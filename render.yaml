@@ -19,6 +19,8 @@ services:
         generateValue: true
       - key: USAGE_INGEST_TOKEN
         generateValue: true
+      - key: DASHBOARD_PASSWORD
+        generateValue: true
 
   - type: cron
     name: fetch-all-usage
