@@ -55,29 +55,30 @@ model UsageSnapshot {
 }
 
 model ExternalUsageEvent {
-  id          String   @id @default(uuid())
-  sourceApp   String
-  environment String?
-  provider    String
-  service     String?
-  label       String?
-  keyRef      String?
-  billingMode String   @default("estimated")
-  metricType  String   @default("usage")
-  quantity    Float?
-  unit        String?
-  costUsd     Float?
-  requests    Int?
-  credits     Float?
-  limit       Float?
-  limitWindow String?
-  tier        String?
-  confidence  String   @default("estimated")
-  windowStart DateTime?
-  windowEnd   DateTime?
-  occurredAt  DateTime
-  metadata    Json?
-  createdAt   DateTime @default(now())
+  id             String   @id @default(uuid())
+  idempotencyKey String   @unique
+  sourceApp      String
+  environment    String?
+  provider       String
+  service        String?
+  label          String?
+  keyRef         String?
+  billingMode    String   @default("estimated")
+  metricType     String   @default("usage")
+  quantity       Float?
+  unit           String?
+  costUsd        Float?
+  requests       Int?
+  credits        Float?
+  limit          Float?
+  limitWindow    String?
+  tier           String?
+  confidence     String   @default("estimated")
+  windowStart    DateTime?
+  windowEnd      DateTime?
+  occurredAt     DateTime
+  metadata       Json?
+  createdAt      DateTime @default(now())
 
   @@index([sourceApp, occurredAt])
   @@index([provider, occurredAt])

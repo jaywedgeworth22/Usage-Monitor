@@ -1,3 +1,5 @@
+import crypto from "crypto";
+
 const MAX_EVENTS = 100;
 const MAX_METADATA_KEYS = 50;
 const MAX_METADATA_STRING_LENGTH = 500;
@@ -41,6 +43,7 @@ export interface ParsedUsageTelemetryEvent {
   windowEnd?: Date;
   occurredAt: Date;
   metadata?: Record<string, string | number | boolean | null>;
+  idempotencyKey: string;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -143,18 +146,50 @@ function readMetadata(
   return Object.keys(clean).length ? clean : undefined;
 }
 
+function deriveIdempotencyKey(
+  record: Record<string, unknown>,
+  resolved: { sourceApp: string; provider: string; metricType: string; keyRef?: string }
+): string {
+  const explicit = readString(record, "idempotencyKey", { max: 200 });
+  if (explicit) return explicit;
+
+  // Derive from the raw (pre-default) occurredAt string the caller sent, so that
+  // retries of the same logical event collapse to the same key. This MUST match
+  // the hashing algorithm used client-side in the congress-trading-shared package.
+  const rawOccurredAt = readString(record, "occurredAt", { max: 80 });
+  if (rawOccurredAt) {
+    return crypto
+      .createHash("sha256")
+      .update(
+        [resolved.sourceApp, resolved.provider, resolved.metricType, resolved.keyRef ?? "", rawOccurredAt].join(
+          "|"
+        )
+      )
+      .digest("hex");
+  }
+
+  // No stable basis to dedupe on (no explicit key, no occurredAt supplied) -
+  // fall back to a random key, which means no idempotency guarantee for this event.
+  return crypto.randomUUID();
+}
+
 function parseEvent(value: unknown): ParsedUsageTelemetryEvent {
   const record = asRecord(value);
   const occurredAt = readDate(record, "occurredAt") ?? new Date();
+  const sourceApp = readString(record, "sourceApp", { required: true, max: 80 })!;
+  const provider = readString(record, "provider", { required: true, max: 80 })!;
+  const metricType = readEnum(record, "metricType", metricTypes, "usage");
+  const keyRef = readString(record, "keyRef", { max: 160 });
+
   return {
-    sourceApp: readString(record, "sourceApp", { required: true, max: 80 })!,
+    sourceApp,
     environment: readString(record, "environment", { max: 80 }),
-    provider: readString(record, "provider", { required: true, max: 80 })!,
+    provider,
     service: readString(record, "service", { max: 120 }),
     label: readString(record, "label", { max: 160 }),
-    keyRef: readString(record, "keyRef", { max: 160 }),
+    keyRef,
     billingMode: readEnum(record, "billingMode", billingModes, "estimated"),
-    metricType: readEnum(record, "metricType", metricTypes, "usage"),
+    metricType,
     quantity: readNumber(record, "quantity"),
     unit: readOptionalEnum(record, "unit", units),
     costUsd: readNumber(record, "costUsd"),
@@ -168,6 +203,7 @@ function parseEvent(value: unknown): ParsedUsageTelemetryEvent {
     windowEnd: readDate(record, "windowEnd"),
     occurredAt,
     metadata: readMetadata(record),
+    idempotencyKey: deriveIdempotencyKey(record, { sourceApp, provider, metricType, keyRef }),
   };
 }
 
