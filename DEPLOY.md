@@ -69,11 +69,25 @@ follow these steps IN ORDER - this involves real production data, so don't
 skip the verification step before deleting anything.
 
 1. **Merge and deploy this branch to Render.** Render will read the updated
-   `render.yaml`, provision the new disk, and drop the old `databases:` and
-   `cron:` resources. The build's `prisma db push` creates a fresh, EMPTY
-   SQLite database on that disk (since nothing has migrated data into it
-   yet).
-2. **Before deleting the old Postgres database**, run the one-time migration
+   `render.yaml` and provision the new disk for the `api-usage-monitor` web
+   service. **Render Blueprint sync does NOT auto-delete resources that were
+   removed from `render.yaml`** - the old `databases:` and `cron:` entries
+   are gone from the file, but the actual `api-usage-monitor-db` Postgres
+   database and `fetch-all-usage` cron job resources keep existing (and keep
+   running/billing) in your Render dashboard until you manually delete/suspend
+   them. The build's `prisma db push` creates a fresh, EMPTY SQLite database
+   on the new disk (since nothing has migrated data into it yet).
+2. **Immediately suspend the old `fetch-all-usage` cron job** (Render
+   dashboard -> select the cron job -> Settings -> Suspend, or delete it
+   outright). Do this right after step 1, before doing anything else below.
+   Until you do, the old cron keeps firing on its own schedule against the
+   old Postgres database at the same time the new web service's in-process
+   scheduler (see `src/instrumentation.ts` / `src/lib/usage-recorder.ts`)
+   starts polling providers from SQLite - two independent pollers hitting
+   the same provider APIs concurrently, causing duplicate external API calls
+   and, once you cut over, duplicate/conflicting usage data. Do not skip
+   this step or delay it until after the migration.
+3. **Before deleting the old Postgres database**, run the one-time migration
    script once to copy every row over. Open the Render dashboard's **Shell**
    tab for the `api-usage-monitor` web service and run:
    ```
@@ -83,13 +97,32 @@ skip the verification step before deleting anything.
    you only need to supply `SOURCE_DATABASE_URL`. This must be run from
    Render's Shell for the web service - the destination SQLite file lives on
    a disk that's only reachable from that Render instance itself, so this
-   cannot be run from a local machine or CI.
-3. **Verify in the dashboard UI** that providers, plans, and usage history
+   cannot be run from a local machine or CI. The script writes to SQLite
+   inside a single transaction, so if it fails partway through it's safe to
+   just fix the underlying issue and re-run it from the top (see
+   "Migration script failure/resume" below).
+4. **Verify in the dashboard UI** that providers, plans, and usage history
    all look correct (visit https://usage.jays.services and check Settings
    and the provider detail pages).
-4. **Only after confirming step 3**, delete the `api-usage-monitor-db`
+5. **Only after confirming step 4**, delete the `api-usage-monitor-db`
    Postgres database in Render's dashboard (Databases -> select it ->
-   Delete) to actually stop that recurring charge.
+   Delete) to actually stop that recurring charge. If you haven't already
+   deleted the `fetch-all-usage` cron resource itself (as opposed to just
+   suspending it in step 2), delete it now too.
+
+### Migration script failure/resume
+
+`scripts/migrate-postgres-to-sqlite.mjs` writes all destination rows inside
+a single `prisma.$transaction`. If it fails partway through (network blip,
+a bad row, etc.), Prisma rolls back every row written so far, so the
+destination SQLite database is left exactly as it was before that run (empty,
+on a first attempt) - there's no partially-migrated state to clean up.
+
+To retry after a failed run, just fix whatever caused the failure (check the
+error output) and re-run the same command again from the top:
+```
+SOURCE_DATABASE_URL="..." node scripts/migrate-postgres-to-sqlite.mjs
+```
 
 ### Optional follow-up: back up the SQLite file
 

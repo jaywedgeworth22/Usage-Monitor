@@ -12,6 +12,13 @@
  * separate Postgres/cron resources) has been deployed, and BEFORE the old
  * Postgres database is deleted.
  *
+ * All destination writes run inside a single prisma.$transaction, so a
+ * failure partway through (network blip, a bad row, etc.) rolls back
+ * everything written so far - the destination SQLite database is left
+ * exactly as it was before the run (empty, if this is the first attempt),
+ * and it is always safe to just re-run the script. There is no partial-
+ * migration state to clean up by hand.
+ *
  * HOW TO RUN THIS (read carefully - this touches real production data):
  *
  *   This script must be run from Render's Shell tab for the deployed
@@ -58,113 +65,127 @@ async function main() {
     await pg.connect();
     console.log("Connected to source Postgres database.");
 
-    // 1. Provider (no foreign keys)
+    // Read all source rows up front (outside the destination transaction -
+    // Postgres reads here are non-mutating, so there's nothing to roll back
+    // on that side).
     const providerRows = (await pg.query('SELECT * FROM "Provider"')).rows;
     console.log(`Provider: ${providerRows.length} rows found in source.`);
-    for (const row of providerRows) {
-      await prisma.provider.create({
-        data: {
-          id: row.id,
-          name: row.name,
-          displayName: row.displayName,
-          type: row.type,
-          apiKey: row.apiKey,
-          config: row.config ?? undefined,
-          isActive: row.isActive,
-          credits: row.credits,
-          refreshIntervalMin: row.refreshIntervalMin,
-          groupId: row.groupId,
-          label: row.label,
-          createdAt: row.createdAt,
-        },
-      });
-    }
-    console.log(`Provider: ${providerRows.length} rows migrated.`);
 
-    // 2. ProviderPlan (references Provider.id)
     const providerPlanRows = (await pg.query('SELECT * FROM "ProviderPlan"')).rows;
     console.log(`ProviderPlan: ${providerPlanRows.length} rows found in source.`);
-    for (const row of providerPlanRows) {
-      await prisma.providerPlan.create({
-        data: {
-          id: row.id,
-          providerId: row.providerId,
-          billingMode: row.billingMode,
-          fixedMonthlyCostUsd: row.fixedMonthlyCostUsd,
-          monthlyBudgetUsd: row.monthlyBudgetUsd,
-          monthlyRequestLimit: row.monthlyRequestLimit,
-          lowBalanceUsd: row.lowBalanceUsd,
-          lowCredits: row.lowCredits,
-          renewalDate: row.renewalDate,
-          mustKeepFunded: row.mustKeepFunded,
-          notes: row.notes,
-          createdAt: row.createdAt,
-          updatedAt: row.updatedAt,
-        },
-      });
-    }
-    console.log(`ProviderPlan: ${providerPlanRows.length} rows migrated.`);
 
-    // 3. UsageSnapshot (references Provider.id)
     const usageSnapshotRows = (await pg.query('SELECT * FROM "UsageSnapshot"')).rows;
     console.log(`UsageSnapshot: ${usageSnapshotRows.length} rows found in source.`);
-    for (const row of usageSnapshotRows) {
-      await prisma.usageSnapshot.create({
-        data: {
-          id: row.id,
-          providerId: row.providerId,
-          fetchedAt: row.fetchedAt,
-          balance: row.balance,
-          totalCost: row.totalCost,
-          totalRequests: row.totalRequests,
-          credits: row.credits,
-          rawData: row.rawData ?? undefined,
-          createdAt: row.createdAt,
-        },
-      });
-    }
-    console.log(`UsageSnapshot: ${usageSnapshotRows.length} rows migrated.`);
 
-    // 4. ExternalUsageEvent (no foreign keys, order doesn't matter for it)
     const externalUsageEventRows = (
       await pg.query('SELECT * FROM "ExternalUsageEvent"')
     ).rows;
     console.log(
       `ExternalUsageEvent: ${externalUsageEventRows.length} rows found in source.`
     );
-    for (const row of externalUsageEventRows) {
-      await prisma.externalUsageEvent.create({
-        data: {
-          id: row.id,
-          idempotencyKey: row.idempotencyKey,
-          sourceApp: row.sourceApp,
-          environment: row.environment,
-          provider: row.provider,
-          service: row.service,
-          label: row.label,
-          keyRef: row.keyRef,
-          billingMode: row.billingMode,
-          metricType: row.metricType,
-          quantity: row.quantity,
-          unit: row.unit,
-          costUsd: row.costUsd,
-          requests: row.requests,
-          credits: row.credits,
-          limit: row.limit,
-          limitWindow: row.limitWindow,
-          tier: row.tier,
-          confidence: row.confidence,
-          windowStart: row.windowStart,
-          windowEnd: row.windowEnd,
-          occurredAt: row.occurredAt,
-          metadata: row.metadata ?? undefined,
-          createdAt: row.createdAt,
-        },
-      });
-    }
-    console.log(
-      `ExternalUsageEvent: ${externalUsageEventRows.length} rows migrated.`
-    );
+
+    // Write everything to the destination SQLite database inside a single
+    // transaction. If anything fails partway through (a bad row, a
+    // constraint violation, etc.), Prisma rolls back every write made in
+    // this block, so the destination is left exactly as it was before the
+    // run - safe to just fix the issue and re-run the whole script.
+    await prisma.$transaction(async (tx) => {
+      // 1. Provider (no foreign keys)
+      for (const row of providerRows) {
+        await tx.provider.create({
+          data: {
+            id: row.id,
+            name: row.name,
+            displayName: row.displayName,
+            type: row.type,
+            apiKey: row.apiKey,
+            config: row.config ?? undefined,
+            isActive: row.isActive,
+            credits: row.credits,
+            refreshIntervalMin: row.refreshIntervalMin,
+            groupId: row.groupId,
+            label: row.label,
+            createdAt: row.createdAt,
+          },
+        });
+      }
+      console.log(`Provider: ${providerRows.length} rows migrated.`);
+
+      // 2. ProviderPlan (references Provider.id)
+      for (const row of providerPlanRows) {
+        await tx.providerPlan.create({
+          data: {
+            id: row.id,
+            providerId: row.providerId,
+            billingMode: row.billingMode,
+            fixedMonthlyCostUsd: row.fixedMonthlyCostUsd,
+            monthlyBudgetUsd: row.monthlyBudgetUsd,
+            monthlyRequestLimit: row.monthlyRequestLimit,
+            lowBalanceUsd: row.lowBalanceUsd,
+            lowCredits: row.lowCredits,
+            renewalDate: row.renewalDate,
+            mustKeepFunded: row.mustKeepFunded,
+            notes: row.notes,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+          },
+        });
+      }
+      console.log(`ProviderPlan: ${providerPlanRows.length} rows migrated.`);
+
+      // 3. UsageSnapshot (references Provider.id)
+      for (const row of usageSnapshotRows) {
+        await tx.usageSnapshot.create({
+          data: {
+            id: row.id,
+            providerId: row.providerId,
+            fetchedAt: row.fetchedAt,
+            balance: row.balance,
+            totalCost: row.totalCost,
+            totalRequests: row.totalRequests,
+            credits: row.credits,
+            rawData: row.rawData ?? undefined,
+            createdAt: row.createdAt,
+          },
+        });
+      }
+      console.log(`UsageSnapshot: ${usageSnapshotRows.length} rows migrated.`);
+
+      // 4. ExternalUsageEvent (no foreign keys, order doesn't matter for it)
+      for (const row of externalUsageEventRows) {
+        await tx.externalUsageEvent.create({
+          data: {
+            id: row.id,
+            idempotencyKey: row.idempotencyKey,
+            sourceApp: row.sourceApp,
+            environment: row.environment,
+            provider: row.provider,
+            service: row.service,
+            label: row.label,
+            keyRef: row.keyRef,
+            billingMode: row.billingMode,
+            metricType: row.metricType,
+            quantity: row.quantity,
+            unit: row.unit,
+            costUsd: row.costUsd,
+            requests: row.requests,
+            credits: row.credits,
+            limit: row.limit,
+            limitWindow: row.limitWindow,
+            tier: row.tier,
+            confidence: row.confidence,
+            windowStart: row.windowStart,
+            windowEnd: row.windowEnd,
+            occurredAt: row.occurredAt,
+            metadata: row.metadata ?? undefined,
+            createdAt: row.createdAt,
+          },
+        });
+      }
+      console.log(
+        `ExternalUsageEvent: ${externalUsageEventRows.length} rows migrated.`
+      );
+    });
 
     console.log("Migration complete.");
   } catch (error) {
