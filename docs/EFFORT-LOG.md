@@ -11,6 +11,12 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 ## In Progress
 - PR #8 (claude/agent-sync-stanza, CLAUDE) — AGENTS.md inter-agent coordination stanza; auto-merge pending.
 - Branch claude/budget-status — parked local branch found at bootstrap (owner/state unknown; whoever owns it: claim or close).
+- GitHub Issues mirror of this board (claude/effort-issues-mirror, CLAUDE) — additive
+  `scripts/sync-effort-issues.py` + `.github/workflows/effort-issues-sync.yml`, ported verbatim from
+  Socratic.Trade (canonical pattern in `/Users/jay/apps/EFFORT-LOG-PROTOCOL.md`). Read-only mirror:
+  this board stays the source of truth, only the workflow writes issues. Disjoint from the
+  concurrent `claude/otlp-claude-code-ingest` lane (worktree `/tmp/wt-monitor-otlp`) — no shared
+  files touched.
 
 ## Planned / Reserved
 - (none)
