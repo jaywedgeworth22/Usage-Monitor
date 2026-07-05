@@ -12,3 +12,6 @@ tsconfig.tsbuildinfo
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Cursor IDE metadata (not source)
+.cursor/

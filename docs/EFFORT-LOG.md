@@ -6,6 +6,12 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board:
 - (record the monitor's production runtime state here when releases happen)
 
 ## Completed
+- **Ingest-auth refactor + ESLint setup (MONET) — PR pending, 2026-07-05.** Wired the
+  `budget-status` and `ingest/usage` routes onto the shared `@/lib/ingest-auth` helpers
+  (`tokenFromRequest`/`safeEqual`/`isUsageIngestAuthorized`), removing duplicated token-auth code.
+  Adds flat-config ESLint (`eslint.config.mjs`) + deps + a CI lint step, a rate-limit
+  in-process-only caveat note, `.cursor/` gitignore, and a README. Carried from an uncommitted
+  Cursor working set, rebased clean onto `main`.
 - **Effort-issues sync secondary-rate-limit hardening (CLAUDE) — PR #38, 2026-07-05.** Verbatim propagation of the fleet-standard `scripts/sync-effort-issues.py` hardening from Socratic.Trade: 2.5s creation throttle, Retry-After/exponential-backoff retries under a bounded 300s per-run budget, and exit-0 "PARTIAL SYNC — resume on next run" summary on budget exhaustion (bulk issue creation previously 403'd on GitHub's secondary rate limit and hard-failed the sync workflow; the sync is idempotent, so a partial pass resumes cleanly on the next run). Lands with this PR.
   Review refinements re-propagated via PR #40 (merged 2026-07-05): issue listing inside
   partial handling, server-sent Retry-After honored uncapped, 1s update throttle.

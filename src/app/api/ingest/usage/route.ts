@@ -1,9 +1,9 @@
-import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { persistExternalUsageEvents } from "@/lib/external-usage-events";
 import { parseUsageTelemetryBatch } from "@/lib/usage-telemetry";
 import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
+import { isUsageIngestAuthorized } from "@/lib/ingest-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,27 +11,6 @@ export const dynamic = "force-dynamic";
 // 10 requests per second per source IP — generous enough for normal
 // fire-and-forget telemetry pushes while preventing abuse.
 const ingestRateLimiter = createRateLimiter(1_000, 10);
-
-function tokenFromRequest(request: NextRequest): string {
-  const authorization = request.headers.get("authorization") ?? "";
-  if (authorization.toLowerCase().startsWith("bearer ")) {
-    return authorization.slice(7).trim();
-  }
-  return request.headers.get("x-usage-ingest-token")?.trim() ?? "";
-}
-
-function safeEqual(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-function isAuthorized(request: NextRequest): boolean {
-  const expected = process.env.USAGE_INGEST_TOKEN?.trim();
-  if (!expected) return false;
-  const actual = tokenFromRequest(request);
-  return Boolean(actual) && safeEqual(actual, expected);
-}
 
 export async function POST(request: NextRequest) {
   if (!process.env.USAGE_INGEST_TOKEN?.trim()) {
@@ -46,7 +25,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!isAuthorized(request)) {
+  if (!isUsageIngestAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

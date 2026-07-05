@@ -4,6 +4,10 @@
  * Uses a Map to track request counts per key (e.g., IP address) within a
  * sliding window. Old entries are purged on every check to prevent memory
  * leaks - no external dependencies required.
+ *
+ * NOTE: In-process memory only — rate-limit state is not shared across
+ * multiple instances/workers. Fine for a single-instance deployment;
+ * switch to a shared store (Redis, etc.) if you scale horizontally.
  */
 
 interface RateLimitEntry {
