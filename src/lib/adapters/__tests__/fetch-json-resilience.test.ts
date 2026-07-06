@@ -180,7 +180,14 @@ describe("fetchJson", () => {
   it("(f) retries a retryable status at most twice, then returns the last response", async () => {
     vi.useFakeTimers();
     // No Retry-After => exponential backoff: 2**0*1000 then 2**1*1000.
-    fetchMock.mockResolvedValue(jsonResponse({ error: "unavailable" }, 503));
+    // Each call must return a *distinct* Response (as real fetch does): the
+    // first two get their bodies cancelled on retry, and only the last one's
+    // body is read via .json(). Reusing one Response instance would have its
+    // body cancelled by the retry path before the final read.
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ error: "unavailable" }, 503))
+      .mockResolvedValueOnce(jsonResponse({ error: "unavailable" }, 503))
+      .mockResolvedValueOnce(jsonResponse({ error: "unavailable" }, 503));
 
     const promise = fetchJson("https://api.example.com/v1/usage");
     // Flush both backoff sleeps: 1000ms + 2000ms.
@@ -192,6 +199,34 @@ describe("fetchJson", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(result.status).toBe(503);
     expect(result.data).toEqual({ error: "unavailable" });
+  });
+
+  it("(f2) cancels the discarded response body before retrying so the connection is not leaked", async () => {
+    vi.useFakeTimers();
+
+    // The retried (429) response's body must be cancelled before the next
+    // fetch; the final (200) response's body is consumed normally by .json()
+    // and must NOT be cancelled.
+    const retriedResponse = jsonResponse({ error: "slow down" }, 429, {
+      "retry-after": "2",
+    });
+    const finalResponse = jsonResponse({ balance: 7 }, 200);
+    const retriedCancel = vi.spyOn(retriedResponse.body!, "cancel");
+    const finalCancel = vi.spyOn(finalResponse.body!, "cancel");
+
+    fetchMock
+      .mockResolvedValueOnce(retriedResponse)
+      .mockResolvedValueOnce(finalResponse);
+
+    const promise = fetchJson("https://api.example.com/v1/usage");
+    await vi.advanceTimersByTimeAsync(2000);
+    const result = await promise;
+
+    expect(result.status).toBe(200);
+    expect(result.data).toEqual({ balance: 7 });
+    expect(retriedCancel).toHaveBeenCalledTimes(1);
+    expect(finalCancel).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("(g) does not retry a non-retryable status (e.g. 401)", async () => {

@@ -155,6 +155,11 @@ export async function fetchJson(
         // Exponential backoff when the server didn't tell us how long to wait.
         await sleep(2 ** attempt * 1000);
       }
+      // This response is being discarded in favor of a retry. Cancel its
+      // unread body so undici returns the connection to the pool instead of
+      // leaking it across the polling loop. Body may be null (e.g. no content)
+      // and cancel() can reject if already closed - ignore both.
+      await res.body?.cancel().catch(() => {});
       attempt++;
       continue;
     }

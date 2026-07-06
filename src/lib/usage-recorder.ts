@@ -96,20 +96,31 @@ export async function fetchAllDueProviders(): Promise<{
         // arbitrary in-flight work here, and leaking one promise per
         // pathological tick is an acceptable tradeoff versus stalling the
         // whole 15-minute poll loop.
-        await Promise.race([
-          recordProviderUsage(provider),
-          new Promise<never>((_, reject) => {
-            setTimeout(
-              () =>
-                reject(
-                  new Error(
-                    `Provider ${provider.name} timed out after ${providerTimeoutMs}ms`
-                  )
-                ),
-              providerTimeoutMs
-            );
-          }),
-        ]);
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            recordProviderUsage(provider),
+            new Promise<never>((_, reject) => {
+              timeoutHandle = setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      `Provider ${provider.name} timed out after ${providerTimeoutMs}ms`
+                    )
+                  ),
+                providerTimeoutMs
+              );
+              // Don't let a still-pending timeout keep the event loop (and the
+              // Node process) alive on its own in one-shot/test contexts.
+              timeoutHandle.unref?.();
+            }),
+          ]);
+        } finally {
+          // Always clear the timer - whether the provider succeeded, threw, or
+          // the timeout won the race - so a winning provider doesn't leave a
+          // stray timer lingering for up to the full budget every poll pass.
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+        }
         successes++;
       } catch (error) {
         failures++;
