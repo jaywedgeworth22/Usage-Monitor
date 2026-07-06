@@ -270,7 +270,6 @@ describe("mapClaudeCodeMetrics", () => {
   it("produces a different idempotency key when the value changes", () => {
     const requestA = sampleRequest();
     const requestB = sampleRequest();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (requestB.resourceMetrics as any)[0].scopeMetrics[0].metrics[1].sum.dataPoints[0].asDouble = 9.99;
     const a = mapClaudeCodeMetrics(requestA).events.find((e) => e.metricType === "cost")!;
     const b = mapClaudeCodeMetrics(requestB).events.find((e) => e.metricType === "cost")!;
