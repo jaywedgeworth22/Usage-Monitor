@@ -146,13 +146,15 @@ Render disks aren't automatically backed up the way Render's managed
 Postgres is. [Litestream](https://litestream.io/) is set up in this repo to
 continuously replicate `/data/prod.db` to S3-compatible storage (Cloudflare
 R2) for backup/durability - but it's **opt-in and disabled by default**.
-With the five `LITESTREAM_S3_*` env vars unset, `render.yaml`'s
-`startCommand` behaves exactly as it did before (no litestream process).
+With the `LITESTREAM_S3_*` env vars unset, `render.yaml`'s `startCommand`
+behaves exactly as it did before (no litestream process).
 
-To enable it: create an R2 bucket + token and set the five `LITESTREAM_S3_*`
+To enable it: create an R2 bucket + token and set the `LITESTREAM_S3_*`
 vars in the Render dashboard's Environment tab (they already exist in
 `render.yaml` with `sync: false` so Render won't prompt for or generate
-them). Full setup, verification, and disaster-recovery restore steps
+them). The four of `LITESTREAM_S3_BUCKET` / `_ENDPOINT` / `_ACCESS_KEY_ID` /
+`_SECRET_ACCESS_KEY` must all be set to enable replication;
+`LITESTREAM_S3_REGION` is optional (an empty region is fine for R2). Full setup, verification, and disaster-recovery restore steps
 (including a restore-drill runbook) live in `docs/litestream.md`. Relevant
 files: `scripts/fetch-litestream.sh` (build-time binary download),
 `litestream.yml` (replica config), `scripts/start-with-litestream.sh` (the

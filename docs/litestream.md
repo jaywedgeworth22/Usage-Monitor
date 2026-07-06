@@ -8,8 +8,9 @@ as LTX files. Adapted from the sibling Socratic.Trade app's PM2/macOS setup
 **Fully opt-in.** With `LITESTREAM_S3_*` unset (the default), `render.yaml`'s
 `startCommand` runs exactly as it did before this was added: `migrate-safe.mjs` then
 `npm start`, no litestream process — same logical behavior as before (it also uses
-`exec` so the server process receives Render's SIGTERM directly). Setting all five
-`LITESTREAM_S3_*` env vars turns replication (and restore-on-fresh-disk) on.
+`exec` so the server process receives Render's SIGTERM directly). Setting the four
+required `LITESTREAM_S3_*` env vars (BUCKET/ENDPOINT/ACCESS_KEY_ID/SECRET_ACCESS_KEY;
+REGION is optional) turns replication (and restore-on-fresh-disk) on.
 
 > **0.5.x note:** Litestream 0.5 only supports a **single replica per database**. It
 > also replaced the `snapshots`/`generations` model with **LTX files** — inspect them

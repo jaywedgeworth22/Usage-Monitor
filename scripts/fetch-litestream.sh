@@ -55,6 +55,16 @@ sha256_of() {
 # Idempotent skip: only trust an existing binary if it reports the exact
 # version we pin — protects against a stale binary left over from a prior
 # pin surviving a Render build-cache hit silently.
+#
+# Tradeoff (accepted): on this skip path we match the `version` string but do
+# NOT re-verify the on-disk binary's sha256, so a build-cache hit does not
+# re-check the checksum pin. Render's persistent build cache is a trusted
+# boundary — anything that can tamper with a cached ./bin/litestream can
+# tamper with the checked-out source too — and re-downloading the release on
+# every build to re-verify would defeat the idempotency this skip exists for.
+# The sha256 pin below is still enforced on every real download (cache miss,
+# version bump, or first build), which is where a tampered/corrupt tarball
+# would actually enter.
 if [[ -x "${BIN_PATH}" ]]; then
   EXISTING_VERSION="$("${BIN_PATH}" version 2>&1 || true)"
   if [[ "${EXISTING_VERSION}" == *"${LITESTREAM_VERSION}"* ]]; then
