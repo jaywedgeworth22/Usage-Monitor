@@ -173,3 +173,23 @@ Effort-log protocol (standardized all apps): `/Users/jay/apps/EFFORT-LOG-PROTOCO
 - **Same bar at every tier:** full gates, receipts, and board discipline apply no matter
   which model did the work.
 - Canonical reference: `/Users/jay/apps/AGENT-SYNC.md` — "Delegation & model economics".
+
+## Cursor Cloud specific instructions
+
+Standard local setup/verify commands live in `README.md` (Quick start) and the **Verify**
+section above; this section only records non-obvious caveats. Dependencies are refreshed
+automatically on VM startup (`npm ci` + `prisma generate` via `postinstall`).
+
+- **Run the dev server with Turbopack: `npm run dev -- --turbopack` (bind port 4103 in this
+  workspace: `npm run dev -- -p 4103 --turbopack`).** The default `npm run dev` uses the
+  webpack dev compiler, which fails to resolve the bare `crypto` builtin while bundling
+  `src/instrumentation.ts` (→ `usage-recorder` → adapters → `src/lib/crypto.ts`). That makes
+  every Node route (e.g. `/api/health`) 500 with `Module not found: Can't resolve 'crypto'`.
+  `next build`/`npm start` are unaffected (production build succeeds), and Turbopack resolves
+  node builtins natively, so dev works under `--turbopack`.
+- **Local DB bootstrap:** there is no `prisma/migrations/` dir, so use `npx prisma db push`
+  (not `prisma migrate dev`) to create the local SQLite `dev.db` from `schema.prisma`.
+- **Env:** copy `.env.example` → `.env`. Beyond the vars listed in the **Env vars** section,
+  local dev also needs `DASHBOARD_PASSWORD` (gates `/login` and all non-ingest routes); without
+  it, login returns 503 and the dashboard is unreachable. `ENCRYPTION_KEY` must be 64-hex
+  (`openssl rand -hex 32`).
