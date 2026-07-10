@@ -230,6 +230,12 @@ PR #58 (`dfdb39e`)._
   fix (PR #58 `dfdb39e`, deployed+verified) Planned→Completed so the issues-sync closes #50. Left
   open: #47 + #22-#25 (orphaned — keyed rows consolidated, need a manual close in CLAUDE's lane) and
   #26 (genuinely not done — parked `claude/budget-status` still on origin).
+- 2026-07-08 — CODEX: live board mirror note for shared agent-sync infra: Slack app Event
+  Subscriptions are enabled, the PM2 `agent-sync-push` relay is appending real #agent-sync events
+  to `/Users/jay/apps/agent-sync/events.jsonl`, `/post` fleet notice was verified through the local
+  authenticated relay endpoint, and old Claude/Monet REST pollers were asked to retire now that the
+  relay blocker is gone. The old Codex Cloud Slack + effort-log readiness row is superseded; no
+  API-usage-monitor runtime branch or PR remains for it.
 
 ### 2026-07-06
 - **Update Settings Page and Dashboard Page to support Projects UI (AG, S)**

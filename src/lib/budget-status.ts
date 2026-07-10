@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { sumMonthToDateExternalCostByProvider, sumMonthToDateExternalCostBySourceApp } from "@/lib/external-usage-events";
 import { buildProviderAlertState, type ProviderAlert } from "@/lib/provider-alerts";
 import { getExternalEventRawCutoff } from "@/lib/data-retention";
+import { calculateEomForecast } from "@/lib/forecasting";
 
 // Budget-status computation for the read endpoint (GET /api/budget-status).
 //
@@ -27,6 +28,7 @@ export interface ProviderBudgetStatus {
   snapshotCostUsd: number | null;
   pushedMonthToDateUsd: number;
   spentUsd: number;
+  projectedEomUsd: number;
   remainingUsd: number | null;
   percentUsed: number | null;
   status: BudgetStatusLevel;
@@ -155,6 +157,7 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
       snapshotCostUsd,
       pushedMonthToDateUsd,
       spentUsd,
+      projectedEomUsd: calculateEomForecast(spentUsd, fixedMonthlyCostUsd, now),
       remainingUsd,
       percentUsed,
       status,
@@ -188,6 +191,7 @@ export interface ProjectBudgetStatus {
   description: string | null;
   monthlyBudgetUsd: number | null;
   spentUsd: number;
+  projectedEomUsd: number;
   remainingUsd: number | null;
   percentUsed: number | null;
   status: BudgetStatusLevel;
@@ -268,6 +272,7 @@ export async function computeProjectBudgetStatus(now: Date = new Date()): Promis
       description: proj.description,
       monthlyBudgetUsd: proj.monthlyBudgetUsd,
       spentUsd,
+      projectedEomUsd: calculateEomForecast(spentUsd, 0, now), // Fixed cost for projects is 0
       remainingUsd,
       percentUsed,
       status,
