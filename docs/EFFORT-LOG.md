@@ -110,8 +110,8 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board:
 
 ## In Progress
 - **Subscription->knob linkage phase 1 (CLAUDE, sonnet subagent, owner-directed 2026-07-10,
-  background agent in an isolated worktree off main) — mirrored from the live board, PR opened
-  2026-07-10.** Goal: the monitor becomes the source of truth for which market-data plan is active
+  background agent in an isolated worktree off main) — mirrored from the live board, OPEN PR #83
+  (`claude/subscription-knob-linkage`), opened 2026-07-10. NOT merged.** Goal: the monitor becomes the source of truth for which market-data plan is active
   per provider AND what rate-limit env knobs that plan implies for Socratic.Trade (Infisical
   `PROVIDER_QUOTA_*`/`PROVIDER_RATE_LIMIT_*`/`TIINGO_DROP_NEWS`). Shipped: `knobEnv Json?` on both
   `ProviderPlan` (free-tier baseline) and `Subscription` (per-plan override); new `considering`

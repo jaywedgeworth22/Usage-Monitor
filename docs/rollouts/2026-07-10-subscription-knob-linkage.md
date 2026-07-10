@@ -1,5 +1,8 @@
 # 2026-07-10 — subscription -> knob linkage phase 1
 
+PR: https://github.com/jaywedgeworth22/api-usage-monitor/pull/83 (`claude/subscription-knob-linkage`,
+OPEN, not merged — CLAUDE #agent-sync claim 2026-07-10, sonnet subagent in an isolated worktree).
+
 ## Summary
 - Added `knobEnv Json?` to both `ProviderPlan` (free-tier baseline) and `Subscription` (per-plan
   override) so the monitor becomes the machine-readable source of truth for which env-var knobs
