@@ -59,8 +59,8 @@ describe("hetzner adapter", () => {
 
     expect(result.totalCost).toBe(8.5); // 3.50 + 5.00
     expect(result.totalRequests).toBe(2); // 2 active servers
-    expect(result.rawData.totalBandwidth_bytes).toBe(1500); // 1000 + 500
-    expect(result.rawData.servers).toHaveLength(2);
+    expect((result.rawData as any).totalBandwidth_bytes).toBe(1500); // 1000 + 500
+    expect((result.rawData as any).servers).toHaveLength(2);
   });
 
   it("handles fetch errors", async () => {
@@ -74,6 +74,6 @@ describe("hetzner adapter", () => {
 
     const result = await fetchUsage("bad-key");
     expect(result.totalCost).toBeNull();
-    expect(result.rawData.error).toBe("HTTP 401");
+    expect((result.rawData as any).error).toBe("HTTP 401");
   });
 });
