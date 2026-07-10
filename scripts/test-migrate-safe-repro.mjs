@@ -176,21 +176,20 @@ async function main() {
     const destructiveDb = path.join(work, "destructive.db");
     copyFileSync(additiveDb, destructiveDb);
 
-    const { DatabaseSync } = await import("node:sqlite");
-    const db = new DatabaseSync(destructiveDb);
-    db.exec(
-      "INSERT INTO Provider (id, name, displayName, type, label, createdAt) " +
-        "VALUES ('repro-p1','repro-provider','Repro Provider','builtin','some-label', datetime('now'))"
-    );
-    db.exec(
-      "INSERT INTO Project (id, name, createdAt, updatedAt) " +
-        "VALUES ('repro-proj1','Repro Project', datetime('now'), datetime('now'))"
-    );
-    db.exec(
-      "INSERT INTO ProviderProjectAllocation (id, providerId, projectId, percentage, createdAt, updatedAt) " +
-        "VALUES ('repro-a1','repro-p1','repro-proj1',100, datetime('now'), datetime('now'))"
-    );
-    db.close();
+    // Seed via the already-generated Prisma client (a real project dependency,
+    // works on any Node version this repo supports) rather than node:sqlite,
+    // which needs Node 22.5+ and isn't guaranteed by package.json/render.yaml
+    // or the Node 20 CI runner.
+    const { PrismaClient } = await import("@prisma/client");
+    const seedClient = new PrismaClient({ datasources: { db: { url: `file:${destructiveDb}` } } });
+    const seedProvider = await seedClient.provider.create({
+      data: { name: "repro-provider", displayName: "Repro Provider", label: "some-label" },
+    });
+    const seedProject = await seedClient.project.create({ data: { name: "Repro Project" } });
+    await seedClient.providerProjectAllocation.create({
+      data: { providerId: seedProvider.id, projectId: seedProject.id, percentage: 100 },
+    });
+    await seedClient.$disconnect();
 
     const destructiveSchema = toDestructiveSchema(readFileSync(SCHEMA_PATH, "utf8"));
     writeFileSync(SCHEMA_PATH, destructiveSchema);
