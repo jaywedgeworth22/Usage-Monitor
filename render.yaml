@@ -84,6 +84,14 @@ services:
         sync: false
       - key: ALERT_WEBHOOK_URL
         sync: false
+      - key: ALERT_RESEND_API_KEY
+        sync: false
+      - key: ALERT_EMAIL_FROM
+        sync: false
+      - key: ALERT_EMAIL_TO
+        sync: false
+      - key: ALERT_PAGERDUTY_ROUTING_KEY
+        sync: false
       - key: ALERT_MIN_SEVERITY
         value: warning
       - key: ALERT_REMINDER_HOURS
