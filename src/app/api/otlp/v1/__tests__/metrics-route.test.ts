@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -35,6 +35,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  vi.unstubAllEnvs();
   await prisma.otlpMetricState.deleteMany();
   await prisma.externalUsageEvent.deleteMany({ where: { sourceApp: "claude-code" } });
   await prisma.provider.deleteMany({ where: { name: { in: ["anthropic", "Anthropic"] } } });
@@ -182,6 +183,30 @@ describe("POST /api/otlp/v1/metrics", () => {
     expect(rows.map((row) => row.costUsd)).toEqual([0.0231, 0.0269]);
     expect(rows.reduce((sum, row) => sum + (row.costUsd ?? 0), 0)).toBeCloseTo(0.05);
     expect(await prisma.otlpMetricState.count()).toBe(1);
+  });
+
+  it("bounds cumulative checkpoint cardinality without deleting replay protection", async () => {
+    vi.stubEnv("OTLP_MAX_CUMULATIVE_SERIES", "1");
+    const first = await POST(
+      jsonRequest(samplePayload, { authorization: "Bearer test-token-123" })
+    );
+    expect(first.status).toBe(202);
+
+    const secondSeries = structuredClone(samplePayload);
+    secondSeries.resourceMetrics[0].resource.attributes.push({
+      key: "session.id",
+      value: { stringValue: "a-different-series" },
+    });
+    const second = await POST(
+      jsonRequest(secondSeries, { authorization: "Bearer test-token-123" })
+    );
+    expect(second.status).toBe(503);
+    expect(second.headers.get("retry-after")).toBe("900");
+    expect(await second.json()).toMatchObject({ limit: 1 });
+    expect(await prisma.otlpMetricState.count()).toBe(1);
+    expect(
+      await prisma.externalUsageEvent.count({ where: { sourceApp: "claude-code" } })
+    ).toBe(1);
   });
 
   it("ignores out-of-order cumulative points and handles a counter reset", async () => {

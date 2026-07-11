@@ -17,6 +17,28 @@ export interface PersistOtlpUsageEventsResult extends PersistExternalUsageEvents
   idempotentRetries: number;
 }
 
+const DEFAULT_MAX_CUMULATIVE_SERIES = 100_000;
+
+function maxCumulativeSeries(): number {
+  const configured = Number(process.env.OTLP_MAX_CUMULATIVE_SERIES);
+  return Number.isSafeInteger(configured) && configured > 0
+    ? configured
+    : DEFAULT_MAX_CUMULATIVE_SERIES;
+}
+
+export class OtlpMetricStateCapacityError extends Error {
+  readonly limit: number;
+
+  constructor(limit: number) {
+    super(
+      `OTLP cumulative-series checkpoint capacity (${limit}) is exhausted; ` +
+        "reduce high-cardinality resource attributes or raise OTLP_MAX_CUMULATIVE_SERIES"
+    );
+    this.name = "OtlpMetricStateCapacityError";
+    this.limit = limit;
+  }
+}
+
 function compareNano(left: string, right: string): number {
   const leftValue = BigInt(left);
   const rightValue = BigInt(right);
@@ -94,6 +116,14 @@ export async function persistOtlpUsageEvents(
       seriesKeys.length > 0
         ? await tx.otlpMetricState.findMany({ where: { seriesKey: { in: seriesKeys } } })
         : [];
+    const newSeriesCount = seriesKeys.length - checkpoints.length;
+    if (newSeriesCount > 0) {
+      const currentSeriesCount = await tx.otlpMetricState.count();
+      const limit = maxCumulativeSeries();
+      if (currentSeriesCount + newSeriesCount > limit) {
+        throw new OtlpMetricStateCapacityError(limit);
+      }
+    }
     const stateBySeries = new Map(checkpoints.map((state) => [state.seriesKey, state]));
     const normalizedByKey = new Map<string, ExternalUsageEventInput>();
     let ignoredOutOfOrder = 0;

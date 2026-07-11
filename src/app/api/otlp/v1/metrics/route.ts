@@ -10,7 +10,10 @@ import { mapClaudeCodeMetrics } from "@/lib/otlp/claude-code-mapper";
 import { mapSystemMetrics } from "@/lib/otlp/system-mapper";
 import { ensureAnthropicProviderSeeded } from "@/lib/otlp/ensure-anthropic-provider";
 import { resolveProjectIdsByName } from "@/lib/project-resolver";
-import { persistOtlpUsageEvents } from "@/lib/otlp/cumulative-state";
+import {
+  OtlpMetricStateCapacityError,
+  persistOtlpUsageEvents,
+} from "@/lib/otlp/cumulative-state";
 import { readBoundedBody, validateMetricsRequest } from "@/lib/otlp/validation";
 
 // OTLP-HTTP metrics ingest: POST /api/otlp/v1/metrics
@@ -173,6 +176,12 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       if (error instanceof ExternalUsageIdempotencyCollisionError) {
         return NextResponse.json({ error: error.message }, { status: 409 });
+      }
+      if (error instanceof OtlpMetricStateCapacityError) {
+        return NextResponse.json(
+          { error: error.message, limit: error.limit },
+          { status: 503, headers: { "Retry-After": "900" } }
+        );
       }
       throw error;
     }
