@@ -177,6 +177,7 @@ export async function fetchUsage(
 
   // 1. Analytics dashboard (general stats)
   const now = new Date();
+  const monthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const analyticsParams = new URLSearchParams({
     since: thirtyDaysAgo.toISOString(),
@@ -239,7 +240,6 @@ export async function fetchUsage(
     rawData.subscriptions = rows;
 
     const nowMs = now.getTime();
-    const monthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
     let billedThisMonthUsd = 0;
     let foundBilledSubscription = false;
     const billingRecords: AdapterExternalBillingRecord[] = [];
@@ -324,8 +324,16 @@ export async function fetchUsage(
   try {
     const paygoResponse = await fetchJson(`${baseUrl}/paygo-usage`, { headers });
     if (paygoResponse.ok) {
-      successfulCalls++;
-      const paygo = (paygoResponse.data ?? {}) as {
+      if (
+        !paygoResponse.data ||
+        typeof paygoResponse.data !== "object" ||
+        Array.isArray(paygoResponse.data)
+      ) {
+        throw new AdapterError("Cloudflare PayGo usage expected a response object", {
+          code: "INVALID_RESPONSE",
+        });
+      }
+      const paygo = paygoResponse.data as {
         result?: Array<{
           BillingCurrency?: string;
           BillingPeriodStart?: string;
@@ -336,7 +344,18 @@ export async function fetchUsage(
           ServiceName?: string;
         }>;
       };
-      const rows = Array.isArray(paygo.result) ? paygo.result : [];
+      if (!Array.isArray(paygo.result)) {
+        throw new AdapterError("Cloudflare PayGo usage expected result[]", {
+          code: "INVALID_RESPONSE",
+        });
+      }
+      successfulCalls++;
+      const rows = paygo.result.filter((row) => {
+        const periodStart = row.BillingPeriodStart
+          ? Date.parse(row.BillingPeriodStart)
+          : Number.NaN;
+        return Number.isFinite(periodStart) && periodStart >= monthStartMs && periodStart <= now.getTime();
+      });
       let paygoCostUsd = 0;
       let foundPaygoCost = false;
       const byService = new Map<string, { contractedCostUsd: number; quantity: number }>();
@@ -365,14 +384,15 @@ export async function fetchUsage(
       rawData.paygoBilling = {
         currentPeriodCostUsd: foundPaygoCost ? paygoCostUsd : null,
         recordCount: rows.length,
+        excludedOutOfPeriodRecords: paygo.result.length - rows.length,
         byService: Object.fromEntries(byService),
         alpha: true,
       };
       billingSyncs.push({
         source: "cloudflare-paygo-usage",
         authoritative: true,
-        records: [
-          {
+        records: rows.length > 0
+          ? [{
             externalId: `${accountId}:${periodStart.slice(0, 7)}`,
             kind: "billing_period",
             planName: "Cloudflare PayGo billable usage",
@@ -381,8 +401,8 @@ export async function fetchUsage(
             currency: "USD",
             currentPeriodStart: periodStart,
             currentPeriodEnd: periodEnd,
-          },
-        ],
+          }]
+          : [],
       });
     } else {
       rawData.paygoBillingCapability = {
@@ -474,6 +494,10 @@ export async function fetchUsage(
     balance: null,
     totalCost,
     fixedCostIncludedUsd,
+    costWindowStart:
+      totalCost != null ? new Date(monthStartMs) : null,
+    costWindowEnd: totalCost != null ? now : null,
+    costScope: totalCost != null ? "calendar_month_to_date" : "unknown",
     totalRequests,
     credits: null,
     rawData,

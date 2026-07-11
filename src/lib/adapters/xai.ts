@@ -153,6 +153,9 @@ export async function fetchUsage(
   return {
     balance,
     totalCost,
+    costWindowStart: totalCost != null ? window?.start ?? null : null,
+    costWindowEnd: totalCost != null ? window?.end ?? null : null,
+    costScope: totalCost != null ? "calendar_month_to_date" : "unknown",
     totalRequests: null,
     credits: balance,
     rawData: {

@@ -157,6 +157,9 @@ export async function fetchUsage(
   return {
     balance,
     totalCost,
+    costWindowStart: totalCost != null ? periodStart : null,
+    costWindowEnd: totalCost != null ? periodEnd : null,
+    costScope: totalCost != null ? "calendar_month_to_date" : "unknown",
     totalRequests: null,
     credits: balance,
     rawData: {

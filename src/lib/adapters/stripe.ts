@@ -131,6 +131,9 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
   return {
     balance: balanceResponse.ok ? usdTotal(balanceData.available) : null,
     totalCost: centsToDollars(feeCents),
+    costWindowStart: new Date(monthStartSeconds * 1000),
+    costWindowEnd: now,
+    costScope: "calendar_month_to_date",
     totalRequests: null,
     credits: null,
     rawData: {

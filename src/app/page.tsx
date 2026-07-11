@@ -14,6 +14,7 @@ interface Provider {
   name: string;
   displayName: string;
   type: string;
+  refreshIntervalMin: number;
   isActive: boolean;
   groupId: string | null;
   label: string | null;
@@ -318,6 +319,7 @@ export default function DashboardPage() {
               name={provider.name}
               displayName={provider.displayName}
               type={provider.type}
+              refreshIntervalMin={provider.refreshIntervalMin}
               label={provider.label}
               keyPreview={provider.keyPreview}
               estimatedMonthlyCostUsd={provider.estimatedMonthlyCostUsd}

@@ -176,6 +176,7 @@ export default function AddSubscriptionModal({
     if (nextStatus === "active" && status !== "active") {
       setStartDate(nextStartDate);
       setActivationDateReset(true);
+      setActivationMode("repurchase");
     }
     setStatus(nextStatus);
   };
@@ -353,7 +354,9 @@ export default function AddSubscriptionModal({
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="subscription-start-date" className={labelClass}>
-                  {isActivating ? "Activation date" : "Start date"}
+                  {isActivating && activationMode === "repurchase"
+                    ? "Activation date"
+                    : "Start date"}
                 </label>
                 <input
                   id="subscription-start-date"
@@ -363,9 +366,10 @@ export default function AddSubscriptionModal({
                     setStartDate(e.target.value);
                     setActivationDateReset(false);
                   }}
+                  disabled={canResumeExistingTerm && activationMode === "resume"}
                   className={inputClass}
                 />
-                {isActivating && (
+                {isActivating && activationMode === "repurchase" && (
                   <p className={`mt-1 text-xs ${activationDateReset ? "text-emerald-700" : "text-gray-500"}`}>
                     Reset to today to avoid charging evaluation time. Change it only to the actual purchase date.
                   </p>
@@ -393,7 +397,11 @@ export default function AddSubscriptionModal({
                     name="activation-mode"
                     value="repurchase"
                     checked={activationMode === "repurchase"}
-                    onChange={() => setActivationMode("repurchase")}
+                    onChange={() => {
+                      setActivationMode("repurchase");
+                      setStartDate(todayIso());
+                      setActivationDateReset(true);
+                    }}
                   />
                   <span><strong>Repurchase now</strong> — start a new paid term and post a charge now.</span>
                 </label>
@@ -403,7 +411,13 @@ export default function AddSubscriptionModal({
                     name="activation-mode"
                     value="resume"
                     checked={activationMode === "resume"}
-                    onChange={() => setActivationMode("resume")}
+                    onChange={() => {
+                      setActivationMode("resume");
+                      if (editSubscription?.startDate) {
+                        setStartDate(editSubscription.startDate.slice(0, 10));
+                      }
+                      setActivationDateReset(false);
+                    }}
                   />
                   <span><strong>Resume paid-through term</strong> — keep the existing cadence and wait until its next renewal to charge.</span>
                 </label>

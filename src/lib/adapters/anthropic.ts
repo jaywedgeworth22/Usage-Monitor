@@ -92,7 +92,31 @@ export async function fetchUsage(
     if (!Array.isArray(data.data) || typeof data.has_more !== "boolean") {
       invalidResponse("expected data[] and boolean has_more fields");
     }
-    buckets.push(...data.data);
+    for (const [bucketIndex, bucket] of data.data.entries()) {
+      if (
+        !bucket ||
+        typeof bucket !== "object" ||
+        !Array.isArray(bucket.results)
+      ) {
+        invalidResponse(`bucket ${bucketIndex} omitted results[]`);
+      }
+      for (const [resultIndex, result] of bucket.results.entries()) {
+        const amount = parseNumber(result?.amount);
+        if (
+          !result ||
+          typeof result !== "object" ||
+          amount == null ||
+          amount < 0 ||
+          typeof result.currency !== "string" ||
+          !result.currency.trim()
+        ) {
+          invalidResponse(
+            `bucket ${bucketIndex} result ${resultIndex} omitted a valid amount or currency`
+          );
+        }
+      }
+      buckets.push(bucket);
+    }
     pageCount++;
 
     if (!data.has_more) break;
@@ -125,11 +149,15 @@ export async function fetchUsage(
   return {
     balance: null,
     totalCost: foundUsd ? totalCents / 100 : null,
+    costWindowStart: foundUsd ? startingAt : null,
+    costWindowEnd: foundUsd ? endingAt : null,
+    costScope: foundUsd ? "calendar_month_to_date" : "unknown",
     totalRequests: null,
     credits: null,
     rawData: {
       costReport: {
         bucketCount: buckets.length,
+        pageCount,
         totalUsd: foundUsd ? totalCents / 100 : null,
       },
       reportingWindow: { startingAt, endingAt },

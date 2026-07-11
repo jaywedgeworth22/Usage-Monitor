@@ -9,6 +9,7 @@ interface ProviderCardProps {
   name: string;
   displayName: string;
   type: string;
+  refreshIntervalMin?: number;
   label?: string | null;
   keyPreview?: string | null;
   estimatedMonthlyCostUsd?: number;
@@ -64,6 +65,7 @@ export default function ProviderCard({
   displayName,
   name,
   type,
+  refreshIntervalMin = 60,
   label,
   keyPreview,
   estimatedMonthlyCostUsd = 0,
@@ -178,7 +180,10 @@ export default function ProviderCard({
           <span className="font-semibold">Provider-reported:</span>{" "}
           {connectedBilling.planName || connectedBilling.kind}
           {connectedBilling.status ? ` · ${connectedBilling.status}` : ""}
-          {isExternalBillingStale(connectedBilling) ? " · stale" : ""}
+          {isExternalBillingStale(
+            connectedBilling,
+            Math.min(24 * 60 * 60 * 1_000, Math.max(60 * 60 * 1_000, refreshIntervalMin * 3 * 60 * 1_000))
+          ) ? " · stale" : ""}
         </div>
       )}
 

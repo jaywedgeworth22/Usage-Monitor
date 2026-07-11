@@ -48,6 +48,19 @@ describe("anthropic adapter", () => {
     });
   });
 
+  it("rejects a bucket that omits result shape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(
+        response({ data: [{}], has_more: false, next_page: null })
+      )
+    );
+
+    await expect(fetchUsage("admin-key")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+  });
+
   it("fails closed when the next page cursor repeats", async () => {
     vi.stubGlobal(
       "fetch",

@@ -30,5 +30,22 @@ describe("github billing adapter", () => {
     expect(fetchMock.mock.calls[0][0]).toContain(
       "/organizations/Acme/settings/billing/usage?"
     );
+    expect(result.costScope).toBe("calendar_month_to_date");
+  });
+
+  it("fails closed when a successful response omits usageItems", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+    );
+
+    await expect(fetchUsage("token", { org: "Acme" })).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
   });
 });

@@ -23,5 +23,22 @@ describe("vercel billing adapter", () => {
     expect(result.externalBilling?.records[0]).toMatchObject({ amountUsd: 3.75 });
     expect(JSON.stringify(result.rawData)).not.toContain("secret");
     expect(fetchMock.mock.calls[0][0]).toContain("teamId=team_123");
+    expect(result.costIncludesUnknownFixed).toBe(true);
+  });
+
+  it("fails closed on a malformed successful FOCUS row", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ServiceName: "Functions" }), {
+          status: 200,
+          headers: { "content-type": "application/x-ndjson" },
+        })
+      )
+    );
+
+    await expect(fetchUsage("token")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
   });
 });

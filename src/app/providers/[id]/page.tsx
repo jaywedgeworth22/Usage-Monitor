@@ -12,6 +12,7 @@ interface Provider {
   name: string;
   displayName: string;
   type: string;
+  refreshIntervalMin: number;
   isActive: boolean;
   label: string | null;
   billingMode: "actual" | "estimated" | "manual";
@@ -211,7 +212,10 @@ export default function ProviderDetailPage() {
         </div>
       )}
 
-      <ExternalBillingDetails records={provider.externalBilling ?? []} />
+      <ExternalBillingDetails
+        records={provider.externalBilling ?? []}
+        refreshIntervalMin={provider.refreshIntervalMin}
+      />
 
       {/* Summary stats */}
       <div

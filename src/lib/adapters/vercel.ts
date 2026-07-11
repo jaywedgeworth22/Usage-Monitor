@@ -19,20 +19,41 @@ interface FocusCharge {
 }
 
 function parseCharges(data: unknown): FocusCharge[] {
-  if (Array.isArray(data)) return data as FocusCharge[];
-  if (typeof data === "object" && data !== null) return [data as FocusCharge];
-  if (typeof data !== "string") return [];
+  let charges: FocusCharge[];
+  if (Array.isArray(data)) charges = data as FocusCharge[];
+  else if (typeof data === "object" && data !== null) charges = [data as FocusCharge];
+  else if (typeof data !== "string") {
+    throw new AdapterError("Vercel returned an invalid FOCUS response", {
+      code: "INVALID_RESPONSE",
+    });
+  } else {
+    charges = [];
+    for (const line of data.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          charges.push(parsed as FocusCharge);
+        } else {
+          throw new Error("FOCUS row was not an object");
+        }
+      } catch (error) {
+        throw new AdapterError("Vercel returned invalid FOCUS JSONL", {
+          code: "INVALID_RESPONSE",
+          cause: error,
+        });
+      }
+    }
+  }
 
-  const charges: FocusCharge[] = [];
-  for (const line of data.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    try {
-      const parsed = JSON.parse(line) as unknown;
-      if (parsed && typeof parsed === "object") charges.push(parsed as FocusCharge);
-    } catch (error) {
-      throw new AdapterError("Vercel returned invalid FOCUS JSONL", {
+  for (const charge of charges) {
+    if (
+      parseNumber(charge.BilledCost) == null ||
+      typeof charge.BillingCurrency !== "string" ||
+      !charge.BillingCurrency.trim()
+    ) {
+      throw new AdapterError("Vercel FOCUS row omitted BilledCost or BillingCurrency", {
         code: "INVALID_RESPONSE",
-        cause: error,
       });
     }
   }
@@ -83,10 +104,15 @@ export async function fetchUsage(
   }
   const month = monthStart.toISOString().slice(0, 7);
   const owner = teamId ?? "personal";
+  const canonicalTotalCost = foundUsd ? Math.max(0, totalCost) : null;
 
   return {
     balance: null,
-    totalCost: foundUsd ? totalCost : null,
+    totalCost: canonicalTotalCost,
+    costWindowStart: foundUsd ? monthStart : null,
+    costWindowEnd: foundUsd ? now : null,
+    costScope: foundUsd ? "calendar_month_to_date" : "unknown",
+    costIncludesUnknownFixed: foundUsd,
     totalRequests: null,
     credits: null,
     rawData: {
@@ -109,7 +135,7 @@ export async function fetchUsage(
           kind: "billing_period",
           planName: "Vercel FOCUS charges",
           status: "open",
-          amountUsd: foundUsd ? totalCost : null,
+          amountUsd: canonicalTotalCost,
           currency: "USD",
           currentPeriodStart: monthStart.toISOString(),
           currentPeriodEnd: monthEnd.toISOString(),

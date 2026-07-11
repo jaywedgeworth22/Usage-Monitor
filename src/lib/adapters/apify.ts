@@ -60,14 +60,26 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
         : null;
   const cycleStart = limitsData.data?.monthlyUsageCycle?.startAt ?? null;
   const cycleEnd = limitsData.data?.monthlyUsageCycle?.endAt ?? null;
+  const now = new Date();
+  const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  const nextMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  const cycleStartMs = cycleStart ? Date.parse(cycleStart) : Number.NaN;
+  const isCurrentMonthCycle =
+    Number.isFinite(cycleStartMs) &&
+    cycleStartMs >= monthStart &&
+    cycleStartMs < nextMonth;
+  const canonicalBill = isCurrentMonthCycle ? currentBill : null;
 
   return {
     balance,
-    totalCost: currentBill,
+    totalCost: canonicalBill,
     fixedCostIncludedUsd:
-      currentBill != null && monthlyBasePrice != null
-        ? Math.min(currentBill, Math.max(0, monthlyBasePrice))
+      canonicalBill != null && monthlyBasePrice != null
+        ? Math.min(canonicalBill, Math.max(0, monthlyBasePrice))
         : null,
+    costWindowStart: canonicalBill != null ? cycleStart : null,
+    costWindowEnd: canonicalBill != null ? cycleEnd : null,
+    costScope: canonicalBill != null ? "billing_cycle_to_date" : "unknown",
     totalRequests: null,
     credits: balance,
     rawData: {
@@ -94,6 +106,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
       billing: {
         currentUsageUsd: usedMonthly,
         estimatedCurrentBillUsd: currentBill,
+        includedInCurrentMonthBudget: canonicalBill != null,
         includedCreditsRemainingUsd: balance,
         maximumUsageLimitUsd: maxMonthly,
       },

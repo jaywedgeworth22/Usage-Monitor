@@ -59,7 +59,12 @@ describe("apify adapter", () => {
       "fetch",
       vi.fn()
         .mockResolvedValueOnce(
-          json({ data: { current: { monthlyUsageUsd: 15 } } })
+          json({
+            data: {
+              monthlyUsageCycle: { startAt: "2026-07-01", endAt: "2026-08-01" },
+              current: { monthlyUsageUsd: 15 },
+            },
+          })
         )
         .mockResolvedValueOnce(
           json({
@@ -78,5 +83,29 @@ describe("apify adapter", () => {
 
     expect(result.totalCost).toBe(25);
     expect(result.balance).toBe(0);
+  });
+
+  it("keeps an out-of-month billing cycle display-only", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(
+          json({
+            data: {
+              monthlyUsageCycle: { startAt: "2026-06-01", endAt: "2026-07-01" },
+              current: { monthlyUsageUsd: 15 },
+            },
+          })
+        )
+        .mockResolvedValueOnce(
+          json({ data: { plan: { id: "Starter", monthlyBasePriceUsd: 20, monthlyUsageCreditsUsd: 10 } } })
+        )
+    );
+
+    const result = await fetchUsage("token");
+    expect(result.totalCost).toBeNull();
+    expect(result.rawData).toMatchObject({
+      billing: { estimatedCurrentBillUsd: 25, includedInCurrentMonthBudget: false },
+    });
   });
 });

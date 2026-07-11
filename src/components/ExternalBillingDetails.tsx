@@ -21,6 +21,7 @@ const EXTERNAL_BILLING_STALE_AFTER_MS = 24 * 60 * 60 * 1_000;
 
 export function isExternalBillingStale(
   record: Pick<ExternalBillingRecord, "syncedAt">,
+  staleAfterMs = EXTERNAL_BILLING_STALE_AFTER_MS,
   now = Date.now()
 ): boolean {
   const syncedAt = Date.parse(record.syncedAt);
@@ -58,8 +59,10 @@ function statusClass(status: string): string {
 
 export default function ExternalBillingDetails({
   records,
+  refreshIntervalMin = 60,
 }: {
   records: ExternalBillingRecord[];
+  refreshIntervalMin?: number;
 }) {
   if (records.length === 0) return null;
 
@@ -82,7 +85,13 @@ export default function ExternalBillingDetails({
                 <p className="text-xs text-gray-500">{record.source} · {record.kind}</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {isExternalBillingStale(record) && (
+                {isExternalBillingStale(
+                  record,
+                  Math.min(
+                    EXTERNAL_BILLING_STALE_AFTER_MS,
+                    Math.max(60 * 60 * 1_000, refreshIntervalMin * 3 * 60 * 1_000)
+                  )
+                ) && (
                   <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800">
                     stale sync
                   </span>

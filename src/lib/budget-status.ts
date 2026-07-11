@@ -196,7 +196,7 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
           {
             OR: [
               { costScope: null },
-              { costScope: { notIn: ["daily", "billing_cycle_to_date"] } },
+              { costScope: { not: "daily" } },
             ],
           },
           {

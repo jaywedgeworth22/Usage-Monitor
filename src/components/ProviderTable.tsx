@@ -194,7 +194,10 @@ export default function ProviderTable({
                       <p className="mt-1 text-[10px] font-medium text-blue-700">
                         Connected: {connectedBilling.planName || connectedBilling.kind}
                         {connectedBilling.status ? ` · ${connectedBilling.status}` : ""}
-                        {isExternalBillingStale(connectedBilling) ? " · stale" : ""}
+                        {isExternalBillingStale(
+                          connectedBilling,
+                          Math.min(24 * 60 * 60 * 1_000, Math.max(60 * 60 * 1_000, provider.refreshIntervalMin * 3 * 60 * 1_000))
+                        ) ? " · stale" : ""}
                       </p>
                     )}
                   </div>

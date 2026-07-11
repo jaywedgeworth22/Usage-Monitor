@@ -1,4 +1,5 @@
 import {
+  AdapterError,
   configurationError,
   errorResult,
   fetchJson,
@@ -47,12 +48,27 @@ export async function fetchUsage(
     });
   }
 
-  const data = (response.data ?? {}) as { usageItems?: GitHubUsageItem[] };
-  const items = Array.isArray(data.usageItems) ? data.usageItems : [];
+  if (!response.data || typeof response.data !== "object" || Array.isArray(response.data)) {
+    throw new AdapterError("GitHub billing usage expected a response object", {
+      code: "INVALID_RESPONSE",
+    });
+  }
+  const data = response.data as { usageItems?: GitHubUsageItem[] };
+  if (!Array.isArray(data.usageItems)) {
+    throw new AdapterError("GitHub billing usage expected usageItems[]", {
+      code: "INVALID_RESPONSE",
+    });
+  }
+  const items = data.usageItems;
   let totalCost = 0;
   let foundCost = false;
   const byProduct = new Map<string, { quantity: number; netAmountUsd: number }>();
   for (const item of items) {
+    if (!item || typeof item !== "object" || parseNumber(item.netAmount) == null) {
+      throw new AdapterError("GitHub billing usage item omitted netAmount", {
+        code: "INVALID_RESPONSE",
+      });
+    }
     const amount = parseNumber(item.netAmount);
     if (amount != null) {
       totalCost += amount;
@@ -69,6 +85,9 @@ export async function fetchUsage(
   return {
     balance: null,
     totalCost: foundCost ? totalCost : null,
+    costWindowStart: foundCost ? monthStart : null,
+    costWindowEnd: foundCost ? now : null,
+    costScope: foundCost ? "calendar_month_to_date" : "unknown",
     totalRequests: null,
     credits: null,
     rawData: {
