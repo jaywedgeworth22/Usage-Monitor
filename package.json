@@ -17,6 +17,8 @@
     "db:studio": "prisma studio",
     "repair:claude-cost": "node scripts/repair-claude-cumulative-cost.mjs",
     "audit:subscription-currency": "node scripts/audit-subscription-currency.mjs",
+    "migrate:provider-secrets": "node scripts/migrate-provider-config-secrets.mjs",
+    "audit:provider-duplicates": "node scripts/audit-provider-duplicates.mjs",
     "test": "vitest run",
     "test:migrate-safe": "node scripts/test-migrate-safe-repro.mjs",
     "test:startup-config": "node scripts/test-startup-config.mjs",
