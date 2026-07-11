@@ -35,6 +35,7 @@ export interface PersistExternalUsageEventsResult {
   attempted: number;
   persisted: number;
   skippedPrunedDuplicates: number;
+  newEvents: ExternalUsageEventInput[];
 }
 
 // Prisma raises P2003 on a foreign-key constraint violation (e.g. a projectId
@@ -115,8 +116,17 @@ export async function persistExternalUsageEvents(
     where: { idempotencyKey: { in: idempotencyKeys } },
     select: { idempotencyKey: true },
   });
+  
+  const existingEvents = await prisma.externalUsageEvent.findMany({
+    where: { idempotencyKey: { in: idempotencyKeys } },
+    select: { idempotencyKey: true },
+  });
+
   const prunedKeys = new Set(tombstones.map((row) => row.idempotencyKey));
+  const existingKeys = new Set(existingEvents.map((row) => row.idempotencyKey));
+  
   let activeEvents = events.filter((event) => !prunedKeys.has(event.idempotencyKey));
+  const newEvents = activeEvents.filter((event) => !existingKeys.has(event.idempotencyKey));
 
   const upsertAll = (batch: ExternalUsageEventInput[]) =>
     prisma.$transaction(
@@ -166,6 +176,7 @@ export async function persistExternalUsageEvents(
     attempted: events.length,
     persisted: activeEvents.length,
     skippedPrunedDuplicates: events.length - activeEvents.length,
+    newEvents,
   };
 }
 
@@ -219,7 +230,10 @@ export async function summarizeExternalUsageEvents(
 
   const [rawEvents, rollups] = await Promise.all([
     prisma.externalUsageEvent.findMany({
-      where: { occurredAt: { gte: rawSince } },
+      where: { 
+        occurredAt: { gte: rawSince },
+        metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
+      },
       orderBy: { occurredAt: "desc" },
       take: 5000,
       select: {
@@ -243,6 +257,7 @@ export async function summarizeExternalUsageEvents(
               gte: new Date(Date.UTC(since.getUTCFullYear(), since.getUTCMonth(), since.getUTCDate())),
               lt: rawCutoff,
             },
+            metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
           },
           select: {
             sourceApp: true,

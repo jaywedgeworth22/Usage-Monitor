@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
   );
 
   // Cross-app status metrics integration: Generate UsageSnapshot rows for absolute metrics.
-  await syncStatusToUsageSnapshot(events);
+  await syncStatusToUsageSnapshot(persistResult.newEvents);
 
   return NextResponse.json(
     {
