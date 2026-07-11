@@ -309,3 +309,8 @@ PR #63's `agent-sync-relay` health-check adapter (issue #55)._
 ### 2026-07-10
 - 2026-07-10 — CLAUDE: fixed the deploy-blocking `migrate-safe.mjs` `--dry-run` crash (found while
   verifying PR #83); moved to Completed above. `docs/rollouts/2026-07-10-migrate-safe-dry-run-fix.md`.
+
+### 2026-07-11
+- 2026-07-11 — AG: Merged UI updates (dashboard charts, dark mode, provider table layout fixes) and updated efforts log.
+- 2026-07-11 — AG: Resolved PR merge conflicts in Socratic.Trade (1412, 1409, 1405, 1396, 1389, 1382, 1380) and Congress.Trade (264, 262, 257, 256).
+- 2026-07-11 — AG: Configured Congress.Trade to push `project: 'congress-trade'` inside telemetry and FMP metrics to support per-project usage attribution in API-usage-monitor.
