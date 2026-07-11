@@ -130,17 +130,21 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board:
   `/Users/jay/apps/api-usage-monitor-alert-delivery`, based on app-wide hardening commit `2dd8ad8`.
   Persist per-channel attempt/success state so one failed channel cannot resend successful channels;
   add bounded per-channel HTTP timeout/retry; use stable PagerDuty dedup keys and resolution events.
-  Implemented locally: Prisma schema + additive migration harness pass, focused alert-delivery
-  tests 6/6, TypeScript, and scoped ESLint pass under Node 24. Scope is alert
-  delivery/schema/focused tests/docs only; no full gate, production writes, push, PR, merge, or
-  deploy in this lane.
+  Implemented locally at `a8f213a` and integrated into parent branch
+  `codex-app-wide-hardening` at `78c2f01`: per-channel state, bounded timeout/retry, PagerDuty
+  trigger/resolve deduplication, schema, migration harness, tests, and docs. Parent full gate is
+  green (45 files/251 tests plus production build). Landing through the parent PR; no production
+  write, merge, or deploy yet.
 - **App-wide hardening + direct billing integrations (CODEX, owner-directed 2026-07-11).** Branch
   `codex-app-wide-hardening`. Implementing the 2026-07-11 audit backlog across telemetry/spend,
   subscriptions, security, adapter failure semantics, accessible/responsive UI, readiness/deploy/
   backup/CI, plus official-API-backed provider billing and subscription integrations. Multi-agent
   isolated sublanes; no production writes or merges without an explicit landing decision.
-  Operations/readiness lane committed at `c398b7f`; telemetry, connector/security, and frontend
-  lanes remain in progress before the serialized full gate.
+  **DONE-local at `2c38df4`; PR/push pending.** All lanes are integrated; serialized Node 24
+  `npm run verify` passes (ESLint, TypeScript, 45 files/251 tests, migration safety, startup checks,
+  production build), and authenticated desktop/390px mobile browser QA passed on a temporary DB.
+  Separate Socratic producer retry/idempotency branch is locally green. No production writes,
+  merge, or deploy performed.
 - **Subscription->knob linkage phase 1 (CLAUDE, sonnet subagent, owner-directed 2026-07-10,
   background agent in an isolated worktree off main) — mirrored from the live board, OPEN PR #83
   (`claude/subscription-knob-linkage`), opened 2026-07-10. NOT merged.** Goal: the monitor becomes the source of truth for which market-data plan is active
