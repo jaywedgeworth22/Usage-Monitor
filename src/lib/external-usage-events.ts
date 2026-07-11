@@ -1,6 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
+export const STATUS_METRIC_TYPES = new Set(["quota_sync", "credit_balance"]);
+
 export interface ExternalUsageEventInput {
   idempotencyKey: string;
   sourceApp: string;
@@ -33,6 +35,7 @@ export interface PersistExternalUsageEventsResult {
   attempted: number;
   persisted: number;
   skippedPrunedDuplicates: number;
+  newEvents: ExternalUsageEventInput[];
 }
 
 // Prisma raises P2003 on a foreign-key constraint violation (e.g. a projectId
@@ -105,7 +108,7 @@ export async function persistExternalUsageEvents(
   events: ExternalUsageEventInput[]
 ): Promise<PersistExternalUsageEventsResult> {
   if (events.length === 0) {
-    return { attempted: 0, persisted: 0, skippedPrunedDuplicates: 0 };
+    return { attempted: 0, persisted: 0, skippedPrunedDuplicates: 0, newEvents: [] };
   }
 
   const idempotencyKeys = events.map((event) => event.idempotencyKey);
@@ -113,8 +116,17 @@ export async function persistExternalUsageEvents(
     where: { idempotencyKey: { in: idempotencyKeys } },
     select: { idempotencyKey: true },
   });
+  
+  const existingEvents = await prisma.externalUsageEvent.findMany({
+    where: { idempotencyKey: { in: idempotencyKeys } },
+    select: { idempotencyKey: true },
+  });
+
   const prunedKeys = new Set(tombstones.map((row) => row.idempotencyKey));
+  const existingKeys = new Set(existingEvents.map((row) => row.idempotencyKey));
+  
   let activeEvents = events.filter((event) => !prunedKeys.has(event.idempotencyKey));
+  const newEvents = activeEvents.filter((event) => !existingKeys.has(event.idempotencyKey));
 
   const upsertAll = (batch: ExternalUsageEventInput[]) =>
     prisma.$transaction(
@@ -164,6 +176,7 @@ export async function persistExternalUsageEvents(
     attempted: events.length,
     persisted: activeEvents.length,
     skippedPrunedDuplicates: events.length - activeEvents.length,
+    newEvents,
   };
 }
 
@@ -217,7 +230,10 @@ export async function summarizeExternalUsageEvents(
 
   const [rawEvents, rollups] = await Promise.all([
     prisma.externalUsageEvent.findMany({
-      where: { occurredAt: { gte: rawSince } },
+      where: { 
+        occurredAt: { gte: rawSince },
+        metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
+      },
       orderBy: { occurredAt: "desc" },
       take: 5000,
       select: {
@@ -241,6 +257,7 @@ export async function summarizeExternalUsageEvents(
               gte: new Date(Date.UTC(since.getUTCFullYear(), since.getUTCMonth(), since.getUTCDate())),
               lt: rawCutoff,
             },
+            metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
           },
           select: {
             sourceApp: true,
@@ -327,13 +344,18 @@ export async function sumMonthToDateExternalCostByProvider(
   const [rawGroups, rollups] = await Promise.all([
     prisma.externalUsageEvent.groupBy({
       by: ["provider", "metricType"],
-      where: { occurredAt: { gte: rawSince }, costUsd: { not: null } },
+      where: { 
+        occurredAt: { gte: rawSince }, 
+        costUsd: { not: null },
+        metricType: { notIn: Array.from(STATUS_METRIC_TYPES) }
+      },
       _sum: { costUsd: true },
     }),
     monthStart < rawCutoff
       ? prisma.externalUsageEventDailyRollup.findMany({
           where: {
             day: { gte: monthStart, lt: rawCutoff },
+            metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
           },
           select: {
             provider: true,
@@ -383,12 +405,19 @@ export async function sumMonthToDateExternalCostAttribution(
   const [rawGroups, rollups] = await Promise.all([
     prisma.externalUsageEvent.groupBy({
       by: ["provider", "sourceApp", "projectId"],
-      where: { occurredAt: { gte: rawSince }, costUsd: { not: null } },
+      where: { 
+        occurredAt: { gte: rawSince }, 
+        costUsd: { not: null },
+        metricType: { notIn: Array.from(STATUS_METRIC_TYPES) }
+      },
       _sum: { costUsd: true },
     }),
     monthStart < rawCutoff
       ? prisma.externalUsageEventDailyRollup.findMany({
-          where: { day: { gte: monthStart, lt: rawCutoff } },
+          where: { 
+            day: { gte: monthStart, lt: rawCutoff },
+            metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
+          },
           select: {
             provider: true,
             sourceApp: true,
@@ -418,3 +447,38 @@ export async function sumMonthToDateExternalCostAttribution(
   }
   return Array.from(rows.values());
 }
+
+export async function syncStatusToUsageSnapshot(events: ExternalUsageEventInput[]): Promise<void> {
+  const statusEvents = events.filter((e) => STATUS_METRIC_TYPES.has(e.metricType));
+  if (statusEvents.length === 0) return;
+
+  const providerNames = new Set(statusEvents.map((e) => e.provider.toLowerCase()));
+  const allProviders = await prisma.provider.findMany({
+    select: { id: true, name: true },
+  });
+  const providers = allProviders.filter((p) => providerNames.has(p.name.toLowerCase()));
+
+  const providerIdByName = new Map(providers.map((p) => [p.name.toLowerCase(), p.id]));
+
+  for (const event of statusEvents) {
+    const providerId = providerIdByName.get(event.provider.toLowerCase());
+    if (!providerId) continue;
+
+    const data: Prisma.UsageSnapshotCreateInput = {
+      provider: { connect: { id: providerId } },
+      fetchedAt: event.occurredAt,
+    };
+
+    if (event.metricType === "quota_sync") {
+      if (event.requests != null || event.quantity != null) {
+        data.totalRequests = event.requests ?? event.quantity ?? undefined;
+      }
+      if (event.costUsd != null) data.totalCost = event.costUsd;
+    } else if (event.metricType === "credit_balance") {
+      data.credits = event.credits ?? event.quantity ?? undefined;
+    }
+
+    await prisma.usageSnapshot.create({ data });
+  }
+}
+

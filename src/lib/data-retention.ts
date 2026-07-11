@@ -276,10 +276,23 @@ function externalGroupKey(row: ExternalUsageEventRow): string {
 
 function applyExternalRow(group: ExternalRollupValues, row: ExternalUsageEventRow): void {
   group.eventCount += 1;
-  group.totalCostUsd += row.costUsd ?? 0;
-  group.totalRequests += row.requests ?? 0;
-  group.totalQuantity += row.quantity ?? 0;
-  group.totalCredits += row.credits ?? 0;
+  const isStatus = row.metricType === "quota_sync" || row.metricType === "credit_balance";
+  
+  if (!isStatus) {
+    group.totalCostUsd += row.costUsd ?? 0;
+    group.totalRequests += row.requests ?? 0;
+    group.totalQuantity += row.quantity ?? 0;
+    group.totalCredits += row.credits ?? 0;
+  } else {
+    // For status metrics, just take the latest value seen as the "total" for display purposes
+    if (row.occurredAt.getTime() >= group.latestOccurredAt.getTime()) {
+      group.totalCostUsd = row.costUsd ?? 0;
+      group.totalRequests = row.requests ?? 0;
+      group.totalQuantity = row.quantity ?? 0;
+      group.totalCredits = row.credits ?? 0;
+    }
+  }
+  
   group.maxLimit = maxNullable(group.maxLimit, row.limit);
   group.latestOccurredAt = maxDate(group.latestOccurredAt, row.occurredAt);
 }
@@ -328,13 +341,16 @@ function mergeExternalRollup(
   incoming: ExternalRollupValues
 ): ExternalRollupValues {
   if (!existing) return incoming;
+  const isStatus = incoming.metricType === "quota_sync" || incoming.metricType === "credit_balance";
+  const incomingIsLatest = incoming.latestOccurredAt.getTime() >= existing.latestOccurredAt.getTime();
+  
   return {
     ...incoming,
     eventCount: existing.eventCount + incoming.eventCount,
-    totalCostUsd: existing.totalCostUsd + incoming.totalCostUsd,
-    totalRequests: existing.totalRequests + incoming.totalRequests,
-    totalQuantity: existing.totalQuantity + incoming.totalQuantity,
-    totalCredits: existing.totalCredits + incoming.totalCredits,
+    totalCostUsd: isStatus ? (incomingIsLatest ? incoming.totalCostUsd : existing.totalCostUsd) : existing.totalCostUsd + incoming.totalCostUsd,
+    totalRequests: isStatus ? (incomingIsLatest ? incoming.totalRequests : existing.totalRequests) : existing.totalRequests + incoming.totalRequests,
+    totalQuantity: isStatus ? (incomingIsLatest ? incoming.totalQuantity : existing.totalQuantity) : existing.totalQuantity + incoming.totalQuantity,
+    totalCredits: isStatus ? (incomingIsLatest ? incoming.totalCredits : existing.totalCredits) : existing.totalCredits + incoming.totalCredits,
     maxLimit: maxNullable(existing.maxLimit, incoming.maxLimit),
     latestOccurredAt: maxDate(existing.latestOccurredAt, incoming.latestOccurredAt),
   };
