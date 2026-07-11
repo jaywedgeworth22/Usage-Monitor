@@ -47,6 +47,8 @@ export interface BudgetStatusResponse {
   providers: ProviderBudgetStatus[];
   summary: {
     totalBudgetUsd: number;
+    budgetedSpentUsd: number;
+    unbudgetedSpentUsd: number;
     totalSpentUsd: number;
     remainingUsd: number;
     percentUsed: number | null;
@@ -208,7 +210,8 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
 
   const budgeted = providerStatuses.filter((p) => p.monthlyBudgetUsd != null && p.monthlyBudgetUsd > 0);
   const totalBudgetUsd = budgeted.reduce((s, p) => s + (p.monthlyBudgetUsd ?? 0), 0);
-  const totalSpentUsd = budgeted.reduce((s, p) => s + p.spentUsd, 0);
+  const budgetedSpentUsd = budgeted.reduce((s, p) => s + p.spentUsd, 0);
+  const totalSpentUsd = providerStatuses.reduce((s, p) => s + p.spentUsd, 0);
 
   return {
     ok: true,
@@ -217,9 +220,11 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
     providers: providerStatuses,
     summary: {
       totalBudgetUsd,
+      budgetedSpentUsd,
+      unbudgetedSpentUsd: totalSpentUsd - budgetedSpentUsd,
       totalSpentUsd,
-      remainingUsd: totalBudgetUsd - totalSpentUsd,
-      percentUsed: totalBudgetUsd > 0 ? totalSpentUsd / totalBudgetUsd : null,
+      remainingUsd: totalBudgetUsd - budgetedSpentUsd,
+      percentUsed: totalBudgetUsd > 0 ? budgetedSpentUsd / totalBudgetUsd : null,
       overBudget: providerStatuses.some((p) => p.status === "exceeded"),
       warning: providerStatuses.some((p) => p.status === "warning"),
     },
@@ -253,6 +258,8 @@ export interface ProjectBudgetStatusResponse {
   projects: ProjectBudgetStatus[];
   summary: {
     totalBudgetUsd: number;
+    budgetedSpentUsd: number;
+    unbudgetedSpentUsd: number;
     totalSpentUsd: number;
     remainingUsd: number;
     percentUsed: number | null;
@@ -372,7 +379,8 @@ export async function computeProjectBudgetStatus(now: Date = new Date()): Promis
 
   const budgeted = projectStatuses.filter((p) => p.monthlyBudgetUsd != null && p.monthlyBudgetUsd > 0);
   const totalBudgetUsd = budgeted.reduce((s, p) => s + (p.monthlyBudgetUsd ?? 0), 0);
-  const totalSpentUsd = budgeted.reduce((s, p) => s + p.spentUsd, 0);
+  const budgetedSpentUsd = budgeted.reduce((s, p) => s + p.spentUsd, 0);
+  const totalSpentUsd = projectStatuses.reduce((s, p) => s + p.spentUsd, 0);
 
   return {
     ok: true,
@@ -382,9 +390,11 @@ export async function computeProjectBudgetStatus(now: Date = new Date()): Promis
     projects: projectStatuses,
     summary: {
       totalBudgetUsd,
+      budgetedSpentUsd,
+      unbudgetedSpentUsd: totalSpentUsd - budgetedSpentUsd,
       totalSpentUsd,
-      remainingUsd: totalBudgetUsd - totalSpentUsd,
-      percentUsed: totalBudgetUsd > 0 ? totalSpentUsd / totalBudgetUsd : null,
+      remainingUsd: totalBudgetUsd - budgetedSpentUsd,
+      percentUsed: totalBudgetUsd > 0 ? budgetedSpentUsd / totalBudgetUsd : null,
       overBudget: projectStatuses.some((p) => p.status === "exceeded"),
       warning: projectStatuses.some((p) => p.status === "warning"),
     },

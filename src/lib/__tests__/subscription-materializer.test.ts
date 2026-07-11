@@ -270,6 +270,33 @@ describe("materializeDueSubscriptions + project attribution (integration)", () =
     expect(status.providers.find((provider) => provider.id === canonical.id)?.spentUsd).toBe(35);
   });
 
+  it("includes unbudgeted spend in summary totals without distorting budget utilization", async () => {
+    await prisma.provider.create({
+      data: { name: "anthropic", displayName: "Anthropic", type: "push" },
+    });
+    await prisma.externalUsageEvent.create({
+      data: {
+        idempotencyKey: "unbudgeted-provider-cost",
+        sourceApp: "claude-code",
+        provider: "anthropic",
+        billingMode: "actual",
+        metricType: "cost",
+        costUsd: 17,
+        occurredAt: NOW,
+      },
+    });
+
+    const status = await computeBudgetStatus(NOW);
+    expect(status.summary).toMatchObject({
+      totalBudgetUsd: 0,
+      budgetedSpentUsd: 0,
+      unbudgetedSpentUsd: 17,
+      totalSpentUsd: 17,
+      remainingUsd: 0,
+      percentUsed: null,
+    });
+  });
+
   it("does not re-charge already-charged periods when the schedule is edited", async () => {
     // Regression for the critical double-charge: editing the schedule (here via
     // a real PUT that changes the interval) must not re-emit past charges.
