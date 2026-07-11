@@ -267,6 +267,32 @@ describe("POST /api/otlp/v1/metrics", () => {
     expect(response.status).toBe(400);
   });
 
+  it("rejects mapped points without a stable event timestamp", async () => {
+    const payload = structuredClone(samplePayload);
+    delete (payload.resourceMetrics[0].scopeMetrics[0].metrics[0].sum.dataPoints[0] as {
+      timeUnixNano?: string;
+    }).timeUnixNano;
+    const response = await POST(
+      jsonRequest(payload, { authorization: "Bearer test-token-123" })
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects an oversized chunked body before decoding it", async () => {
+    ipCounter += 1;
+    const request = new NextRequest("https://usage.jays.services/api/otlp/v1/metrics", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer test-token-123",
+        "x-forwarded-for": `10.0.0.${ipCounter}`,
+      },
+      body: JSON.stringify({ padding: "x".repeat(1_048_576) }),
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(413);
+  });
+
   it("tolerates unknown metric names without a 500 and does not persist them", async () => {
     const payload = {
       resourceMetrics: [
