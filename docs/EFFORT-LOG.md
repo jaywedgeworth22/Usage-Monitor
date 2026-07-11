@@ -314,3 +314,4 @@ PR #63's `agent-sync-relay` health-check adapter (issue #55)._
 - 2026-07-11 — AG: Merged UI updates (dashboard charts, dark mode, provider table layout fixes) and updated efforts log.
 - 2026-07-11 — AG: Resolved PR merge conflicts in Socratic.Trade (1412, 1409, 1405, 1396, 1389, 1382, 1380) and Congress.Trade (264, 262, 257, 256).
 - 2026-07-11 — AG: Configured Congress.Trade to push `project: 'congress-trade'` inside telemetry and FMP metrics to support per-project usage attribution in API-usage-monitor.
+- 2026-07-11 — AG: Designed and implemented the Browser Sync Chrome Extension (`chrome-extension/`) and backend ingest route (`/api/ingest/keys`) to automatically sync provider API keys and active session tokens.
