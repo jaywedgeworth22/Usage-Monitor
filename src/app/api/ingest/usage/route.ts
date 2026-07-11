@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
-import { persistExternalUsageEvents } from "@/lib/external-usage-events";
+import { persistExternalUsageEvents, syncStatusToUsageSnapshot } from "@/lib/external-usage-events";
 import { parseUsageTelemetryBatch } from "@/lib/usage-telemetry";
 import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
 import { isUsageIngestAuthorized } from "@/lib/ingest-auth";
@@ -83,6 +83,9 @@ export async function POST(request: NextRequest) {
       };
     })
   );
+
+  // Cross-app status metrics integration: Generate UsageSnapshot rows for absolute metrics.
+  await syncStatusToUsageSnapshot(events);
 
   return NextResponse.json(
     {
