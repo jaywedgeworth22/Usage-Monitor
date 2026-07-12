@@ -13,6 +13,8 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board:
   exists specifically to make this section verifiable going forward instead of inferred.
 
 ## Completed
+- **Handle cross-app status metrics properly (AG) — MERGED as PR #90, 2026-07-11.**
+  Implemented cross-app status metrics handling (`quota_sync`, `credit_balance`) to insert snapshots using `syncStatusToUsageSnapshot`. Addressed review comments to (1) use `newEvents` during bulk insert to avoid idempotency double-snapshot creation, and (2) explicitly filter out `STATUS_METRIC_TYPES` from `summarizeExternalUsageEvents` raw queries to prevent absolute metrics from incorrectly inflating additive dashboard sums. Tests added, PR 90 merged to main and autodeploy to production triggered.
 - **Fix deploy-blocking `migrate-safe.mjs` `--dry-run` crash (CLAUDE, S) — 2026-07-10.**
   `scripts/migrate-safe.mjs`'s `npx prisma db push --dry-run` pre-check used a flag that doesn't
   exist on the pinned Prisma version (`6.19.3`), crashing unconditionally on every deploy once the
