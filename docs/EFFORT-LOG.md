@@ -127,6 +127,16 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board:
 - **UI refactoring for Dashboard and Settings + API Type Safety (AG, S) — 2026-07-11.** Refactor monolithic page components (Dashboard, Settings) into discrete UI components and replace 'any' casting with PrismaClientKnownRequestError for P2002 checks.
 
 ## In Progress
+- **Provider account auto-enrichment + billing/subscription UX (CODEX, owner-directed 2026-07-12).**
+  Branch `codex-provider-account-enrichment`; isolated worktree
+  `/Users/jay/apps/api-usage-monitor-provider-enrichment` from fetched `origin/main`. Auditing
+  provider capabilities and implementing automatic display of trustworthy paid services,
+  subscription tier, renewal, billing, usage, and quota data, with explicit unsupported/manual
+  states and responsive browser QA. Also removing PR #105/#106's unsafe browser-session sync path
+  (`/api/ingest/keys`, Chrome/Safari wrappers): it accepted the fleet ingest token, wrote arbitrary
+  provider config, and persisted full site storage/session material in client-visible config. The
+  dependency baseline is locally repaired to supported ESLint/TypeScript/Tailwind versions. No
+  production writes, merge, or deploy yet.
 - **Alert-delivery channel reliability (CODEX, owner-directed 2026-07-11).** Branch
   `codex-alert-delivery-reliability`, isolated worktree
   `/Users/jay/apps/api-usage-monitor-alert-delivery`, based on app-wide hardening commit `2dd8ad8`.
