@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { type Provider } from "@/app/settings/page";
 import { isExternalBillingStale } from "@/components/ExternalBillingDetails";
 
@@ -14,6 +15,9 @@ interface ProviderTableProps {
   onFetchNow: (id: string) => void;
 }
 
+type SortField = "name" | "type" | "status" | "spend" | "renewal" | "alerts" | "credits" | "lastFetched";
+type SortDirection = "asc" | "desc";
+
 export default function ProviderTable({
   providers,
   actionLoading,
@@ -26,9 +30,28 @@ export default function ProviderTable({
   onToggleActive,
   onFetchNow,
 }: ProviderTableProps) {
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "Never";
-    return new Date(dateStr).toLocaleString();
+  const [sortField, setSortField] = useState<SortField>("name");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  };
+
+  const renderSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <span className="ml-1 text-gray-300 opacity-0 group-hover:opacity-100">↕</span>;
+    }
+    return <span className="ml-1 text-gray-500">{sortDirection === "asc" ? "↑" : "↓"}</span>;
+  };
+
+  const formatDateObject = (dateStr: string | null) => {
+    if (!dateStr) return null;
+    return new Date(dateStr);
   };
 
   const formatUsd = (amount: number | null | undefined) => {
@@ -55,14 +78,44 @@ export default function ProviderTable({
     critical: provider.alerts.filter((a) => a.severity === "critical").length,
   });
 
-  const orderedProviders = [...providers].sort((left, right) => {
-    const severity = (provider: Provider) =>
-      provider.alerts.some((alert) => alert.severity === "critical")
-        ? 0
-        : provider.alerts.some((alert) => alert.severity === "warning")
-          ? 1
-          : 2;
-    return severity(left) - severity(right) || left.displayName.localeCompare(right.displayName);
+  const sortedProviders = [...providers].sort((a, b) => {
+    let comparison = 0;
+    switch (sortField) {
+      case "name":
+        comparison = a.displayName.localeCompare(b.displayName);
+        break;
+      case "type":
+        comparison = a.type.localeCompare(b.type);
+        break;
+      case "status":
+        comparison = (a.isActive ? 1 : 0) - (b.isActive ? 1 : 0);
+        break;
+      case "spend":
+        comparison = (a.spentUsd ?? a.estimatedMonthlyCostUsd) - (b.spentUsd ?? b.estimatedMonthlyCostUsd);
+        break;
+      case "renewal": {
+        const dateA = a.plan?.renewalDate ? new Date(a.plan.renewalDate).getTime() : 0;
+        const dateB = b.plan?.renewalDate ? new Date(b.plan.renewalDate).getTime() : 0;
+        comparison = dateA - dateB;
+        break;
+      }
+      case "alerts":
+        comparison = countProviderAlerts(a).open - countProviderAlerts(b).open;
+        break;
+      case "credits": {
+        const valA = a.latestSnapshot?.credits ?? 0;
+        const valB = b.latestSnapshot?.credits ?? 0;
+        comparison = valA - valB;
+        break;
+      }
+      case "lastFetched": {
+        const dateA = a.latestSnapshot?.fetchedAt ? new Date(a.latestSnapshot.fetchedAt).getTime() : 0;
+        const dateB = b.latestSnapshot?.fetchedAt ? new Date(b.latestSnapshot.fetchedAt).getTime() : 0;
+        comparison = dateA - dateB;
+        break;
+      }
+    }
+    return sortDirection === "asc" ? comparison : -comparison;
   });
 
   if (providers.length === 0) {
@@ -86,34 +139,58 @@ export default function ProviderTable({
         <caption className="sr-only">Configured API providers</caption>
         <thead>
           <tr className="border-b border-gray-100 bg-gray-50">
-            <th className="text-left px-6 py-3 font-medium text-gray-500">
-              Name
+            <th 
+              className="text-left px-6 py-3 font-medium text-gray-500 cursor-pointer hover:bg-gray-100 group select-none"
+              onClick={() => handleSort("name")}
+            >
+              Name {renderSortIcon("name")}
             </th>
             <th className="text-left px-6 py-3 font-medium text-gray-500 hidden md:table-cell">
               Label
             </th>
-            <th className="text-left px-6 py-3 font-medium text-gray-500 hidden sm:table-cell">
-              Type
+            <th 
+              className="text-left px-6 py-3 font-medium text-gray-500 hidden sm:table-cell cursor-pointer hover:bg-gray-100 group select-none"
+              onClick={() => handleSort("type")}
+            >
+              Type {renderSortIcon("type")}
             </th>
-            <th className="text-left px-6 py-3 font-medium text-gray-500 hidden sm:table-cell">
-              Status
+            <th 
+              className="text-left px-6 py-3 font-medium text-gray-500 hidden sm:table-cell cursor-pointer hover:bg-gray-100 group select-none"
+              onClick={() => handleSort("status")}
+            >
+              Status {renderSortIcon("status")}
             </th>
-            <th className="text-left px-6 py-3 font-medium text-gray-500">
-              Spend / Budget
+            <th 
+              className="text-left px-6 py-3 font-medium text-gray-500 cursor-pointer hover:bg-gray-100 group select-none"
+              onClick={() => handleSort("spend")}
+            >
+              Spend / Budget {renderSortIcon("spend")}
             </th>
-            <th className="text-left px-6 py-3 font-medium text-gray-500 hidden lg:table-cell">
-              Renewal
+            <th 
+              className="text-left px-6 py-3 font-medium text-gray-500 hidden lg:table-cell cursor-pointer hover:bg-gray-100 group select-none"
+              onClick={() => handleSort("renewal")}
+            >
+              Renewal {renderSortIcon("renewal")}
             </th>
-            <th className="text-left px-6 py-3 font-medium text-gray-500">
-              Alerts
+            <th 
+              className="text-left px-6 py-3 font-medium text-gray-500 cursor-pointer hover:bg-gray-100 group select-none"
+              onClick={() => handleSort("alerts")}
+            >
+              Alerts {renderSortIcon("alerts")}
             </th>
             {hasAnyCredits && (
-              <th className="text-right px-6 py-3 font-medium text-gray-500">
-                Credits
+              <th 
+                className="text-right px-6 py-3 font-medium text-gray-500 cursor-pointer hover:bg-gray-100 group select-none"
+                onClick={() => handleSort("credits")}
+              >
+                Credits {renderSortIcon("credits")}
               </th>
             )}
-            <th className="text-left px-6 py-3 font-medium text-gray-500 hidden xl:table-cell">
-              Last Fetched
+            <th 
+              className="text-left px-6 py-3 font-medium text-gray-500 hidden xl:table-cell cursor-pointer hover:bg-gray-100 group select-none"
+              onClick={() => handleSort("lastFetched")}
+            >
+              Last Fetched {renderSortIcon("lastFetched")}
             </th>
             <th className="text-right px-6 py-3 font-medium text-gray-500">
               Actions
@@ -121,9 +198,10 @@ export default function ProviderTable({
           </tr>
         </thead>
         <tbody>
-          {orderedProviders.map((provider) => {
+          {sortedProviders.map((provider) => {
             const alertCounts = countProviderAlerts(provider);
             const connectedBilling = provider.externalBilling?.[0];
+            const fetchedDate = formatDateObject(provider.latestSnapshot?.fetchedAt ?? null);
 
             return (
               <tr
@@ -236,8 +314,19 @@ export default function ProviderTable({
                       : "--"}
                   </td>
                 )}
-                <td data-label="Last fetched" className="px-6 py-4 text-gray-500 text-xs hidden xl:table-cell">
-                  {formatDate(provider.latestSnapshot?.fetchedAt ?? null)}
+                <td data-label="Last fetched" className="px-6 py-4 hidden xl:table-cell">
+                  {fetchedDate ? (
+                    <div className="flex flex-col">
+                      <span className="text-sm text-gray-900">
+                        {fetchedDate.toLocaleDateString()}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {fetchedDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-gray-500 text-xs">Never</span>
+                  )}
                 </td>
                 <td data-label="Actions" className="px-6 py-4">
                   <div className="table-actions flex flex-wrap items-center justify-end gap-2">
@@ -298,3 +387,4 @@ export default function ProviderTable({
     </div>
   );
 }
+
