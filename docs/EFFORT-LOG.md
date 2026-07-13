@@ -3,6 +3,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-04.
 
 ## Deployed
+- **Add MIT License (AG, S)** — DEPLOYED (2026-07-13): Added MIT License file and updated package.json. Verified live via `/api/health` revision `9b9e100` and `package.json` license property.
 - **Production reality check (CODEX audit, 2026-07-11):** Render deploy
   `dep-d98t65svikkc73dbgq50` is live at `d19f03f`. The live service still runs
   `npx prisma db push --accept-data-loss && npm start`, not the repository's
@@ -17,7 +18,6 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
   exists specifically to make this section verifiable going forward instead of inferred.
 
 ## Completed
-- **Add MIT License (AG, S)** — COMPLETED (MERGED PR #122, 2026-07-13): Added MIT License file and updated package.json.
 - **Cross-App Status Integration (AG, M)** — COMPLETED (MERGED PR #90, 2026-07-11): Updating `/api/ingest/usage` to handle `quota_sync` and `credit_balance` metric types from Socratic.Trade and Congress.Trade status pages, addressing bulk insert idempotency bug and excluding status metrics from dashboard raw sum totals.
 - **App-wide production/status and improvement audit (CODEX, read-only, 2026-07-11) — delivered; no
   implementation PR applicable.** Current source/deploy, authenticated desktop/mobile UX, spend
