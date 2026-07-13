@@ -140,7 +140,9 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board:
   ingest resolution, same-batch replay protection, calendar-bounded PayGo, non-paid-plan exclusion,
   and Google export provisioning/partition safeguards. Final adversarial re-review is all-clear.
   Node 24 `npm run verify` PASS: ESLint, TypeScript, 69 files / 391 tests, migrate-safe 3/3,
-  SQLite backup, startup config, and production build. No branch push, PR, merge, or deployment yet.
+  SQLite backup, startup config, and production build. **READY FOR REVIEW — OPEN PR #119**
+  (`codex-cloudflare-gcp-billing`, code `330ac4b`, rollout receipt `ebb11f4`,
+  https://github.com/jaywedgeworth22/api-usage-monitor/pull/119). No merge or deployment yet.
 - **Provider account auto-enrichment + billing/subscription UX (CODEX, owner-directed 2026-07-12).**
   **READY FOR REVIEW — OPEN PR #107**
   (`codex-provider-account-enrichment`, commit `a640dd6`,
