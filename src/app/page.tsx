@@ -9,6 +9,8 @@ import DashboardCharts from "@/components/DashboardCharts";
 import ExternalTelemetryPanel, { type ExternalUsageSummary } from "@/components/ExternalTelemetryPanel";
 import ProjectsPanel, { type ProjectBudgetStatus } from "@/components/ProjectsPanel";
 import type { ExternalBillingRecord } from "@/components/ExternalBillingDetails";
+import PaidServicesPanel from "@/components/PaidServicesPanel";
+import type { SubscriptionRow } from "@/components/SubscriptionsPanel";
 
 interface Provider {
   id: string;
@@ -20,10 +22,20 @@ interface Provider {
   groupId: string | null;
   label: string | null;
   keyPreview?: string | null;
+  config?: Record<string, unknown>;
+  secretConfigMeta?: { configured: boolean; fields: string[]; readable: boolean };
   estimatedMonthlyCostUsd: number;
   projectedEomUsd: number;
   spentUsd?: number;
   externalBilling?: ExternalBillingRecord[];
+  plan: {
+    fixedMonthlyCostUsd: number | null;
+    monthlyBudgetUsd: number | null;
+    monthlyRequestLimit: number | null;
+    renewalDate: string | null;
+    billingInterval: string | null;
+    notes: string | null;
+  } | null;
   billingMode: "actual" | "estimated" | "manual";
   alerts: {
     severity: "critical" | "warning" | "info";
@@ -60,6 +72,7 @@ export default function DashboardPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [usageSummary, setUsageSummary] = useState<ExternalUsageSummary | null>(null);
   const [projects, setProjects] = useState<ProjectBudgetStatus[]>([]);
+  const [subscriptions, setSubscriptions] = useState<SubscriptionRow[]>([]);
   const [projectSummary, setProjectSummary] = useState<ProjectBudgetResponse["summary"] | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -76,10 +89,11 @@ export default function DashboardPage() {
     setWarnings([]);
 
     try {
-      const [providersResult, usageResult, projectsResult] = await Promise.allSettled([
+      const [providersResult, usageResult, projectsResult, subscriptionsResult] = await Promise.allSettled([
         fetchJson<Provider[]>("/api/providers", "providers"),
         fetchJson<ExternalUsageSummary>("/api/usage-events?days=30", "app telemetry"),
         fetchJson<ProjectBudgetResponse>("/api/projects?includeSummary=1", "projects"),
+        fetchJson<SubscriptionRow[]>("/api/subscriptions", "paid services"),
       ]);
 
       const nextWarnings: string[] = [];
@@ -103,6 +117,12 @@ export default function DashboardPage() {
         setProjectSummary(projectsResult.value.summary);
       } else {
         nextWarnings.push("Project budgets are temporarily unavailable.");
+      }
+
+      if (subscriptionsResult.status === "fulfilled") {
+        setSubscriptions(subscriptionsResult.value);
+      } else {
+        nextWarnings.push("Tracked subscriptions are temporarily unavailable.");
       }
 
       setWarnings(nextWarnings);
@@ -237,6 +257,13 @@ export default function DashboardPage() {
         totalCredits={totalCredits}
       />
 
+      <PaidServicesPanel
+        providers={providers}
+        subscriptions={subscriptions}
+        variant="dashboard"
+        maxItems={6}
+      />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-8">
           {usageSummary && <ExternalTelemetryPanel usageSummary={usageSummary} />}
@@ -326,6 +353,9 @@ export default function DashboardPage() {
               name={provider.name}
               displayName={provider.displayName}
               type={provider.type}
+              isActive={provider.isActive}
+              config={provider.config}
+              secretConfigMeta={provider.secretConfigMeta}
               refreshIntervalMin={provider.refreshIntervalMin}
               label={provider.label}
               keyPreview={provider.keyPreview}

@@ -127,6 +127,52 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board:
 - **UI refactoring for Dashboard and Settings + API Type Safety (AG, S) — 2026-07-11.** Refactor monolithic page components (Dashboard, Settings) into discrete UI components and replace 'any' casting with PrismaClientKnownRequestError for P2002 checks.
 
 ## In Progress
+- **Provider account auto-enrichment + billing/subscription UX (CODEX, owner-directed 2026-07-12).**
+  **READY FOR REVIEW — OPEN PR #107**
+  (`codex-provider-account-enrichment`, commit `a640dd6`,
+  https://github.com/jaywedgeworth22/api-usage-monitor/pull/107). Implemented canonical paid-service
+  inventory/provenance, documented provider account enrichment, explicit manual/unsupported
+  boundaries, responsive/dark/accessibility improvements, safe exact-period subscription linking,
+  provider-type credential routing, transactional secret migration, and removal of PR #105/#106's
+  unsafe browser-session sync path. Node 24 `npm run verify` PASS: ESLint, TypeScript, 61 test files /
+  329 tests, migrate-safe 3/3, SQLite backup, startup config, and production build. Browser QA PASS
+  on dashboard, Paid services, provider detail, dark mode, and mobile viewport with no console
+  errors. No production writes, merge, or deploy. Deployment follow-up: verified backup + schema
+  startup, review `npm run migrate:provider-secrets` dry run before `-- --apply`, and rotate the
+  ingest token/provider credentials if retired browser sync was ever used.
+- **Third-party integration transparency drawer (CODEX, owner-directed 2026-07-11).** Branch
+  `provider-integration-transparency`, isolated worktree
+  `/Users/jay/apps/api-usage-monitor-integration-transparency`, based on `c8ccd7f`. IMPLEMENTED and
+  ready for parent integration: typed exhaustive built-in/system/custom/manual catalog; accurate
+  credential/config fields; push/manual providers no longer solicit unused keys; accessible,
+  focus-trapped responsive drawer with per-instance connection state that exposes field names and
+  last-four/booleans only; dashboard, Settings, detail, and Add Provider affordances; compile-time
+  adapter/definition coverage. Focused 6/6, TypeScript, ESLint, and production build green. Browser
+  runtime had no available backend in this subagent; rendered QA remains with the parent integration.
+- **Production maintenance script hardening (CODEX, owner-directed 2026-07-11).** Branch
+  `maintenance-script-hardening`, isolated worktree
+  `/Users/jay/apps/api-usage-monitor-maintenance-hardening`, based on `e736bf1`. Scope: make
+  provider-secret migration transactional with encrypted-value precedence and classifier parity;
+  constrain historical Claude repair to cost-only, preserve newer OTLP checkpoints, and add
+  production-safety/idempotency regression coverage. Implementation complete locally: focused
+  suite 6/6, full suite 46 files/258 tests, ESLint, TypeScript, script syntax, diff checks, and
+  production build green. No production writes or deploys.
+- **Deterministic provider-subscription release plan (CODEX, owner-directed 2026-07-11).** Branch
+  `release-plan-hardening`, isolated worktree
+  `/Users/jay/apps/api-usage-monitor-release-plan`, based on `e736bf1`. Scope: transactional
+  `provider-subscriptions-2026-07-10-v1` seed with fixed billing anchors, exact-plan startup gate,
+  database receipt written only after postconditions, ambiguity/manual-row preservation, and
+  startup ordering after verified backup + migration. No production writes or deploys.
+- **Provider type-aware credential routing (CODEX, owner-directed 2026-07-11).** Branch
+  `codex-provider-type-routing` (slash namespace unavailable because a pre-existing local branch
+  is literally named `codex`), isolated worktree
+  `/Users/jay/apps/api-usage-monitor-provider-routing`, based on `origin/main` `8e44b4d`. Fix the
+  P0 adapter-dispatch flaw so custom providers always use their configured custom endpoint even
+  when their slug collides with a built-in, while generic/manual and unknown built-in rows fail
+  closed without routing credentials. Regression coverage proves `openai`/`stripe` custom-name
+  collisions never invoke those built-in adapters. No polling-loop files, production writes,
+  push, merge, or deploy. Local verification: adapter suite 20 files / 65 tests passed;
+  `npm run lint` and `npm run typecheck` passed.
 - **Alert-delivery channel reliability (CODEX, owner-directed 2026-07-11).** Branch
   `codex-alert-delivery-reliability`, isolated worktree
   `/Users/jay/apps/api-usage-monitor-alert-delivery`, based on app-wide hardening commit `2dd8ad8`.
@@ -250,6 +296,9 @@ _2026-07-06 (CLAUDE): "Monitor the agent-sync relay endpoint" moved to Completed
 PR #63's `agent-sync-relay` health-check adapter (issue #55)._
 
 ## Changelog of this log
+- 2026-07-11 — CODEX reserved third-party integration transparency catalog/drawer implementation.
+- 2026-07-11 — CODEX implemented integration transparency catalog/drawer; focused tests,
+  typecheck, lint, and build green; handed rendered QA to parent because this lane had no browser backend.
 - 2026-07-04 — bootstrapped by CLAUDE (effort-log standardization).
 - 2026-07-04 — CLAUDE: OTLP ingest + Sentry health card implementation complete, PR pending.
 - 2026-07-04 — CLAUDE: PR #13 merged (OTLP ingest + Sentry health card); moved to Completed.
