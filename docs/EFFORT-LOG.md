@@ -129,18 +129,18 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board:
 ## In Progress
 - **Remaining-provider automatic billing feasibility audit (CODEX-MONEY, owner-directed 2026-07-13) — DONE.** Read-only official-doc review of all 22 not-fully-covered built-ins. Newly feasible: FinTech Studios `/me` + `/usage` (free account tier/credits/quota reset), Resend quota headers, LlamaIndex beta usage metrics, whole-account Render inventory, broader Hetzner paid-resource run-rate inventory, Pinecone backup/collection/assistant inventory, exact-calendar Sentry category usage, and Langfuse billable-unit counts. Twelve Data/Intrinio/Pushover/Tradier/Alpaca are already at the safe public-API ceiling. Voyage/FMP/Finnhub/Alpha Vantage/Marketstack/Tiingo/Massive/FRED/Robinhood remain dashboard-only, free/no-billing, or require quota-bearing product/interactive calls. No runtime code changed; implementation should land as a bounded, tested wave with authoritative-pagination and double-count guards.
 - **Automatic Cloudflare + Google Cloud billing and zero-cost remediation (CODEX + expert team,
-  owner-directed 2026-07-13) — IMPLEMENTED LOCALLY, FINAL REVIEW.** Branch
+  owner-directed 2026-07-13) — VERIFIED, READY TO PUBLISH.** Branch
   `codex-cloudflare-gcp-billing`, isolated worktree
   `/Users/jay/apps/api-usage-monitor-cloudflare-gcp-billing`, based on deployed `main` at `82c85f0`.
   Adds Cloudflare subscription discovery with token/global-key auth clarity, Google Cloud Billing
   BigQuery export ingestion, canonical provider/project attribution, replay-safe project enrichment,
   and explicit priced/unpriced/historical-unknown coverage throughout provider, dashboard, telemetry,
-  and project-budget UI. Base implementation commit `63aa851`; adversarial follow-up fixes add safe
+  and project-budget UI. Verified code commit `330ac4b`; adversarial follow-up fixes add safe
   manual-plan handoff, credential disconnect, exact-name-before-alias routing, canonical project
   ingest resolution, same-batch replay protection, calendar-bounded PayGo, non-paid-plan exclusion,
-  and Google export provisioning/partition safeguards. Node 24 ESLint, TypeScript, and the full
-  69-file / 388-test Vitest suite pass; clean-commit migration/backup/startup/build gate and final
-  regression review remain. No branch push, PR, merge, or deployment yet.
+  and Google export provisioning/partition safeguards. Final adversarial re-review is all-clear.
+  Node 24 `npm run verify` PASS: ESLint, TypeScript, 69 files / 391 tests, migrate-safe 3/3,
+  SQLite backup, startup config, and production build. No branch push, PR, merge, or deployment yet.
 - **Provider account auto-enrichment + billing/subscription UX (CODEX, owner-directed 2026-07-12).**
   **READY FOR REVIEW — OPEN PR #107**
   (`codex-provider-account-enrichment`, commit `a640dd6`,
