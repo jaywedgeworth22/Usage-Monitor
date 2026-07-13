@@ -73,11 +73,14 @@ describe("agent-sync-relay adapter", () => {
     );
     fetchMock.mockResolvedValue(mockResponse);
 
-    await expect(
-      fetchUsage("dummy-key", {
-        endpoint: "https://agent-sync.jays.services/health",
-      })
-    ).rejects.toMatchObject({ code: "HTTP_ERROR", status: 500 });
+    const res = await fetchUsage("dummy-key", {
+      endpoint: "https://agent-sync.jays.services/health",
+    });
+
+    expect(res.rawData).toEqual({
+      status: "DOWN",
+      error: "Agent Sync Relay health check failed: HTTP 500",
+    });
   });
 });
 
