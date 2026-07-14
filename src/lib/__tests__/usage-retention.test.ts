@@ -27,6 +27,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 import {
   getExternalEventRawCutoff,
   getSnapshotRawCutoff,
+  isAutomaticVacuumEnabled,
   runUsageRetention,
   startOfUtcDay,
 } from "../usage-retention";
@@ -39,6 +40,7 @@ function resetEnv() {
   delete process.env.EXTERNAL_USAGE_EVENT_RAW_RETENTION_DAYS;
   delete process.env.EXTERNAL_USAGE_EVENT_TOMBSTONE_RETENTION_DAYS;
   delete process.env.DATA_RETENTION_BATCH_SIZE;
+  delete process.env.DATA_RETENTION_ENABLE_VACUUM;
   delete process.env.DATA_RETENTION_DISABLE_VACUUM;
 }
 
@@ -79,12 +81,27 @@ describe("usage-retention wrapper", () => {
     );
   });
 
+  it("keeps exclusive full-database compaction disabled unless explicitly enabled", () => {
+    expect(isAutomaticVacuumEnabled({})).toBe(false);
+    expect(
+      isAutomaticVacuumEnabled({ DATA_RETENTION_ENABLE_VACUUM: "true" })
+    ).toBe(true);
+    expect(
+      isAutomaticVacuumEnabled({
+        DATA_RETENTION_ENABLE_VACUUM: "true",
+        DATA_RETENTION_DISABLE_VACUUM: "1",
+      })
+    ).toBe(false);
+    expect(
+      isAutomaticVacuumEnabled({ DATA_RETENTION_ENABLE_VACUUM: "unexpected" })
+    ).toBe(false);
+  });
+
   it("aggregates old rows before pruning them", async () => {
     process.env.USAGE_SNAPSHOT_RAW_RETENTION_DAYS = "45";
     process.env.EXTERNAL_USAGE_EVENT_RAW_RETENTION_DAYS = "90";
     process.env.EXTERNAL_USAGE_EVENT_TOMBSTONE_RETENTION_DAYS = "180";
     process.env.DATA_RETENTION_BATCH_SIZE = "1000";
-    process.env.DATA_RETENTION_DISABLE_VACUUM = "1";
 
     prismaMock.provider.findMany.mockResolvedValue([
       {
@@ -226,5 +243,17 @@ describe("usage-retention wrapper", () => {
       where: { id: { in: ["evt-1", "evt-2"] } },
     });
     expect(prismaMock.$executeRawUnsafe).not.toHaveBeenCalled();
+
+    process.env.DATA_RETENTION_ENABLE_VACUUM = "true";
+    const optedInResult = await runUsageRetention(
+      new Date("2026-07-04T12:00:00.000Z")
+    );
+
+    expect(optedInResult.compacted).toBe(true);
+    expect(prismaMock.$executeRawUnsafe).toHaveBeenNthCalledWith(
+      1,
+      "PRAGMA wal_checkpoint(TRUNCATE)"
+    );
+    expect(prismaMock.$executeRawUnsafe).toHaveBeenNthCalledWith(2, "VACUUM");
   });
 });

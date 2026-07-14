@@ -12,6 +12,32 @@ export const dynamic = "force-dynamic";
 
 const DATABASE_TIMEOUT_MS = 2_000;
 
+// Prisma does not cancel the underlying SQLite query when Promise.race's
+// timeout wins. Reusing one outstanding probe prevents repeated readiness
+// requests from queueing another query every few seconds while SQLite is busy.
+// The tracked promise always resolves, so a late database failure cannot become
+// an unhandled rejection after the HTTP request has already returned 503.
+let databaseProbeInFlight: Promise<boolean> | null = null;
+
+function databaseProbe(): Promise<boolean> {
+  if (databaseProbeInFlight) return databaseProbeInFlight;
+
+  const query = Promise.resolve()
+    .then(() =>
+      prisma.$queryRawUnsafe<Array<Record<string, number>>>("SELECT 1")
+    )
+    .then(
+      () => true,
+      () => false
+    );
+  let tracked: Promise<boolean>;
+  tracked = query.finally(() => {
+    if (databaseProbeInFlight === tracked) databaseProbeInFlight = null;
+  });
+  databaseProbeInFlight = tracked;
+  return tracked;
+}
+
 async function checkDatabase(): Promise<{
   ok: boolean;
   latencyMs: number;
@@ -20,17 +46,17 @@ async function checkDatabase(): Promise<{
   let timeout: ReturnType<typeof setTimeout> | undefined;
 
   try {
-    await Promise.race([
-      prisma.$queryRawUnsafe<Array<Record<string, number>>>("SELECT 1"),
-      new Promise<never>((_, reject) => {
+    const ok = await Promise.race([
+      databaseProbe(),
+      new Promise<false>((resolve) => {
         timeout = setTimeout(
-          () => reject(new Error("database readiness check timed out")),
+          () => resolve(false),
           DATABASE_TIMEOUT_MS
         );
         timeout.unref?.();
       }),
     ]);
-    return { ok: true, latencyMs: Date.now() - startedAt };
+    return { ok, latencyMs: Date.now() - startedAt };
   } catch {
     return { ok: false, latencyMs: Date.now() - startedAt };
   } finally {

@@ -52,6 +52,32 @@ describe("GET /api/ready", () => {
     expect(body.checks.database.ok).toBe(false);
   });
 
+  it("reuses a timed-out SQLite probe instead of queueing more uncancelled queries", async () => {
+    vi.useFakeTimers();
+    let finishProbe: ((value: Array<Record<string, number>>) => void) | undefined;
+    mocks.queryRawUnsafe.mockReturnValue(
+      new Promise<Array<Record<string, number>>>((resolve) => {
+        finishProbe = resolve;
+      })
+    );
+
+    try {
+      const firstRequest = GET();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect((await firstRequest).status).toBe(503);
+      expect(mocks.queryRawUnsafe).toHaveBeenCalledTimes(1);
+
+      const secondRequest = GET();
+      expect(mocks.queryRawUnsafe).toHaveBeenCalledTimes(1);
+
+      finishProbe?.([{ "1": 1 }]);
+      expect((await secondRequest).status).toBe(200);
+      expect(mocks.queryRawUnsafe).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stays ready after one transient scheduler failure", async () => {
     markSchedulerTickCompleted(false, null);
 
