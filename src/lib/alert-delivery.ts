@@ -516,7 +516,12 @@ export async function deliverProviderAlerts(options: {
   };
 
   const providers = await db.provider.findMany({
-    where: { isActive: true },
+    where: {
+      OR: [
+        { isActive: true },
+        { alertNotifications: { some: { resolvedAt: null } } },
+      ],
+    },
     orderBy: { name: "asc" },
     select: {
       id: true,

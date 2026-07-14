@@ -454,4 +454,80 @@ describe("alert delivery", () => {
     expect(payload.alert.code).toBe("budget_warning");
     expect(payload.alert.message).toContain("$9.00");
   });
+
+  it("resolves open alerts for a provider after it is deactivated", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "deactivate_resolve_test",
+        displayName: "Deactivate Resolve Test",
+        type: "builtin",
+        refreshIntervalMin: 60,
+        isActive: true,
+        plan: {
+          create: {
+            billingMode: "actual",
+            lowBalanceUsd: 10,
+          },
+        },
+      },
+    });
+
+    await prisma.usageSnapshot.create({
+      data: {
+        providerId: provider.id,
+        fetchedAt: new Date("2026-07-20T08:00:00.000Z"),
+        balance: 5,
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 202 }));
+    const config = {
+      channels: [
+        { kind: "pagerduty" as const, routingKey: "test-pd-deactivate-routing-key" },
+      ],
+      minSeverity: "warning" as const,
+      reminderHours: 24,
+      maxAttempts: 1,
+      retryBaseMs: 0,
+    };
+
+    // 1. Trigger the alert
+    const first = await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    expect(first.sent).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const openNotification = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { stateKey: `${provider.id}:balance_low` },
+    });
+    expect(openNotification.resolvedAt).toBeNull();
+
+    // 2. Deactivate the provider
+    await prisma.provider.update({
+      where: { id: provider.id },
+      data: { isActive: false },
+    });
+
+    // 3. Deliver alerts again; since the provider is now inactive, the alert is no longer active, so it should be resolved
+    const second = await deliverProviderAlerts({
+      now: new Date("2026-07-20T13:00:00.000Z"),
+      config,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    expect(second.resolved).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const callArgs = fetchMock.mock.calls[1];
+    const body = JSON.parse(String(callArgs[1]?.body ?? "{}"));
+    expect(body.event_action).toBe("resolve");
+    expect(body.dedup_key).toBe(`api-usage-monitor:${provider.id}:balance_low`);
+
+    const resolvedNotification = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { id: openNotification.id },
+    });
+    expect(resolvedNotification.resolvedAt).not.toBeNull();
+  });
 });
