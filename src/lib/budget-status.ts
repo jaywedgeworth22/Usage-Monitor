@@ -7,6 +7,7 @@ import {
   type ProviderPushedCost,
 } from "@/lib/external-usage-events";
 import {
+  canonicalProviderKey,
   canonicalProjectKey,
   resolveProviderIdentity,
 } from "@/lib/provider-identity";
@@ -423,7 +424,7 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
     const hasKnownVariableCost = pushed.pricedEventCount > 0 || snapshotCostUsd != null;
     const hasUnknownCost =
       pushed.unpricedEventCount > 0 || pushed.unclassifiedCostEventCount > 0;
-    const spendCoverage: CostCoverage = hasUnknownCost
+    let spendCoverage: CostCoverage = hasUnknownCost
       ? hasKnownVariableCost || fixedAccruedUsd > 0
         ? "partial"
         : pushed.unclassifiedCostEventCount > 0
@@ -434,6 +435,19 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
         : fixedAccruedUsd > 0
           ? "partial"
           : "unknown";
+    // Anthropic individual accounts have no authoritative billing API. A
+    // fully priced producer stream is complete for the events received, but
+    // cannot prove that every account request reached the monitor. Keep the
+    // provider-level cash total explicitly partial until an authoritative
+    // organization cost snapshot exists.
+    if (
+      canonicalProviderKey(p.name) === "anthropic" &&
+      snapshotCostUsd == null &&
+      hasPushedEvents &&
+      spendCoverage === "complete"
+    ) {
+      spendCoverage = "partial";
+    }
     const forecastedSubscriptionRenewalsUsd = forecastSubscriptionRenewals(
       p.subscriptions,
       now

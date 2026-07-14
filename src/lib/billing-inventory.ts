@@ -41,6 +41,7 @@ export interface BillingInventoryProvider {
   spentUsd?: number;
   projectedEomUsd?: number;
   billingMode?: "actual" | "estimated" | "manual";
+  anthropicAdminApiConfigured?: boolean;
   plan?: {
     fixedMonthlyCostUsd: number | null;
     monthlyBudgetUsd: number | null;
@@ -599,6 +600,9 @@ export function buildBillingInventory(
           (item.provenance === "automatic" || item.provenance === "linked") &&
           item.stale
       );
+      const anthropicAdminConfigured =
+        profile.name === "anthropic" &&
+        (provider.anthropicAdminApiConfigured ?? false);
       if (automaticBilling) {
         status = "automatic";
         summary = "Provider-reported billing or plan data is syncing.";
@@ -623,6 +627,10 @@ export function buildBillingInventory(
       } else if (profile.billing.visibility === "manual") {
         status = "manual";
         summary = profile.billing.summary;
+      } else if (profile.name === "anthropic" && !anthropicAdminConfigured) {
+        status = "manual";
+        summary =
+          "No organization Admin API key is configured. Individual accounts cannot obtain one, so reconcile pushed producer telemetry with Anthropic Console totals and track Claude plans through Subscription or receipt records; organization accounts may add an Admin key.";
       } else if (provider.isActive === false) {
         status = "available";
         summary = "Connection is disabled; re-enable it to resume automatic billing sync.";

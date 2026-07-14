@@ -339,6 +339,40 @@ describe("materializeDueSubscriptions + project attribution (integration)", () =
     });
   });
 
+  it("keeps priced pushed-only Anthropic cash spend explicitly incomplete", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "anthropic",
+        displayName: "Anthropic individual",
+        type: "builtin",
+        refreshIntervalMin: 60,
+      },
+    });
+    await prisma.externalUsageEvent.create({
+      data: {
+        idempotencyKey: "anthropic-individual-priced-request",
+        sourceApp: "socratic-trade",
+        provider: "anthropic",
+        service: "claude-api",
+        billingMode: "actual",
+        metricType: "cost",
+        costUsd: 4.13,
+        occurredAt: NOW,
+      },
+    });
+
+    const status = await computeBudgetStatus(NOW);
+    const anthropic = status.providers.find((row) => row.id === provider.id)!;
+
+    expect(anthropic).toMatchObject({
+      snapshotCostUsd: null,
+      pushedMonthToDateUsd: 4.13,
+      pushedCostCoverage: "complete",
+      spendCoverage: "partial",
+      spentUsd: 4.13,
+    });
+  });
+
   it("dedupes a provider-reported fixed fee against its local manual subscription", async () => {
     const provider = await prisma.provider.create({
       data: {

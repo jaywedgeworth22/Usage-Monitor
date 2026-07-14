@@ -12,6 +12,7 @@ import {
   providerConfigForClient,
   splitProviderConfig,
 } from "@/lib/provider-secret-config";
+import { hasStoredAnthropicAdminApiKey } from "@/lib/anthropic-credentials";
 
 function buildKeyPreview(encryptedKey: string | null): string | null {
   if (!encryptedKey) return null;
@@ -139,6 +140,12 @@ export async function GET() {
       ...rest,
       ...clientConfig,
       keyPreview: buildKeyPreview(apiKey),
+      anthropicAdminApiConfigured: hasStoredAnthropicAdminApiKey({
+        name: p.name,
+        apiKey,
+        config,
+        secretConfig,
+      }),
       latestSnapshot,
       alerts: canonicalBudget?.alerts ?? alertState.alerts,
       estimatedMonthlyCostUsd: alertState.estimatedMonthlyCostUsd,

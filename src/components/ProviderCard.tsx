@@ -22,6 +22,7 @@ interface ProviderCardProps {
   refreshIntervalMin?: number;
   label?: string | null;
   keyPreview?: string | null;
+  anthropicAdminApiConfigured?: boolean;
   estimatedMonthlyCostUsd?: number;
   projectedEomUsd?: number;
   spentUsd?: number;
@@ -86,6 +87,7 @@ export default function ProviderCard({
   refreshIntervalMin = 60,
   label,
   keyPreview,
+  anthropicAdminApiConfigured,
   estimatedMonthlyCostUsd = 0,
   projectedEomUsd = 0,
   spentUsd,
@@ -160,6 +162,7 @@ export default function ProviderCard({
                 isActive,
                 primaryCredentialConfigured: Boolean(keyPreview),
                 keyPreview,
+                anthropicAdminApiConfigured,
                 publicConfigFields: publicConfigFieldNames(config),
                 protectedConfigFields: secretConfigMeta?.fields ?? [],
                 protectedConfigReadable: secretConfigMeta?.readable,

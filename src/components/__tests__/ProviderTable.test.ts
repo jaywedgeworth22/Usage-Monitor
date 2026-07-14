@@ -85,4 +85,27 @@ describe("ProviderTable cost coverage", () => {
     expect(html).toContain("$0.00 MTD");
     expect(html).not.toContain("Cost not reported");
   });
+
+  it("hides Fetch Now when Anthropic has no organization Admin key", () => {
+    const individualHtml = renderTable([
+      provider({ name: "anthropic", displayName: "Anthropic individual" }),
+    ]);
+    const organizationHtml = renderTable([
+      provider({
+        name: "anthropic",
+        displayName: "Anthropic organization",
+        anthropicAdminApiConfigured: true,
+        secretConfigMeta: {
+          configured: true,
+          fields: ["adminApiKey"],
+          readable: true,
+        },
+      }),
+    ]);
+
+    expect(individualHtml).not.toContain("Fetch Now");
+    expect(individualHtml).toContain("Push / manual");
+    expect(organizationHtml).toContain("Fetch Now");
+    expect(organizationHtml).toContain("Active");
+  });
 });

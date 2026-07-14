@@ -24,7 +24,7 @@ Authoritative feeds reconcile only after their complete response has been valida
 | Provider | Direct data | Required credential/config | Official source |
 |---|---|---|---|
 | OpenAI | Organization Costs API plus legacy month-range usage/balance fallback; the one-day usage cost remains diagnostic-only | Organization Admin key in encrypted `adminApiKey`; normal API key remains separate | [Costs API](https://platform.openai.com/docs/api-reference/usage/costs) |
-| Anthropic | Organization month-to-date cost report; cents converted to USD | Admin API key (`sk-ant-admin...`) in encrypted `adminApiKey` or primary key field | [Usage and Cost API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) |
+| Anthropic | Organization accounts: month-to-date cost report, with cents converted to USD. Individual accounts: no direct billing API; use explicitly incomplete pushed per-request telemetry plus Console and Subscription/receipt reconciliation | Organization accounts only: Admin API key (`sk-ant-admin...`) in encrypted `adminApiKey` or a legacy primary-key field. Standard Messages API keys are never sent to the cost endpoint | [Usage and Cost API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) |
 | DeepSeek | Prepaid/granted balance and availability | API key | [User balance API](https://api-docs.deepseek.com/api/get-user-balance/) |
 | xAI | Prepaid balance, postpaid current invoice preview, billing cycle, monthly spending limits | `teamId`; encrypted `managementKey` (or primary key if it is a Management API key) | [Billing Management API](https://docs.x.ai/developers/rest-api-reference/management/billing) |
 | Mistral | Organization current usage/cost, payment/limit status, monthly spend cap, request/token limits | Backoffice Admin API key in encrypted `adminApiKey` | [Admin usage metrics](https://docs.mistral.ai/admin/admin-api/usage-metrics) |
@@ -66,6 +66,7 @@ The following adapters no longer consume a paid/quota-bearing product call for a
 
 | Provider | Current authoritative surface |
 |---|---|
+| Anthropic individual accounts | No direct billing API; pushed producer telemetry for metered API activity plus explicit Subscription/receipt reconciliation for Claude plans. The standard Messages API key is neither requested nor polled. [Usage and Cost API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) |
 | Voyage AI | Dashboard only; inference endpoints would create billable embeddings. [Pricing](https://docs.voyageai.com/docs/pricing) |
 | FMP | Developer dashboard usage/billing. [Developer docs](https://site.financialmodelingprep.com/developer/docs/quickstart) |
 | Finnhub | Dashboard/contract; no documented billing endpoint. [API docs](https://finnhub.io/docs/api) |

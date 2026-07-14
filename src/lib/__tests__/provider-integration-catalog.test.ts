@@ -53,6 +53,20 @@ describe("provider integration catalog", () => {
     expect(cloudflare.limitations.join(" ")).toMatch(/Global API key/i);
   });
 
+  it("documents the Anthropic individual-account billing boundary and fallback", () => {
+    const anthropic = getProviderIntegrationProfile("anthropic");
+
+    expect(anthropic.mode).toBe("partial");
+    expect(anthropic.billing.visibility).toBe("partial");
+    expect(anthropic.summary).toMatch(/Individual accounts rely on.*pushed/i);
+    expect(anthropic.cannotAdd.join(" ")).toMatch(
+      /does not offer the Admin or Usage & Cost APIs to individual accounts/i
+    );
+    expect(anthropic.shares.join(" ")).toMatch(
+      /standard Messages API key is not sent/i
+    );
+  });
+
   it("exposes required adapter config and does not solicit unused blind-adapter keys", () => {
     const byName = new Map(BUILT_IN_PROVIDERS.map((provider) => [provider.name, provider]));
     expect(byName.get("langfuse")?.needsConfig?.fields.map((field) => field.key)).toEqual([
