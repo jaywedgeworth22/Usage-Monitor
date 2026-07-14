@@ -17,7 +17,10 @@
      `src/instrumentation.ts` / `src/lib/usage-recorder.ts`).
 5. Sync the Blueprint and confirm the service settings match `render.yaml`:
    Node `24.14.1`, `npm ci` build, `scripts/start-with-litestream.sh` start,
-   `/api/ready` health check, and auto-deploy only after CI checks pass.
+   `/api/health` liveness check, and auto-deploy only after CI checks pass.
+   Strict database/scheduler/backup diagnostics remain at `/api/ready`, but
+   must not be the process restart trigger: restarting during an exclusive
+   SQLite operation can repeat the operation and livelock the sole instance.
 6. Wait for the first deploy. At runtime, the startup wrapper optionally
    restores a missing database, creates a transaction-consistent SQLite Online
    Backup API snapshot of any existing database, verifies it with
@@ -92,6 +95,10 @@ not copied from the obsolete gray-cloud setup.
 - `EXTERNAL_USAGE_EVENT_TOMBSTONE_RETENTION_DAYS` (legacy compatibility setting, still reported
   by maintenance results but no longer used to delete tombstones; rolled-up idempotency keys are
   retained permanently so late producer retries cannot be counted twice)
+- `DATA_RETENTION_ENABLE_VACUUM` (optional, defaults off; full SQLite compaction
+  is operator-only because it takes an exclusive lock and rewrites the database)
+- `DATA_RETENTION_DISABLE_VACUUM` (legacy override; any true value prevents the
+  opt-in compaction above)
 - `ADAPTER_HTTP_TIMEOUT_MS` / `ADAPTER_PROVIDER_TIMEOUT_MS` (optional bounded
   upstream-request and per-provider polling budgets)
 - `LITESTREAM_S3_*` (optional replica credentials; set all four required values

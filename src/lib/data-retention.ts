@@ -172,9 +172,27 @@ function maxNullable(left: number | null, right: number | null): number | null {
   return Math.max(left, right);
 }
 
-function shouldRunVacuum(): boolean {
-  const raw = process.env.DATA_RETENTION_DISABLE_VACUUM?.trim().toLowerCase();
-  return raw !== "1" && raw !== "true" && raw !== "yes";
+function enabledFlag(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+/**
+ * Full SQLite VACUUM takes an exclusive database lock and rewrites the whole
+ * file. It must never be an implicit side effect of the in-process retention
+ * scheduler: on a large Render disk that can block readiness long enough for
+ * Render to restart the sole instance, which restarts retention and livelocks.
+ *
+ * Keep the legacy disable flag as an override, but require an explicit opt-in
+ * for operators that have deliberately arranged a maintenance window.
+ */
+export function isAutomaticVacuumEnabled(
+  env: Readonly<Record<string, string | undefined>> = process.env
+): boolean {
+  return (
+    enabledFlag(env.DATA_RETENTION_ENABLE_VACUUM) &&
+    !enabledFlag(env.DATA_RETENTION_DISABLE_VACUUM)
+  );
 }
 
 function groupHash(parts: Array<string | null>): string {
@@ -637,7 +655,7 @@ export async function runDataRetentionMaintenance(now = new Date()): Promise<Dat
   const prunedRows = usageSnapshots.pruned + externalUsageEvents.pruned;
   let compacted = false;
   let compactionError: string | undefined;
-  if (prunedRows > 0 && shouldRunVacuum()) {
+  if (prunedRows > 0 && isAutomaticVacuumEnabled()) {
     try {
       await prisma.$executeRawUnsafe("PRAGMA wal_checkpoint(TRUNCATE)");
       await prisma.$executeRawUnsafe("VACUUM");

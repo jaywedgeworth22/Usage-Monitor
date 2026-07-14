@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const script = join(repoRoot, "scripts", "start-with-litestream.sh");
+const renderConfig = join(repoRoot, "render.yaml");
 const keys = [
   "LITESTREAM_S3_BUCKET",
   "LITESTREAM_S3_ENDPOINT",
@@ -35,6 +36,13 @@ function expectStatus(name, result, expected) {
 const temp = mkdtempSync(join(tmpdir(), "usage-startup-config-"));
 try {
   const startupSource = readFileSync(script, "utf8");
+  const renderSource = readFileSync(renderConfig, "utf8");
+  if (!/^\s*healthCheckPath:\s*\/api\/health\s*$/m.test(renderSource)) {
+    throw new Error("Render health checks must use the database-independent /api/health liveness route");
+  }
+  if (/^\s*healthCheckPath:\s*\/api\/ready\s*$/m.test(renderSource)) {
+    throw new Error("strict /api/ready must not be Render's restart trigger");
+  }
   const backupIndex = startupSource.indexOf(
     'node "${REPO_ROOT}/scripts/backup-sqlite-before-migrate.mjs"'
   );

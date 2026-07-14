@@ -13,7 +13,11 @@ services:
     runtime: node
     plan: starter
     autoDeployTrigger: checksPass
-    healthCheckPath: /api/ready
+    # Render uses this as a liveness/restart signal. Keep it independent of
+    # SQLite readiness: restarting during an exclusive maintenance operation
+    # restarts that same operation and can livelock the only instance.
+    # Operators and dependency monitors still use strict /api/ready.
+    healthCheckPath: /api/health
     buildFilter:
       ignoredPaths:
         - docs/**
