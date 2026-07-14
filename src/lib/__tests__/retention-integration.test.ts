@@ -159,6 +159,31 @@ describe("retention integration", () => {
     expect(await prisma.externalUsageEvent.count()).toBe(1);
   });
 
+  it("reports only newly inserted rows as persisted across idempotent replays", async () => {
+    const existing = {
+      idempotencyKey: "accepted-count-existing",
+      sourceApp: "socratic-trade",
+      provider: "openai",
+      billingMode: "actual",
+      metricType: "cost",
+      costUsd: 0,
+      occurredAt: new Date("2026-07-03T12:00:00.000Z"),
+    };
+    const first = await persistExternalUsageEvents([existing]);
+    const replay = await persistExternalUsageEvents([existing]);
+    const mixed = await persistExternalUsageEvents([
+      existing,
+      { ...existing, idempotencyKey: "accepted-count-new" },
+    ]);
+
+    expect(first).toMatchObject({ attempted: 1, persisted: 1, skippedPrunedDuplicates: 0 });
+    expect(replay).toMatchObject({ attempted: 1, persisted: 0, skippedPrunedDuplicates: 0 });
+    expect(replay.newEvents).toEqual([]);
+    expect(mixed).toMatchObject({ attempted: 2, persisted: 1, skippedPrunedDuplicates: 0 });
+    expect(mixed.newEvents.map((event) => event.idempotencyKey)).toEqual(["accepted-count-new"]);
+    expect(await prisma.externalUsageEvent.count()).toBe(2);
+  });
+
   it("serves rolled-up historical data without double counting recent raw rows", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
@@ -266,6 +291,7 @@ describe("retention integration", () => {
         occurredAt: new Date("2026-06-25T12:00:00.000Z"),
       },
     ]);
+    expect(replay.persisted).toBe(0);
     expect(replay.skippedPrunedDuplicates).toBe(1);
     expect(await prisma.externalUsageEvent.findMany()).toHaveLength(1);
   });

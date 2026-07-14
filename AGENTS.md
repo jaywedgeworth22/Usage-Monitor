@@ -29,6 +29,12 @@ Idempotency: when the producer omits `idempotencyKey`, the server derives the sa
 key as shared (`sourceApp` + `provider` + `metricType` + `keyRef` + `occurredAt`). Explicit keys
 are persisted and upsert-deduped on `ExternalUsageEvent.idempotencyKey`.
 
+Persistence-result semantics are intentionally narrower than request acceptance:
+`attempted` is the number of submitted events, `persisted` is only the number of
+rows newly inserted by that call, and `skippedPrunedDuplicates` is the number
+blocked by retention tombstones. Existing active idempotent replays are valid
+but contribute zero to `persisted`; never derive it from `activeEvents.length`.
+
 ## Endpoints (App B integration)
 
 - `POST /api/ingest/usage` — Bearer `USAGE_INGEST_TOKEN` (or `x-usage-ingest-token`). Writes `ExternalUsageEvent`.

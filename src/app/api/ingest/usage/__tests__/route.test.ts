@@ -45,6 +45,7 @@ beforeEach(() => {
   vi.stubEnv("USAGE_INGEST_TOKEN", "test-token");
   resolveProjects.mockResolvedValue(new Map());
   externalUsageMocks.persist.mockResolvedValue({
+    attempted: 1,
     persisted: 1,
     skippedPrunedDuplicates: 0,
     newEvents: [],
@@ -74,6 +75,27 @@ describe("POST /api/ingest/usage admission", () => {
   it("releases admission after a successful ingest", async () => {
     const response = await POST(request());
     expect(response.status).toBe(202);
+
+    const release = tryAcquireIngestAdmission();
+    expect(release).not.toBeNull();
+    release?.();
+  });
+
+  it("reports zero accepted rows for an idempotent replay", async () => {
+    externalUsageMocks.persist.mockResolvedValueOnce({
+      attempted: 1,
+      persisted: 0,
+      skippedPrunedDuplicates: 0,
+      newEvents: [],
+    });
+
+    const response = await POST(request());
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({
+      ok: true,
+      accepted: 0,
+      ignoredPruned: 0,
+    });
 
     const release = tryAcquireIngestAdmission();
     expect(release).not.toBeNull();
