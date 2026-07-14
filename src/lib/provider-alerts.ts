@@ -45,6 +45,8 @@ export interface UsageSnapshotForAlerts {
 export interface ProviderAlertInput {
   isActive: boolean;
   refreshIntervalMin: number;
+  /** False for push/manual rows where a poll snapshot cannot exist. */
+  snapshotExpected?: boolean;
   plan: ProviderPlanForAlerts | null;
   latestSnapshot: UsageSnapshotForAlerts | null;
   // Canonical month-to-date spend across poll, pushed usage, subscriptions,
@@ -113,21 +115,26 @@ export function buildProviderAlertState(
     });
   }
 
-  if (!latestSnapshot) {
-    alerts.push({
-      code: "missing_snapshot",
-      severity: "warning",
-      message: "No usage snapshot has been fetched yet.",
-    });
-  } else {
-    const fetchedAt = new Date(latestSnapshot.fetchedAt);
-    const staleAfterMs = Math.max(input.refreshIntervalMin * 3 * 60 * 1000, MS_PER_DAY);
-    if (now.getTime() - fetchedAt.getTime() > staleAfterMs) {
+  if (input.snapshotExpected !== false) {
+    if (!latestSnapshot) {
       alerts.push({
-        code: "stale_snapshot",
+        code: "missing_snapshot",
         severity: "warning",
-        message: "Latest usage snapshot is stale.",
+        message: "No usage snapshot has been fetched yet.",
       });
+    } else {
+      const fetchedAt = new Date(latestSnapshot.fetchedAt);
+      const staleAfterMs = Math.max(
+        input.refreshIntervalMin * 3 * 60 * 1000,
+        MS_PER_DAY
+      );
+      if (now.getTime() - fetchedAt.getTime() > staleAfterMs) {
+        alerts.push({
+          code: "stale_snapshot",
+          severity: "warning",
+          message: "Latest usage snapshot is stale.",
+        });
+      }
     }
   }
 

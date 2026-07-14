@@ -63,6 +63,17 @@ function providerProfile(provider: Provider) {
   return getProviderIntegrationProfile(provider.name, provider.type);
 }
 
+function supportsManualFetch(provider: Provider): boolean {
+  const profile = providerProfile(provider);
+  if (profile.name !== "anthropic") return true;
+  return provider.anthropicAdminApiConfigured ?? false;
+}
+
+function providerStatusLabel(provider: Provider): string {
+  if (!provider.isActive) return "Inactive";
+  return supportsManualFetch(provider) ? "Active" : "Push / manual";
+}
+
 function resolvedSpendCoverage(provider: Provider) {
   return (
     provider.spendCoverage ??
@@ -305,6 +316,8 @@ export default function ProviderTable({
                         isActive: provider.isActive,
                         primaryCredentialConfigured: Boolean(provider.keyPreview),
                         keyPreview: provider.keyPreview,
+                        anthropicAdminApiConfigured:
+                          provider.anthropicAdminApiConfigured,
                         publicConfigFields: publicConfigFieldNames(provider.config),
                         protectedConfigFields: provider.secretConfigMeta?.fields ?? [],
                         protectedConfigReadable: provider.secretConfigMeta?.readable,
@@ -340,16 +353,22 @@ export default function ProviderTable({
                     disabled={actionLoading === provider.id}
                     className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full transition-colors ${
                       provider.isActive
-                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                        ? supportsManualFetch(provider)
+                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                          : "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
                         : "bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-400"
                     }`}
                   >
                     <span
                       className={`w-1.5 h-1.5 rounded-full ${
-                        provider.isActive ? "bg-emerald-500" : "bg-gray-300"
+                        provider.isActive
+                          ? supportsManualFetch(provider)
+                            ? "bg-emerald-500"
+                            : "bg-blue-500"
+                          : "bg-gray-300"
                       }`}
                     />
-                    {provider.isActive ? "Active" : "Inactive"}
+                    {providerStatusLabel(provider)}
                   </button>
                 </td>
                 <td data-label="Spend / Budget" className="px-6 py-4">
@@ -441,15 +460,17 @@ export default function ProviderTable({
                 </td>
                 <td data-label="Actions" className="px-6 py-4">
                   <div className="table-actions flex flex-wrap items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      aria-label={`Fetch ${provider.displayName} now`}
-                      onClick={() => onFetchNow(provider.id)}
-                      disabled={actionLoading === provider.id}
-                      className="rounded-md bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-100 disabled:opacity-50 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900/60"
-                    >
-                      {actionLoading === provider.id ? "..." : "Fetch Now"}
-                    </button>
+                    {supportsManualFetch(provider) ? (
+                      <button
+                        type="button"
+                        aria-label={`Fetch ${provider.displayName} now`}
+                        onClick={() => onFetchNow(provider.id)}
+                        disabled={actionLoading === provider.id}
+                        className="rounded-md bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-100 disabled:opacity-50 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900/60"
+                      >
+                        {actionLoading === provider.id ? "..." : "Fetch Now"}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       aria-label={`Edit ${provider.displayName}`}

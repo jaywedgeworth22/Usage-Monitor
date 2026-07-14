@@ -22,6 +22,7 @@ interface Provider {
   groupId: string | null;
   label: string | null;
   keyPreview?: string | null;
+  anthropicAdminApiConfigured?: boolean;
   config?: Record<string, unknown>;
   secretConfigMeta?: { configured: boolean; fields: string[]; readable: boolean };
   estimatedMonthlyCostUsd: number;
@@ -368,6 +369,9 @@ export default function DashboardPage() {
               refreshIntervalMin={provider.refreshIntervalMin}
               label={provider.label}
               keyPreview={provider.keyPreview}
+              anthropicAdminApiConfigured={
+                provider.anthropicAdminApiConfigured
+              }
               estimatedMonthlyCostUsd={provider.estimatedMonthlyCostUsd}
               projectedEomUsd={provider.projectedEomUsd}
               spentUsd={provider.spentUsd}

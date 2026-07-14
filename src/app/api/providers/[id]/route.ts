@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { encrypt, encryptJson } from "@/lib/crypto";
+import { decrypt, encrypt, encryptJson } from "@/lib/crypto";
 import { parseProviderUpdateInput, readJsonBody } from "@/lib/provider-input";
 import { buildProviderAlertState } from "@/lib/provider-alerts";
 import { computeBudgetStatus } from "@/lib/budget-status";
@@ -14,6 +14,7 @@ import {
   providerConfigForClient,
   splitProviderConfig,
 } from "@/lib/provider-secret-config";
+import { hasStoredAnthropicAdminApiKey } from "@/lib/anthropic-credentials";
 
 export async function GET(
   _request: NextRequest,
@@ -28,6 +29,7 @@ export async function GET(
       name: true,
       displayName: true,
       type: true,
+      apiKey: true,
       isActive: true,
       config: true,
       secretConfig: true,
@@ -94,7 +96,7 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const { snapshots, config, secretConfig, ...rest } = provider;
+  const { snapshots, apiKey, config, secretConfig, ...rest } = provider;
   const clientConfig = providerConfigForClient(config, secretConfig);
   const latestSnapshot = snapshots[0] ?? null;
   const alertState = buildProviderAlertState({
@@ -115,6 +117,24 @@ export async function GET(
   return NextResponse.json({
     ...rest,
     ...clientConfig,
+    keyPreview: apiKey
+      ? (() => {
+          try {
+            const decrypted = decrypt(apiKey);
+            return decrypted.length > 10
+              ? `${decrypted.slice(0, 6)}...${decrypted.slice(-4)}`
+              : null;
+          } catch {
+            return null;
+          }
+        })()
+      : null,
+    anthropicAdminApiConfigured: hasStoredAnthropicAdminApiKey({
+      name: provider.name,
+      apiKey,
+      config,
+      secretConfig,
+    }),
     latestSnapshot,
     alerts: canonicalBudget?.alerts ?? alertState.alerts,
     estimatedMonthlyCostUsd: alertState.estimatedMonthlyCostUsd,

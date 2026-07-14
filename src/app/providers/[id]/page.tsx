@@ -18,6 +18,7 @@ interface Provider {
   type: string;
   config?: Record<string, unknown>;
   keyPreview?: string | null;
+  anthropicAdminApiConfigured?: boolean;
   secretConfigMeta?: { configured: boolean; fields: string[]; readable: boolean };
   refreshIntervalMin: number;
   isActive: boolean;
@@ -245,6 +246,8 @@ export default function ProviderDetailPage() {
               isActive: provider.isActive,
               primaryCredentialConfigured: Boolean(provider.keyPreview),
               keyPreview: provider.keyPreview,
+              anthropicAdminApiConfigured:
+                provider.anthropicAdminApiConfigured,
               publicConfigFields: publicConfigFieldNames(provider.config),
               protectedConfigFields: provider.secretConfigMeta?.fields ?? [],
               protectedConfigReadable: provider.secretConfigMeta?.readable,

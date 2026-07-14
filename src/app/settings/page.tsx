@@ -47,6 +47,7 @@ export interface Provider {
   groupId: string | null;
   label: string | null;
   keyPreview?: string | null;
+  anthropicAdminApiConfigured?: boolean;
   plan: ProviderPlan | null;
   allocations: { projectId: string; percentage: number }[];
   externalBilling?: ExternalBillingRecord[];

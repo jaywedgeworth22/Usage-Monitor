@@ -55,4 +55,82 @@ describe("ProviderIntegrationDrawer", () => {
     expect(html).toContain("arbitrary full response is not persisted");
     expect(html).toContain("SSRF-checked");
   });
+
+  it("shows individual Anthropic billing as skipped instead of broken polling", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProviderIntegrationDrawer, {
+        providerName: "anthropic",
+        providerType: "builtin",
+        displayName: "Anthropic",
+        instanceState: {
+          isActive: true,
+          primaryCredentialConfigured: true,
+          keyPreview: "sk-ant...1234",
+          anthropicAdminApiConfigured: false,
+          publicConfigFields: [],
+          protectedConfigFields: [],
+          protectedConfigReadable: true,
+          lastSnapshotAt: null,
+          externalBillingRecordCount: 0,
+          externalBillingSources: [],
+        },
+        onClose: vi.fn(),
+      })
+    );
+
+    expect(html).toContain("Skipped · no organization Admin API");
+    expect(html).toContain("Legacy Messages credential");
+    expect(html).toContain("not polled");
+  });
+
+  it("recognizes an organization Admin key stored in a legacy primary field", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProviderIntegrationDrawer, {
+        providerName: "anthropic",
+        providerType: "builtin",
+        displayName: "Anthropic organization",
+        instanceState: {
+          isActive: true,
+          primaryCredentialConfigured: true,
+          keyPreview: "sk-ant...1234",
+          anthropicAdminApiConfigured: true,
+          publicConfigFields: [],
+          protectedConfigFields: [],
+          protectedConfigReadable: true,
+          lastSnapshotAt: null,
+          externalBillingRecordCount: 0,
+          externalBillingSources: [],
+        },
+        onClose: vi.fn(),
+      })
+    );
+
+    expect(html).toContain("Active");
+    expect(html).not.toContain("Skipped · no organization Admin API");
+  });
+
+  it("shows an inactive individual Anthropic row as inactive", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProviderIntegrationDrawer, {
+        providerName: "anthropic",
+        providerType: "builtin",
+        displayName: "Inactive Anthropic",
+        instanceState: {
+          isActive: false,
+          primaryCredentialConfigured: false,
+          anthropicAdminApiConfigured: false,
+          publicConfigFields: [],
+          protectedConfigFields: [],
+          protectedConfigReadable: true,
+          lastSnapshotAt: null,
+          externalBillingRecordCount: 0,
+          externalBillingSources: [],
+        },
+        onClose: vi.fn(),
+      })
+    );
+
+    expect(html).toContain("Inactive");
+    expect(html).not.toContain("Skipped · no organization Admin API");
+  });
 });

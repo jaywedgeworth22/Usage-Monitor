@@ -28,3 +28,22 @@ describe("Cloudflare provider definition", () => {
     expect(cloudflare?.helpNote).toMatch(/email is only for a Global API key/i);
   });
 });
+
+describe("Anthropic provider definition", () => {
+  it("does not imply individual accounts can obtain direct billing access", () => {
+    const anthropic = BUILT_IN_PROVIDERS.find(
+      (provider) => provider.name === "anthropic"
+    );
+    const adminField = anthropic?.needsConfig?.fields.find(
+      (field) => field.key === "adminApiKey"
+    );
+
+    expect(anthropic?.helpNote).toMatch(/individual accounts cannot use/i);
+    expect(anthropic?.helpNote).toMatch(/no standard Messages API key is requested/i);
+    expect(anthropic?.helpNote).toMatch(/pushed per-request telemetry/i);
+    expect(anthropic?.helpNote).toMatch(/Subscription or receipt reconciliation/i);
+    expect(anthropic?.usesApiKey).toBe(false);
+    expect(adminField?.label).toMatch(/organization accounts only/i);
+    expect(adminField?.advanced).toBe(true);
+  });
+});

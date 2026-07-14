@@ -20,6 +20,7 @@ export interface ProviderIntegrationInstanceState {
   isActive: boolean;
   primaryCredentialConfigured: boolean;
   keyPreview?: string | null;
+  anthropicAdminApiConfigured?: boolean;
   publicConfigFields: string[];
   protectedConfigFields: string[];
   protectedConfigReadable?: boolean;
@@ -95,6 +96,11 @@ export default function ProviderIntegrationDrawer({
   const headingId = useId();
   const summaryId = useId();
   const keyLastFour = instanceState?.keyPreview?.slice(-4) ?? null;
+  const anthropicAdminConfigured =
+    profile.name === "anthropic" &&
+    (instanceState?.anthropicAdminApiConfigured ?? false);
+  const anthropicWithoutAdmin =
+    profile.name === "anthropic" && !anthropicAdminConfigured;
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -214,17 +220,27 @@ export default function ProviderIntegrationDrawer({
                 <div className="rounded-lg bg-gray-50 p-3">
                   <dt className="text-xs font-medium text-gray-500">Polling</dt>
                   <dd className="mt-1 font-medium text-gray-900">
-                    {instanceState.isActive ? "Active" : "Inactive"}
+                    {!instanceState.isActive
+                      ? "Inactive"
+                      : anthropicWithoutAdmin
+                        ? "Skipped · no organization Admin API"
+                        : "Active"}
                   </dd>
                 </div>
                 <div className="rounded-lg bg-gray-50 p-3">
-                  <dt className="text-xs font-medium text-gray-500">Primary credential</dt>
+                  <dt className="text-xs font-medium text-gray-500">
+                    {anthropicWithoutAdmin
+                      ? "Legacy Messages credential"
+                      : "Primary credential"}
+                  </dt>
                   <dd className="mt-1 font-medium text-gray-900">
                     {instanceState.primaryCredentialConfigured
                       ? keyLastFour
-                        ? `Configured · •••• ${keyLastFour}`
-                        : "Configured"
-                      : "Not configured"}
+                        ? `Configured · •••• ${keyLastFour}${anthropicWithoutAdmin ? " · not polled" : ""}`
+                        : `Configured${anthropicWithoutAdmin ? " · not polled" : ""}`
+                      : anthropicWithoutAdmin
+                        ? "Not needed"
+                        : "Not configured"}
                   </dd>
                 </div>
                 <div className="rounded-lg bg-gray-50 p-3 sm:col-span-2">

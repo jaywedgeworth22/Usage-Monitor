@@ -538,6 +538,38 @@ describe("buildBillingInventory", () => {
     expect(inventory.coverage.find((entry) => entry.providerId === "relay")?.status).toBe("not-applicable");
   });
 
+  it("does not present unavailable Anthropic individual-account billing as setup-ready", () => {
+    const inventory = buildBillingInventory(
+      [
+        provider({
+          id: "anthropic-individual",
+          name: "anthropic",
+          displayName: "Anthropic individual",
+        }),
+        provider({
+          id: "anthropic-org",
+          name: "anthropic",
+          displayName: "Anthropic organization",
+          anthropicAdminApiConfigured: true,
+        }),
+      ],
+      [],
+      NOW
+    );
+
+    expect(
+      inventory.coverage.find(
+        (entry) => entry.providerId === "anthropic-individual"
+      )
+    ).toMatchObject({
+      status: "manual",
+      summary: expect.stringMatching(/no organization Admin API key is configured/i),
+    });
+    expect(
+      inventory.coverage.find((entry) => entry.providerId === "anthropic-org")
+    ).toMatchObject({ status: "available" });
+  });
+
   it("reports a stale linked provider confirmation instead of claiming no confirmation exists", () => {
     const external = {
       source: "cloudflare-subscriptions",

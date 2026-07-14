@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { buildProviderAlertState, type AlertSeverity, type ProviderAlert } from "@/lib/provider-alerts";
 import { computeBudgetStatus } from "@/lib/budget-status";
+import { providerPollSnapshotExpected } from "@/lib/anthropic-credentials";
 
 export type AlertDeliveryChannel =
   | { kind: "slack"; url: string }
@@ -527,6 +528,9 @@ export async function deliverProviderAlerts(options: {
       id: true,
       name: true,
       displayName: true,
+      apiKey: true,
+      config: true,
+      secretConfig: true,
       isActive: true,
       refreshIntervalMin: true,
       plan: {
@@ -566,6 +570,7 @@ export async function deliverProviderAlerts(options: {
       {
         isActive: provider.isActive,
         refreshIntervalMin: provider.refreshIntervalMin,
+        snapshotExpected: providerPollSnapshotExpected(provider),
         plan: provider.plan,
         latestSnapshot: provider.snapshots[0] ?? null,
       },
