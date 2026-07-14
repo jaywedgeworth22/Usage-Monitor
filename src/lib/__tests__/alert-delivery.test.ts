@@ -115,6 +115,86 @@ describe("alert delivery", () => {
     expect(resolved.resolvedAt).not.toBeNull();
   });
 
+  it("persists channel success before a notification-summary timeout so the next cycle does not resend", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "summary-timeout",
+        displayName: "Summary Timeout",
+        type: "builtin",
+        refreshIntervalMin: 60,
+        plan: { create: { billingMode: "actual", lowBalanceUsd: 10 } },
+        snapshots: {
+          create: {
+            fetchedAt: new Date("2026-07-20T08:00:00.000Z"),
+            balance: 5,
+          },
+        },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const config = {
+      channels: [{ kind: "webhook" as const, url: "https://alerts.example/summary-timeout" }],
+      minSeverity: "warning" as const,
+      reminderHours: 24,
+    };
+    const notificationDelegate = new Proxy(prisma.providerAlertNotification, {
+      get(target, property) {
+        if (property === "update") {
+          return async (args: Parameters<typeof prisma.providerAlertNotification.update>[0]) => {
+            if ("lastSentAt" in args.data) {
+              throw Object.assign(new Error("SQLite socket timeout"), {
+                code: "P1008",
+                meta: { modelName: "ProviderAlertNotification" },
+              });
+            }
+            return prisma.providerAlertNotification.update(args);
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    type AlertDb = NonNullable<
+      NonNullable<Parameters<typeof deliverProviderAlerts>[0]>["db"]
+    >;
+    const db = {
+      provider: prisma.provider,
+      providerAlertNotification: notificationDelegate,
+      providerAlertChannelDelivery: prisma.providerAlertChannelDelivery,
+    } as unknown as AlertDb;
+
+    await expect(
+      deliverProviderAlerts({
+        now: new Date("2026-07-20T12:00:00.000Z"),
+        config,
+        fetchImpl: fetchMock,
+        db,
+      })
+    ).rejects.toMatchObject({
+      code: "P1008",
+      meta: { modelName: "ProviderAlertNotification" },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const notification = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { stateKey: `${provider.id}:balance_low` },
+    });
+    const channelState = await prisma.providerAlertChannelDelivery.findFirstOrThrow({
+      where: { notificationId: notification.id },
+    });
+    expect(channelState.lastSucceededAt).toEqual(new Date("2026-07-20T12:00:00.000Z"));
+    expect(notification.lastSentAt).toBeNull();
+    expect(notification.sendCount).toBe(0);
+
+    const next = await deliverProviderAlerts({
+      now: new Date("2026-07-20T13:00:00.000Z"),
+      config,
+      fetchImpl: fetchMock,
+    });
+    expect(next.skipped).toBe(1);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("retries only the failed channel while preserving successful channel state", async () => {
     const provider = await prisma.provider.create({
       data: {
