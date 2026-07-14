@@ -38,9 +38,13 @@ export interface ExternalUsageEventInput {
 }
 
 export interface PersistExternalUsageEventsResult {
+  /** Number of submitted inputs, including active or tombstoned replays. */
   attempted: number;
+  /** Number of rows newly inserted by this call; active replays do not count. */
   persisted: number;
+  /** Number of unique inputs rejected because retention already pruned them. */
   skippedPrunedDuplicates: number;
+  /** Newly inserted event inputs, in insertion order. */
   newEvents: ExternalUsageEventInput[];
 }
 
@@ -368,7 +372,7 @@ export async function persistExternalUsageEventsInTransaction(
 
   return {
     attempted: events.length,
-    persisted: activeEvents.length,
+    persisted: newEvents.length,
     skippedPrunedDuplicates: uniqueEvents.length - activeEvents.length,
     newEvents,
   };
