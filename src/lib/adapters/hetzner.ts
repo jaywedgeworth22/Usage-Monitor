@@ -334,6 +334,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
         serviceName: server.name ?? `Server ${server.id}`,
         planName: type,
         status: server.status ?? "unknown",
+        amountUsd: monthlyPrice,
         currency,
         rollupRole: "canonical",
       });
@@ -345,6 +346,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
         serviceName: `${server.name ?? `Server ${server.id}`} backups`,
         planName: backupPercentage == null ? "Backups" : `Backups (${backupPercentage}%)`,
         status: "active",
+        amountUsd: backupMonthlyPrice,
         currency,
         rollupRole: "component",
       });
@@ -378,6 +380,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
         serviceName: volume.name ?? `Volume ${volume.id}`,
         planName: `${volume.size} GB volume`,
         status: volume.status ?? "available",
+        amountUsd: monthlyPrice,
         currency,
         usageQuantity: volume.size ?? null,
         usageUnit: "GB",
@@ -411,6 +414,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
         serviceName: ip.name || ip.description || `Floating IP ${ip.id}`,
         planName: type ? `Floating ${type.toUpperCase()}` : "Floating IP",
         status: ip.blocked ? "blocked" : "active",
+        amountUsd: monthlyPrice,
         currency,
         rollupRole: ip.server == null ? "canonical" : "component",
       });
@@ -439,6 +443,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
         serviceName: ip.name ?? `Primary IP ${ip.id}`,
         planName: type ? `Primary ${type.toUpperCase()}` : "Primary IP",
         status: ip.blocked ? "blocked" : "active",
+        amountUsd: monthlyPrice,
         currency,
         rollupRole: ip.assignee_id == null ? "canonical" : "component",
       });
@@ -471,6 +476,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
         serviceName: loadBalancer.name ?? `Load Balancer ${loadBalancer.id}`,
         planName: type,
         status: "active",
+        amountUsd: monthlyPrice,
         currency,
         rollupRole: "canonical",
       });
@@ -508,6 +514,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
         serviceName: image.name || image.description || `Snapshot ${image.id}`,
         planName: image.image_size == null ? "Snapshot" : `${image.image_size} GB snapshot`,
         status: image.status ?? "unknown",
+        amountUsd: monthlyPrice,
         currency,
         usageQuantity: image.image_size,
         usageUnit: "GB",

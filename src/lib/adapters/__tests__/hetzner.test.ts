@@ -204,8 +204,24 @@ describe("hetzner adapter", () => {
     expect(result.externalBilling?.records.map((record) => record.externalId)).not.toContain(
       "snapshot:8"
     );
-    expect(result.externalBilling?.records.every((record) => record.amountUsd == null)).toBe(true);
-    expect(result.externalBilling?.records.every((record) => record.currency === "EUR")).toBe(true);
+    expect(
+      result.externalBilling?.records.map((record) => ({
+        externalId: record.externalId,
+        amountUsd: record.amountUsd,
+        currency: record.currency,
+      }))
+    ).toEqual(
+      expect.arrayContaining([
+        { externalId: "1", amountUsd: 3.5, currency: "EUR" },
+        { externalId: "server-backup:1", amountUsd: 0.7, currency: "EUR" },
+        { externalId: "volume:2", amountUsd: 0.4, currency: "EUR" },
+        { externalId: "floating-ip:3", amountUsd: 1, currency: "EUR" },
+        { externalId: "primary-ip:4", amountUsd: 0.5, currency: "EUR" },
+        { externalId: "load-balancer:6", amountUsd: 5, currency: "EUR" },
+        { externalId: "snapshot:7", amountUsd: 0.02, currency: "EUR" },
+      ])
+    );
+
 
     const rawData = result.rawData as Record<string, unknown>;
     expect(rawData.totalBandwidthBytes).toBe(1500);
