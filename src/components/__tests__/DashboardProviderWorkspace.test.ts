@@ -201,10 +201,16 @@ describe("DashboardProviderWorkspace", () => {
           status: "canceled",
           nextRenewalAt: "2099-01-15T00:00:00.000Z",
         }),
+        subscription("Expired term", "provider-one", {
+          autoRenew: false,
+          status: "active",
+          effectiveStatus: "expired",
+          nextRenewalAt: "2020-01-10T00:00:00.000Z",
+        }),
       ]
     );
 
-    expect(html).toContain("4 records");
+    expect(html).toContain("5 records");
     expect(html).not.toContain("SHOULD-NOT-RENDER");
     expect(html.match(/Usage period/g)).toHaveLength(1);
     expect(html).toContain("linked cloudflare-subscriptions");
@@ -213,6 +219,8 @@ describe("DashboardProviderWorkspace", () => {
     expect(html).toContain("€5.00");
     expect(html).toContain("Period ends");
     expect(html).toContain("Term ends");
+    expect(html).toContain("expired / monthly");
+    expect(html).toContain("Term ended 1/10/2020");
     expect(html).toContain("Next renewal 2/1/2099");
   });
 

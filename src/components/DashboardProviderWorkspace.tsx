@@ -704,7 +704,7 @@ export default function DashboardProviderWorkspace({
                                 <span className="min-w-0">
                                   <span className="block truncate text-sm font-semibold text-blue-950 dark:text-blue-100">{subscription.name}</span>
                                   <span className="mt-0.5 block text-xs text-blue-700 dark:text-blue-300">
-                                    {subscription.status} / {subscription.intervalCount === 1 ? subscription.interval : `${subscription.intervalCount} ${subscription.interval}`}
+                                    {effectiveSubscriptionStatus(subscription)} / {subscription.intervalCount === 1 ? subscription.interval : `${subscription.intervalCount} ${subscription.interval}`}
                                     {subscription.externalBillingSource
                                       ? ` / linked ${subscription.externalBillingSource}`
                                       : ""}
