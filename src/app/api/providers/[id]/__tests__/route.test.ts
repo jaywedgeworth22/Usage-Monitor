@@ -15,6 +15,7 @@ let decryptJson: typeof import("@/lib/crypto").decryptJson;
 let encrypt: typeof import("@/lib/crypto").encrypt;
 let geminiApiKeyFingerprint: typeof import("@/lib/gemini-key-status").geminiApiKeyFingerprint;
 let geminiBillingConfigFingerprint: typeof import("@/lib/gemini-key-status").geminiBillingConfigFingerprint;
+let geminiMonitoringConfigFingerprint: typeof import("@/lib/gemini-key-status").geminiMonitoringConfigFingerprint;
 
 beforeAll(async () => {
   testDir = fs.mkdtempSync(path.join(os.tmpdir(), "provider-route-test-"));
@@ -27,7 +28,11 @@ beforeAll(async () => {
   ({ GET: GET_COLLECTION } = await import("../../route"));
   ({ prisma } = await import("@/lib/prisma"));
   ({ encrypt, encryptJson, decryptJson } = await import("@/lib/crypto"));
-  ({ geminiApiKeyFingerprint, geminiBillingConfigFingerprint } = await import("@/lib/gemini-key-status"));
+  ({
+    geminiApiKeyFingerprint,
+    geminiBillingConfigFingerprint,
+    geminiMonitoringConfigFingerprint,
+  } = await import("@/lib/gemini-key-status"));
 }, 60_000);
 
 afterAll(async () => {
@@ -247,6 +252,20 @@ describe("GET /api/providers/:id Gemini key status", () => {
                   geminiBillingConfigFingerprint(billingConfig),
                 privateBillingPayload: "must-not-be-returned",
               },
+              monitoring: {
+                configured: true,
+                status: "permission_denied",
+                projectId: "gemini-production",
+                configFingerprint:
+                  geminiMonitoringConfigFingerprint(billingConfig),
+                requests: {
+                  status: "error",
+                  errorCode: "HTTP_ERROR",
+                  httpStatus: 403,
+                  retryable: false,
+                  upstreamBody: "must-not-be-returned",
+                },
+              },
             },
           },
         },
@@ -309,6 +328,14 @@ describe("GET /api/providers/:id Gemini key status", () => {
       retryable: false,
       checkedAt: "2026-07-14T23:00:00.000Z",
     });
+    expect(body.geminiMonitoringStatus).toEqual({
+      state: "permission_denied",
+      projectId: "gemini-production",
+      errorCode: "HTTP_ERROR",
+      httpStatus: 403,
+      retryable: false,
+      checkedAt: "2026-07-14T23:00:00.000Z",
+    });
     expect(body.latestSnapshot.fetchedAt).toBe("2026-07-14T23:05:00.000Z");
     expect(body.latestSnapshot.totalRequests).toBe(123);
     expect(body.latestSnapshot).not.toHaveProperty("rawData");
@@ -321,13 +348,20 @@ describe("GET /api/providers/:id Gemini key status", () => {
     expect(serialized).not.toContain(apiKey);
     expect(serialized).not.toContain("must-not-be-returned");
     expect(serialized).not.toContain(geminiApiKeyFingerprint(apiKey));
+    expect(serialized).not.toContain(
+      geminiMonitoringConfigFingerprint(billingConfig)
+    );
 
     const collectionResponse = await GET_COLLECTION();
     const collectionBody = await collectionResponse.json();
+    const collectionSerialized = JSON.stringify(collectionBody);
     const collectionProvider = collectionBody.find(
       (entry: { id?: unknown }) => entry.id === provider.id
     );
     expect(collectionResponse.status).toBe(200);
+    expect(collectionSerialized).not.toContain(
+      geminiMonitoringConfigFingerprint(billingConfig)
+    );
     expect(collectionProvider.externalBilling).toEqual([
       expect.objectContaining({
         source: "google-gemini-rate-limits",

@@ -32,6 +32,27 @@ export interface GeminiBillingStatus {
   checkedAt: string | null;
 }
 
+export type GeminiMonitoringState =
+  | "ready"
+  | "empty"
+  | "partial"
+  | "permission_denied"
+  | "error"
+  | "configuration_changed"
+  | "project_required"
+  | "credential_required"
+  | "unchecked"
+  | "not_configured";
+
+export interface GeminiMonitoringStatus {
+  state: GeminiMonitoringState;
+  projectId: string | null;
+  errorCode: string | null;
+  httpStatus: number | null;
+  retryable: boolean;
+  checkedAt: string | null;
+}
+
 interface LatestGeminiSnapshot {
   rawData: unknown;
   fetchedAt: Date | string;
@@ -80,6 +101,20 @@ export function geminiBillingConfigFingerprint(
   ];
   return createHash("sha256")
     .update("api-usage-monitor:gemini-billing-config:v1\0", "utf8")
+    .update(JSON.stringify(identity), "utf8")
+    .digest("hex");
+}
+
+/** Server-only binding for one exact Cloud Monitoring identity. */
+export function geminiMonitoringConfigFingerprint(
+  config: Record<string, unknown>
+): string {
+  const identity = [
+    ["googleProjectId", cleanString(config.googleProjectId)],
+    ["serviceAccountJson", cleanString(config.serviceAccountJson)],
+  ];
+  return createHash("sha256")
+    .update("api-usage-monitor:gemini-monitoring-config:v1\0", "utf8")
     .update(JSON.stringify(identity), "utf8")
     .digest("hex");
 }
@@ -269,6 +304,135 @@ export function deriveGeminiBillingStatus(input: {
     httpStatus:
       state === "error" ? safeInteger(billing?.httpStatus, 100) : null,
     retryable: state === "error" && billing?.retryable === true,
+    checkedAt:
+      state === "unchecked" ? null : isoDate(input.latestSnapshot.fetchedAt),
+  };
+}
+
+/** Sanitized project-level Monitoring health, kept separate from cash billing. */
+export function deriveGeminiMonitoringStatus(input: {
+  providerName: string;
+  providerType: string;
+  monitoringConfig: Record<string, unknown> | null;
+  latestSnapshot: LatestGeminiSnapshot | null;
+}): GeminiMonitoringStatus | null {
+  if (
+    input.providerType.trim().toLowerCase() !== "builtin" ||
+    canonicalProviderKey(input.providerName) !== "google-ai"
+  ) {
+    return null;
+  }
+
+  const configuredProjectId = cleanString(
+    input.monitoringConfig?.googleProjectId
+  );
+  if (input.monitoringConfig == null) {
+    return {
+      state: "error",
+      projectId: configuredProjectId || null,
+      errorCode: "CONFIGURATION_UNREADABLE",
+      httpStatus: null,
+      retryable: false,
+      checkedAt: null,
+    };
+  }
+  if (!cleanString(input.monitoringConfig.serviceAccountJson)) {
+    return {
+      state: configuredProjectId ? "credential_required" : "not_configured",
+      projectId: configuredProjectId || null,
+      errorCode: null,
+      httpStatus: null,
+      retryable: false,
+      checkedAt: null,
+    };
+  }
+
+  const rawData = asRecord(input.latestSnapshot?.rawData);
+  const monitoring = asRecord(rawData?.monitoring);
+  if (!input.latestSnapshot || !monitoring) {
+    return {
+      state: "unchecked",
+      projectId: configuredProjectId || null,
+      errorCode: null,
+      httpStatus: null,
+      retryable: false,
+      checkedAt: null,
+    };
+  }
+  const observedFingerprint =
+    typeof monitoring.configFingerprint === "string"
+      ? monitoring.configFingerprint
+      : null;
+  const currentFingerprint = geminiMonitoringConfigFingerprint(
+    input.monitoringConfig
+  );
+  if (!observedFingerprint) {
+    return {
+      state: "unchecked",
+      projectId: configuredProjectId || null,
+      errorCode: null,
+      httpStatus: null,
+      retryable: false,
+      checkedAt: null,
+    };
+  }
+  if (!sameFingerprint(observedFingerprint, currentFingerprint)) {
+    return {
+      state: "configuration_changed",
+      projectId: configuredProjectId || null,
+      errorCode: null,
+      httpStatus: null,
+      retryable: false,
+      checkedAt: null,
+    };
+  }
+  const observedProjectId = cleanString(monitoring.projectId);
+  if (
+    configuredProjectId &&
+    observedProjectId &&
+    configuredProjectId !== observedProjectId
+  ) {
+    return {
+      state: "unchecked",
+      projectId: configuredProjectId,
+      errorCode: null,
+      httpStatus: null,
+      retryable: false,
+      checkedAt: null,
+    };
+  }
+
+  const declaredStatus = monitoring.status;
+  const state: GeminiMonitoringState =
+    declaredStatus === "ready" ||
+    declaredStatus === "empty" ||
+    declaredStatus === "partial" ||
+    declaredStatus === "permission_denied" ||
+    declaredStatus === "error" ||
+    declaredStatus === "project_required" ||
+    declaredStatus === "credential_required"
+      ? declaredStatus
+      : "unchecked";
+  const requests = asRecord(monitoring.requests);
+  const descriptors = asRecord(monitoring.descriptorDiscovery);
+  const quotaUsage = asRecord(monitoring.quotaUsage);
+  const quotaLimits = asRecord(monitoring.quotaLimits);
+  const failure = [monitoring, requests, descriptors, quotaUsage, quotaLimits]
+    .find(
+      (record) =>
+        typeof record?.errorCode === "string" ||
+        safeInteger(record?.httpStatus, 100) != null
+    );
+
+  return {
+    state,
+    projectId: observedProjectId || configuredProjectId || null,
+    errorCode:
+      failure && typeof failure.errorCode === "string"
+        ? failure.errorCode
+        : null,
+    httpStatus: failure ? safeInteger(failure.httpStatus, 100) : null,
+    retryable: failure?.retryable === true,
     checkedAt:
       state === "unchecked" ? null : isoDate(input.latestSnapshot.fetchedAt),
   };
