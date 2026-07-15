@@ -11,6 +11,9 @@ import {
   resolveExternalBillingPeriod,
 } from "@/lib/external-billing-link";
 import {
+  findExternalAdoptionGuardKeyForCharge,
+} from "@/lib/external-billing-subscription-adoption";
+import {
   normalizeMonthlyUsd,
   effectiveSubscriptionStatus,
   isSubscriptionInterval,
@@ -143,6 +146,7 @@ export async function POST(request: NextRequest) {
     nextRenewalAt: Date;
     anchorDay: null;
   } | null = null;
+  let externalAdoptionGuardKey: string | null = null;
   if (input.externalBillingSource && input.externalBillingId) {
     const externalBilling = await prisma.providerExternalBilling.findUnique({
       where: {
@@ -212,28 +216,55 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const subscription = await prisma.subscription.create({
-      data: {
-        providerId: input.providerId,
-        projectId: input.projectId,
-        externalBillingSource: input.externalBillingSource,
-        externalBillingId: input.externalBillingId,
-        name: input.name,
-        description: input.description,
-        costUsd: input.costUsd,
-        currency: input.currency,
-        interval: input.interval,
-        intervalCount: input.intervalCount,
-        anchorDay: linkedCycle ? linkedCycle.anchorDay : input.anchorDay,
-        startDate: linkedCycle?.startDate ?? input.startDate,
-        currentPeriodStart:
-          linkedCycle?.currentPeriodStart ?? input.currentPeriodStart,
-        nextRenewalAt: linkedCycle?.nextRenewalAt ?? input.nextRenewalAt,
-        autoRenew: input.autoRenew,
-        status: input.status,
-        notes: input.notes,
-        knobEnv: input.knobEnv === null ? Prisma.JsonNull : (input.knobEnv as Prisma.InputJsonObject),
-      },
+    const subscription = await prisma.$transaction(async (tx) => {
+      // Take SQLite's writer lock before the final exact-identity reread so an
+      // adapter refresh cannot invalidate guard authority between read/create.
+      await tx.$executeRaw`
+        UPDATE "Provider"
+        SET "name" = "name"
+        WHERE "id" = ${input.providerId}
+      `;
+      externalAdoptionGuardKey = await findExternalAdoptionGuardKeyForCharge(
+        {
+          providerId: input.providerId,
+          refreshIntervalMin: provider.refreshIntervalMin,
+          externalBillingSource: input.externalBillingSource,
+          externalBillingId: input.externalBillingId,
+          costUsd: input.costUsd,
+          currency: input.currency,
+          interval: input.interval,
+          intervalCount: input.intervalCount,
+          now: validationNow,
+        },
+        tx
+      );
+      return tx.subscription.create({
+        data: {
+          providerId: input.providerId,
+          projectId: input.projectId,
+          externalBillingSource: input.externalBillingSource,
+          externalBillingId: input.externalBillingId,
+          externalAdoptionGuardKey,
+          name: input.name,
+          description: input.description,
+          costUsd: input.costUsd,
+          currency: input.currency,
+          interval: input.interval,
+          intervalCount: input.intervalCount,
+          anchorDay: linkedCycle ? linkedCycle.anchorDay : input.anchorDay,
+          startDate: linkedCycle?.startDate ?? input.startDate,
+          currentPeriodStart:
+            linkedCycle?.currentPeriodStart ?? input.currentPeriodStart,
+          nextRenewalAt: linkedCycle?.nextRenewalAt ?? input.nextRenewalAt,
+          autoRenew: input.autoRenew,
+          status: input.status,
+          notes: input.notes,
+          knobEnv:
+            input.knobEnv === null
+              ? Prisma.JsonNull
+              : (input.knobEnv as Prisma.InputJsonObject),
+        },
+      });
     });
     return NextResponse.json(subscription, { status: 201 });
   } catch (error) {
@@ -242,7 +273,11 @@ export async function POST(request: NextRequest) {
       error.code === "P2002"
     ) {
       return NextResponse.json(
-        { error: "External billing record is already linked to another subscription" },
+        {
+          error: externalAdoptionGuardKey
+            ? "An equivalent authoritative external charge is already represented by another subscription"
+            : "External billing record is already linked to another subscription",
+        },
         { status: 409 }
       );
     }

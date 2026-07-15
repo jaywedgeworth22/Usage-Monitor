@@ -87,6 +87,7 @@ describe("cloudflare adapter", () => {
       planName: "Workers Paid",
       status: "paid",
       amountUsd: 5,
+      paidRecurringAuthoritative: true,
     });
     expect(JSON.stringify(result.rawData)).not.toContain("must-not-persist.example");
     const requestHeaders = fetchMock.mock.calls[2][1].headers;

@@ -1,6 +1,14 @@
-import crypto from "crypto";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { persistExternalUsageEvents, type ExternalUsageEventInput } from "@/lib/external-usage-events";
+import {
+  persistExternalUsageEvents,
+  persistExternalUsageEventsInTransaction,
+  type ExternalUsageEventInput,
+} from "@/lib/external-usage-events";
+import {
+  SUBSCRIPTION_SOURCE_APP,
+  subscriptionChargeIdempotencyKey,
+} from "@/lib/subscription-charge-identity";
 import { advancePeriod, isSubscriptionInterval, type SubscriptionInterval } from "@/lib/subscriptions";
 
 // Turns each active subscription's elapsed billing periods into synthetic
@@ -22,22 +30,13 @@ import { advancePeriod, isSubscriptionInterval, type SubscriptionInterval } from
 // unbounded backfill in one pass.
 const MAX_PERIODS_PER_RUN = 240;
 
-export const SUBSCRIPTION_SOURCE_APP = "subscription";
-
 export interface MaterializeSubscriptionsResult {
   examined: number;
   charged: number;
   eventsWritten: number;
 }
 
-function chargeIdempotencyKey(subscriptionId: string, periodStart: Date): string {
-  return crypto
-    .createHash("sha256")
-    .update(`subscription:${subscriptionId}:${periodStart.toISOString()}`)
-    .digest("hex");
-}
-
-interface DueSubscription {
+interface SubscriptionChargePlanInput {
   id: string;
   name: string;
   costUsd: number;
@@ -49,7 +48,24 @@ interface DueSubscription {
   currentPeriodStart: Date;
   nextRenewalAt: Date;
   lastChargedPeriodStart: Date | null;
-  provider: { name: string };
+  provider: { name: string; refreshIntervalMin?: number };
+}
+
+interface DueSubscription extends SubscriptionChargePlanInput {
+  providerId: string;
+  externalAdoptionGuardKey: string | null;
+  externalBillingSource: string | null;
+  externalBillingId: string | null;
+  externalBillingManaged: boolean;
+}
+
+interface ChargeCorrectionProof {
+  managedSubscriptionId: string;
+  source: string;
+  externalId: string;
+  correctedPeriodStart: Date;
+  correctedPeriodEnd: Date;
+  correctedGuardKey: string;
 }
 
 interface ChargePlan {
@@ -63,7 +79,7 @@ interface ChargePlan {
 // returns the charges to emit and the advanced cycle fields. Charges every
 // period whose start is at or before `now` and past the watermark.
 export function planSubscriptionCharges(
-  subscription: DueSubscription,
+  subscription: SubscriptionChargePlanInput,
   now: Date
 ): ChargePlan | null {
   const interval: SubscriptionInterval = isSubscriptionInterval(subscription.interval)
@@ -94,7 +110,10 @@ export function planSubscriptionCharges(
 
     if (!lastCharged || periodStart.getTime() > lastCharged.getTime()) {
       inputs.push({
-        idempotencyKey: chargeIdempotencyKey(subscription.id, periodStart),
+        idempotencyKey: subscriptionChargeIdempotencyKey(
+          subscription.id,
+          periodStart
+        ),
         sourceApp: SUBSCRIPTION_SOURCE_APP,
         provider: subscription.provider.name,
         projectId: subscription.projectId,
@@ -139,6 +158,171 @@ export function planSubscriptionCharges(
   };
 }
 
+function conflictingManagedPeriodStarts(
+  subscription: DueSubscription,
+  plan: ChargePlan,
+  correctionProofs: ChargeCorrectionProof[]
+): Set<number> {
+  const periodStarts = new Set<number>();
+  const guardKey = subscription.externalAdoptionGuardKey;
+  const externalBillingSource = subscription.externalBillingSource;
+  const externalBillingId = subscription.externalBillingId;
+  if (
+    !guardKey ||
+    subscription.externalBillingManaged !== false ||
+    !externalBillingSource ||
+    !externalBillingId
+  ) {
+    return periodStarts;
+  }
+
+  for (const proof of correctionProofs) {
+    if (
+      proof.managedSubscriptionId === subscription.id ||
+      proof.correctedGuardKey !== guardKey ||
+      proof.source !== externalBillingSource ||
+      proof.externalId !== externalBillingId
+    ) {
+      continue;
+    }
+    if (
+      plan.inputs.some(
+        (input) =>
+          input.windowStart?.getTime() ===
+            proof.correctedPeriodStart.getTime() &&
+          input.windowEnd?.getTime() === proof.correctedPeriodEnd.getTime()
+      )
+    ) {
+      periodStarts.add(proof.correctedPeriodStart.getTime());
+    }
+  }
+  return periodStarts;
+}
+
+async function resolveGuardedChargePlan(
+  subscriptionId: string,
+  now: Date
+): Promise<
+  | { subscription: DueSubscription; plan: ChargePlan }
+  | { settled: true; charged: number; eventsWritten: number }
+  | null
+> {
+  return prisma.$transaction(
+    async (tx) => {
+      // SQLite interactive transactions begin deferred. Take the writer lock
+      // before re-reading the guarded row and its collision provenance so a
+      // concurrent owner edit cannot be mistaken for the state we settle.
+      await tx.$executeRaw`
+        UPDATE "Subscription"
+        SET "costUsd" = "costUsd"
+        WHERE "id" = ${subscriptionId}
+      `;
+      const subscription = await tx.subscription.findFirst({
+        where: {
+          id: subscriptionId,
+          status: "active",
+          currentPeriodStart: { lte: now },
+        },
+        select: {
+          id: true,
+          providerId: true,
+          externalAdoptionGuardKey: true,
+          externalBillingSource: true,
+          externalBillingId: true,
+          externalBillingManaged: true,
+          name: true,
+          costUsd: true,
+          currency: true,
+          interval: true,
+          intervalCount: true,
+          projectId: true,
+          autoRenew: true,
+          currentPeriodStart: true,
+          nextRenewalAt: true,
+          lastChargedPeriodStart: true,
+          provider: {
+            select: { name: true, refreshIntervalMin: true },
+          },
+        },
+      });
+      if (!subscription) return null;
+
+      const plan = planSubscriptionCharges(subscription, now);
+      if (!plan) return null;
+      if (!subscription.externalAdoptionGuardKey) {
+        return { subscription, plan };
+      }
+
+      // A provider/price/cadence guard is not a billing identity. Only an
+      // owner-declared exact source + external ID can spend correction proof;
+      // absent identity fails open so unrelated paid services stay additive.
+      if (
+        subscription.externalBillingManaged !== false ||
+        !subscription.externalBillingSource ||
+        !subscription.externalBillingId
+      ) {
+        return { subscription, plan };
+      }
+
+      const correctionProofs = await tx.externalBillingChargeCorrection.findMany({
+        where: {
+          providerId: subscription.providerId,
+          correctedGuardKey: subscription.externalAdoptionGuardKey,
+          source: subscription.externalBillingSource,
+          externalId: subscription.externalBillingId,
+        },
+        select: {
+          managedSubscriptionId: true,
+          source: true,
+          externalId: true,
+          correctedPeriodStart: true,
+          correctedPeriodEnd: true,
+          correctedGuardKey: true,
+        },
+      });
+      const settledPeriodStarts = conflictingManagedPeriodStarts(
+        subscription,
+        plan,
+        correctionProofs
+      );
+      if (settledPeriodStarts.size === 0) return { subscription, plan };
+
+      // Suppress only the proven overlapping input. Any earlier/non-overlap
+      // inputs must materialize before the monotonic watermark advances past
+      // them, or a June+July plan could permanently omit June when only July
+      // overlaps. Persistence and watermark/cycle advancement share this
+      // writer-locked transaction, so failure rolls both back and replay stays
+      // idempotent.
+      const nonOverlappingInputs = plan.inputs.filter(
+        (input) =>
+          !settledPeriodStarts.has(input.windowStart?.getTime() ?? Number.NaN)
+      );
+      const persisted = await persistExternalUsageEventsInTransaction(
+        tx,
+        nonOverlappingInputs
+      );
+      await tx.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          currentPeriodStart: plan.currentPeriodStart,
+          nextRenewalAt: plan.nextRenewalAt,
+          lastChargedPeriodStart: plan.lastChargedPeriodStart,
+        },
+      });
+      return {
+        settled: true,
+        charged: nonOverlappingInputs.length > 0 ? 1 : 0,
+        eventsWritten: persisted.persisted,
+      };
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 5_000,
+      timeout: 20_000,
+    }
+  );
+}
+
 export async function materializeDueSubscriptions(
   now: Date = new Date()
 ): Promise<MaterializeSubscriptionsResult> {
@@ -146,6 +330,11 @@ export async function materializeDueSubscriptions(
     where: { status: "active", currentPeriodStart: { lte: now } },
     select: {
       id: true,
+      providerId: true,
+      externalAdoptionGuardKey: true,
+      externalBillingSource: true,
+      externalBillingId: true,
+      externalBillingManaged: true,
       name: true,
       costUsd: true,
       currency: true,
@@ -163,9 +352,28 @@ export async function materializeDueSubscriptions(
   let charged = 0;
   let eventsWritten = 0;
 
-  for (const subscription of subscriptions) {
-    const plan = planSubscriptionCharges(subscription, now);
+  for (const observedSubscription of subscriptions) {
+    let subscription: DueSubscription = observedSubscription;
+    let plan = planSubscriptionCharges(subscription, now);
     if (!plan) continue;
+
+    // An explicitly linked owner-controlled row can take over an identity after
+    // a provider corrects a charged term (for example $5 -> $6). Preserve its
+    // terms/status/guard, but avoid a duplicate only when immutable proof
+    // matches that exact source + external ID and window. The writer-locked
+    // recheck records only a settlement watermark; unlinked/unrelated rows and
+    // an owner reanchor remain independently billable.
+    if (subscription.externalAdoptionGuardKey) {
+      const guarded = await resolveGuardedChargePlan(subscription.id, now);
+      if (!guarded) continue;
+      if ("settled" in guarded) {
+        charged += guarded.charged;
+        eventsWritten += guarded.eventsWritten;
+        continue;
+      }
+      subscription = guarded.subscription;
+      plan = guarded.plan;
+    }
 
     const persistResult = await persistExternalUsageEvents(plan.inputs);
     eventsWritten += persistResult.persisted;

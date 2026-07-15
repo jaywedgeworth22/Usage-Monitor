@@ -37,6 +37,7 @@ model Provider {
   allocations           ProviderProjectAllocation[]
   subscriptions         Subscription[]
   externalBilling       ProviderExternalBilling[]
+  externalBillingChargeCorrections ExternalBillingChargeCorrection[]
 }
 
 model ProviderPlan {
@@ -68,15 +69,19 @@ model ProviderPlan {
 
 // Authoritative, read-only billing/account state synchronized from a
 // provider's official API. These rows are deliberately separate from
-// Subscription: Subscription materializes charges, while this model only
-// mirrors external plan/status/period data and can therefore never create a
-// second charge for spend already reported by an adapter.
+// Subscription: this model only mirrors external plan/status/period data.
+// Maintenance may conservatively adopt an exact authoritative recurring row
+// into Subscription; the external identity then drives fixed-cost dedupe.
 model ProviderExternalBilling {
   id                 String    @id @default(uuid())
   providerId         String
   provider           Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
   source             String
   externalId         String
+  // Explicit per-record authority to create/reconcile a paid recurring local
+  // charge. Collection-level sync.authoritative only controls source pruning
+  // and is deliberately never copied into this field.
+  paidRecurringAuthoritative Boolean @default(false)
   kind               String
   // Human-readable paid product/service distinct from a tier or plan name.
   serviceName        String?
@@ -416,6 +421,14 @@ model Subscription {
   // provider-reported fixed fee when this exact identity is present and live.
   externalBillingSource  String?
   externalBillingId      String?
+  // True only for subscriptions created by authoritative external-billing
+  // maintenance. These are single-term schedules reconciled from fresh rows;
+  // owner-created/linked rows remain false and are never overwritten.
+  externalBillingManaged Boolean   @default(false)
+  // Durable charge-shape guard used by auto-managed rows and by owner rows
+  // explicitly linked to one exact eligible external source + ID. Never
+  // inferred for an unlinked same-price row: price/cadence are not identity.
+  externalAdoptionGuardKey String? @unique
   name                   String
   description            String?
   costUsd                Float
@@ -454,6 +467,35 @@ model Subscription {
   @@unique([providerId, externalBillingSource, externalBillingId])
   @@index([projectId])
   @@index([status, nextRenewalAt])
+}
+
+// Immutable-period proof that a fresh authoritative provider observation
+// corrected one exact already-materialized local subscription charge. Each
+// corrected charge shape remains available for budget reconciliation and can
+// settle a matching explicitly linked owner collision even after provider
+// rollover, source staleness, or deletion of the managed Subscription row.
+// Stale observations never create or update these rows.
+model ExternalBillingChargeCorrection {
+  id                    String       @id @default(uuid())
+  providerId            String
+  provider              Provider     @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  managedSubscriptionId String
+  source                String
+  externalId            String
+  originalPeriodStart   DateTime
+  originalPeriodEnd     DateTime
+  originalAmountUsd     Float
+  correctedPeriodStart  DateTime
+  correctedPeriodEnd    DateTime
+  correctedAmountUsd    Float
+  correctedGuardKey     String
+  observedAt            DateTime
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  @@unique([managedSubscriptionId, originalPeriodStart, correctedGuardKey])
+  @@index([providerId, originalPeriodStart])
+  @@index([providerId, correctedGuardKey])
 }
 
 model ProviderProjectAllocation {

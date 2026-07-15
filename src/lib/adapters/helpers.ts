@@ -43,6 +43,13 @@ export interface AdapterInvocationContext {
 
 export interface AdapterExternalBillingRecord {
   externalId: string;
+  /**
+   * Explicit authority to create/reconcile a paid recurring local charge from
+   * this exact record. Defaults false at persistence. Collection completeness
+   * (`AdapterExternalBillingSync.authoritative`) is only a pruning contract and
+   * must never imply that an individual row is safe to charge.
+   */
+  paidRecurringAuthoritative?: boolean;
   kind: "account" | "billing_period" | "invoice" | "plan" | "subscription" | "service_plan";
   serviceName?: string | null;
   planName?: string | null;

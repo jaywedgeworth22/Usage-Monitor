@@ -269,6 +269,17 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
       outcomes: [],
     }));
     const runMaintenance = vi.fn(async () => ({
+      subscriptionAdoption: {
+        examined: 0,
+        eligible: 0,
+        adopted: 0,
+        existing: 0,
+        ambiguous: 0,
+        reconciled: 0,
+        deactivated: 0,
+        raced: 0,
+        degradedError: null,
+      },
       subscriptions: { examined: 0, charged: 0, eventsWritten: 0 },
       providerRenewals: { examined: 0, advanced: 0 },
       retention: { skipped: true as const, reason: "interval" as const },
@@ -319,6 +330,17 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
       outcomes: [],
     }));
     const runMaintenance = vi.fn(async () => ({
+      subscriptionAdoption: {
+        examined: 0,
+        eligible: 0,
+        adopted: 0,
+        existing: 0,
+        ambiguous: 0,
+        reconciled: 0,
+        deactivated: 0,
+        raced: 0,
+        degradedError: null,
+      },
       subscriptions: { examined: 0, charged: 0, eventsWritten: 0 },
       providerRenewals: { examined: 0, advanced: 0 },
       retention: { skipped: true as const, reason: "interval" as const },

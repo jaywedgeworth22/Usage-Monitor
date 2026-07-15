@@ -50,6 +50,7 @@ describe("apify adapter", () => {
       planName: "Personal",
       amountUsd: 49,
       spendLimitUsd: 300,
+      paidRecurringAuthoritative: true,
     });
     expect(JSON.stringify(result.rawData)).not.toContain("must-not-persist");
   });
@@ -83,6 +84,9 @@ describe("apify adapter", () => {
 
     expect(result.totalCost).toBe(25);
     expect(result.balance).toBe(0);
+    expect(
+      result.externalBilling?.records[0].paidRecurringAuthoritative
+    ).toBe(false);
   });
 
   it("keeps an out-of-month billing cycle display-only", async () => {
@@ -107,5 +111,47 @@ describe("apify adapter", () => {
     expect(result.rawData).toMatchObject({
       billing: { estimatedCurrentBillUsd: 25, includedInCurrentMonthBudget: false },
     });
+    expect(
+      result.externalBilling?.records[0].paidRecurringAuthoritative
+    ).toBe(false);
   });
+
+  it.each([false, null])(
+    "does not attest a paid recurring charge when isPaying is %s",
+    async (isPaying) => {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValueOnce(
+            json({
+              data: {
+                monthlyUsageCycle: {
+                  startAt: "2026-07-01",
+                  endAt: "2026-08-01",
+                },
+              },
+            })
+          )
+          .mockResolvedValueOnce(
+            json({
+              data: {
+                isPaying,
+                plan: {
+                  id: "Personal",
+                  isEnabled: true,
+                  monthlyBasePriceUsd: 49,
+                },
+              },
+            })
+          )
+      );
+
+      const result = await fetchUsage("token");
+
+      expect(
+        result.externalBilling?.records[0].paidRecurringAuthoritative
+      ).toBe(false);
+    }
+  );
 });
