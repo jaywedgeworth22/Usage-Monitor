@@ -794,13 +794,13 @@ export default function AddProviderModal({
                 />
                 <span>
                   <span className="block text-sm font-medium text-red-800">
-                    Disconnect Google Cloud Billing
+                    Disconnect Google Cloud integrations
                   </span>
                   <span className="mt-0.5 block text-xs text-red-700">
-                    On save, remove the billing dataset, optional project/table,
-                    and encrypted service-account JSON. The Gemini API key,
-                    manual price, renewal date, and unrelated configuration stay
-                    unchanged.
+                    On save, remove the billing dataset, Gemini project/table,
+                    and encrypted service-account JSON. Cloud Billing and Cloud
+                    Monitoring will both disconnect. The Gemini API key, manual
+                    price, renewal date, and unrelated configuration stay unchanged.
                   </span>
                 </span>
               </label>
