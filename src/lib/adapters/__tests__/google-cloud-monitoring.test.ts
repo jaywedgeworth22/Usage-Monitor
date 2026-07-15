@@ -374,6 +374,15 @@ describe("Google Cloud Monitoring Gemini enrichment", () => {
       "google-cloud-monitoring-native-quota-usage",
       "google-cloud-monitoring-native-quota-limits",
     ]);
+    expect(result.externalBillingSyncs[0]).toMatchObject({
+      authoritative: true,
+      records: [
+        expect.objectContaining({
+          externalId: "gemini-requests-mtd",
+          usageQuantity: 15,
+        }),
+      ],
+    });
     expect(result.externalBillingSyncs[2].records[0]).toMatchObject({
       requestLimit: 2_000_000,
       usageUnit: "tokens",
@@ -429,7 +438,7 @@ describe("Google Cloud Monitoring Gemini enrichment", () => {
     expect(result.externalBillingSyncs).toEqual([
       {
         source: "google-cloud-monitoring-requests",
-        authoritative: true,
+        authoritative: false,
         records: [],
       },
       {

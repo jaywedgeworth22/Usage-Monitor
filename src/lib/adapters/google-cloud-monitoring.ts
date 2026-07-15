@@ -1078,13 +1078,17 @@ export async function fetchGoogleCloudMonitoring(
 
   const externalBillingSyncs: AdapterExternalBillingSync[] = [];
   if (requests.status !== "error") {
+    const observedAggregate =
+      requestTotal != null && requestReportThrough != null;
     externalBillingSyncs.push({
       source: "google-cloud-monitoring-requests",
-      authoritative: true,
-      records:
-        requestTotal != null && requestReportThrough != null
-          ? [requestRecord(requestTotal, window, requestReportThrough)]
-          : [],
+      // request_count can remain empty during Google's documented visibility
+      // delay. Only a real aggregate point is current/authoritative; an empty
+      // query means unknown and must preserve the previous MTD row.
+      authoritative: observedAggregate,
+      records: observedAggregate
+        ? [requestRecord(requestTotal, window, requestReportThrough)]
+        : [],
     });
   }
   if (discovery.status === "ready") {

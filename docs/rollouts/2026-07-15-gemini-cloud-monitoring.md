@@ -52,10 +52,12 @@ credential identifiers returned in labels are discarded.
 Google currently documents up to 150 seconds of visibility delay for native
 Gemini quota usage and limit metrics and up to 1,800 seconds for aggregate
 request counts. Consequently, successful empty results remain unknown (`null`),
-never false zero. Aggregate request fallback can clear only its own stale
-metadata after a successful empty result. Native discovery is intentionally
-recent-series-only, so native sources remain non-authoritative: absent, failed,
-or bounded dimensions preserve prior records instead of implying deletion.
+never false zero. An empty aggregate request fallback is non-authoritative and
+preserves the previous month-to-date row through visibility latency; only an
+observed aggregate point is authoritative/current. Native discovery is
+intentionally recent-series-only, so native sources remain non-authoritative:
+absent, failed, or bounded dimensions preserve prior records instead of
+implying deletion.
 
 ## Safety bounds
 
