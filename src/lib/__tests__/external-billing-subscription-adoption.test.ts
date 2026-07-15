@@ -1842,6 +1842,302 @@ describe("adoptExternalBillingSubscriptions", () => {
     });
   });
 
+  it("hands off Cloudflare's explicit midnight renewal window without broadening general adoption", async () => {
+    const provider = await createProvider();
+    const cloudflareStart = new Date("2026-06-16T19:02:36.000Z");
+    const cloudflareEnd = new Date("2026-07-16T00:00:00.000Z");
+    await createExternalBilling(provider.id, "workers-paid", {
+      planName: "Workers Paid",
+      currentPeriodStart: cloudflareStart,
+      currentPeriodEnd: cloudflareEnd,
+      nextRenewalAt: cloudflareEnd,
+    });
+    const legacy = await createLegacyCloudflareSubscription(
+      provider.id,
+      "workers-paid",
+      {
+        currentPeriodStart: cloudflareStart,
+        nextRenewalAt: cloudflareEnd,
+      }
+    );
+
+    const defaultOff = await adoptExternalBillingSubscriptions(NOW);
+    expect(defaultOff).toMatchObject({
+      eligible: 0,
+      adopted: 0,
+      cloudflareLegacyHandoff: "disabled",
+    });
+    expect(
+      await prisma.subscription.findUniqueOrThrow({ where: { id: legacy.id } })
+    ).toMatchObject({
+      externalBillingManaged: false,
+      externalAdoptionGuardKey: null,
+      autoRenew: true,
+    });
+
+    process.env.CLOUDFLARE_LEGACY_HANDOFF_SUBSCRIPTION_ID = legacy.id;
+    const handedOff = await adoptExternalBillingSubscriptions(NOW);
+    expect(handedOff).toMatchObject({
+      eligible: 0,
+      adopted: 0,
+      existing: 0,
+      deactivated: 0,
+      cloudflareLegacyHandoff: "handed_off",
+    });
+    expect(
+      await prisma.subscription.findUniqueOrThrow({ where: { id: legacy.id } })
+    ).toMatchObject({
+      id: legacy.id,
+      currentPeriodStart: cloudflareStart,
+      nextRenewalAt: cloudflareEnd,
+      externalBillingManaged: true,
+      externalAdoptionGuardKey: externalAdoptionGuardKey(
+        provider.id,
+        500,
+        "monthly"
+      ),
+      autoRenew: false,
+      status: "active",
+    });
+    expect(await prisma.externalUsageEvent.count()).toBe(1);
+
+    delete process.env.CLOUDFLARE_LEGACY_HANDOFF_SUBSCRIPTION_ID;
+    expect(await adoptExternalBillingSubscriptions(NOW)).toMatchObject({
+      eligible: 0,
+      adopted: 0,
+      deactivated: 0,
+      cloudflareLegacyHandoff: "disabled",
+    });
+    expect(
+      await prisma.subscription.findUniqueOrThrow({ where: { id: legacy.id } })
+    ).toMatchObject({ status: "active", autoRenew: false });
+
+    const nextPeriodStart = cloudflareEnd;
+    const nextPeriodEnd = new Date("2026-08-16T00:00:00.000Z");
+    const nextPeriodNow = new Date("2026-08-15T12:00:00.000Z");
+    await prisma.providerExternalBilling.updateMany({
+      data: {
+        currentPeriodStart: nextPeriodStart,
+        currentPeriodEnd: nextPeriodEnd,
+        nextRenewalAt: nextPeriodEnd,
+        syncedAt: nextPeriodNow,
+      },
+    });
+    expect(
+      await adoptExternalBillingSubscriptions(nextPeriodNow)
+    ).toMatchObject({
+      eligible: 1,
+      adopted: 0,
+      reconciled: 1,
+      deactivated: 0,
+      cloudflareLegacyHandoff: "disabled",
+    });
+    expect(
+      await materializeDueSubscriptions(nextPeriodNow)
+    ).toMatchObject({ charged: 1, eventsWritten: 1 });
+    expect(
+      await materializeDueSubscriptions(nextPeriodNow)
+    ).toMatchObject({ charged: 0, eventsWritten: 0 });
+    expect(await prisma.subscription.count()).toBe(1);
+    expect(
+      await prisma.externalUsageEvent.findMany({
+        orderBy: { occurredAt: "asc" },
+        select: { occurredAt: true, metadata: true },
+      })
+    ).toEqual([
+      {
+        occurredAt: cloudflareStart,
+        metadata: expect.objectContaining({ subscriptionId: legacy.id }),
+      },
+      {
+        occurredAt: nextPeriodStart,
+        metadata: expect.objectContaining({ subscriptionId: legacy.id }),
+      },
+    ]);
+  });
+
+  it.each([
+    [
+      "a non-midnight end",
+      { currentPeriodEnd: new Date("2026-07-16T06:00:00.000Z") },
+    ],
+    [
+      "the wrong renewal date",
+      { currentPeriodEnd: new Date("2026-07-17T00:00:00.000Z") },
+    ],
+    ["a different service", { serviceName: "Pages Paid" }],
+    ["a non-paid state", { status: "active" }],
+  ] as const)(
+    "keeps the Cloudflare explicit-window exception closed for %s",
+    async (_scenario, externalOverride) => {
+      const provider = await createProvider();
+      const cloudflareStart = new Date("2026-06-16T19:02:36.000Z");
+      const defaultEnd = new Date("2026-07-16T00:00:00.000Z");
+      const cloudflareEnd =
+        "currentPeriodEnd" in externalOverride
+          ? externalOverride.currentPeriodEnd
+          : defaultEnd;
+      await createExternalBilling(provider.id, "workers-paid", {
+        planName: "Workers Paid",
+        currentPeriodStart: cloudflareStart,
+        currentPeriodEnd: cloudflareEnd,
+        nextRenewalAt: cloudflareEnd,
+        ...externalOverride,
+      });
+      const legacy = await createLegacyCloudflareSubscription(
+        provider.id,
+        "workers-paid",
+        {
+          currentPeriodStart: cloudflareStart,
+          nextRenewalAt: cloudflareEnd,
+        }
+      );
+      process.env.CLOUDFLARE_LEGACY_HANDOFF_SUBSCRIPTION_ID = legacy.id;
+
+      expect(
+        (await adoptExternalBillingSubscriptions(NOW))
+          .cloudflareLegacyHandoff
+      ).toBe("external_billing_ineligible");
+      expect(
+        await prisma.subscription.findUniqueOrThrow({ where: { id: legacy.id } })
+      ).toMatchObject({
+        externalBillingManaged: false,
+        externalAdoptionGuardKey: null,
+        autoRenew: true,
+      });
+    }
+  );
+
+  it.each([
+    ["a different service", { serviceName: "Pages Paid" }],
+    ["a generic live state", { status: "active" }],
+    ["a plan record", { kind: "plan" }],
+    ["generic period-end semantics", { dateKind: "period_end" }],
+    [
+      "a mismatched authoritative renewal",
+      { nextRenewalAt: new Date("2026-08-02T00:00:00.000Z") },
+    ],
+  ] as const)(
+    "does not bypass strict Cloudflare handoff guards with exact duration for %s",
+    async (_scenario, externalOverride) => {
+      const provider = await createProvider();
+      await createExternalBilling(provider.id, "workers-paid", externalOverride);
+      const legacy = await createLegacyCloudflareSubscription(provider.id);
+      process.env.CLOUDFLARE_LEGACY_HANDOFF_SUBSCRIPTION_ID = legacy.id;
+
+      expect(
+        (await adoptExternalBillingSubscriptions(NOW))
+          .cloudflareLegacyHandoff
+      ).toBe("external_billing_ineligible");
+      expect(
+        await prisma.subscription.findUniqueOrThrow({ where: { id: legacy.id } })
+      ).toMatchObject({
+        externalBillingManaged: false,
+        externalAdoptionGuardKey: null,
+        autoRenew: true,
+        status: "active",
+      });
+    }
+  );
+
+  it.each([
+    [
+      "another provider",
+      "not-cloudflare",
+      "Cloudflare Workers Paid (Congress.Trade)",
+    ],
+    ["a non-legacy Cloudflare row", "cloudflare", "Workers Paid"],
+  ] as const)(
+    "does not extend the midnight-window reconciliation exception to %s",
+    async (_scenario, providerName, subscriptionName) => {
+      const provider = await createProvider(providerName);
+      if (providerName !== "cloudflare") {
+        await prisma.provider.update({
+          where: { id: provider.id },
+          data: { type: "custom" },
+        });
+      }
+      const cloudflareStart = new Date("2026-06-16T19:02:36.000Z");
+      const cloudflareEnd = new Date("2026-07-16T00:00:00.000Z");
+      await createExternalBilling(provider.id, "workers-paid", {
+        currentPeriodStart: cloudflareStart,
+        currentPeriodEnd: cloudflareEnd,
+        nextRenewalAt: cloudflareEnd,
+      });
+      const managed = await prisma.subscription.create({
+        data: {
+          providerId: provider.id,
+          externalBillingSource: "cloudflare-subscriptions",
+          externalBillingId: "workers-paid",
+          externalBillingManaged: true,
+          externalAdoptionGuardKey: externalAdoptionGuardKey(
+            provider.id,
+            500,
+            "monthly"
+          ),
+          name: subscriptionName,
+          costUsd: 5,
+          currency: "USD",
+          interval: "monthly",
+          intervalCount: 1,
+          startDate: cloudflareStart,
+          currentPeriodStart: cloudflareStart,
+          nextRenewalAt: cloudflareEnd,
+          autoRenew: false,
+          status: "active",
+        },
+      });
+
+      expect(await adoptExternalBillingSubscriptions(NOW)).toMatchObject({
+        eligible: 0,
+        adopted: 0,
+        ambiguous: 1,
+        reconciled: 0,
+        deactivated: 1,
+        cloudflareLegacyHandoff: "disabled",
+      });
+      expect(
+        await prisma.subscription.findUniqueOrThrow({ where: { id: managed.id } })
+      ).toMatchObject({ status: "paused", autoRenew: false });
+      expect(await prisma.externalUsageEvent.count()).toBe(0);
+    }
+  );
+
+  it("rejects a second same-shaped explicit-window Cloudflare authority", async () => {
+    const provider = await createProvider();
+    const cloudflareStart = new Date("2026-06-16T19:02:36.000Z");
+    const cloudflareEnd = new Date("2026-07-16T00:00:00.000Z");
+    for (const externalId of ["workers-paid", "workers-paid-duplicate"]) {
+      await createExternalBilling(provider.id, externalId, {
+        currentPeriodStart: cloudflareStart,
+        currentPeriodEnd: cloudflareEnd,
+        nextRenewalAt: cloudflareEnd,
+      });
+    }
+    const legacy = await createLegacyCloudflareSubscription(
+      provider.id,
+      "workers-paid",
+      {
+        currentPeriodStart: cloudflareStart,
+        nextRenewalAt: cloudflareEnd,
+      }
+    );
+    process.env.CLOUDFLARE_LEGACY_HANDOFF_SUBSCRIPTION_ID = legacy.id;
+
+    expect(
+      (await adoptExternalBillingSubscriptions(NOW)).cloudflareLegacyHandoff
+    ).toBe("guard_collision");
+    expect(
+      await prisma.subscription.findUniqueOrThrow({ where: { id: legacy.id } })
+    ).toMatchObject({
+      externalBillingManaged: false,
+      externalAdoptionGuardKey: null,
+      autoRenew: true,
+      status: "active",
+    });
+    expect(await prisma.externalUsageEvent.count()).toBe(1);
+  });
+
   it.each([
     ["wrong provider", "wrong_provider"],
     ["wrong provider key", "wrong_provider"],
