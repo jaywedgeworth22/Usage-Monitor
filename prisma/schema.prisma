@@ -37,6 +37,7 @@ model Provider {
   allocations           ProviderProjectAllocation[]
   subscriptions         Subscription[]
   externalBilling       ProviderExternalBilling[]
+  externalBillingChargeCorrections ExternalBillingChargeCorrection[]
 }
 
 model ProviderPlan {
@@ -467,6 +468,35 @@ model Subscription {
   @@unique([providerId, externalBillingSource, externalBillingId])
   @@index([projectId])
   @@index([status, nextRenewalAt])
+}
+
+// Immutable-period proof that a fresh authoritative provider observation
+// corrected one exact already-materialized local subscription charge. Each
+// corrected charge shape remains available for budget reconciliation and can
+// settle a matching owner collision even after provider rollover, source
+// staleness, or deletion of the managed Subscription row. Stale observations
+// never create or update these rows.
+model ExternalBillingChargeCorrection {
+  id                    String       @id @default(uuid())
+  providerId            String
+  provider              Provider     @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  managedSubscriptionId String
+  source                String
+  externalId            String
+  originalPeriodStart   DateTime
+  originalPeriodEnd     DateTime
+  originalAmountUsd     Float
+  correctedPeriodStart  DateTime
+  correctedPeriodEnd    DateTime
+  correctedAmountUsd    Float
+  correctedGuardKey     String
+  observedAt            DateTime
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  @@unique([managedSubscriptionId, originalPeriodStart, correctedGuardKey])
+  @@index([providerId, originalPeriodStart])
+  @@index([providerId, correctedGuardKey])
 }
 
 model ProviderProjectAllocation {

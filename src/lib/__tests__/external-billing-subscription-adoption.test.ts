@@ -500,6 +500,92 @@ describe("adoptExternalBillingSubscriptions", () => {
     });
   });
 
+  it("survives a crash before July settlement and suppresses that collision after August rollover", async () => {
+    const provider = await createProvider("crash-before-settlement-provider");
+    const externalId = "crash-before-settlement-plan";
+    await createExternalBilling(provider.id, externalId);
+    await adoptExternalBillingSubscriptions(NOW);
+    await materializeDueSubscriptions(NOW);
+
+    await prisma.providerExternalBilling.update({
+      where: {
+        providerId_source_externalId: {
+          providerId: provider.id,
+          source: "cloudflare-subscriptions",
+          externalId,
+        },
+      },
+      data: { amountUsd: 6, syncedAt: NOW },
+    });
+    const manual = await prisma.subscription.create({
+      data: {
+        providerId: provider.id,
+        externalAdoptionGuardKey: externalAdoptionGuardKey(
+          provider.id,
+          600,
+          "monthly"
+        ),
+        name: "Owner-entered corrected price",
+        costUsd: 6,
+        currency: "USD",
+        interval: "monthly",
+        intervalCount: 1,
+        startDate: PERIOD_START,
+        currentPeriodStart: PERIOD_START,
+        nextRenewalAt: PERIOD_END,
+        autoRenew: false,
+        status: "active",
+      },
+    });
+
+    // Reconciliation establishes the exact correction proof, but simulate a
+    // process stop before materialization can settle the manual watermark.
+    await adoptExternalBillingSubscriptions(NOW);
+    expect(
+      await prisma.externalBillingChargeCorrection.count({
+        where: { providerId: provider.id },
+      })
+    ).toBe(1);
+    expect(
+      await prisma.subscription.findUnique({ where: { id: manual.id } })
+    ).toMatchObject({ lastChargedPeriodStart: null });
+
+    const augustNow = new Date("2026-08-15T12:00:00.000Z");
+    const augustEnd = new Date("2026-09-01T00:00:00.000Z");
+    await prisma.providerExternalBilling.update({
+      where: {
+        providerId_source_externalId: {
+          providerId: provider.id,
+          source: "cloudflare-subscriptions",
+          externalId,
+        },
+      },
+      data: {
+        amountUsd: 7,
+        currentPeriodStart: PERIOD_END,
+        currentPeriodEnd: augustEnd,
+        nextRenewalAt: augustEnd,
+        syncedAt: augustNow,
+      },
+    });
+    await adoptExternalBillingSubscriptions(augustNow);
+
+    const materialized = await materializeDueSubscriptions(augustNow);
+    expect(materialized).toMatchObject({ charged: 1, eventsWritten: 1 });
+    expect(
+      await prisma.externalUsageEvent.findMany({
+        orderBy: { occurredAt: "asc" },
+        select: { costUsd: true, occurredAt: true },
+      })
+    ).toEqual([
+      { costUsd: 5, occurredAt: PERIOD_START },
+      { costUsd: 7, occurredAt: PERIOD_END },
+    ]);
+    expect(
+      await prisma.subscription.findUnique({ where: { id: manual.id } })
+    ).toMatchObject({ lastChargedPeriodStart: PERIOD_START });
+  });
+
   it.each([
     {
       label: "stale",
@@ -580,6 +666,11 @@ describe("adoptExternalBillingSubscriptions", () => {
       expect(
         await prisma.subscription.findUnique({ where: { id: manual.id } })
       ).toMatchObject({ lastChargedPeriodStart: PERIOD_START });
+      expect(
+        await prisma.externalBillingChargeCorrection.count({
+          where: { providerId: provider.id },
+        })
+      ).toBe(0);
     }
   );
 
@@ -630,6 +721,82 @@ describe("adoptExternalBillingSubscriptions", () => {
       spentUsd: 4,
     });
   });
+
+  it.each([
+    { label: "downward", correctedUsd: 4, expectedSpentUsd: 7 },
+    { label: "upward", correctedUsd: 6, expectedSpentUsd: 9 },
+  ])(
+    "keeps a $label exact-period correction deduped after source staleness without subtracting an unrelated subscription",
+    async ({ label, correctedUsd, expectedSpentUsd }) => {
+      const provider = await createProvider(`stale-${label}-correction-provider`);
+      const externalId = `stale-${label}-correction-plan`;
+      await createExternalBilling(provider.id, externalId);
+      await adoptExternalBillingSubscriptions(NOW);
+      await materializeDueSubscriptions(NOW);
+
+      await prisma.subscription.create({
+        data: {
+          providerId: provider.id,
+          name: "Unrelated owner subscription",
+          costUsd: 3,
+          currency: "USD",
+          interval: "monthly",
+          intervalCount: 1,
+          startDate: PERIOD_START,
+          currentPeriodStart: PERIOD_START,
+          nextRenewalAt: PERIOD_END,
+          autoRenew: false,
+          status: "active",
+        },
+      });
+      await materializeDueSubscriptions(NOW);
+
+      await prisma.providerExternalBilling.update({
+        where: {
+          providerId_source_externalId: {
+            providerId: provider.id,
+            source: "cloudflare-subscriptions",
+            externalId,
+          },
+        },
+        data: { amountUsd: correctedUsd, syncedAt: NOW },
+      });
+      await prisma.usageSnapshot.create({
+        data: {
+          providerId: provider.id,
+          fetchedAt: NOW,
+          totalCost: correctedUsd,
+          fixedCostIncludedUsd: correctedUsd,
+        },
+      });
+      await adoptExternalBillingSubscriptions(NOW);
+
+      const fresh = await computeBudgetStatus(NOW);
+      const managed = await prisma.subscription.findFirstOrThrow({
+        where: { providerId: provider.id, externalBillingManaged: true },
+        select: { id: true },
+      });
+      await prisma.subscription.delete({ where: { id: managed.id } });
+      expect(
+        await prisma.externalBillingChargeCorrection.count({
+          where: { providerId: provider.id },
+        })
+      ).toBe(1);
+      const stale = await computeBudgetStatus(
+        new Date("2026-07-15T16:00:01.000Z")
+      );
+      for (const budget of [fresh, stale]) {
+        expect(
+          budget.providers.find((row) => row.id === provider.id)
+        ).toMatchObject({
+          subscriptionMonthToDateUsd: 8,
+          linkedFixedDedupeUsd: 5,
+          fixedCostConflict: false,
+          spentUsd: expectedSpentUsd,
+        });
+      }
+    }
+  );
 
   it.each([
     {

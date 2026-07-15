@@ -122,6 +122,25 @@ CREATE TABLE "Subscription" (
   CONSTRAINT "Subscription_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "Project" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
+CREATE TABLE "ExternalBillingChargeCorrection" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "providerId" TEXT NOT NULL,
+  "managedSubscriptionId" TEXT NOT NULL,
+  "source" TEXT NOT NULL,
+  "externalId" TEXT NOT NULL,
+  "originalPeriodStart" DATETIME NOT NULL,
+  "originalPeriodEnd" DATETIME NOT NULL,
+  "originalAmountUsd" REAL NOT NULL,
+  "correctedPeriodStart" DATETIME NOT NULL,
+  "correctedPeriodEnd" DATETIME NOT NULL,
+  "correctedAmountUsd" REAL NOT NULL,
+  "correctedGuardKey" TEXT NOT NULL,
+  "observedAt" DATETIME NOT NULL,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL,
+  CONSTRAINT "ExternalBillingChargeCorrection_providerId_fkey" FOREIGN KEY ("providerId") REFERENCES "Provider" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 CREATE TABLE "UsageSnapshot" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "providerId" TEXT NOT NULL,
@@ -324,6 +343,9 @@ CREATE UNIQUE INDEX "Subscription_providerId_externalBillingSource_externalBilli
 CREATE UNIQUE INDEX "Subscription_externalAdoptionGuardKey_key" ON "Subscription"("externalAdoptionGuardKey");
 CREATE INDEX "Subscription_projectId_idx" ON "Subscription"("projectId");
 CREATE INDEX "Subscription_status_nextRenewalAt_idx" ON "Subscription"("status", "nextRenewalAt");
+CREATE UNIQUE INDEX "ExternalBillingChargeCorrection_managedSubscriptionId_originalPeriodStart_correctedGuardKey_key" ON "ExternalBillingChargeCorrection"("managedSubscriptionId", "originalPeriodStart", "correctedGuardKey");
+CREATE INDEX "ExternalBillingChargeCorrection_providerId_originalPeriodStart_idx" ON "ExternalBillingChargeCorrection"("providerId", "originalPeriodStart");
+CREATE INDEX "ExternalBillingChargeCorrection_providerId_correctedGuardKey_idx" ON "ExternalBillingChargeCorrection"("providerId", "correctedGuardKey");
 CREATE INDEX "ExternalUsageEventTombstone_occurredAt_idx" ON "ExternalUsageEventTombstone"("occurredAt");
 CREATE INDEX "ExternalUsageEventTombstone_prunedAt_idx" ON "ExternalUsageEventTombstone"("prunedAt");
 CREATE INDEX "OtlpMetricState_updatedAt_idx" ON "OtlpMetricState"("updatedAt");

@@ -57,6 +57,15 @@ Adoption immediately precedes materialization under one scheduler admission leas
 identity and exact period matching dedupe the materialized fixed term from a provider snapshot's
 `fixedCostIncludedUsd`, so the current Cloudflare term contributes once.
 
+When a fresh authoritative row corrects an already-materialized managed term, adoption verifies
+the deterministic local charge's provider, identity, exact window, amount, and subscription
+metadata before storing an `ExternalBillingChargeCorrection`. The proof is keyed to the immutable
+original charged period plus the corrected charge shape, not the provider's mutable current term.
+It therefore survives a process stop before collision settlement, later provider rollover/source
+staleness, and managed-subscription edits or deletion. Budget reconciliation replaces only the
+exact proven event represented by the fixed snapshot; unrelated subscription events remain
+additive. Stale, weak, or inexact evidence cannot establish a new proof.
+
 ## Verification coverage
 
 - Cloudflare auto-adoption, current-term materialization once, and fixed snapshot dedupe
@@ -69,20 +78,23 @@ identity and exact period matching dedupe the materialized fixed term from a pro
 - charged same-period amount/name/cadence/end corrections preserve historical terms/guard and pause
 - corrected fixed-cost snapshot dedupe (`$5` historical event + `$6` correction = `$6`, not `$11`)
 - guard-collision adoption stays healthy and suppresses a duplicate event without mutating owner rows
-- rollover-safe suppression transactionally watermarks the manual planned period proven settled by immutable managed charged history
+- rollover-safe suppression transactionally watermarks the manual planned period proven settled by durable exact-event correction proof
+- crash before settlement followed by provider rollover still suppresses only the proven prior collision
 - later provider amount/cadence changes cannot release that settled period as a delayed event
 - initial settlement requires fresh/live/canonical/exact authority and matching full provider/managed/manual windows
 - stale, terminal, and already-rolled same-price evidence cannot silently settle a manual period
 - multi-period plans materialize non-overlapping inputs chronologically before the overlap watermark advances
 - a true manual reanchor to the provider's next period remains independently billable
 - downward fixed correction dedupe (`$5` historical event + `$4` correction = exactly `$4`)
+- upward/downward correction dedupe remains stable after source staleness and managed-row deletion,
+  without subtracting unrelated subscription spend
 - exact USD cents, explicit `5.004`/`5.006` rejection, and manual near-cent ambiguity
 - deterministic two-client manual-before-lock, manual-after-lock, cancel, and delete races
 - whole-transaction rollback on candidate failure
 - adoption-degraded continuation through existing materialization/renewal/retention/alerts
 - same-price manual subscriptions remain allowed without external charge authority
 
-The remediated local commit passed `npm run verify`: ESLint, TypeScript, 88 test files / 693 tests,
+The remediated local commit passed `npm run verify`: ESLint, TypeScript, 88 test files / 696 tests,
 additive migration safety including Litestream preservation and destructive-change refusal, SQLite
 backup/startup checks, and the production build. The hostile-review HOLD remains in force until
 independent re-review. No production mutation, push, PR, merge, or deployment is allowed before

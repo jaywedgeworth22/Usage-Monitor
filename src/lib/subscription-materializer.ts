@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
@@ -7,9 +6,9 @@ import {
   type ExternalUsageEventInput,
 } from "@/lib/external-usage-events";
 import {
-  paidRecurringAdoptionCandidate,
-  type PaidRecurringAdoptionRecord,
-} from "@/lib/external-billing-subscription-adoption";
+  SUBSCRIPTION_SOURCE_APP,
+  subscriptionChargeIdempotencyKey,
+} from "@/lib/subscription-charge-identity";
 import { advancePeriod, isSubscriptionInterval, type SubscriptionInterval } from "@/lib/subscriptions";
 
 // Turns each active subscription's elapsed billing periods into synthetic
@@ -31,19 +30,10 @@ import { advancePeriod, isSubscriptionInterval, type SubscriptionInterval } from
 // unbounded backfill in one pass.
 const MAX_PERIODS_PER_RUN = 240;
 
-export const SUBSCRIPTION_SOURCE_APP = "subscription";
-
 export interface MaterializeSubscriptionsResult {
   examined: number;
   charged: number;
   eventsWritten: number;
-}
-
-function chargeIdempotencyKey(subscriptionId: string, periodStart: Date): string {
-  return crypto
-    .createHash("sha256")
-    .update(`subscription:${subscriptionId}:${periodStart.toISOString()}`)
-    .digest("hex");
 }
 
 interface DueSubscription {
@@ -63,18 +53,11 @@ interface DueSubscription {
   provider: { name: string; refreshIntervalMin?: number };
 }
 
-interface GuardConflictExternalRecord extends PaidRecurringAdoptionRecord {
-  providerId: string;
-}
-
-interface ChargedManagedIdentity {
-  id: string;
-  providerId: string;
-  externalBillingSource: string | null;
-  externalBillingId: string | null;
-  currentPeriodStart: Date;
-  nextRenewalAt: Date;
-  lastChargedPeriodStart: Date | null;
+interface ChargeCorrectionProof {
+  managedSubscriptionId: string;
+  correctedPeriodStart: Date;
+  correctedPeriodEnd: Date;
+  correctedGuardKey: string;
 }
 
 interface ChargePlan {
@@ -119,7 +102,10 @@ export function planSubscriptionCharges(
 
     if (!lastCharged || periodStart.getTime() > lastCharged.getTime()) {
       inputs.push({
-        idempotencyKey: chargeIdempotencyKey(subscription.id, periodStart),
+        idempotencyKey: subscriptionChargeIdempotencyKey(
+          subscription.id,
+          periodStart
+        ),
         sourceApp: SUBSCRIPTION_SOURCE_APP,
         provider: subscription.provider.name,
         projectId: subscription.projectId,
@@ -164,52 +150,34 @@ export function planSubscriptionCharges(
   };
 }
 
-function conflictingManagedPeriodStart(
+function conflictingManagedPeriodStarts(
   subscription: DueSubscription,
   plan: ChargePlan,
-  externalRecords: GuardConflictExternalRecord[],
-  chargedManagedIdentities: ChargedManagedIdentity[],
-  refreshIntervalMin: number,
-  now: Date
-): Date | null {
-  const providerId = subscription.providerId;
+  correctionProofs: ChargeCorrectionProof[]
+): Set<number> {
+  const periodStarts = new Set<number>();
   const guardKey = subscription.externalAdoptionGuardKey;
-  if (!providerId || !guardKey) return null;
+  if (!guardKey) return periodStarts;
 
-  for (const record of externalRecords) {
-    const candidate = paidRecurringAdoptionCandidate(
-      providerId,
-      refreshIntervalMin,
-      record,
-      now
-    );
-    if (!candidate || candidate.guardKey !== guardKey) {
+  for (const proof of correctionProofs) {
+    if (
+      proof.managedSubscriptionId === subscription.id ||
+      proof.correctedGuardKey !== guardKey
+    ) {
       continue;
     }
-
-    for (const managed of chargedManagedIdentities) {
-      if (
-        managed.id !== subscription.id &&
-        managed.providerId === providerId &&
-        managed.externalBillingSource === record.source &&
-        managed.externalBillingId === record.externalId &&
-        managed.lastChargedPeriodStart?.getTime() ===
-          managed.currentPeriodStart.getTime() &&
-        managed.currentPeriodStart.getTime() ===
-          candidate.periodStart.getTime() &&
-        managed.nextRenewalAt.getTime() === candidate.periodEnd.getTime() &&
-        plan.inputs.some(
-          (input) =>
-            input.windowStart?.getTime() ===
-              candidate.periodStart.getTime() &&
-            input.windowEnd?.getTime() === candidate.periodEnd.getTime()
-        )
-      ) {
-        return managed.currentPeriodStart;
-      }
+    if (
+      plan.inputs.some(
+        (input) =>
+          input.windowStart?.getTime() ===
+            proof.correctedPeriodStart.getTime() &&
+          input.windowEnd?.getTime() === proof.correctedPeriodEnd.getTime()
+      )
+    ) {
+      periodStarts.add(proof.correctedPeriodStart.getTime());
     }
   }
-  return null;
+  return periodStarts;
 }
 
 async function resolveGuardedChargePlan(
@@ -263,52 +231,24 @@ async function resolveGuardedChargePlan(
         return { subscription, plan };
       }
 
-      const externalRecords = await tx.providerExternalBilling.findMany({
-        where: { providerId: subscription.providerId },
-        select: {
-          providerId: true,
-          source: true,
-          externalId: true,
-          paidRecurringAuthoritative: true,
-          kind: true,
-          serviceName: true,
-          planName: true,
-          status: true,
-          amountUsd: true,
-          currency: true,
-          billingInterval: true,
-          currentPeriodStart: true,
-          currentPeriodEnd: true,
-          rollupRole: true,
-          dateKind: true,
-          syncedAt: true,
-        },
-      });
-      const chargedManagedIdentities = await tx.subscription.findMany({
+      const correctionProofs = await tx.externalBillingChargeCorrection.findMany({
         where: {
           providerId: subscription.providerId,
-          externalBillingManaged: true,
-          lastChargedPeriodStart: { not: null },
+          correctedGuardKey: subscription.externalAdoptionGuardKey,
         },
         select: {
-          id: true,
-          providerId: true,
-          externalBillingSource: true,
-          externalBillingId: true,
-          currentPeriodStart: true,
-          nextRenewalAt: true,
-          lastChargedPeriodStart: true,
+          managedSubscriptionId: true,
+          correctedPeriodStart: true,
+          correctedPeriodEnd: true,
+          correctedGuardKey: true,
         },
       });
-      const settledPeriodStart = conflictingManagedPeriodStart(
+      const settledPeriodStarts = conflictingManagedPeriodStarts(
         subscription,
         plan,
-        externalRecords,
-        chargedManagedIdentities,
-        subscription.provider.refreshIntervalMin,
-        now
+        correctionProofs
       );
-      if (!settledPeriodStart) return { subscription, plan };
+      if (settledPeriodStarts.size === 0) return { subscription, plan };
 
       // Suppress only the proven overlapping input. Any earlier/non-overlap
       // inputs must materialize before the monotonic watermark advances past
@@ -318,7 +258,7 @@ async function resolveGuardedChargePlan(
       // idempotent.
       const nonOverlappingInputs = plan.inputs.filter(
         (input) =>
-          input.windowStart?.getTime() !== settledPeriodStart.getTime()
+          !settledPeriodStarts.has(input.windowStart?.getTime() ?? Number.NaN)
       );
       const persisted = await persistExternalUsageEventsInTransaction(
         tx,

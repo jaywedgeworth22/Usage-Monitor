@@ -8,6 +8,10 @@ import {
   resolveExternalBillingPeriod,
 } from "@/lib/external-billing-link";
 import { prisma } from "@/lib/prisma";
+import {
+  SUBSCRIPTION_SOURCE_APP,
+  subscriptionChargeIdempotencyKey,
+} from "@/lib/subscription-charge-identity";
 import type { SubscriptionInterval } from "@/lib/subscriptions";
 
 export interface AdoptExternalBillingSubscriptionsResult {
@@ -50,10 +54,12 @@ export interface PaidRecurringAdoptionCandidate {
   periodStart: Date;
   periodEnd: Date;
   guardKey: string;
+  observedAt: Date;
 }
 
 const providerStateSelect = {
   id: true,
+  name: true,
   refreshIntervalMin: true,
   plan: { select: { fixedMonthlyCostUsd: true } },
   subscriptions: {
@@ -186,7 +192,11 @@ export function paidRecurringAdoptionCandidate(
 
   const cadence = normalizeExternalBillingCadence(record.billingInterval);
   const period = resolveExternalBillingPeriod(record);
-  if (!cadence || !period) return null;
+  const observedAt =
+    record.syncedAt instanceof Date
+      ? record.syncedAt
+      : new Date(record.syncedAt);
+  if (!cadence || !period || !Number.isFinite(observedAt.getTime())) return null;
 
   return {
     providerId,
@@ -200,7 +210,14 @@ export function paidRecurringAdoptionCandidate(
     periodStart: period.start,
     periodEnd: period.end,
     guardKey: externalAdoptionGuardKey(providerId, amountCents, cadence),
+    observedAt,
   };
+}
+
+function asRecord(value: Prisma.JsonValue | null): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 export async function findExternalAdoptionGuardKeyForCharge(input: {
@@ -324,6 +341,93 @@ function chargedTermsMatchCandidate(
   );
 }
 
+/**
+ * Persist correction authority only after proving the exact local charge row
+ * that the fresh provider observation replaces. The proof survives provider
+ * rollover/staleness, but neither can create a new proof.
+ */
+async function recordChargedCorrectionProof(
+  tx: AdoptionTransaction,
+  provider: ProviderState,
+  subscription: ProviderState["subscriptions"][number],
+  candidate: AdoptionCandidate
+): Promise<boolean> {
+  if (
+    candidate.periodStart.getTime() !==
+      subscription.currentPeriodStart.getTime() ||
+    !hasChargedCurrentPeriod(subscription) ||
+    chargedTermsMatchCandidate(subscription, candidate)
+  ) {
+    return false;
+  }
+
+  const event = await tx.externalUsageEvent.findUnique({
+    where: {
+      idempotencyKey: subscriptionChargeIdempotencyKey(
+        subscription.id,
+        subscription.currentPeriodStart
+      ),
+    },
+    select: {
+      sourceApp: true,
+      provider: true,
+      metricType: true,
+      costUsd: true,
+      occurredAt: true,
+      windowStart: true,
+      windowEnd: true,
+      metadata: true,
+    },
+  });
+  const metadata = asRecord(event?.metadata ?? null);
+  const originalAmountCents = exactUsdCents(subscription.costUsd);
+  const eventAmountCents = exactUsdCents(event?.costUsd ?? null);
+  if (
+    !event ||
+    event.sourceApp !== SUBSCRIPTION_SOURCE_APP ||
+    event.provider !== provider.name ||
+    event.metricType !== "subscription" ||
+    originalAmountCents == null ||
+    eventAmountCents !== originalAmountCents ||
+    event.occurredAt.getTime() !==
+      subscription.currentPeriodStart.getTime() ||
+    event.windowStart?.getTime() !==
+      subscription.currentPeriodStart.getTime() ||
+    event.windowEnd?.getTime() !== subscription.nextRenewalAt.getTime() ||
+    metadata?.subscriptionId !== subscription.id
+  ) {
+    return false;
+  }
+
+  await tx.externalBillingChargeCorrection.upsert({
+    where: {
+      managedSubscriptionId_originalPeriodStart_correctedGuardKey: {
+        managedSubscriptionId: subscription.id,
+        originalPeriodStart: subscription.currentPeriodStart,
+        correctedGuardKey: candidate.guardKey,
+      },
+    },
+    create: {
+      providerId: provider.id,
+      managedSubscriptionId: subscription.id,
+      source: candidate.source,
+      externalId: candidate.externalId,
+      originalPeriodStart: subscription.currentPeriodStart,
+      originalPeriodEnd: subscription.nextRenewalAt,
+      originalAmountUsd: subscription.costUsd,
+      correctedPeriodStart: candidate.periodStart,
+      correctedPeriodEnd: candidate.periodEnd,
+      correctedAmountUsd: candidate.amountUsd,
+      correctedGuardKey: candidate.guardKey,
+      observedAt: candidate.observedAt,
+    },
+    // The unique key already identifies the original charge plus corrected
+    // shape. Preserve the first exact authoritative observation verbatim.
+    update: {},
+  });
+  return true;
+}
+
 async function pauseAmbiguousSubscriptions(
   tx: AdoptionTransaction,
   subscriptions: ProviderState["subscriptions"],
@@ -408,6 +512,27 @@ async function reconcileManagedSubscriptions(
         continue;
       }
 
+      const candidateStart = candidate.periodStart.getTime();
+      const storedStart = subscription.currentPeriodStart.getTime();
+      if (
+        candidateStart < storedStart ||
+        (candidateStart > storedStart &&
+          candidateStart < subscription.nextRenewalAt.getTime())
+      ) {
+        result.ambiguous += 1;
+        continue;
+      }
+
+      // Record the fresh correction before resolving a guard collision. A
+      // process can stop after this transaction and before materialization;
+      // the proof must already be durable when the provider later rolls over.
+      await recordChargedCorrectionProof(
+        tx,
+        provider,
+        subscription,
+        candidate
+      );
+
       // The guard is a durable claim on one provider/cadence/amount shape. If
       // another row already owns the candidate's guard, changing this managed
       // row would throw P2002 and abort all adoption maintenance. Pause the
@@ -435,17 +560,6 @@ async function reconcileManagedSubscriptions(
           blockedSubscriptionIds,
           result
         );
-        continue;
-      }
-
-      const candidateStart = candidate.periodStart.getTime();
-      const storedStart = subscription.currentPeriodStart.getTime();
-      if (
-        candidateStart < storedStart ||
-        (candidateStart > storedStart &&
-          candidateStart < subscription.nextRenewalAt.getTime())
-      ) {
-        result.ambiguous += 1;
         continue;
       }
 

@@ -158,6 +158,12 @@ usage — no special-casing. Idempotent by `(subscriptionId, periodStart)` hash 
   back all new/reconciled rows and is reported as degraded, while materialization of existing
   subscriptions, renewals, retention, and alerts still run. Adoption and materialization share one
   scheduler admission lease, so a newly adopted current term normally charges in that same pass.
+- A fresh authoritative correction to an already-materialized managed term writes an
+  `ExternalBillingChargeCorrection` only after verifying the exact deterministic charge event,
+  provider, period, amount, and subscription metadata. This immutable-period proof survives source
+  rollover/staleness and managed-row edits/deletion, so a crash before collision settlement cannot
+  later release a duplicate charge and a corrected fixed snapshot stays deduped. Stale/inexact
+  evidence cannot create proof, and unrelated subscription events remain additive.
 - A recurring fee should be modeled EITHER as `ProviderPlan.fixedMonthlyCostUsd` (a flat read-time
   add) OR as a `Subscription` (materialized events) — not both, or it double-counts.
 - **Status is `active | paused | canceled | considering`** (subscription -> knob linkage phase 1,
