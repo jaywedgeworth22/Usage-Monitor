@@ -652,7 +652,8 @@ async function fetchSecretRecord(
   baseUrl: string,
   source: SourceConfig,
   token: string,
-  secretName: string
+  secretName: string,
+  options: { expandSecretReferences?: boolean } = {}
 ): Promise<SecretRecordRead> {
   const params = new URLSearchParams({
     projectId: source.projectId,
@@ -660,7 +661,7 @@ async function fetchSecretRecord(
     secretPath: source.secretPath,
     type: "shared",
     viewSecretValue: "true",
-    expandSecretReferences: "true",
+    expandSecretReferences: String(options.expandSecretReferences ?? true),
     includeImports: "false",
   });
   const response = await fetchBounded(
@@ -695,9 +696,10 @@ async function fetchBootstrapSecretRecord(
   source: SourceConfig,
   token: string,
   secretName: string,
-  scopeErrorCode: string
+  scopeErrorCode: string,
+  options: { expandSecretReferences?: boolean } = {}
 ): Promise<SecretRecordRead> {
-  const record = await fetchSecretRecord(baseUrl, source, token, secretName);
+  const record = await fetchSecretRecord(baseUrl, source, token, secretName, options);
   if (record.found) {
     if (!record.secret) {
       throw new InfisicalSyncError(scopeErrorCode);
@@ -1888,7 +1890,8 @@ async function readStPrimaryBridge(
     source,
     token,
     ST_PRIMARY_MANIFEST_SECRET,
-    "bridge_manifest_scope_mismatch"
+    "bridge_manifest_scope_mismatch",
+    { expandSecretReferences: false }
   );
   if (!manifestRecord.found) {
     throw new InfisicalSyncError("bridge_manifest_missing");
@@ -1905,7 +1908,8 @@ async function readStPrimaryBridge(
       source,
       token,
       entry.secretName,
-      "bridge_value_scope_mismatch"
+      "bridge_value_scope_mismatch",
+      { expandSecretReferences: false }
     );
     if (!record.found || !record.value) {
       throw new InfisicalSyncError("bridge_complete_set_missing_value");
