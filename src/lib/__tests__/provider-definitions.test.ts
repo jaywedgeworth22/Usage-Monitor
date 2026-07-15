@@ -26,6 +26,12 @@ describe("Cloudflare provider definition", () => {
     expect(cloudflare?.needsAccountId).toBe(true);
     expect(cloudflare?.helpNote).toMatch(/Billing Read API token needs no email/i);
     expect(cloudflare?.helpNote).toMatch(/email is only for a Global API key/i);
+    expect(cloudflare?.helpNote).toMatch(
+      /single-resource metadata\/readability probes only/i
+    );
+    expect(cloudflare?.helpNote).toMatch(
+      /do not affect billing, subscriptions, spend, usage, quotas, or PayGo eligibility/i
+    );
   });
 });
 

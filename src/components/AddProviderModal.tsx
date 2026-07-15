@@ -37,6 +37,9 @@ const GOOGLE_BILLING_CONFIG_FIELDS = [
   "serviceAccountJson",
 ] as const;
 
+export const CLOUDFLARE_RESOURCE_PROBE_DISCLOSURE =
+  "When supplied, each field enables one metadata/readability check for only that resource. These probes do not affect billing, subscriptions, spend, usage, quotas, or PayGo eligibility.";
+
 export function actualUsageBillingPlan(plan: ProviderPlan): ProviderPlan {
   return {
     ...plan,
@@ -701,10 +704,10 @@ export default function AddProviderModal({
             type: "email",
           });
         }
-        fields.push({ key: "databaseId", label: "D1 Database ID (optional)", placeholder: "D1 database UUID", advanced: true });
-        fields.push({ key: "r2BucketName", label: "R2 Bucket Name (optional)", placeholder: "R2 bucket name", advanced: true });
-        fields.push({ key: "kvNamespaceId", label: "KV Namespace ID (optional)", placeholder: "KV namespace UUID", advanced: true });
-        fields.push({ key: "queueId", label: "Queue ID (optional)", placeholder: "Queue UUID", advanced: true });
+        fields.push({ key: "databaseId", label: "D1 database ID", placeholder: "D1 database UUID", advanced: true });
+        fields.push({ key: "r2BucketName", label: "R2 bucket name", placeholder: "R2 bucket name", advanced: true });
+        fields.push({ key: "kvNamespaceId", label: "KV namespace ID", placeholder: "KV namespace UUID", advanced: true });
+        fields.push({ key: "queueId", label: "Queue ID", placeholder: "Queue UUID", advanced: true });
       } else if (selectedDef.name === "twilio") {
         fields.push({ key: "accountId", label: "Account SID", placeholder: "Twilio Account SID" });
       }
@@ -749,6 +752,11 @@ export default function AddProviderModal({
             <textarea
               id={`provider-extra-${field.key}`}
               aria-label={field.label}
+              aria-describedby={
+                selectedDef.name === "cloudflare" && field.advanced
+                  ? "cloudflare-resource-probe-help"
+                  : undefined
+              }
               required={field.required}
               disabled={googleBillingFieldDisabled}
               value={value}
@@ -764,6 +772,11 @@ export default function AddProviderModal({
             <select
               id={`provider-extra-${field.key}`}
               aria-label={field.label}
+              aria-describedby={
+                selectedDef.name === "cloudflare" && field.advanced
+                  ? "cloudflare-resource-probe-help"
+                  : undefined
+              }
               disabled={googleBillingFieldDisabled}
               value={value}
               onChange={(event) =>
@@ -779,6 +792,11 @@ export default function AddProviderModal({
             <input
               id={`provider-extra-${field.key}`}
               aria-label={field.label}
+              aria-describedby={
+                selectedDef.name === "cloudflare" && field.advanced
+                  ? "cloudflare-resource-probe-help"
+                  : undefined
+              }
               type={field.type || "text"}
               required={field.required}
               disabled={googleBillingFieldDisabled}
@@ -808,8 +826,18 @@ export default function AddProviderModal({
         {advancedFields.length > 0 && (
           <details className="rounded-lg border border-gray-200 px-3 py-2">
             <summary className="cursor-pointer text-sm font-medium text-gray-600">
-              Advanced optional configuration
+              {selectedDef.name === "cloudflare"
+                ? "Optional single-resource metadata probes"
+                : "Advanced optional configuration"}
             </summary>
+            {selectedDef.name === "cloudflare" && (
+              <p
+                id="cloudflare-resource-probe-help"
+                className="mt-2 text-xs leading-relaxed text-gray-500"
+              >
+                {CLOUDFLARE_RESOURCE_PROBE_DISCLOSURE}
+              </p>
+            )}
             <div className="mt-3 space-y-3">{advancedFields.map(renderField)}</div>
           </details>
         )}

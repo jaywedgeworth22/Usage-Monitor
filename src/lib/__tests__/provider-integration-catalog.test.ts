@@ -63,6 +63,12 @@ describe("provider integration catalog", () => {
     expect(cloudflare.credentialInputs.join(" ")).toMatch(/scoped API token/i);
     expect(cloudflare.cannotAdd.join(" ")).toMatch(/error 10000/i);
     expect(cloudflare.limitations.join(" ")).toMatch(/Global API key/i);
+    expect(cloudflare.credentialInputs.join(" ")).toMatch(
+      /single-resource metadata\/readability probes only/i
+    );
+    expect(cloudflare.limitations.join(" ")).toMatch(
+      /do not affect billing, subscriptions, spend, usage, quotas, or PayGo eligibility/i
+    );
   });
 
   it("documents the Anthropic individual-account billing boundary and fallback", () => {

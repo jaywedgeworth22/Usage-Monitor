@@ -37,6 +37,10 @@ describe("ProviderIntegrationDrawer", () => {
     expect(html).toContain("What this app reads");
     expect(html).toContain("What is shared back with the service");
     expect(html).toContain("Billing and subscription coverage");
+    expect(html).toContain("single-resource D1/R2/KV/Queue metadata probes");
+    expect(html).toContain(
+      "do not affect billing, subscriptions, spend, usage, quotas, or PayGo eligibility"
+    );
     expect(html).toContain("Confidence and source date");
     expect(html).toContain("Close Cloudflare Production integration details");
   });

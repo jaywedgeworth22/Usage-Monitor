@@ -60,6 +60,8 @@ Langfuse's metrics API reports the cost of model calls observed by Langfuse, not
 
 Cloudflare analytics is not billing-grade. Paid fixed subscription prices/status are direct; zero-dollar Free/Base rows remain compact entitlement metadata and do not inflate Paid Services. A $5 monthly plan with a prior-month period start is shown as recurring `$5/mo` with its next renewal, while calendar-month charged cost correctly remains `$0` until the renewal occurs. The restricted PayGo alpha supplies `ContractedCost` only where the account is eligible; 403/404 and Cloudflare error 10000 are recorded as capability misses without discarding the valid subscription sync. The broader v2 usage alpha currently documents cost fields as unpopulated, so the adapter does not infer missing cost from analytics.
 
+The optional D1 Database ID, R2 Bucket Name, KV Namespace ID, and Queue ID fields each enable one metadata/readability probe for only the named resource. They do not discover account resources and do not affect billing, subscriptions, spend, usage, quotas, or PayGo eligibility. Leave them blank unless a specific resource-access check is useful.
+
 ## No safe direct billing endpoint found
 
 The following adapters no longer consume a paid/quota-bearing product call for a fake “usage check.” They return a typed `UNSUPPORTED` result (no false successful snapshot) and rely on pushed telemetry or local Subscription/ProviderPlan data until the provider publishes a non-billable account API.

@@ -350,13 +350,13 @@ const CATALOG: Record<CatalogProviderName, ProviderIntegrationProfile> = {
   }),
   cloudflare: defineProfile({
     name: "cloudflare", displayName: "Cloudflare", category: "Infrastructure", mode: "direct",
-    summary: "Reads account request analytics, fixed subscriptions, eligible PayGo billing, and optional D1/R2/KV/Queue readability metadata.",
-    reads: ["30-day account request analytics, using Workers analytics only as a fallback when account totals are unavailable.", "All fixed subscriptions with price, status, billing period, and renewal.", "Billing-grade PayGo charges when the alpha endpoint is enabled for the account.", "Optional configured D1, R2, KV, and Queue metadata/readability checks."],
-    credentialInputs: ["Account ID.", "Preferred scoped API token; or Global API key plus account email.", "Optional resource IDs/names for D1, R2, KV, and Queue reads."],
+    summary: "Reads account request analytics, fixed subscriptions, eligible PayGo billing, and optional single-resource D1/R2/KV/Queue metadata probes.",
+    reads: ["30-day account request analytics, using Workers analytics only as a fallback when account totals are unavailable.", "All fixed subscriptions with price, status, billing period, and renewal.", "Billing-grade PayGo charges when the alpha endpoint is enabled for the account.", "Optional D1, R2, KV, and Queue fields each run one metadata/readability check for only the named resource."],
+    credentialInputs: ["Account ID.", "Preferred scoped API token; or Global API key plus account email.", "Optional D1 database ID, R2 bucket name, KV namespace ID, and Queue ID for single-resource metadata/readability probes only."],
     billing: { visibility: "actual", summary: "Fixed subscription charges are direct; PayGo actual cost is direct only for eligible accounts. Analytics is never treated as billing-grade spend." },
     canAdd: ["More Cloudflare resource inventories or GraphQL analytics can be mapped with least-privilege scopes."],
     cannotAdd: ["PayGo billing cannot be forced for accounts that receive 403/404 or Cloudflare error 10000 from the restricted alpha endpoint."],
-    limitations: ["Account and Workers request totals are never summed; Workers is fallback-only to avoid double-counting.", "Optional resource calls prove readability/metadata only and are not billing usage.", "Token permissions determine each capability independently; partial success is expected and recorded.", "Global API key auth is broader and should be avoided when a scoped Billing Read token works."],
+    limitations: ["Account and Workers request totals are never summed; Workers is fallback-only to avoid double-counting.", "Optional resource probes do not affect billing, subscriptions, spend, usage, quotas, or PayGo eligibility.", "Token permissions determine each capability independently; partial success is expected and recorded.", "Global API key auth is broader and should be avoided when a scoped Billing Read token works."],
     source: "src/lib/adapters/cloudflare.ts",
   }),
   hetzner: defineProfile({
