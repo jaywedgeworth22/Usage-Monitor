@@ -11,6 +11,7 @@ import {
   runUsageMaintenance,
   type UsageMaintenanceDependencies,
 } from "../usage-maintenance";
+import { tryAcquireIngestAdmission } from "../ingest-admission";
 
 const subscriptions: MaterializeSubscriptionsResult = {
   examined: 2,
@@ -59,6 +60,54 @@ beforeEach(() => {
 });
 
 describe("runUsageMaintenance", () => {
+  it("queues scheduler money-path writes behind an external ingest admission lease", async () => {
+    const releaseExternal = tryAcquireIngestAdmission();
+    expect(releaseExternal).not.toBeNull();
+
+    const deliverAlerts = vi.fn(async () => deliveredAlerts);
+    const deps = dependencies(deliverAlerts);
+    const materializeSubscriptions = vi.fn(async () => subscriptions);
+    const rollForwardRenewals = vi.fn(async () => providerRenewals);
+    deps.materializeSubscriptions = materializeSubscriptions;
+    deps.rollForwardRenewals = rollForwardRenewals;
+
+    const pending = runUsageMaintenance(deps);
+    await Promise.resolve();
+    expect(materializeSubscriptions).not.toHaveBeenCalled();
+
+    releaseExternal?.();
+    const result = await pending;
+    expect(result.subscriptions).toEqual(subscriptions);
+    expect(result.providerRenewals).toEqual(providerRenewals);
+    expect(materializeSubscriptions).toHaveBeenCalledOnce();
+    expect(rollForwardRenewals).toHaveBeenCalledOnce();
+  });
+
+  it("does not hold scheduler admission across alert delivery dependencies", async () => {
+    let resolveRelease!: (release: () => void) => void;
+    const releaseReady = new Promise<() => void>((resolve) => {
+      resolveRelease = resolve;
+    });
+    const deliverAlerts = vi.fn(async () => deliveredAlerts);
+    const deps = dependencies(deliverAlerts);
+    deps.runRetention = vi.fn(async () => {
+      const releaseExternal = tryAcquireIngestAdmission();
+      expect(releaseExternal).not.toBeNull();
+      resolveRelease(releaseExternal ?? (() => undefined));
+      return retention;
+    });
+
+    const pending = runUsageMaintenance(deps);
+    const releaseExternal = await releaseReady;
+    await Promise.resolve();
+    await vi.waitFor(() => expect(deliverAlerts).toHaveBeenCalledOnce());
+
+    releaseExternal();
+    const result = await pending;
+    expect(result.alerts).toEqual({ ...deliveredAlerts, deferredError: null });
+    expect(deliverAlerts).toHaveBeenCalledOnce();
+  });
+
   it("returns a structured degraded alert result without failing completed money-path stages", async () => {
     const error = summaryTimeout();
     const deliverAlerts = vi.fn(async () => {
