@@ -212,13 +212,13 @@ describe("hetzner adapter", () => {
       }))
     ).toEqual(
       expect.arrayContaining([
-        { externalId: "1", amountUsd: 3.5, currency: "EUR" },
-        { externalId: "server-backup:1", amountUsd: 0.7, currency: "EUR" },
-        { externalId: "volume:2", amountUsd: 0.4, currency: "EUR" },
-        { externalId: "floating-ip:3", amountUsd: 1, currency: "EUR" },
-        { externalId: "primary-ip:4", amountUsd: 0.5, currency: "EUR" },
-        { externalId: "load-balancer:6", amountUsd: 5, currency: "EUR" },
-        { externalId: "snapshot:7", amountUsd: 0.02, currency: "EUR" },
+        { externalId: "1", amountUsd: 3.815, currency: "USD" },
+        { externalId: "server-backup:1", amountUsd: 0.763, currency: "USD" },
+        { externalId: "volume:2", amountUsd: 0.436, currency: "USD" },
+        { externalId: "floating-ip:3", amountUsd: 1.09, currency: "USD" },
+        { externalId: "primary-ip:4", amountUsd: 0.545, currency: "USD" },
+        { externalId: "load-balancer:6", amountUsd: 5.45, currency: "USD" },
+        { externalId: "snapshot:7", amountUsd: 0.0218, currency: "USD" },
       ])
     );
 
@@ -226,17 +226,17 @@ describe("hetzner adapter", () => {
     const rawData = result.rawData as Record<string, unknown>;
     expect(rawData.totalBandwidthBytes).toBe(1500);
     expect(rawData.monthlyRunRate).toEqual({
-      amount: 11.12,
-      currency: "EUR",
+      amount: 12.1208,
+      currency: "USD",
       basis: "current_resource_catalog_net_monthly_maximum",
       byResource: {
-        servers: 3.5,
-        serverBackups: 0.7,
-        volumes: 0.4,
-        floatingIps: 1,
-        primaryIps: 0.5,
-        loadBalancers: 5,
-        snapshots: 0.02,
+        servers: 3.815,
+        serverBackups: 0.763,
+        volumes: 0.436,
+        floatingIps: 1.09,
+        primaryIps: 0.545,
+        loadBalancers: 5.45,
+        snapshots: 0.0218,
       },
     });
     expect(rawData.images).toEqual(
@@ -389,5 +389,38 @@ describe("hetzner adapter", () => {
     await expect(fetchUsage("key")).rejects.toMatchObject({
       code: "INVALID_RESPONSE",
     });
+  });
+
+  it("converts Euros to USD using a custom exchange rate when HETZNER_EUR_USD_RATE is configured", async () => {
+    vi.stubEnv("HETZNER_EUR_USD_RATE", "1.15");
+    installHetznerMock();
+
+    const result = await fetchUsage("fake-key");
+
+    expect(
+      result.externalBilling?.records.find((r) => r.externalId === "1")
+    ).toMatchObject({
+      amountUsd: 4.025, // 3.50 * 1.15
+      currency: "USD",
+    });
+  });
+
+  it("does not apply conversion when the API currency is USD", async () => {
+    installHetznerMock({
+      pricing: {
+        ...completePricing,
+        currency: "USD",
+      },
+    });
+
+    const result = await fetchUsage("fake-key");
+
+    expect(
+      result.externalBilling?.records.find((r) => r.externalId === "1")
+    ).toMatchObject({
+      amountUsd: 3.50,
+      currency: "USD",
+    });
+    expect((result.rawData as any).capabilities.currencyConversionApplied).toBe(false);
   });
 });
