@@ -278,7 +278,19 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
   if (!pricing || typeof pricing !== "object") {
     invalidResponse("Hetzner returned no pricing catalog");
   }
-  const currency = pricing.currency?.trim().toUpperCase() || null;
+  const rawCurrency = pricing.currency?.trim().toUpperCase() || null;
+  const exchangeRate = parseFloat(process.env.HETZNER_EUR_USD_RATE || "1.09");
+  const currencyConversionApplied = rawCurrency === "EUR";
+  const currency = currencyConversionApplied ? "USD" : rawCurrency;
+
+  const convertPrice = (price: number | null | undefined): number | null => {
+    if (price == null) return null;
+    if (currencyConversionApplied) {
+      return roundCatalogAmount(price * exchangeRate);
+    }
+    return price;
+  };
+
   const backupPercentage = catalogNumber(pricing.server_backup?.percentage);
   const volumePricePerGb = catalogNumber(pricing.volume?.price_per_gb_month?.net);
   const imagePricePerGb = catalogNumber(pricing.image?.price_per_gb_month?.net);
@@ -314,39 +326,41 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
       location,
       server.server_type?.prices
     );
-    if (monthlyPrice == null) pricingComplete = false;
-    else runRateByResource.servers += monthlyPrice;
+    const convertedMonthlyPrice = convertPrice(monthlyPrice);
+    if (convertedMonthlyPrice == null) pricingComplete = false;
+    else runRateByResource.servers += convertedMonthlyPrice;
     const backupEnabled = Boolean(server.backup_window?.trim());
     const backupMonthlyPrice = backupEnabled && monthlyPrice != null && backupPercentage != null
       ? roundCatalogAmount(monthlyPrice * (backupPercentage / 100))
       : backupEnabled
         ? null
         : 0;
-    if (backupEnabled && backupMonthlyPrice == null) pricingComplete = false;
-    else runRateByResource.serverBackups += backupMonthlyPrice ?? 0;
+    const convertedBackupMonthlyPrice = convertPrice(backupMonthlyPrice);
+    if (backupEnabled && convertedBackupMonthlyPrice == null) pricingComplete = false;
+    else runRateByResource.serverBackups += convertedBackupMonthlyPrice ?? 0;
     if (typeof server.outgoing_traffic === "number") {
       totalBandwidthBytes += server.outgoing_traffic;
     }
-    if (server.id != null && monthlyPrice != null && monthlyPrice > 0) {
+    if (server.id != null && convertedMonthlyPrice != null && convertedMonthlyPrice > 0) {
       records.push({
         externalId: String(server.id),
         kind: "service_plan",
         serviceName: server.name ?? `Server ${server.id}`,
         planName: type,
         status: server.status ?? "unknown",
-        amountUsd: monthlyPrice,
+        amountUsd: convertedMonthlyPrice,
         currency,
         rollupRole: "canonical",
       });
     }
-    if (server.id != null && backupEnabled && backupMonthlyPrice != null && backupMonthlyPrice > 0) {
+    if (server.id != null && backupEnabled && convertedBackupMonthlyPrice != null && convertedBackupMonthlyPrice > 0) {
       records.push({
         externalId: `server-backup:${server.id}`,
         kind: "service_plan",
         serviceName: `${server.name ?? `Server ${server.id}`} backups`,
         planName: backupPercentage == null ? "Backups" : `Backups (${backupPercentage}%)`,
         status: "active",
-        amountUsd: backupMonthlyPrice,
+        amountUsd: convertedBackupMonthlyPrice,
         currency,
         rollupRole: "component",
       });
@@ -359,9 +373,9 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
       location,
       outgoingTrafficBytes: server.outgoing_traffic ?? null,
       backupEnabled,
-      monthlyCatalogPrice: priceMetadata(monthlyPrice, currency),
+      monthlyCatalogPrice: priceMetadata(convertedMonthlyPrice, currency),
       backupMonthlyCatalogPrice: backupEnabled
-        ? priceMetadata(backupMonthlyPrice, currency)
+        ? priceMetadata(convertedBackupMonthlyPrice, currency)
         : null,
     };
   });
@@ -371,16 +385,17 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
       volumePricePerGb != null && typeof volume.size === "number" && volume.size >= 0
         ? roundCatalogAmount(volumePricePerGb * volume.size)
         : null;
-    if (monthlyPrice == null) pricingComplete = false;
-    else runRateByResource.volumes += monthlyPrice;
-    if (volume.id != null && monthlyPrice != null && monthlyPrice > 0) {
+    const convertedMonthlyPrice = convertPrice(monthlyPrice);
+    if (convertedMonthlyPrice == null) pricingComplete = false;
+    else runRateByResource.volumes += convertedMonthlyPrice;
+    if (volume.id != null && convertedMonthlyPrice != null && convertedMonthlyPrice > 0) {
       records.push({
         externalId: `volume:${volume.id}`,
         kind: "service_plan",
         serviceName: volume.name ?? `Volume ${volume.id}`,
         planName: `${volume.size} GB volume`,
         status: volume.status ?? "available",
-        amountUsd: monthlyPrice,
+        amountUsd: convertedMonthlyPrice,
         currency,
         usageQuantity: volume.size ?? null,
         usageUnit: "GB",
@@ -394,7 +409,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
       serverId: volume.server ?? null,
       sizeGB: volume.size ?? null,
       location: locationName(volume.location),
-      monthlyCatalogPrice: priceMetadata(monthlyPrice, currency),
+      monthlyCatalogPrice: priceMetadata(convertedMonthlyPrice, currency),
     };
   });
 
@@ -405,16 +420,17 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
     const monthlyPrice = (pricing.floating_ips?.length ?? 0) > 0
       ? typedPrice
       : catalogNumber(pricing.floating_ip?.price_monthly?.net);
-    if (monthlyPrice == null) pricingComplete = false;
-    else runRateByResource.floatingIps += monthlyPrice;
-    if (ip.id != null && monthlyPrice != null && monthlyPrice > 0) {
+    const convertedMonthlyPrice = convertPrice(monthlyPrice);
+    if (convertedMonthlyPrice == null) pricingComplete = false;
+    else runRateByResource.floatingIps += convertedMonthlyPrice;
+    if (ip.id != null && convertedMonthlyPrice != null && convertedMonthlyPrice > 0) {
       records.push({
         externalId: `floating-ip:${ip.id}`,
         kind: "service_plan",
         serviceName: ip.name || ip.description || `Floating IP ${ip.id}`,
         planName: type ? `Floating ${type.toUpperCase()}` : "Floating IP",
         status: ip.blocked ? "blocked" : "active",
-        amountUsd: monthlyPrice,
+        amountUsd: convertedMonthlyPrice,
         currency,
         rollupRole: ip.server == null ? "canonical" : "component",
       });
@@ -426,7 +442,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
       serverId: ip.server ?? null,
       blocked: ip.blocked ?? null,
       location,
-      monthlyCatalogPrice: priceMetadata(monthlyPrice, currency),
+      monthlyCatalogPrice: priceMetadata(convertedMonthlyPrice, currency),
     };
   });
 
@@ -434,16 +450,17 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
     const location = locationName(ip.location, ip.datacenter);
     const type = ip.type?.trim() || null;
     const monthlyPrice = locationPrice(pricing.primary_ips, type, location);
-    if (monthlyPrice == null) pricingComplete = false;
-    else runRateByResource.primaryIps += monthlyPrice;
-    if (ip.id != null && monthlyPrice != null && monthlyPrice > 0) {
+    const convertedMonthlyPrice = convertPrice(monthlyPrice);
+    if (convertedMonthlyPrice == null) pricingComplete = false;
+    else runRateByResource.primaryIps += convertedMonthlyPrice;
+    if (ip.id != null && convertedMonthlyPrice != null && convertedMonthlyPrice > 0) {
       records.push({
         externalId: `primary-ip:${ip.id}`,
         kind: "service_plan",
         serviceName: ip.name ?? `Primary IP ${ip.id}`,
         planName: type ? `Primary ${type.toUpperCase()}` : "Primary IP",
         status: ip.blocked ? "blocked" : "active",
-        amountUsd: monthlyPrice,
+        amountUsd: convertedMonthlyPrice,
         currency,
         rollupRole: ip.assignee_id == null ? "canonical" : "component",
       });
@@ -456,7 +473,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
       assigneeType: ip.assignee_type ?? null,
       blocked: ip.blocked ?? null,
       location,
-      monthlyCatalogPrice: priceMetadata(monthlyPrice, currency),
+      monthlyCatalogPrice: priceMetadata(convertedMonthlyPrice, currency),
     };
   });
 
@@ -464,19 +481,20 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
     const location = locationName(loadBalancer.location);
     const type = loadBalancer.load_balancer_type?.name?.trim() || null;
     const monthlyPrice = locationPrice(pricing.load_balancer_types, type, location);
-    if (monthlyPrice == null) pricingComplete = false;
-    else runRateByResource.loadBalancers += monthlyPrice;
+    const convertedMonthlyPrice = convertPrice(monthlyPrice);
+    if (convertedMonthlyPrice == null) pricingComplete = false;
+    else runRateByResource.loadBalancers += convertedMonthlyPrice;
     if (typeof loadBalancer.outgoing_traffic === "number") {
       totalBandwidthBytes += loadBalancer.outgoing_traffic;
     }
-    if (loadBalancer.id != null && monthlyPrice != null && monthlyPrice > 0) {
+    if (loadBalancer.id != null && convertedMonthlyPrice != null && convertedMonthlyPrice > 0) {
       records.push({
         externalId: `load-balancer:${loadBalancer.id}`,
         kind: "service_plan",
         serviceName: loadBalancer.name ?? `Load Balancer ${loadBalancer.id}`,
         planName: type,
         status: "active",
-        amountUsd: monthlyPrice,
+        amountUsd: convertedMonthlyPrice,
         currency,
         rollupRole: "canonical",
       });
@@ -488,7 +506,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
       location,
       outgoingTrafficBytes: loadBalancer.outgoing_traffic ?? null,
       ingoingTrafficBytes: loadBalancer.ingoing_traffic ?? null,
-      monthlyCatalogPrice: priceMetadata(monthlyPrice, currency),
+      monthlyCatalogPrice: priceMetadata(convertedMonthlyPrice, currency),
     };
   });
 
@@ -505,16 +523,17 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
       : isSnapshot
         ? null
         : 0;
-    if (isSnapshot && monthlyPrice == null) pricingComplete = false;
-    else runRateByResource.snapshots += monthlyPrice ?? 0;
-    if (image.id != null && isSnapshot && monthlyPrice != null && monthlyPrice > 0) {
+    const convertedMonthlyPrice = convertPrice(monthlyPrice);
+    if (isSnapshot && convertedMonthlyPrice == null) pricingComplete = false;
+    else runRateByResource.snapshots += convertedMonthlyPrice ?? 0;
+    if (image.id != null && isSnapshot && convertedMonthlyPrice != null && convertedMonthlyPrice > 0) {
       records.push({
         externalId: `snapshot:${image.id}`,
         kind: "service_plan",
         serviceName: image.name || image.description || `Snapshot ${image.id}`,
         planName: image.image_size == null ? "Snapshot" : `${image.image_size} GB snapshot`,
         status: image.status ?? "unknown",
-        amountUsd: monthlyPrice,
+        amountUsd: convertedMonthlyPrice,
         currency,
         usageQuantity: image.image_size,
         usageUnit: "GB",
@@ -529,7 +548,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
       imageSizeGB: image.image_size ?? null,
       diskSizeGB: image.disk_size ?? null,
       sourceServerId: image.created_from?.id ?? null,
-      monthlyCatalogPrice: isSnapshot ? priceMetadata(monthlyPrice, currency) : null,
+      monthlyCatalogPrice: isSnapshot ? priceMetadata(convertedMonthlyPrice, currency) : null,
       priceIncludedInServerBackup: image.type === "backup",
     };
   });
@@ -576,7 +595,7 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
         catalogMonthlyRunRate: pricingComplete,
         actualInvoiceCost: false,
         accountCurrencyKnown: currency != null,
-        currencyConversionApplied: false,
+        currencyConversionApplied,
         backupArtifactDoubleCountAvoided: true,
       },
     },
