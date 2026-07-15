@@ -145,7 +145,7 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
   }
 
   const run = (async () => {
-    await ensureAgentSyncProviderSeeded();
+    await withInternalUsageWriteAdmission(() => ensureAgentSyncProviderSeeded());
     const providers = await prisma.provider.findMany({
       where: { isActive: true },
       include: {

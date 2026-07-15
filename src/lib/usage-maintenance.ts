@@ -17,6 +17,7 @@ import {
   rollForwardProviderRenewals,
   type RollForwardProviderRenewalsResult,
 } from "@/lib/provider-renewals";
+import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
 
 export interface UsageMaintenanceResult {
   subscriptions: MaterializeSubscriptionsResult;
@@ -74,12 +75,12 @@ export async function runUsageMaintenance(
     // Materialize subscription charges and advance provider renewals BEFORE
     // retention so newly-generated subscription events roll up in the same
     // pass, and BEFORE alerts so budget/renewal alerts see current state.
-    const subscriptions = await (
-      dependencies.materializeSubscriptions ?? materializeDueSubscriptions
-    )();
-    const providerRenewals = await (
-      dependencies.rollForwardRenewals ?? rollForwardProviderRenewals
-    )();
+    const subscriptions = await withInternalUsageWriteAdmission(() =>
+      (dependencies.materializeSubscriptions ?? materializeDueSubscriptions)()
+    );
+    const providerRenewals = await withInternalUsageWriteAdmission(() =>
+      (dependencies.rollForwardRenewals ?? rollForwardProviderRenewals)()
+    );
     const retention = await (
       dependencies.runRetention ?? runScheduledDataRetentionMaintenance
     )();
