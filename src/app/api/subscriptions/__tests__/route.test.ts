@@ -390,6 +390,93 @@ describe("POST /api/subscriptions — stays session-cookie-only", () => {
     expect(stored?.knobEnv).toEqual({ SOME_KNOB: "value" });
   });
 
+  it("claims an eligible external charge shape for an unlinked manual create", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "cloudflare",
+        displayName: "Cloudflare",
+        type: "builtin",
+        refreshIntervalMin: 60,
+      },
+    });
+    await prisma.providerExternalBilling.create({
+      data: {
+        providerId: provider.id,
+        source: "cloudflare-subscriptions",
+        externalId: "workers-paid-guarded",
+        paidRecurringAuthoritative: true,
+        kind: "subscription",
+        serviceName: "Workers Paid",
+        status: "paid",
+        amountUsd: 5,
+        currency: "USD",
+        billingInterval: "monthly",
+        ...liveMonthlyPeriod(),
+        rollupRole: "canonical",
+        dateKind: "renewal",
+        syncedAt: new Date(),
+      },
+    });
+    const body = {
+      providerId: provider.id,
+      name: "Owner-entered Workers Paid",
+      costUsd: 5,
+      interval: "monthly",
+      intervalCount: 1,
+    };
+
+    const first = await POST(postRequest(body, sessionCookieHeader()));
+    expect(first.status).toBe(201);
+    const stored = await prisma.subscription.findFirst();
+    expect(stored).toMatchObject({
+      externalBillingSource: null,
+      externalBillingId: null,
+      externalBillingManaged: false,
+    });
+    expect(stored?.externalAdoptionGuardKey).toContain(
+      `external-paid-recurring:${provider.id}:monthly:500`
+    );
+
+    const duplicate = await POST(postRequest(body, sessionCookieHeader()));
+    expect(duplicate.status).toBe(409);
+    await expect(duplicate.json()).resolves.toMatchObject({
+      error: expect.stringContaining("equivalent authoritative external charge"),
+    });
+    expect(await prisma.subscription.count()).toBe(1);
+  });
+
+  it("still allows same-price manual accounts when no external charge is authoritative", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "anthropic",
+        displayName: "Anthropic",
+        type: "builtin",
+        refreshIntervalMin: 60,
+      },
+    });
+    const first = await POST(
+      postRequest(
+        { providerId: provider.id, name: "Max account 1", costUsd: 200 },
+        sessionCookieHeader()
+      )
+    );
+    const second = await POST(
+      postRequest(
+        { providerId: provider.id, name: "Max account 2", costUsd: 200 },
+        sessionCookieHeader()
+      )
+    );
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(await prisma.subscription.count()).toBe(2);
+    expect(
+      await prisma.subscription.count({
+        where: { externalAdoptionGuardKey: { not: null } },
+      })
+    ).toBe(0);
+  });
+
   it("rejects linking one provider billing identity to multiple subscriptions", async () => {
     const provider = await prisma.provider.create({
       data: { name: "cloudflare", displayName: "Cloudflare", type: "builtin" },
@@ -596,6 +683,105 @@ describe("POST /api/subscriptions — stays session-cookie-only", () => {
 });
 
 describe("PUT /api/subscriptions/:id — provider editing", () => {
+  it("recomputes the adoption guard after an owner unlinks and reshapes a charge", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "cloudflare",
+        displayName: "Cloudflare",
+        type: "builtin",
+        refreshIntervalMin: 60,
+      },
+    });
+    const period = liveMonthlyPeriod();
+    await prisma.providerExternalBilling.create({
+      data: {
+        providerId: provider.id,
+        source: "cloudflare-subscriptions",
+        externalId: "workers-paid-edit-guard",
+        paidRecurringAuthoritative: true,
+        kind: "subscription",
+        serviceName: "Workers Paid",
+        status: "paid",
+        amountUsd: 5,
+        currency: "USD",
+        billingInterval: "monthly",
+        ...period,
+        rollupRole: "canonical",
+        dateKind: "renewal",
+        syncedAt: new Date(),
+      },
+    });
+    const originalGuard = `external-paid-recurring:${provider.id}:monthly:500`;
+    const subscription = await prisma.subscription.create({
+      data: {
+        providerId: provider.id,
+        externalBillingSource: "cloudflare-subscriptions",
+        externalBillingId: "workers-paid-edit-guard",
+        externalBillingManaged: true,
+        externalAdoptionGuardKey: originalGuard,
+        name: "Workers Paid",
+        costUsd: 5,
+        currency: "USD",
+        interval: "monthly",
+        intervalCount: 1,
+        autoRenew: false,
+        status: "active",
+        startDate: period.currentPeriodStart,
+        currentPeriodStart: period.currentPeriodStart,
+        nextRenewalAt: period.currentPeriodEnd,
+      },
+    });
+
+    const reshapeResponse = await PUT(
+      new Request(`https://usage.jays.services/api/subscriptions/${subscription.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          externalBillingSource: null,
+          externalBillingId: null,
+          costUsd: 6,
+          interval: "annual",
+        }),
+      }),
+      { params: Promise.resolve({ id: subscription.id }) }
+    );
+
+    expect(reshapeResponse.status).toBe(200);
+    expect(
+      await prisma.subscription.findUnique({ where: { id: subscription.id } })
+    ).toMatchObject({
+      externalBillingSource: null,
+      externalBillingId: null,
+      externalBillingManaged: false,
+      externalAdoptionGuardKey: null,
+      costUsd: 6,
+      interval: "annual",
+    });
+
+    // Matching the still-authoritative external charge again must reclaim its
+    // durable guard even though the owner keeps the row explicitly unlinked.
+    const rematchResponse = await PUT(
+      new Request(`https://usage.jays.services/api/subscriptions/${subscription.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ costUsd: 5, interval: "monthly" }),
+      }),
+      { params: Promise.resolve({ id: subscription.id }) }
+    );
+
+    expect(rematchResponse.status).toBe(200);
+    expect(
+      await prisma.subscription.findUnique({ where: { id: subscription.id } })
+    ).toMatchObject({
+      externalBillingSource: null,
+      externalBillingId: null,
+      externalBillingManaged: false,
+      externalAdoptionGuardKey: originalGuard,
+      costUsd: 5,
+      interval: "monthly",
+    });
+  });
+
   it("allows a notes edit on an unchanged linked term that is effectively expired", async () => {
     const provider = await prisma.provider.create({
       data: { name: "cloudflare", displayName: "Cloudflare", type: "builtin" },

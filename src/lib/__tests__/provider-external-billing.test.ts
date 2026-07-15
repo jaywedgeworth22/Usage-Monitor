@@ -38,6 +38,31 @@ beforeEach(async () => {
 });
 
 describe("reconcileProviderExternalBilling", () => {
+  it("does not infer paid-recurring authority from collection completeness", async () => {
+    await reconcileProviderExternalBilling(providerId, {
+      source: "complete-plan-list",
+      authoritative: true,
+      records: [
+        {
+          externalId: "plan-without-charge-attestation",
+          kind: "subscription",
+          status: "active",
+          amountUsd: 5,
+          currency: "USD",
+          billingInterval: "monthly",
+          currentPeriodStart: "2026-07-01T00:00:00.000Z",
+          currentPeriodEnd: "2026-08-01T00:00:00.000Z",
+          rollupRole: "canonical",
+          dateKind: "renewal",
+        },
+      ],
+    });
+
+    expect(await prisma.providerExternalBilling.findFirst()).toMatchObject({
+      paidRecurringAuthoritative: false,
+    });
+  });
+
   it("is idempotent and never creates a charge-producing Subscription", async () => {
     const sync = {
       source: "cloudflare-subscriptions",
@@ -45,6 +70,7 @@ describe("reconcileProviderExternalBilling", () => {
       records: [
         {
           externalId: "sub_1",
+          paidRecurringAuthoritative: true,
           kind: "subscription" as const,
           serviceName: "Cloudflare Workers",
           planName: "Workers Paid",
@@ -72,6 +98,7 @@ describe("reconcileProviderExternalBilling", () => {
     expect(await prisma.providerExternalBilling.findFirst()).toMatchObject({
       source: "cloudflare-subscriptions",
       externalId: "sub_1",
+      paidRecurringAuthoritative: true,
       serviceName: "Cloudflare Workers",
       planName: "Workers Paid",
       currency: "USD",
@@ -187,17 +214,20 @@ describe("reconcileProviderExternalBilling", () => {
         externalId: row.externalId,
         status: row.status,
         amountUsd: row.amountUsd,
+        paidRecurringAuthoritative: row.paidRecurringAuthoritative,
       }))
     ).toEqual([
       {
         externalId: "gemini-mtd:pending",
         status: "pending",
         amountUsd: null,
+        paidRecurringAuthoritative: false,
       },
       {
         externalId: "gemini-mtd:project-a",
         status: "active",
         amountUsd: 8.25,
+        paidRecurringAuthoritative: false,
       },
     ]);
   });

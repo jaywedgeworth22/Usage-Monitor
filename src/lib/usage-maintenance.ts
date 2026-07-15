@@ -18,12 +18,27 @@ import {
   type RollForwardProviderRenewalsResult,
 } from "@/lib/provider-renewals";
 import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
+import {
+  adoptExternalBillingSubscriptions,
+  type AdoptExternalBillingSubscriptionsResult,
+} from "@/lib/external-billing-subscription-adoption";
 
 export interface UsageMaintenanceResult {
+  subscriptionAdoption: SubscriptionAdoptionMaintenanceResult;
   subscriptions: MaterializeSubscriptionsResult;
   providerRenewals: RollForwardProviderRenewalsResult;
   retention: DataRetentionResult | ScheduledRetentionSkipped;
   alerts: AlertMaintenanceResult;
+}
+
+export interface SubscriptionAdoptionMaintenanceError {
+  stage: "subscription_adoption";
+  message: string;
+}
+
+export interface SubscriptionAdoptionMaintenanceResult
+  extends AdoptExternalBillingSubscriptionsResult {
+  degradedError: SubscriptionAdoptionMaintenanceError | null;
 }
 
 export interface DeferredAlertMaintenanceError {
@@ -39,6 +54,7 @@ export interface AlertMaintenanceResult extends AlertDeliveryResult {
 }
 
 export interface UsageMaintenanceDependencies {
+  adoptSubscriptions?: typeof adoptExternalBillingSubscriptions;
   materializeSubscriptions?: typeof materializeDueSubscriptions;
   rollForwardRenewals?: typeof rollForwardProviderRenewals;
   runRetention?: typeof runScheduledDataRetentionMaintenance;
@@ -47,6 +63,7 @@ export interface UsageMaintenanceDependencies {
 
 export function isUsageMaintenanceHealthy(result: UsageMaintenanceResult): boolean {
   return (
+    result.subscriptionAdoption.degradedError === null &&
     result.alerts.deferredError === null &&
     result.alerts.persistenceDegraded.length === 0
   );
@@ -72,12 +89,55 @@ export async function runUsageMaintenance(
   if (maintenanceInFlight) return maintenanceInFlight;
 
   const run = (async () => {
-    // Materialize subscription charges and advance provider renewals BEFORE
-    // retention so newly-generated subscription events roll up in the same
-    // pass, and BEFORE alerts so budget/renewal alerts see current state.
-    const subscriptions = await withInternalUsageWriteAdmission(() =>
-      (dependencies.materializeSubscriptions ?? materializeDueSubscriptions)()
-    );
+    // External billing was reconciled during provider polling. Adopt only its
+    // exact authoritative recurring charges before materialization so a newly
+    // discovered current period is charged exactly once in this same pass.
+    const { subscriptionAdoption, subscriptions } =
+      await withInternalUsageWriteAdmission(async () => {
+        let subscriptionAdoption: SubscriptionAdoptionMaintenanceResult;
+        try {
+          subscriptionAdoption = {
+            ...(await (
+              dependencies.adoptSubscriptions ??
+              adoptExternalBillingSubscriptions
+            )()),
+            degradedError: null,
+          };
+        } catch (error) {
+          // Adoption is an optional source of NEW local charges. Fail it
+          // closed, but continue materializing already-existing schedules and
+          // all later maintenance stages.
+          console.error(
+            "[usage-maintenance] external billing subscription adoption failed; continuing existing maintenance",
+            error
+          );
+          subscriptionAdoption = {
+            examined: 0,
+            eligible: 0,
+            adopted: 0,
+            existing: 0,
+            ambiguous: 0,
+            reconciled: 0,
+            deactivated: 0,
+            raced: 0,
+            degradedError: {
+              stage: "subscription_adoption",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Unknown subscription adoption failure",
+            },
+          };
+        }
+        const subscriptions = await (
+          dependencies.materializeSubscriptions ?? materializeDueSubscriptions
+        )();
+        return { subscriptionAdoption, subscriptions };
+      });
+
+    // Advance provider renewals BEFORE retention so newly-generated
+    // subscription events roll up in the same pass, and BEFORE alerts so
+    // budget/renewal alerts see current state.
     const providerRenewals = await withInternalUsageWriteAdmission(() =>
       (dependencies.rollForwardRenewals ?? rollForwardProviderRenewals)()
     );
@@ -107,7 +167,13 @@ export async function runUsageMaintenance(
         deferredError: deferredAlertMaintenanceError(error),
       };
     }
-    return { subscriptions, providerRenewals, retention, alerts };
+    return {
+      subscriptionAdoption,
+      subscriptions,
+      providerRenewals,
+      retention,
+      alerts,
+    };
   })();
 
   maintenanceInFlight = run;

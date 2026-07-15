@@ -11,6 +11,9 @@ import {
   resolveExternalBillingPeriod,
 } from "@/lib/external-billing-link";
 import {
+  findExternalAdoptionGuardKeyForCharge,
+} from "@/lib/external-billing-subscription-adoption";
+import {
   normalizeMonthlyUsd,
   effectiveSubscriptionStatus,
   isSubscriptionInterval,
@@ -143,6 +146,7 @@ export async function POST(request: NextRequest) {
     nextRenewalAt: Date;
     anchorDay: null;
   } | null = null;
+  let externalAdoptionGuardKey: string | null = null;
   if (input.externalBillingSource && input.externalBillingId) {
     const externalBilling = await prisma.providerExternalBilling.findUnique({
       where: {
@@ -211,6 +215,16 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  externalAdoptionGuardKey = await findExternalAdoptionGuardKeyForCharge({
+    providerId: input.providerId,
+    refreshIntervalMin: provider.refreshIntervalMin,
+    costUsd: input.costUsd,
+    currency: input.currency,
+    interval: input.interval,
+    intervalCount: input.intervalCount,
+    now: validationNow,
+  });
+
   try {
     const subscription = await prisma.subscription.create({
       data: {
@@ -218,6 +232,7 @@ export async function POST(request: NextRequest) {
         projectId: input.projectId,
         externalBillingSource: input.externalBillingSource,
         externalBillingId: input.externalBillingId,
+        externalAdoptionGuardKey,
         name: input.name,
         description: input.description,
         costUsd: input.costUsd,
@@ -242,7 +257,11 @@ export async function POST(request: NextRequest) {
       error.code === "P2002"
     ) {
       return NextResponse.json(
-        { error: "External billing record is already linked to another subscription" },
+        {
+          error: externalAdoptionGuardKey
+            ? "An equivalent authoritative external charge is already represented by another subscription"
+            : "External billing record is already linked to another subscription",
+        },
         { status: 409 }
       );
     }

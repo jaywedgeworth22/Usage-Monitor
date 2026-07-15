@@ -6,6 +6,7 @@ import {
 import type { ScheduledRetentionSkipped } from "../data-retention";
 import type { RollForwardProviderRenewalsResult } from "../provider-renewals";
 import type { MaterializeSubscriptionsResult } from "../subscription-materializer";
+import type { AdoptExternalBillingSubscriptionsResult } from "../external-billing-subscription-adoption";
 import {
   isUsageMaintenanceHealthy,
   runUsageMaintenance,
@@ -17,6 +18,20 @@ const subscriptions: MaterializeSubscriptionsResult = {
   examined: 2,
   charged: 1,
   eventsWritten: 1,
+};
+const subscriptionAdoption: AdoptExternalBillingSubscriptionsResult = {
+  examined: 2,
+  eligible: 1,
+  adopted: 1,
+  existing: 0,
+  ambiguous: 0,
+  reconciled: 0,
+  deactivated: 0,
+  raced: 0,
+};
+const successfulSubscriptionAdoption = {
+  ...subscriptionAdoption,
+  degradedError: null,
 };
 const providerRenewals: RollForwardProviderRenewalsResult = {
   examined: 1,
@@ -37,6 +52,7 @@ function dependencies(
   deliverAlerts: UsageMaintenanceDependencies["deliverAlerts"]
 ): UsageMaintenanceDependencies {
   return {
+    adoptSubscriptions: vi.fn(async () => subscriptionAdoption),
     materializeSubscriptions: vi.fn(async () => subscriptions),
     rollForwardRenewals: vi.fn(async () => providerRenewals),
     runRetention: vi.fn(async () => retention),
@@ -60,25 +76,47 @@ beforeEach(() => {
 });
 
 describe("runUsageMaintenance", () => {
+  it("adopts authoritative billing before materializing its current period", async () => {
+    const calls: string[] = [];
+    const deps = dependencies(vi.fn(async () => deliveredAlerts));
+    deps.adoptSubscriptions = vi.fn(async () => {
+      calls.push("adopt");
+      return subscriptionAdoption;
+    });
+    deps.materializeSubscriptions = vi.fn(async () => {
+      calls.push("materialize");
+      return subscriptions;
+    });
+
+    await runUsageMaintenance(deps);
+
+    expect(calls).toEqual(["adopt", "materialize"]);
+  });
+
   it("queues scheduler money-path writes behind an external ingest admission lease", async () => {
     const releaseExternal = tryAcquireIngestAdmission();
     expect(releaseExternal).not.toBeNull();
 
     const deliverAlerts = vi.fn(async () => deliveredAlerts);
     const deps = dependencies(deliverAlerts);
+    const adoptSubscriptions = vi.fn(async () => subscriptionAdoption);
     const materializeSubscriptions = vi.fn(async () => subscriptions);
     const rollForwardRenewals = vi.fn(async () => providerRenewals);
+    deps.adoptSubscriptions = adoptSubscriptions;
     deps.materializeSubscriptions = materializeSubscriptions;
     deps.rollForwardRenewals = rollForwardRenewals;
 
     const pending = runUsageMaintenance(deps);
     await Promise.resolve();
+    expect(adoptSubscriptions).not.toHaveBeenCalled();
     expect(materializeSubscriptions).not.toHaveBeenCalled();
 
     releaseExternal?.();
     const result = await pending;
+    expect(result.subscriptionAdoption).toEqual(successfulSubscriptionAdoption);
     expect(result.subscriptions).toEqual(subscriptions);
     expect(result.providerRenewals).toEqual(providerRenewals);
+    expect(adoptSubscriptions).toHaveBeenCalledOnce();
     expect(materializeSubscriptions).toHaveBeenCalledOnce();
     expect(rollForwardRenewals).toHaveBeenCalledOnce();
   });
@@ -119,6 +157,7 @@ describe("runUsageMaintenance", () => {
     const result = await runUsageMaintenance(deps);
     expect(result).toEqual({
       subscriptions,
+      subscriptionAdoption: successfulSubscriptionAdoption,
       providerRenewals,
       retention,
       alerts: {
@@ -178,6 +217,52 @@ describe("runUsageMaintenance", () => {
     expect(result.alerts.deferredError).toBeNull();
     expect(result.alerts.persistenceDegraded).toHaveLength(1);
     expect(isUsageMaintenanceHealthy(result)).toBe(false);
+  });
+
+  it("fails adoption closed but continues all existing maintenance stages", async () => {
+    const calls: string[] = [];
+    const failure = new Error("adoption transaction failed");
+    const deps = dependencies(vi.fn(async () => {
+      calls.push("alerts");
+      return deliveredAlerts;
+    }));
+    deps.adoptSubscriptions = vi.fn(async () => {
+      calls.push("adopt");
+      throw failure;
+    });
+    deps.materializeSubscriptions = vi.fn(async () => {
+      calls.push("materialize");
+      return subscriptions;
+    });
+    deps.rollForwardRenewals = vi.fn(async () => {
+      calls.push("renewals");
+      return providerRenewals;
+    });
+    deps.runRetention = vi.fn(async () => {
+      calls.push("retention");
+      return retention;
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await runUsageMaintenance(deps);
+
+    expect(calls).toEqual([
+      "adopt",
+      "materialize",
+      "renewals",
+      "retention",
+      "alerts",
+    ]);
+    expect(result.subscriptionAdoption).toMatchObject({
+      adopted: 0,
+      degradedError: {
+        stage: "subscription_adoption",
+        message: "adoption transaction failed",
+      },
+    });
+    expect(result.subscriptions).toEqual(subscriptions);
+    expect(isUsageMaintenanceHealthy(result)).toBe(false);
+    expect(log).toHaveBeenCalledOnce();
   });
 
   it("coalesces concurrent callers into one degraded alert pass and clears in-flight state", async () => {

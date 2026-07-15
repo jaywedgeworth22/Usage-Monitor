@@ -16,6 +16,7 @@ import {
   isSubscriptionInterval,
   type SubscriptionInterval,
 } from "@/lib/subscriptions";
+import { findExternalAdoptionGuardKeyForCharge } from "@/lib/external-billing-subscription-adoption";
 
 function sameCalendarDay(a: Date, b: Date): boolean {
   return a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
@@ -271,6 +272,34 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   }
 
   const data: Prisma.SubscriptionUpdateInput = {};
+  // Any owner edit converts an auto-managed row into an owner-managed row.
+  // Maintenance must never overwrite explicit dashboard decisions.
+  data.externalBillingManaged = false;
+  const guardProvider = await prisma.provider.findUnique({
+    where: { id: effectiveProviderId },
+    select: { refreshIntervalMin: true },
+  });
+  if (!guardProvider) {
+    return NextResponse.json(
+      { error: "providerId does not match a known provider" },
+      { status: 400 }
+    );
+  }
+  // A guard represents the row's exact provider/cadence/amount charge shape,
+  // not the subscription identity. Owner edits can unlink or reshape a guarded
+  // row, so always derive it again from the final submitted values and current
+  // authoritative external billing state. Retaining the old guard merely
+  // because the provider stayed the same can strand the real external charge
+  // behind a stale unique key and make maintenance degrade with P2002.
+  data.externalAdoptionGuardKey = await findExternalAdoptionGuardKeyForCharge({
+    providerId: effectiveProviderId,
+    refreshIntervalMin: guardProvider.refreshIntervalMin,
+    costUsd: update.costUsd ?? existing.costUsd,
+    currency: update.currency ?? existing.currency,
+    interval: update.interval ?? existing.interval,
+    intervalCount: update.intervalCount ?? existing.intervalCount,
+    now: validationNow,
+  });
   if (update.providerId !== undefined) {
     data.provider = { connect: { id: update.providerId } };
     if (!externalBillingLinkSupplied && update.providerId !== existing.providerId) {
@@ -432,7 +461,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       error.code === "P2002"
     ) {
       return NextResponse.json(
-        { error: "External billing record is already linked to another subscription" },
+        {
+          error: data.externalAdoptionGuardKey
+            ? "An equivalent authoritative external charge is already represented by another subscription"
+            : "External billing record is already linked to another subscription",
+        },
         { status: 409 }
       );
     }

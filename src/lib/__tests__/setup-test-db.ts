@@ -66,6 +66,7 @@ CREATE TABLE "ProviderExternalBilling" (
   "providerId" TEXT NOT NULL,
   "source" TEXT NOT NULL,
   "externalId" TEXT NOT NULL,
+  "paidRecurringAuthoritative" BOOLEAN NOT NULL DEFAULT false,
   "kind" TEXT NOT NULL,
   "serviceName" TEXT,
   "planName" TEXT,
@@ -97,6 +98,8 @@ CREATE TABLE "Subscription" (
   "projectId" TEXT,
   "externalBillingSource" TEXT,
   "externalBillingId" TEXT,
+  "externalBillingManaged" BOOLEAN NOT NULL DEFAULT false,
+  "externalAdoptionGuardKey" TEXT,
   "name" TEXT NOT NULL,
   "description" TEXT,
   "costUsd" REAL NOT NULL,
@@ -318,6 +321,7 @@ CREATE INDEX "ExternalUsageEventDailyRollup_projectId_day_idx" ON "ExternalUsage
 CREATE UNIQUE INDEX "ExternalUsageEventDailyRollup_day_groupKey_key" ON "ExternalUsageEventDailyRollup"("day", "groupKey");
 CREATE INDEX "Subscription_providerId_idx" ON "Subscription"("providerId");
 CREATE UNIQUE INDEX "Subscription_providerId_externalBillingSource_externalBillingId_key" ON "Subscription"("providerId", "externalBillingSource", "externalBillingId");
+CREATE UNIQUE INDEX "Subscription_externalAdoptionGuardKey_key" ON "Subscription"("externalAdoptionGuardKey");
 CREATE INDEX "Subscription_projectId_idx" ON "Subscription"("projectId");
 CREATE INDEX "Subscription_status_nextRenewalAt_idx" ON "Subscription"("status", "nextRenewalAt");
 CREATE INDEX "ExternalUsageEventTombstone_occurredAt_idx" ON "ExternalUsageEventTombstone"("occurredAt");

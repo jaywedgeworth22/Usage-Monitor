@@ -1,6 +1,15 @@
 import crypto from "crypto";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { persistExternalUsageEvents, type ExternalUsageEventInput } from "@/lib/external-usage-events";
+import {
+  persistExternalUsageEvents,
+  persistExternalUsageEventsInTransaction,
+  type ExternalUsageEventInput,
+} from "@/lib/external-usage-events";
+import {
+  paidRecurringAdoptionCandidate,
+  type PaidRecurringAdoptionRecord,
+} from "@/lib/external-billing-subscription-adoption";
 import { advancePeriod, isSubscriptionInterval, type SubscriptionInterval } from "@/lib/subscriptions";
 
 // Turns each active subscription's elapsed billing periods into synthetic
@@ -39,6 +48,8 @@ function chargeIdempotencyKey(subscriptionId: string, periodStart: Date): string
 
 interface DueSubscription {
   id: string;
+  providerId?: string;
+  externalAdoptionGuardKey?: string | null;
   name: string;
   costUsd: number;
   currency: string;
@@ -49,7 +60,21 @@ interface DueSubscription {
   currentPeriodStart: Date;
   nextRenewalAt: Date;
   lastChargedPeriodStart: Date | null;
-  provider: { name: string };
+  provider: { name: string; refreshIntervalMin?: number };
+}
+
+interface GuardConflictExternalRecord extends PaidRecurringAdoptionRecord {
+  providerId: string;
+}
+
+interface ChargedManagedIdentity {
+  id: string;
+  providerId: string;
+  externalBillingSource: string | null;
+  externalBillingId: string | null;
+  currentPeriodStart: Date;
+  nextRenewalAt: Date;
+  lastChargedPeriodStart: Date | null;
 }
 
 interface ChargePlan {
@@ -139,6 +164,188 @@ export function planSubscriptionCharges(
   };
 }
 
+function conflictingManagedPeriodStart(
+  subscription: DueSubscription,
+  plan: ChargePlan,
+  externalRecords: GuardConflictExternalRecord[],
+  chargedManagedIdentities: ChargedManagedIdentity[],
+  refreshIntervalMin: number,
+  now: Date
+): Date | null {
+  const providerId = subscription.providerId;
+  const guardKey = subscription.externalAdoptionGuardKey;
+  if (!providerId || !guardKey) return null;
+
+  for (const record of externalRecords) {
+    const candidate = paidRecurringAdoptionCandidate(
+      providerId,
+      refreshIntervalMin,
+      record,
+      now
+    );
+    if (!candidate || candidate.guardKey !== guardKey) {
+      continue;
+    }
+
+    for (const managed of chargedManagedIdentities) {
+      if (
+        managed.id !== subscription.id &&
+        managed.providerId === providerId &&
+        managed.externalBillingSource === record.source &&
+        managed.externalBillingId === record.externalId &&
+        managed.lastChargedPeriodStart?.getTime() ===
+          managed.currentPeriodStart.getTime() &&
+        managed.currentPeriodStart.getTime() ===
+          candidate.periodStart.getTime() &&
+        managed.nextRenewalAt.getTime() === candidate.periodEnd.getTime() &&
+        plan.inputs.some(
+          (input) =>
+            input.windowStart?.getTime() ===
+              candidate.periodStart.getTime() &&
+            input.windowEnd?.getTime() === candidate.periodEnd.getTime()
+        )
+      ) {
+        return managed.currentPeriodStart;
+      }
+    }
+  }
+  return null;
+}
+
+async function resolveGuardedChargePlan(
+  subscriptionId: string,
+  now: Date
+): Promise<
+  | { subscription: DueSubscription; plan: ChargePlan }
+  | { settled: true; charged: number; eventsWritten: number }
+  | null
+> {
+  return prisma.$transaction(
+    async (tx) => {
+      // SQLite interactive transactions begin deferred. Take the writer lock
+      // before re-reading the guarded row and its collision provenance so a
+      // concurrent owner edit cannot be mistaken for the state we settle.
+      await tx.$executeRaw`
+        UPDATE "Subscription"
+        SET "costUsd" = "costUsd"
+        WHERE "id" = ${subscriptionId}
+      `;
+      const subscription = await tx.subscription.findFirst({
+        where: {
+          id: subscriptionId,
+          status: "active",
+          currentPeriodStart: { lte: now },
+        },
+        select: {
+          id: true,
+          providerId: true,
+          externalAdoptionGuardKey: true,
+          name: true,
+          costUsd: true,
+          currency: true,
+          interval: true,
+          intervalCount: true,
+          projectId: true,
+          autoRenew: true,
+          currentPeriodStart: true,
+          nextRenewalAt: true,
+          lastChargedPeriodStart: true,
+          provider: {
+            select: { name: true, refreshIntervalMin: true },
+          },
+        },
+      });
+      if (!subscription) return null;
+
+      const plan = planSubscriptionCharges(subscription, now);
+      if (!plan) return null;
+      if (!subscription.externalAdoptionGuardKey) {
+        return { subscription, plan };
+      }
+
+      const externalRecords = await tx.providerExternalBilling.findMany({
+        where: { providerId: subscription.providerId },
+        select: {
+          providerId: true,
+          source: true,
+          externalId: true,
+          paidRecurringAuthoritative: true,
+          kind: true,
+          serviceName: true,
+          planName: true,
+          status: true,
+          amountUsd: true,
+          currency: true,
+          billingInterval: true,
+          currentPeriodStart: true,
+          currentPeriodEnd: true,
+          rollupRole: true,
+          dateKind: true,
+          syncedAt: true,
+        },
+      });
+      const chargedManagedIdentities = await tx.subscription.findMany({
+        where: {
+          providerId: subscription.providerId,
+          externalBillingManaged: true,
+          lastChargedPeriodStart: { not: null },
+        },
+        select: {
+          id: true,
+          providerId: true,
+          externalBillingSource: true,
+          externalBillingId: true,
+          currentPeriodStart: true,
+          nextRenewalAt: true,
+          lastChargedPeriodStart: true,
+        },
+      });
+      const settledPeriodStart = conflictingManagedPeriodStart(
+        subscription,
+        plan,
+        externalRecords,
+        chargedManagedIdentities,
+        subscription.provider.refreshIntervalMin,
+        now
+      );
+      if (!settledPeriodStart) return { subscription, plan };
+
+      // Suppress only the proven overlapping input. Any earlier/non-overlap
+      // inputs must materialize before the monotonic watermark advances past
+      // them, or a June+July plan could permanently omit June when only July
+      // overlaps. Persistence and watermark/cycle advancement share this
+      // writer-locked transaction, so failure rolls both back and replay stays
+      // idempotent.
+      const nonOverlappingInputs = plan.inputs.filter(
+        (input) =>
+          input.windowStart?.getTime() !== settledPeriodStart.getTime()
+      );
+      const persisted = await persistExternalUsageEventsInTransaction(
+        tx,
+        nonOverlappingInputs
+      );
+      await tx.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          currentPeriodStart: plan.currentPeriodStart,
+          nextRenewalAt: plan.nextRenewalAt,
+          lastChargedPeriodStart: plan.lastChargedPeriodStart,
+        },
+      });
+      return {
+        settled: true,
+        charged: nonOverlappingInputs.length > 0 ? 1 : 0,
+        eventsWritten: persisted.persisted,
+      };
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 5_000,
+      timeout: 20_000,
+    }
+  );
+}
+
 export async function materializeDueSubscriptions(
   now: Date = new Date()
 ): Promise<MaterializeSubscriptionsResult> {
@@ -146,6 +353,8 @@ export async function materializeDueSubscriptions(
     where: { status: "active", currentPeriodStart: { lte: now } },
     select: {
       id: true,
+      providerId: true,
+      externalAdoptionGuardKey: true,
       name: true,
       costUsd: true,
       currency: true,
@@ -163,9 +372,29 @@ export async function materializeDueSubscriptions(
   let charged = 0;
   let eventsWritten = 0;
 
-  for (const subscription of subscriptions) {
-    const plan = planSubscriptionCharges(subscription, now);
+  for (const observedSubscription of subscriptions) {
+    let subscription: DueSubscription = observedSubscription;
+    let plan = planSubscriptionCharges(subscription, now);
     if (!plan) continue;
+
+    // An owner-controlled guarded row can coexist with an older managed row
+    // after the provider corrects a charge shape (for example $5 -> $6). Do
+    // preserve that manual row's owner-controlled terms/status/guard, but also
+    // do not emit a second same-period event while the linked managed identity
+    // proves the period was already charged. The guarded transactional recheck
+    // records only a settlement watermark; an owner reanchor to a later period
+    // remains independently billable.
+    if (subscription.externalAdoptionGuardKey) {
+      const guarded = await resolveGuardedChargePlan(subscription.id, now);
+      if (!guarded) continue;
+      if ("settled" in guarded) {
+        charged += guarded.charged;
+        eventsWritten += guarded.eventsWritten;
+        continue;
+      }
+      subscription = guarded.subscription;
+      plan = guarded.plan;
+    }
 
     const persistResult = await persistExternalUsageEvents(plan.inputs);
     eventsWritten += persistResult.persisted;

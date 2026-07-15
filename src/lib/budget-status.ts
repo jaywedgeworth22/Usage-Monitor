@@ -210,7 +210,15 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
           },
         },
         subscriptions: {
-          where: { status: "active" },
+          where: {
+            OR: [
+              { status: "active" },
+              {
+                externalBillingManaged: true,
+                lastChargedPeriodStart: { not: null },
+              },
+            ],
+          },
           select: {
             id: true,
             costUsd: true,
@@ -221,6 +229,9 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
             autoRenew: true,
             externalBillingSource: true,
             externalBillingId: true,
+            externalBillingManaged: true,
+            currentPeriodStart: true,
+            lastChargedPeriodStart: true,
             status: true,
           },
         },
@@ -473,22 +484,48 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
           record.source === subscription.externalBillingSource &&
           record.externalId === subscription.externalBillingId
       );
-      if (
-        !externalRecord ||
-        !canLinkSubscriptionToExternalBilling(subscription, externalRecord)
-      ) {
-        continue;
-      }
-      const externalPeriod = resolveExternalBillingPeriod(externalRecord)!;
-      const periodKey = `${subscription.id}\u0000${externalPeriod.start.toISOString()}\u0000${externalPeriod.end.toISOString()}`;
+      if (!externalRecord) continue;
+      const exactCurrentTerms = canLinkSubscriptionToExternalBilling(
+        subscription,
+        externalRecord
+      );
+      const chargedManagedCorrection =
+        subscription.externalBillingManaged &&
+        subscription.lastChargedPeriodStart?.getTime() ===
+          subscription.currentPeriodStart.getTime() &&
+        externalRecord.currentPeriodStart?.getTime() ===
+          subscription.currentPeriodStart.getTime();
+      if (!exactCurrentTerms && !chargedManagedCorrection) continue;
+      // A provider may correct the amount/name/cadence/end after an externally
+      // managed period was materialized. Reconciliation pauses that row and
+      // preserves its historical terms. For fixed-cost dedupe, exact identity
+      // plus the unchanged period start proves the old event and corrected
+      // snapshot overlap; use the immutable stored charged window so $5 -> $6
+      // reports $6, not a conflicting $11.
+      const materializedPeriod = exactCurrentTerms
+        ? resolveExternalBillingPeriod(externalRecord)!
+        : {
+            start: subscription.currentPeriodStart,
+            end: subscription.nextRenewalAt,
+          };
+      const periodKey = `${subscription.id}\u0000${materializedPeriod.start.toISOString()}\u0000${materializedPeriod.end.toISOString()}`;
       linkedMaterializedFixedUsd +=
         materializedCostBySubscriptionPeriod.get(periodKey) ?? 0;
     }
-    const linkedFixedDedupeUsd = Math.min(
-      snapshotFixedCostIncludedUsd,
-      pushed.subscriptionPushed,
-      linkedMaterializedFixedUsd
-    );
+    // A provider can correct a fixed charge after the linked historical event
+    // materialized. Once an included fixed-cost snapshot exists, subtract the
+    // full overlap proven by linked materialized/subscription evidence, even
+    // when that old event is larger than a downward-corrected snapshot. This
+    // makes $5 historical + $4 corrected snapshot resolve to $4 (and $5 + $6
+    // to $6), while never deducting more than either the linked event total or
+    // the subscription event channel actually contains.
+    const linkedFixedDedupeUsd =
+      snapshotFixedCostIncludedUsd > 0
+        ? Math.min(
+            pushed.subscriptionPushed,
+            linkedMaterializedFixedUsd
+          )
+        : 0;
     const snapshotCostIncludesUnknownFixed =
       snapshotCostUsd != null
         ? latestCostSnapshot?.costIncludesUnknownFixed ?? false

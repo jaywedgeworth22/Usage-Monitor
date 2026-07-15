@@ -153,6 +153,12 @@ describe("planSubscriptionCharges", () => {
     );
     expect(plan!.inputs).toHaveLength(1);
     expect(plan!.currentPeriodStart.toISOString()).toBe("2026-05-01T00:00:00.000Z");
+    expect(plan!.inputs[0].windowStart?.toISOString()).toBe(
+      "2026-05-01T00:00:00.000Z"
+    );
+    expect(plan!.inputs[0].windowEnd?.toISOString()).toBe(
+      "2026-06-01T00:00:00.000Z"
+    );
   });
 });
 

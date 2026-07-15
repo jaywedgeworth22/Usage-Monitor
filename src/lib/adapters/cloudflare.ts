@@ -345,6 +345,8 @@ export async function fetchUsage(
       const planName = subscriptionPlanName(subscription);
       billingRecords.push({
         externalId: subscription.id!,
+        paidRecurringAuthoritative:
+          isPaid && price != null && price > 0 && currency === "USD",
         kind: "subscription",
         serviceName: planName ?? "Cloudflare subscription",
         planName,

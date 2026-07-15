@@ -138,6 +138,26 @@ usage — no special-casing. Idempotent by `(subscriptionId, periodStart)` hash 
   compute the effective next renewal in-memory; the maintenance cycle persists the advance.
 - Both the materializer and the renewal roll-forward run inside `runUsageMaintenance`
   (`src/lib/usage-maintenance.ts`), before retention and alert delivery.
+- Maintenance first runs `adoptExternalBillingSubscriptions`, which can create a linked
+  `Subscription` only when the adapter set that exact record's default-false
+  `paidRecurringAuthoritative` marker. `AdapterExternalBillingSync.authoritative` means only that
+  the collection is complete enough to prune; it never authorizes charges. Auto-adoption also
+  requires a fresh known-live plan/subscription, explicit `canonical` role, `renewal|period_end`
+  date semantics, exact positive USD minor units, a supported cadence, and one exact explicit
+  current period. Every positive `ProviderPlan.fixedMonthlyCostUsd`, equal manual charge, existing
+  link, colliding provider/cadence/amount guard, partial/catalog/component/aggregate row, stale
+  observation, and incomplete/inexact period suppresses adoption.
+- Auto-adopted rows are `externalBillingManaged=true` and always `autoRenew=false`: each fresh
+  explicit provider period is one term, never permission to invent later terms. Maintenance
+  pauses/cancels managed rows when authority becomes stale, canceled, or deleted; a fresh exact
+  next period reactivates and charges once. Owner-created/linked rows are never managed, and any
+  owner edit relinquishes management. A nullable unique `externalAdoptionGuardKey` is populated
+  only for eligible external charge shapes, preventing manual/adoption races without blocking
+  legitimate same-price manual accounts where no external charge authority exists.
+- Adoption is one SQLite writer-locked transaction with a full state re-read. Its failure rolls
+  back all new/reconciled rows and is reported as degraded, while materialization of existing
+  subscriptions, renewals, retention, and alerts still run. Adoption and materialization share one
+  scheduler admission lease, so a newly adopted current term normally charges in that same pass.
 - A recurring fee should be modeled EITHER as `ProviderPlan.fixedMonthlyCostUsd` (a flat read-time
   add) OR as a `Subscription` (materialized events) — not both, or it double-counts.
 - **Status is `active | paused | canceled | considering`** (subscription -> knob linkage phase 1,
