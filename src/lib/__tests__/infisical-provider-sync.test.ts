@@ -116,6 +116,7 @@ interface SecretRead {
   projectId: string | null;
   environment: string | null;
   secretPath: string | null;
+  expandSecretReferences: string | null;
   includeImports: string | null;
 }
 
@@ -419,6 +420,7 @@ function installInfisicalMock(
         projectId: url.searchParams.get("projectId"),
         environment: url.searchParams.get("environment"),
         secretPath: url.searchParams.get("secretPath"),
+        expandSecretReferences: url.searchParams.get("expandSecretReferences"),
         includeImports: url.searchParams.get("includeImports"),
       });
       if (options.rejectedSecrets?.[source]?.includes(name)) {
@@ -642,6 +644,44 @@ describe("Socratic primary-account bridge reader", () => {
     expect(managedDeepseek.isActive).toBe(true);
     expect(decrypt(managedDeepseek.apiKey!)).toBe(deepseekKey);
     expectRedacted(result, [geminiKey, deepseekKey]);
+  });
+
+  it("fingerprints and stores reference-like API-key bytes without expanding them", async () => {
+    configureStPrimary();
+    const literalGemini = "${BASE_SECRET}";
+    const literalDeepseek = "prefix-${BASE_SECRET}-suffix";
+    const capture = installInfisicalMock({
+      "st-primary": {
+        BRIDGE_MANIFEST_V1: stPrimaryManifest(
+          1,
+          { status: "active", value: literalGemini },
+          { status: "active", value: literalDeepseek }
+        ),
+        GEMINI_API_KEY: literalGemini,
+        DEEPSEEK_API_KEY: literalDeepseek,
+      },
+    });
+
+    const result = await syncProviderCredentialsFromInfisical();
+
+    expect(result.sources.find((source) => source.source === "st-primary"))
+      .toMatchObject({ configured: true, status: "synced", available: 2 });
+    const bridgeReads = capture.secretReads.filter((read) => read.source === "st-primary");
+    expect(bridgeReads.map((read) => read.name).sort()).toEqual([
+      "BRIDGE_MANIFEST_V1",
+      "DEEPSEEK_API_KEY",
+      "GEMINI_API_KEY",
+    ]);
+    expect(bridgeReads.every((read) => read.expandSecretReferences === "false")).toBe(true);
+    const providers = await prisma.provider.findMany({
+      where: { label: "SocraticTrade.com · Primary account" },
+      orderBy: { name: "asc" },
+    });
+    expect(providers.map((provider) => [provider.name, decrypt(provider.apiKey!)])).toEqual([
+      ["deepseek", literalDeepseek],
+      ["google-ai", literalGemini],
+    ]);
+    expectRedacted(result, [literalGemini, literalDeepseek]);
   });
 
   it("retains last-known-good values on a fingerprint mismatch", async () => {
@@ -901,6 +941,7 @@ describe("Infisical provider credential sync", () => {
         expect(read.projectId).toBe(SOURCE_ENV[source].projectId);
         expect(read.environment).toBe("prod");
         expect(read.secretPath).toBe(SOURCE_ENV[source].secretPath);
+        expect(read.expandSecretReferences).toBe("true");
         expect(read.includeImports).toBe("false");
       }
     }
