@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
 import { prisma } from "@/lib/prisma";
 import { persistExternalUsageEvents, type ExternalUsageEventInput } from "@/lib/external-usage-events";
 import { advancePeriod, isSubscriptionInterval, type SubscriptionInterval } from "@/lib/subscriptions";
@@ -167,18 +168,20 @@ export async function materializeDueSubscriptions(
     const plan = planSubscriptionCharges(subscription, now);
     if (!plan) continue;
 
-    const persistResult = await persistExternalUsageEvents(plan.inputs);
-    eventsWritten += persistResult.persisted;
-    charged += 1;
-
-    await prisma.subscription.update({
-      where: { id: subscription.id },
-      data: {
-        currentPeriodStart: plan.currentPeriodStart,
-        nextRenewalAt: plan.nextRenewalAt,
-        lastChargedPeriodStart: plan.lastChargedPeriodStart,
-      },
+    const persisted = await withInternalUsageWriteAdmission(async () => {
+      const persistResult = await persistExternalUsageEvents(plan.inputs);
+      await prisma.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          currentPeriodStart: plan.currentPeriodStart,
+          nextRenewalAt: plan.nextRenewalAt,
+          lastChargedPeriodStart: plan.lastChargedPeriodStart,
+        },
+      });
+      return persistResult.persisted;
     });
+    eventsWritten += persisted;
+    charged += 1;
   }
 
   return { examined: subscriptions.length, charged, eventsWritten };

@@ -24,6 +24,7 @@ const prismaMock = vi.hoisted(() => {
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 
+import { tryAcquireIngestAdmission } from "../ingest-admission";
 import {
   getExternalEventRawCutoff,
   getSnapshotRawCutoff,
@@ -255,5 +256,42 @@ describe("usage-retention wrapper", () => {
       "PRAGMA wal_checkpoint(TRUNCATE)"
     );
     expect(prismaMock.$executeRawUnsafe).toHaveBeenNthCalledWith(2, "VACUUM");
+  });
+
+  it("waits for active ingest admission before retention write transactions", async () => {
+    process.env.USAGE_SNAPSHOT_RAW_RETENTION_DAYS = "45";
+    process.env.EXTERNAL_USAGE_EVENT_RAW_RETENTION_DAYS = "90";
+    process.env.DATA_RETENTION_BATCH_SIZE = "1000";
+
+    prismaMock.provider.findMany.mockResolvedValue([{ snapshots: [] }]);
+    prismaMock.usageSnapshot.findMany.mockResolvedValue([
+      {
+        id: "snap-old",
+        providerId: "prov-a",
+        fetchedAt: new Date("2026-05-01T00:00:00.000Z"),
+        balance: 10,
+        totalCost: 1,
+        totalRequests: 2,
+        credits: 3,
+      },
+    ]);
+    prismaMock.usageSnapshotDailyRollup.findUnique.mockResolvedValue(null);
+    prismaMock.externalUsageEvent.findMany.mockResolvedValue([]);
+
+    const releaseIngest = tryAcquireIngestAdmission();
+    expect(releaseIngest).not.toBeNull();
+
+    const retention = runUsageRetention(new Date("2026-07-04T12:00:00.000Z"));
+    await Promise.resolve();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+
+    releaseIngest?.();
+    const result = await retention;
+
+    expect(result.usageSnapshots.pruned).toBe(1);
+    expect(prismaMock.$transaction).toHaveBeenCalled();
+    expect(prismaMock.usageSnapshot.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["snap-old"] } },
+    });
   });
 });

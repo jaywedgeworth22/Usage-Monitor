@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  acquireInternalUsageWriteAdmission,
   isOtlpMetricsIngestEnabled,
   tryAcquireIngestAdmission,
+  withInternalUsageWriteAdmission,
 } from "../ingest-admission";
 
 describe("ingest admission", () => {
@@ -34,5 +36,39 @@ describe("ingest admission", () => {
     releaseFirst?.();
     expect(tryAcquireIngestAdmission()).toBeNull();
     releaseSecond?.();
+  });
+
+  it("queues internal writers FIFO and blocks external ingest while owned", async () => {
+    const releaseFirst = await acquireInternalUsageWriteAdmission();
+    const order: string[] = [];
+
+    const second = withInternalUsageWriteAdmission(async () => {
+      order.push("second");
+      expect(tryAcquireIngestAdmission()).toBeNull();
+    });
+    const third = withInternalUsageWriteAdmission(async () => {
+      order.push("third");
+    });
+
+    await Promise.resolve();
+    expect(order).toEqual([]);
+    expect(tryAcquireIngestAdmission()).toBeNull();
+
+    releaseFirst();
+    await Promise.all([second, third]);
+    expect(order).toEqual(["second", "third"]);
+  });
+
+  it("allows nested internal write phases under the same owner", async () => {
+    await withInternalUsageWriteAdmission(async () => {
+      expect(tryAcquireIngestAdmission()).toBeNull();
+      await withInternalUsageWriteAdmission(async () => {
+        expect(tryAcquireIngestAdmission()).toBeNull();
+      });
+    });
+
+    const releaseExternal = tryAcquireIngestAdmission();
+    expect(releaseExternal).not.toBeNull();
+    releaseExternal?.();
   });
 });

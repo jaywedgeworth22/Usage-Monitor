@@ -1,3 +1,4 @@
+import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
 import { prisma } from "@/lib/prisma";
 import { isSubscriptionInterval, rollForwardRenewal } from "@/lib/subscriptions";
 
@@ -35,18 +36,20 @@ export async function rollForwardProviderRenewals(
     }
     const next = rollForwardRenewal(plan.renewalDate, plan.billingInterval, 1, now);
     if (next.getTime() !== plan.renewalDate.getTime()) {
-      const changed = await prisma.$transaction(async (tx) => {
-        const updated = await tx.providerPlan.updateMany({
-          where: { id: plan.id, renewalDate: plan.renewalDate },
-          data: { renewalDate: next },
-        });
-        if (updated.count === 0) return false;
-        await tx.provider.update({
-          where: { id: plan.providerId },
-          data: { alertConfigGeneration: { increment: 1 } },
-        });
-        return true;
-      });
+      const changed = await withInternalUsageWriteAdmission(() =>
+        prisma.$transaction(async (tx) => {
+          const updated = await tx.providerPlan.updateMany({
+            where: { id: plan.id, renewalDate: plan.renewalDate },
+            data: { renewalDate: next },
+          });
+          if (updated.count === 0) return false;
+          await tx.provider.update({
+            where: { id: plan.providerId },
+            data: { alertConfigGeneration: { increment: 1 } },
+          });
+          return true;
+        })
+      );
       if (changed) advanced += 1;
     }
   }

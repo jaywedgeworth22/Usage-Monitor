@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
 import { prisma } from "@/lib/prisma";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -442,47 +443,49 @@ async function pruneUsageSnapshots(
 
     const groups = groupSnapshotRows(rows);
     const ids = rows.map((row) => row.id);
-    await prisma.$transaction(async (tx) => {
-      for (const group of groups) {
-        const existing = await tx.usageSnapshotDailyRollup.findUnique({
-          where: { providerId_day: { providerId: group.providerId, day: group.day } },
-          select: {
-            providerId: true,
-            day: true,
-            sampleCount: true,
-            firstFetchedAt: true,
-            lastFetchedAt: true,
-            latestBalance: true,
-            latestTotalCost: true,
-            latestTotalRequests: true,
-            latestCredits: true,
-            minBalance: true,
-            maxBalance: true,
-            maxTotalCost: true,
-            maxTotalRequests: true,
-          },
-        });
-        const merged = mergeSnapshotRollup(existing, group);
-        await tx.usageSnapshotDailyRollup.upsert({
-          where: { providerId_day: { providerId: group.providerId, day: group.day } },
-          create: merged,
-          update: {
-            sampleCount: merged.sampleCount,
-            firstFetchedAt: merged.firstFetchedAt,
-            lastFetchedAt: merged.lastFetchedAt,
-            latestBalance: merged.latestBalance,
-            latestTotalCost: merged.latestTotalCost,
-            latestTotalRequests: merged.latestTotalRequests,
-            latestCredits: merged.latestCredits,
-            minBalance: merged.minBalance,
-            maxBalance: merged.maxBalance,
-            maxTotalCost: merged.maxTotalCost,
-            maxTotalRequests: merged.maxTotalRequests,
-          },
-        });
-      }
-      await tx.usageSnapshot.deleteMany({ where: { id: { in: ids } } });
-    });
+    await withInternalUsageWriteAdmission(() =>
+      prisma.$transaction(async (tx) => {
+        for (const group of groups) {
+          const existing = await tx.usageSnapshotDailyRollup.findUnique({
+            where: { providerId_day: { providerId: group.providerId, day: group.day } },
+            select: {
+              providerId: true,
+              day: true,
+              sampleCount: true,
+              firstFetchedAt: true,
+              lastFetchedAt: true,
+              latestBalance: true,
+              latestTotalCost: true,
+              latestTotalRequests: true,
+              latestCredits: true,
+              minBalance: true,
+              maxBalance: true,
+              maxTotalCost: true,
+              maxTotalRequests: true,
+            },
+          });
+          const merged = mergeSnapshotRollup(existing, group);
+          await tx.usageSnapshotDailyRollup.upsert({
+            where: { providerId_day: { providerId: group.providerId, day: group.day } },
+            create: merged,
+            update: {
+              sampleCount: merged.sampleCount,
+              firstFetchedAt: merged.firstFetchedAt,
+              lastFetchedAt: merged.lastFetchedAt,
+              latestBalance: merged.latestBalance,
+              latestTotalCost: merged.latestTotalCost,
+              latestTotalRequests: merged.latestTotalRequests,
+              latestCredits: merged.latestCredits,
+              minBalance: merged.minBalance,
+              maxBalance: merged.maxBalance,
+              maxTotalCost: merged.maxTotalCost,
+              maxTotalRequests: merged.maxTotalRequests,
+            },
+          });
+        }
+        await tx.usageSnapshot.deleteMany({ where: { id: { in: ids } } });
+      })
+    );
 
     result.scanned += rows.length;
     result.pruned += rows.length;
@@ -503,48 +506,15 @@ async function pruneExternalUsageEvents(
     // deletion. Ingest retries can backfill a previously-null projectId; if
     // selection happened before this transaction, retention could aggregate
     // the old attribution and then delete the newly-attributed raw row.
-    const batch = await prisma.$transaction(async (tx) => {
-      const rows = await tx.externalUsageEvent.findMany({
-        where: { occurredAt: { lt: cutoff } },
-        orderBy: { occurredAt: "asc" },
-        take: batchSize,
-        select: {
-          id: true,
-          idempotencyKey: true,
-          sourceApp: true,
-          environment: true,
-          provider: true,
-          service: true,
-          label: true,
-          keyRef: true,
-          billingMode: true,
-          metricType: true,
-          quantity: true,
-          unit: true,
-          costUsd: true,
-          requests: true,
-          credits: true,
-          limit: true,
-          limitWindow: true,
-          tier: true,
-          confidence: true,
-          projectId: true,
-          occurredAt: true,
-        },
-      });
-      if (rows.length === 0) {
-        return { scanned: 0, pruned: 0, rollupsTouched: 0, tombstonesWritten: 0 };
-      }
-
-      const groups = groupExternalRows(rows);
-      const ids = rows.map((row) => row.id);
-      const prunedAt = new Date();
-      for (const group of groups) {
-        const existing = await tx.externalUsageEventDailyRollup.findUnique({
-          where: { day_groupKey: { day: group.day, groupKey: group.groupKey } },
+    const batch = await withInternalUsageWriteAdmission(() =>
+      prisma.$transaction(async (tx) => {
+        const rows = await tx.externalUsageEvent.findMany({
+          where: { occurredAt: { lt: cutoff } },
+          orderBy: { occurredAt: "asc" },
+          take: batchSize,
           select: {
-            day: true,
-            groupKey: true,
+            id: true,
+            idempotencyKey: true,
             sourceApp: true,
             environment: true,
             provider: true,
@@ -553,57 +523,92 @@ async function pruneExternalUsageEvents(
             keyRef: true,
             billingMode: true,
             metricType: true,
+            quantity: true,
             unit: true,
+            costUsd: true,
+            requests: true,
+            credits: true,
+            limit: true,
             limitWindow: true,
             tier: true,
             confidence: true,
             projectId: true,
-            eventCount: true,
-            pricedEventCount: true,
-            unpricedEventCount: true,
-            unclassifiedCostEventCount: true,
-            totalCostUsd: true,
-            totalRequests: true,
-            totalQuantity: true,
-            totalCredits: true,
-            maxLimit: true,
-            latestOccurredAt: true,
+            occurredAt: true,
           },
         });
-        const merged = mergeExternalRollup(existing, group);
-        await tx.externalUsageEventDailyRollup.upsert({
-          where: { day_groupKey: { day: group.day, groupKey: group.groupKey } },
-          create: merged,
-          update: {
-            eventCount: merged.eventCount,
-            pricedEventCount: merged.pricedEventCount,
-            unpricedEventCount: merged.unpricedEventCount,
-            unclassifiedCostEventCount: merged.unclassifiedCostEventCount,
-            totalCostUsd: merged.totalCostUsd,
-            totalRequests: merged.totalRequests,
-            totalQuantity: merged.totalQuantity,
-            totalCredits: merged.totalCredits,
-            maxLimit: merged.maxLimit,
-            latestOccurredAt: merged.latestOccurredAt,
-          },
-        });
-      }
+        if (rows.length === 0) {
+          return { scanned: 0, pruned: 0, rollupsTouched: 0, tombstonesWritten: 0 };
+        }
 
-      for (const row of rows) {
-        await tx.externalUsageEventTombstone.upsert({
-          where: { idempotencyKey: row.idempotencyKey },
-          create: { idempotencyKey: row.idempotencyKey, occurredAt: row.occurredAt, prunedAt },
-          update: {},
-        });
-      }
-      await tx.externalUsageEvent.deleteMany({ where: { id: { in: ids } } });
-      return {
-        scanned: rows.length,
-        pruned: rows.length,
-        rollupsTouched: groups.length,
-        tombstonesWritten: rows.length,
-      };
-    }, { timeout: 30_000 });
+        const groups = groupExternalRows(rows);
+        const ids = rows.map((row) => row.id);
+        const prunedAt = new Date();
+        for (const group of groups) {
+          const existing = await tx.externalUsageEventDailyRollup.findUnique({
+            where: { day_groupKey: { day: group.day, groupKey: group.groupKey } },
+            select: {
+              day: true,
+              groupKey: true,
+              sourceApp: true,
+              environment: true,
+              provider: true,
+              service: true,
+              label: true,
+              keyRef: true,
+              billingMode: true,
+              metricType: true,
+              unit: true,
+              limitWindow: true,
+              tier: true,
+              confidence: true,
+              projectId: true,
+              eventCount: true,
+              pricedEventCount: true,
+              unpricedEventCount: true,
+              unclassifiedCostEventCount: true,
+              totalCostUsd: true,
+              totalRequests: true,
+              totalQuantity: true,
+              totalCredits: true,
+              maxLimit: true,
+              latestOccurredAt: true,
+            },
+          });
+          const merged = mergeExternalRollup(existing, group);
+          await tx.externalUsageEventDailyRollup.upsert({
+            where: { day_groupKey: { day: group.day, groupKey: group.groupKey } },
+            create: merged,
+            update: {
+              eventCount: merged.eventCount,
+              pricedEventCount: merged.pricedEventCount,
+              unpricedEventCount: merged.unpricedEventCount,
+              unclassifiedCostEventCount: merged.unclassifiedCostEventCount,
+              totalCostUsd: merged.totalCostUsd,
+              totalRequests: merged.totalRequests,
+              totalQuantity: merged.totalQuantity,
+              totalCredits: merged.totalCredits,
+              maxLimit: merged.maxLimit,
+              latestOccurredAt: merged.latestOccurredAt,
+            },
+          });
+        }
+
+        for (const row of rows) {
+          await tx.externalUsageEventTombstone.upsert({
+            where: { idempotencyKey: row.idempotencyKey },
+            create: { idempotencyKey: row.idempotencyKey, occurredAt: row.occurredAt, prunedAt },
+            update: {},
+          });
+        }
+        await tx.externalUsageEvent.deleteMany({ where: { id: { in: ids } } });
+        return {
+          scanned: rows.length,
+          pruned: rows.length,
+          rollupsTouched: groups.length,
+          tombstonesWritten: rows.length,
+        };
+      }, { timeout: 30_000 })
+    );
 
     if (batch.scanned === 0) break;
 
@@ -657,8 +662,10 @@ export async function runDataRetentionMaintenance(now = new Date()): Promise<Dat
   let compactionError: string | undefined;
   if (prunedRows > 0 && isAutomaticVacuumEnabled()) {
     try {
-      await prisma.$executeRawUnsafe("PRAGMA wal_checkpoint(TRUNCATE)");
-      await prisma.$executeRawUnsafe("VACUUM");
+      await withInternalUsageWriteAdmission(async () => {
+        await prisma.$executeRawUnsafe("PRAGMA wal_checkpoint(TRUNCATE)");
+        await prisma.$executeRawUnsafe("VACUUM");
+      });
       compacted = true;
     } catch (error) {
       compactionError = error instanceof Error ? error.message : "SQLite compaction failed";
