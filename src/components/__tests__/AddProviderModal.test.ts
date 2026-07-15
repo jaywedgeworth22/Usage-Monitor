@@ -1,5 +1,8 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import {
+import AddProviderModal, {
+  CLOUDFLARE_RESOURCE_PROBE_DISCLOSURE,
   actualUsageBillingPlan,
   type ProviderPlan,
   validateGoogleIntegrationSubmission,
@@ -101,5 +104,33 @@ describe("AddProviderModal billing normalization", () => {
         plan: manualPlan,
       })
     ).toEqual({ ...manualPlan, billingMode: "actual" });
+  });
+
+  it("groups Cloudflare resource IDs as optional metadata probes with no money-path effect", () => {
+    const html = renderToStaticMarkup(
+      createElement(AddProviderModal, {
+        open: true,
+        onClose: () => undefined,
+        onSave: async () => undefined,
+        editProvider: {
+          id: "cloudflare-provider",
+          name: "cloudflare",
+          displayName: "Cloudflare",
+          type: "builtin",
+          config: { accountId: "account-id", authMode: "api_token" },
+        },
+      })
+    );
+
+    expect(html).toContain("Optional single-resource metadata probes");
+    expect(html).toContain(CLOUDFLARE_RESOURCE_PROBE_DISCLOSURE);
+    expect(html).toContain("D1 database ID");
+    expect(html).toContain("R2 bucket name");
+    expect(html).toContain("KV namespace ID");
+    expect(html).toContain("Queue ID");
+    expect(html).toContain(
+      'aria-describedby="cloudflare-resource-probe-help"'
+    );
+    expect(html).not.toContain("D1 Database ID (optional)");
   });
 });
