@@ -41,7 +41,7 @@ const DEFINITIONS = [
   { name: "google-ai", displayName: "Google AI", type: "builtin", category: "LLM/AI", helpNote: "Gemini keys created in Google Cloud Console or Google AI Studio are supported. Verify & fetch checks the key without inference. For automatic project-level requests and quota limits, set the exact Gemini project and grant the encrypted service account Monitoring Viewer. The same credential can independently read actual spend when a standard Cloud Billing export dataset is configured. AI Studio prepaid balance, tier, and renewal are not exposed programmatically.", needsConfig: { fields: [
     { key: "billingDataset", label: "Billing export dataset (optional)", placeholder: "billing-project.billing_export" },
     { key: "serviceAccountJson", label: "Google read-only service-account JSON (optional)", placeholder: "Paste the complete service-account JSON", type: "textarea" },
-    { key: "googleProjectId", label: "Exact Gemini project ID (for usage/quota)", placeholder: "gemini-production", advanced: true },
+    { key: "googleProjectId", label: "Exact Gemini project ID (for usage/quota)", placeholder: "gemini-production" },
     { key: "billingTable", label: "Standard billing table ID (optional)", placeholder: "gcp_billing_export_v1_...", advanced: true },
   ] } },
   { name: "deepseek", displayName: "DeepSeek", type: "builtin", category: "LLM/AI", helpNote: "Reads the official prepaid/granted balance endpoint; DeepSeek does not expose invoice or subscription status here." },

@@ -85,8 +85,10 @@ export async function fetchUsage(
     configuredString(config.serviceAccountJson) ||
     context?.secretConfigConfigured === true;
   const monitoringProjectConfigured = configuredString(config.googleProjectId);
+  const billingRequested = hasGoogleCloudBillingConfig(config);
   const monitoringConfigured =
-    serviceAccountConfigured || monitoringProjectConfigured;
+    monitoringProjectConfigured ||
+    (serviceAccountConfigured && !billingRequested);
   const monitoringConfigurationStatus = !monitoringConfigured
     ? "not_configured"
     : !monitoringProjectConfigured
@@ -101,7 +103,7 @@ export async function fetchUsage(
     monitoringProjectConfigured &&
     secretConfigReadable;
   const billingConfigured =
-    hasGoogleCloudBillingConfig(config) ||
+    billingRequested ||
     (configuredString(config.billingDataset) &&
       context?.secretConfigConfigured === true &&
       !secretConfigReadable);
@@ -310,6 +312,7 @@ export async function fetchUsage(
             windowStart: monitoring.windowStart,
             windowEnd: monitoring.windowEnd,
             reportThrough: monitoring.reportThrough,
+            descriptorDiscovery: monitoring.descriptorDiscovery,
             requests: monitoring.requests,
             quotaUsage: {
               status: monitoring.quotaUsage.status,

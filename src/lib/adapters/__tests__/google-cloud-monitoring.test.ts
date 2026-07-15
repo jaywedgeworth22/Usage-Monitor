@@ -3,8 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchGoogleCloudMonitoring } from "../google-cloud-monitoring";
 
 const REQUEST_COUNT = "serviceruntime.googleapis.com/api/request_count";
-const QUOTA_USAGE = "serviceruntime.googleapis.com/quota/rate/net_usage";
-const QUOTA_LIMIT = "serviceruntime.googleapis.com/quota/limit";
+const TOKEN_USAGE =
+  "generativelanguage.googleapis.com/quota/generate_content_paid_tier_2_input_token_count/usage";
+const TOKEN_LIMIT =
+  "generativelanguage.googleapis.com/quota/generate_content_paid_tier_2_input_token_count/limit";
+const REQUEST_USAGE =
+  "generativelanguage.googleapis.com/quota/generate_requests_per_model/usage";
+const REQUEST_LIMIT =
+  "generativelanguage.googleapis.com/quota/generate_requests_per_model/limit";
+const LOCATION_RESOURCE = "generativelanguage.googleapis.com/Location";
 const PROJECT_ID = "gemini-production";
 const SERVICE = "generativelanguage.googleapis.com";
 
@@ -43,18 +50,24 @@ function point(value: number, endTime = "2026-07-13T20:00:00Z") {
 
 function series(input: {
   metricType: string;
-  resourceType: "consumed_api" | "consumer_quota";
+  resourceType: "consumed_api" | typeof LOCATION_RESOURCE;
   metricLabels?: Record<string, string>;
   resourceLabels?: Record<string, string>;
+  omitProjectLabel?: boolean;
   points: Array<ReturnType<typeof point>>;
 }) {
+  const native = input.resourceType === LOCATION_RESOURCE;
   return {
     metric: { type: input.metricType, labels: input.metricLabels ?? {} },
     resource: {
       type: input.resourceType,
       labels: {
-        project_id: PROJECT_ID,
-        service: SERVICE,
+        ...(!input.omitProjectLabel
+          ? native
+            ? { resource_container: PROJECT_ID }
+            : { project_id: PROJECT_ID }
+          : {}),
+        ...(native ? {} : { service: SERVICE }),
         location: "global",
         ...input.resourceLabels,
       },
@@ -63,23 +76,53 @@ function series(input: {
   };
 }
 
+function descriptor(
+  type: string,
+  metricKind: "DELTA" | "GAUGE",
+  displayName = "Gemini quota"
+) {
+  return {
+    type,
+    metricKind,
+    valueType: "INT64",
+    displayName,
+    monitoredResourceTypes: [LOCATION_RESOURCE],
+    labels: [{ key: "limit_name" }, { key: "model" }],
+  };
+}
+
+const CURRENT_DESCRIPTORS = [
+  descriptor(TOKEN_USAGE, "DELTA", "Paid tier 2 input token quota usage"),
+  descriptor(TOKEN_LIMIT, "GAUGE", "Paid tier 2 input token quota limit"),
+  descriptor(REQUEST_USAGE, "DELTA", "Requests per model quota usage"),
+  descriptor(REQUEST_LIMIT, "GAUGE", "Requests per model quota limit"),
+];
+
 function decodeJwtClaims(body: unknown): Record<string, unknown> {
   const assertion = new URLSearchParams(String(body)).get("assertion");
   expect(assertion).toBeTruthy();
-  const encodedClaims = assertion!.split(".")[1];
-  return JSON.parse(Buffer.from(encodedClaims, "base64url").toString("utf8"));
+  return JSON.parse(
+    Buffer.from(assertion!.split(".")[1], "base64url").toString("utf8")
+  );
 }
 
-function metricFromUrl(value: string): string {
-  const filter = new URL(value).searchParams.get("filter") ?? "";
+function metricFromUrl(url: URL): string {
+  const filter = url.searchParams.get("filter") ?? "";
   const match = filter.match(/metric\.type = "([^"]+)"/);
-  if (!match) throw new Error(`Missing metric filter: ${filter}`);
+  if (!match) throw new Error(`Missing exact metric filter: ${filter}`);
   return match[1];
 }
 
-function stubMonitoring(
-  responder: (metric: string, url: URL) => Response | Promise<Response>
-) {
+interface StubOptions {
+  descriptors?: unknown[];
+  descriptorResponder?: (url: URL) => Response | Promise<Response>;
+  timeSeriesResponder?: (
+    metric: string,
+    url: URL
+  ) => Response | Promise<Response>;
+}
+
+function stubMonitoring(options: StubOptions = {}) {
   const fetchMock = vi.fn(
     (input: string | URL | Request, init?: RequestInit) => {
       const value = String(input);
@@ -94,19 +137,41 @@ function stubMonitoring(
       }
       const url = new URL(value);
       expect(url.origin).toBe("https://monitoring.googleapis.com");
-      expect(url.pathname).toBe(
-        `/v3/projects/${PROJECT_ID}/timeSeries`
-      );
       expect(new Headers(init?.headers).get("Authorization")).toBe(
         "Bearer monitoring-token"
       );
+      if (url.pathname.endsWith("/metricDescriptors")) {
+        expect(url.pathname).toBe(
+          `/v3/projects/${PROJECT_ID}/metricDescriptors`
+        );
+        expect(url.searchParams.get("filter")).toBe(
+          'metric.type = starts_with("generativelanguage.googleapis.com/quota/")'
+        );
+        expect(url.searchParams.get("activeOnly")).toBe("true");
+        expect(url.searchParams.get("pageSize")).toBe("1000");
+        return Promise.resolve(
+          options.descriptorResponder?.(url) ??
+            jsonResponse({
+              metricDescriptors: options.descriptors ?? CURRENT_DESCRIPTORS,
+            })
+        );
+      }
+      expect(url.pathname).toBe(`/v3/projects/${PROJECT_ID}/timeSeries`);
       expect(url.searchParams.get("pageSize")).toBe("1000");
       expect(url.searchParams.get("view")).toBe("FULL");
-      const filter = url.searchParams.get("filter");
-      expect(filter).toContain(
-        `resource.labels.service = "${SERVICE}"`
+      const filter = url.searchParams.get("filter") ?? "";
+      expect(filter).toContain(`project = "${PROJECT_ID}"`);
+      const metric = metricFromUrl(url);
+      if (metric === REQUEST_COUNT) {
+        expect(filter).toContain(`resource.labels.service = "${SERVICE}"`);
+      } else {
+        expect(filter).toContain(`resource.type = "${LOCATION_RESOURCE}"`);
+        expect(filter).not.toContain("resource.labels.service");
+      }
+      return Promise.resolve(
+        options.timeSeriesResponder?.(metric, url) ??
+          jsonResponse({ timeSeries: [] })
       );
-      return Promise.resolve(responder(metricFromUrl(value), url));
     }
   );
   vi.stubGlobal("fetch", fetchMock);
@@ -125,76 +190,83 @@ describe("Google Cloud Monitoring Gemini enrichment", () => {
     vi.restoreAllMocks();
   });
 
-  it("reads documented request and request/token quota metrics with monitoring.read", async () => {
-    const fetchMock = stubMonitoring((metric, url) => {
-      if (metric === REQUEST_COUNT) {
-        expect(url.searchParams.get("aggregation.perSeriesAligner")).toBe(
-          "ALIGN_SUM"
-        );
-        expect(url.searchParams.get("aggregation.crossSeriesReducer")).toBe(
-          "REDUCE_SUM"
-        );
-        return jsonResponse({
-          timeSeries: [
-            series({
-              metricType: REQUEST_COUNT,
-              resourceType: "consumed_api",
-              resourceLabels: {
-                credential_id: "must-not-be-retained",
-                method: "GenerateContent",
-              },
-              points: [point(10), point(5, "2026-07-12T20:00:00Z")],
-            }),
-          ],
-        });
-      }
-      if (metric === QUOTA_USAGE) {
-        return jsonResponse({
-          timeSeries: [
-            series({
-              metricType: QUOTA_USAGE,
-              resourceType: "consumer_quota",
-              metricLabels: {
-                quota_metric:
-                  "generativelanguage.googleapis.com/generate_content_requests",
-              },
-              points: [point(8)],
-            }),
-            series({
-              metricType: QUOTA_USAGE,
-              resourceType: "consumer_quota",
-              metricLabels: {
-                quota_metric:
-                  "generativelanguage.googleapis.com/generate_content_tokens",
-              },
-              points: [point(1200)],
-            }),
-            series({
-              metricType: QUOTA_USAGE,
-              resourceType: "consumer_quota",
-              metricLabels: {
-                quota_metric: "unrelated.googleapis.com/network_bytes",
-              },
-              points: [point(999)],
-            }),
-          ],
-        });
-      }
-      expect(metric).toBe(QUOTA_LIMIT);
-      return jsonResponse({
-        timeSeries: [
-          series({
-            metricType: QUOTA_LIMIT,
-            resourceType: "consumer_quota",
-            metricLabels: {
-              quota_metric:
-                "generativelanguage.googleapis.com/generate_content_tokens",
-              limit_name: "GenerateContentTokensPerMinutePerProject",
-            },
-            points: [point(2_000_000)],
-          }),
-        ],
-      });
+  it("reads current native model/tier/location quotas and keeps request_count as aggregate fallback", async () => {
+    const fetchMock = stubMonitoring({
+      timeSeriesResponder: (metric, url) => {
+        if (metric === REQUEST_COUNT) {
+          expect(url.searchParams.get("aggregation.perSeriesAligner")).toBe(
+            "ALIGN_SUM"
+          );
+          expect(url.searchParams.get("aggregation.crossSeriesReducer")).toBe(
+            "REDUCE_SUM"
+          );
+          return jsonResponse({
+            timeSeries: [
+              series({
+                metricType: REQUEST_COUNT,
+                resourceType: "consumed_api",
+                // Reducers can remove project_id; the explicit project
+                // selector remains the authoritative scope.
+                omitProjectLabel: true,
+                resourceLabels: {
+                  credential_id: "must-not-be-retained",
+                  method: "GenerateContent",
+                },
+                points: [point(10), point(5, "2026-07-12T20:00:00Z")],
+              }),
+            ],
+          });
+        }
+        if (metric === TOKEN_USAGE) {
+          expect(url.searchParams.get("aggregation.perSeriesAligner")).toBe(
+            "ALIGN_SUM"
+          );
+          return jsonResponse({
+            timeSeries: [
+              series({
+                metricType: TOKEN_USAGE,
+                resourceType: LOCATION_RESOURCE,
+                metricLabels: {
+                  limit_name: "InputTokensPerMinute",
+                  method: "GenerateContent",
+                  model: "gemini-2.5-pro",
+                },
+                points: [point(100), point(50, "2026-07-12T20:00:00Z")],
+              }),
+              series({
+                metricType: TOKEN_USAGE,
+                resourceType: LOCATION_RESOURCE,
+                metricLabels: {
+                  limit_name: "InputTokensPerMinute",
+                  model: "gemini-2.5-flash",
+                },
+                resourceLabels: { location: "us-central1" },
+                points: [point(75)],
+              }),
+            ],
+          });
+        }
+        if (metric === TOKEN_LIMIT) {
+          expect(url.searchParams.get("aggregation.perSeriesAligner")).toBeNull();
+          return jsonResponse({
+            timeSeries: [
+              series({
+                metricType: TOKEN_LIMIT,
+                resourceType: LOCATION_RESOURCE,
+                metricLabels: {
+                  limit_name: "InputTokensPerMinute",
+                  model: "gemini-2.5-pro",
+                },
+                points: [
+                  point(2_000_000),
+                  point(1_000_000, "2026-07-12T20:00:00Z"),
+                ],
+              }),
+            ],
+          });
+        }
+        return jsonResponse({ timeSeries: [] });
+      },
     });
 
     const result = await fetchGoogleCloudMonitoring(config());
@@ -203,30 +275,58 @@ describe("Google Cloud Monitoring Gemini enrichment", () => {
       status: "ready",
       projectId: PROJECT_ID,
       totalRequests: 15,
-      requests: { status: "ready", total: 15, pointCount: 2 },
+      descriptorDiscovery: {
+        status: "ready",
+        availableCount: 4,
+        selectedCount: 4,
+        truncated: false,
+      },
+      requests: {
+        status: "ready",
+        source: "aggregate_service_runtime_fallback",
+        total: 15,
+      },
       quotaUsage: {
         status: "ready",
         availableCount: 2,
         retainedCount: 2,
-        truncated: false,
       },
       quotaLimits: {
         status: "ready",
         availableCount: 1,
         retainedCount: 1,
-        truncated: false,
       },
+    });
+    expect(result.quotaUsage.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          metricType: TOKEN_USAGE,
+          model: "gemini-2.5-pro",
+          tier: "paid tier 2",
+          location: "global",
+          unit: "tokens",
+          value: 150,
+        }),
+        expect.objectContaining({
+          model: "gemini-2.5-flash",
+          tier: "paid tier 2",
+          location: "us-central1",
+          value: 75,
+        }),
+      ])
+    );
+    expect(result.quotaLimits.items[0]).toMatchObject({
+      metricType: TOKEN_LIMIT,
+      model: "gemini-2.5-pro",
+      tier: "paid tier 2",
+      value: 2_000_000,
+      reportThrough: "2026-07-13T20:00:00.000Z",
     });
     expect(result.externalBillingSyncs.map((sync) => sync.source)).toEqual([
       "google-cloud-monitoring-requests",
-      "google-cloud-monitoring-quota-usage",
-      "google-cloud-monitoring-quota-limits",
+      "google-cloud-monitoring-native-quota-usage",
+      "google-cloud-monitoring-native-quota-limits",
     ]);
-    expect(result.externalBillingSyncs[0].records[0]).toMatchObject({
-      usageQuantity: 15,
-      usageUnit: "requests",
-      rollupRole: "metadata",
-    });
     expect(result.externalBillingSyncs[2].records[0]).toMatchObject({
       requestLimit: 2_000_000,
       usageUnit: "tokens",
@@ -235,17 +335,50 @@ describe("Google Cloud Monitoring Gemini enrichment", () => {
     expect(JSON.stringify(result)).not.toContain("must-not-be-retained");
     expect(JSON.stringify(result)).not.toContain("GenerateContent\"");
     expect(JSON.stringify(result)).not.toContain("PRIVATE KEY");
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
   });
 
-  it("authoritatively clears stale metadata when all successful queries are empty", async () => {
-    stubMonitoring(() => jsonResponse({ timeSeries: [] }));
+  it("rejects a returned cross-project series even though every query has an exact project selector", async () => {
+    stubMonitoring({
+      descriptors: [descriptor(TOKEN_USAGE, "DELTA")],
+      timeSeriesResponder: (metric) =>
+        metric === TOKEN_USAGE
+          ? jsonResponse({
+              timeSeries: [
+                series({
+                  metricType: TOKEN_USAGE,
+                  resourceType: LOCATION_RESOURCE,
+                  metricLabels: { model: "gemini-2.5-pro" },
+                  resourceLabels: { resource_container: "another-project" },
+                  points: [point(10)],
+                }),
+              ],
+            })
+          : jsonResponse({ timeSeries: [] }),
+    });
+
+    const result = await fetchGoogleCloudMonitoring(config());
+
+    expect(result.status).toBe("partial");
+    expect(result.quotaUsage).toMatchObject({
+      status: "partial",
+      queryFailureCount: 1,
+      errorCode: "INVALID_RESPONSE",
+    });
+    expect(
+      result.externalBillingSyncs.find(
+        (sync) => sync.source === "google-cloud-monitoring-native-quota-usage"
+      )
+    ).toMatchObject({ authoritative: false, records: [] });
+  });
+
+  it("does not falsely clear native history when active descriptor discovery is empty", async () => {
+    stubMonitoring({ descriptors: [] });
 
     const result = await fetchGoogleCloudMonitoring(config());
 
     expect(result.status).toBe("empty");
     expect(result.totalRequests).toBeNull();
-    expect(result.reportThrough).toBeNull();
     expect(result.externalBillingSyncs).toEqual([
       {
         source: "google-cloud-monitoring-requests",
@@ -253,51 +386,65 @@ describe("Google Cloud Monitoring Gemini enrichment", () => {
         records: [],
       },
       {
-        source: "google-cloud-monitoring-quota-usage",
-        authoritative: true,
+        source: "google-cloud-monitoring-native-quota-usage",
+        authoritative: false,
         records: [],
       },
       {
-        source: "google-cloud-monitoring-quota-limits",
-        authoritative: true,
+        source: "google-cloud-monitoring-native-quota-limits",
+        authoritative: false,
         records: [],
       },
     ]);
   });
 
-  it("keeps successful request and limit data when one quota query is forbidden", async () => {
-    stubMonitoring((metric) => {
-      if (metric === QUOTA_USAGE) {
-        return jsonResponse({ error: { status: "PERMISSION_DENIED" } }, 403);
-      }
-      if (metric === REQUEST_COUNT) {
-        return jsonResponse({
-          timeSeries: [
-            series({
-              metricType: REQUEST_COUNT,
-              resourceType: "consumed_api",
-              points: [point(12)],
-            }),
-          ],
-        });
-      }
-      return jsonResponse({ timeSeries: [] });
+  it("preserves successful native siblings when one exact metric query is forbidden", async () => {
+    stubMonitoring({
+      descriptors: [
+        descriptor(TOKEN_USAGE, "DELTA"),
+        descriptor(REQUEST_USAGE, "DELTA"),
+      ],
+      timeSeriesResponder: (metric) => {
+        if (metric === TOKEN_USAGE) {
+          return jsonResponse({ error: { status: "PERMISSION_DENIED" } }, 403);
+        }
+        if (metric === REQUEST_USAGE) {
+          return jsonResponse({
+            timeSeries: [
+              series({
+                metricType: REQUEST_USAGE,
+                resourceType: LOCATION_RESOURCE,
+                metricLabels: {
+                  limit_name: "RequestsPerMinute",
+                  model: "gemini-2.5-flash",
+                },
+                points: [point(8)],
+              }),
+            ],
+          });
+        }
+        return jsonResponse({ timeSeries: [] });
+      },
     });
 
     const result = await fetchGoogleCloudMonitoring(config());
 
     expect(result.status).toBe("partial");
-    expect(result.totalRequests).toBe(12);
     expect(result.quotaUsage).toMatchObject({
-      status: "error",
-      errorCode: "HTTP_ERROR",
-      httpStatus: 403,
-      retryable: false,
+      status: "partial",
+      queryFailureCount: 1,
+      availableCount: 1,
     });
-    expect(result.externalBillingSyncs.map((sync) => sync.source)).toEqual([
-      "google-cloud-monitoring-requests",
-      "google-cloud-monitoring-quota-limits",
-    ]);
+    expect(result.quotaUsage.items[0]).toMatchObject({
+      metricType: REQUEST_USAGE,
+      model: "gemini-2.5-flash",
+      value: 8,
+    });
+    expect(
+      result.externalBillingSyncs.find(
+        (sync) => sync.source === "google-cloud-monitoring-native-quota-usage"
+      )
+    ).toMatchObject({ authoritative: false });
     expect(result.partialError).toMatchObject({
       code: "HTTP_ERROR",
       status: 403,
@@ -305,9 +452,12 @@ describe("Google Cloud Monitoring Gemini enrichment", () => {
   });
 
   it("reports project permission denial without returning false zero or clear syncs", async () => {
-    stubMonitoring(() =>
-      jsonResponse({ error: { status: "PERMISSION_DENIED" } }, 403)
-    );
+    stubMonitoring({
+      descriptorResponder: () =>
+        jsonResponse({ error: { status: "PERMISSION_DENIED" } }, 403),
+      timeSeriesResponder: () =>
+        jsonResponse({ error: { status: "PERMISSION_DENIED" } }, 403),
+    });
 
     const result = await fetchGoogleCloudMonitoring(config());
 
@@ -321,30 +471,116 @@ describe("Google Cloud Monitoring Gemini enrichment", () => {
     });
   });
 
-  it("rejects repeated pagination tokens and preserves successful sibling queries", async () => {
-    let requestPage = 0;
-    stubMonitoring((metric, url) => {
-      if (metric !== REQUEST_COUNT) return jsonResponse({ timeSeries: [] });
-      requestPage += 1;
-      if (requestPage === 1) {
-        expect(url.searchParams.get("pageToken")).toBeNull();
-        return jsonResponse({ timeSeries: [], nextPageToken: "repeat" });
-      }
-      expect(url.searchParams.get("pageToken")).toBe("repeat");
-      return jsonResponse({ timeSeries: [], nextPageToken: "repeat" });
+  it("bounds dynamic native queries and marks a truncated catalog non-authoritative", async () => {
+    const descriptors = Array.from({ length: 60 }, (_, index) =>
+      descriptor(
+        `generativelanguage.googleapis.com/quota/custom_request_quota_${String(index).padStart(2, "0")}/usage`,
+        "DELTA"
+      )
+    );
+    const fetchMock = stubMonitoring({ descriptors });
+
+    const result = await fetchGoogleCloudMonitoring(config());
+
+    const monitoringCalls = fetchMock.mock.calls
+      .map(([input]) => String(input))
+      .filter((url) => url.includes("monitoring.googleapis.com"));
+    const timeSeriesCalls = monitoringCalls.filter((url) =>
+      url.includes("/timeSeries?")
+    );
+    expect(timeSeriesCalls).toHaveLength(41);
+    expect(result).toMatchObject({
+      status: "partial",
+      descriptorDiscovery: {
+        availableCount: 60,
+        selectedCount: 40,
+        truncated: true,
+      },
+      quotaUsage: { status: "partial", truncated: true },
+    });
+    expect(
+      result.externalBillingSyncs.find(
+        (sync) => sync.source === "google-cloud-monitoring-native-quota-usage"
+      )
+    ).toMatchObject({ authoritative: false });
+  });
+
+  it("bounds descriptor pagination and preserves the aggregate request sibling", async () => {
+    let descriptorPage = 0;
+    stubMonitoring({
+      descriptorResponder: (url) => {
+        descriptorPage += 1;
+        if (descriptorPage === 1) {
+          expect(url.searchParams.get("pageToken")).toBeNull();
+          return jsonResponse({ metricDescriptors: [], nextPageToken: "repeat" });
+        }
+        expect(url.searchParams.get("pageToken")).toBe("repeat");
+        return jsonResponse({ metricDescriptors: [], nextPageToken: "repeat" });
+      },
+      timeSeriesResponder: (metric) =>
+        metric === REQUEST_COUNT
+          ? jsonResponse({
+              timeSeries: [
+                series({
+                  metricType: REQUEST_COUNT,
+                  resourceType: "consumed_api",
+                  points: [point(4)],
+                }),
+              ],
+            })
+          : jsonResponse({ timeSeries: [] }),
     });
 
     const result = await fetchGoogleCloudMonitoring(config());
 
     expect(result.status).toBe("partial");
-    expect(result.requests).toMatchObject({
+    expect(result.totalRequests).toBe(4);
+    expect(result.descriptorDiscovery).toMatchObject({
       status: "error",
       errorCode: "INVALID_RESPONSE",
     });
-    expect(result.totalRequests).toBeNull();
     expect(result.externalBillingSyncs.map((sync) => sync.source)).toEqual([
-      "google-cloud-monitoring-quota-usage",
-      "google-cloud-monitoring-quota-limits",
+      "google-cloud-monitoring-requests",
     ]);
+  });
+
+  it("uses bounded descriptor pages as non-authoritative partial discovery", async () => {
+    let descriptorPage = 0;
+    const fetchMock = stubMonitoring({
+      descriptorResponder: () => {
+        descriptorPage += 1;
+        return jsonResponse({
+          metricDescriptors: [
+            descriptor(
+              descriptorPage === 1 ? TOKEN_USAGE : REQUEST_USAGE,
+              "DELTA"
+            ),
+          ],
+          nextPageToken: `page-${descriptorPage + 1}`,
+        });
+      },
+    });
+
+    const result = await fetchGoogleCloudMonitoring(config());
+
+    expect(descriptorPage).toBe(2);
+    expect(result).toMatchObject({
+      status: "partial",
+      descriptorDiscovery: {
+        status: "ready",
+        availableCount: 2,
+        selectedCount: 2,
+        truncated: true,
+      },
+    });
+    const timeSeriesCalls = fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes("/timeSeries?")
+    );
+    expect(timeSeriesCalls).toHaveLength(3);
+    expect(
+      result.externalBillingSyncs.find(
+        (sync) => sync.source === "google-cloud-monitoring-native-quota-usage"
+      )
+    ).toMatchObject({ authoritative: false });
   });
 });

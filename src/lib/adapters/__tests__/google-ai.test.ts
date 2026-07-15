@@ -99,13 +99,16 @@ function mockGoogle(options: {
       return Promise.resolve(jsonResponse({ access_token: "oauth-token" }));
     }
     if (url.startsWith("https://monitoring.googleapis.com/v3/")) {
-      expect(url).toContain("/projects/gemini-prod/timeSeries");
       expect(init?.headers).toMatchObject({ Authorization: "Bearer oauth-token" });
       if (options.monitoringStatus && options.monitoringStatus !== 200) {
         return Promise.resolve(
           jsonResponse({ error: "monitoring forbidden" }, options.monitoringStatus)
         );
       }
+      if (url.includes("/projects/gemini-prod/metricDescriptors")) {
+        return Promise.resolve(jsonResponse({ metricDescriptors: [] }));
+      }
+      expect(url).toContain("/projects/gemini-prod/timeSeries");
       const filter = new URL(url).searchParams.get("filter") ?? "";
       if (filter.includes("serviceruntime.googleapis.com/api/request_count")) {
         return Promise.resolve(
@@ -363,8 +366,8 @@ describe("google-ai billing adapter", () => {
     expect(result.externalBillingSyncs?.map((sync) => sync.source)).toEqual([
       "google-gemini-rate-limits",
       "google-cloud-monitoring-requests",
-      "google-cloud-monitoring-quota-usage",
-      "google-cloud-monitoring-quota-limits",
+      "google-cloud-monitoring-native-quota-usage",
+      "google-cloud-monitoring-native-quota-limits",
     ]);
     expect(result.rawData).toMatchObject({
       billing: { status: "ready" },

@@ -16,25 +16,35 @@ import {
 
 const MONITORING_API = "https://monitoring.googleapis.com/v3";
 const GEMINI_SERVICE = "generativelanguage.googleapis.com";
+const GEMINI_LOCATION_RESOURCE =
+  "generativelanguage.googleapis.com/Location";
 const REQUEST_COUNT_METRIC =
   "serviceruntime.googleapis.com/api/request_count";
-const QUOTA_USAGE_METRIC =
-  "serviceruntime.googleapis.com/quota/rate/net_usage";
-const QUOTA_LIMIT_METRIC = "serviceruntime.googleapis.com/quota/limit";
-const MAX_PAGES = 5;
-const PAGE_SIZE = 1_000;
-const MAX_POINTS = MAX_PAGES * PAGE_SIZE;
+const NATIVE_QUOTA_PREFIX =
+  "generativelanguage.googleapis.com/quota/";
+const MAX_TIME_SERIES_PAGES = 5;
+const TIME_SERIES_PAGE_SIZE = 1_000;
+const MAX_TIME_SERIES_POINTS =
+  MAX_TIME_SERIES_PAGES * TIME_SERIES_PAGE_SIZE;
+const MAX_DESCRIPTOR_PAGES = 2;
+const DESCRIPTOR_PAGE_SIZE = 1_000;
+const MAX_DESCRIPTOR_RESULTS =
+  MAX_DESCRIPTOR_PAGES * DESCRIPTOR_PAGE_SIZE;
+const MAX_NATIVE_QUOTA_QUERIES = 40;
+const NATIVE_QUERY_CONCURRENCY = 10;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_RETAINED_QUOTAS = 100;
 
-type QueryName = "requests" | "quotaUsage" | "quotaLimits";
 type MonitoringStatus =
   | "ready"
   | "empty"
   | "partial"
   | "permission_denied"
   | "error";
+type QueryStatus = "ready" | "empty" | "partial" | "error";
+type MetricKind = "DELTA" | "GAUGE";
+type NativeQuotaKind = "usage" | "limit";
 
 interface MonitoringPoint {
   value: number;
@@ -47,27 +57,86 @@ interface MonitoringSeries {
   points: MonitoringPoint[];
 }
 
+interface QuerySpec {
+  name: string;
+  metricType: string;
+  metricKind: MetricKind;
+  resourceType: "consumed_api" | typeof GEMINI_LOCATION_RESOURCE;
+  window: { start: string; end: string };
+  serviceFilter: boolean;
+  alignment?: {
+    period: string;
+    aligner: "ALIGN_SUM";
+    reducer?: "REDUCE_SUM";
+    groupByFields?: string[];
+  };
+}
+
 interface QuerySuccess {
-  name: QueryName;
+  name: string;
   status: "ready" | "empty";
   series: MonitoringSeries[];
 }
 
 interface QueryFailure {
-  name: QueryName;
+  name: string;
   status: "error";
   error: AdapterError;
 }
 
 type QueryOutcome = QuerySuccess | QueryFailure;
 
+interface NativeMetricDescriptor {
+  type: string;
+  metricKind: MetricKind;
+  kind: NativeQuotaKind;
+  quotaName: string;
+}
+
+interface NativeQueryOutcome {
+  descriptor: NativeMetricDescriptor;
+  outcome: QueryOutcome;
+}
+
+interface DescriptorDiscoverySuccess {
+  status: "ready";
+  availableCount: number;
+  selected: NativeMetricDescriptor[];
+  truncated: boolean;
+}
+
+interface DescriptorDiscoveryFailure {
+  status: "error";
+  error: AdapterError;
+}
+
+type DescriptorDiscoveryOutcome =
+  | DescriptorDiscoverySuccess
+  | DescriptorDiscoveryFailure;
+
 export interface GoogleMonitoringQuotaItem {
-  quotaMetric: string;
+  metricType: string;
+  quotaName: string;
   limitName: string | null;
+  model: string;
+  tier: string;
   location: string;
-  unit: "requests" | "tokens";
+  unit: string;
   value: number;
   reportThrough: string;
+}
+
+interface QuotaSummary {
+  status: QueryStatus;
+  descriptorCount: number;
+  queryFailureCount: number;
+  availableCount: number;
+  retainedCount: number;
+  truncated: boolean;
+  items: GoogleMonitoringQuotaItem[];
+  errorCode?: string;
+  httpStatus?: number | null;
+  retryable?: boolean;
 }
 
 export interface GoogleCloudMonitoringResult {
@@ -77,8 +146,18 @@ export interface GoogleCloudMonitoringResult {
   windowEnd: string;
   totalRequests: number | null;
   reportThrough: string | null;
+  descriptorDiscovery: {
+    status: "ready" | "error";
+    availableCount: number;
+    selectedCount: number;
+    truncated: boolean;
+    errorCode?: string;
+    httpStatus?: number | null;
+    retryable?: boolean;
+  };
   requests: {
     status: "ready" | "empty" | "error";
+    source: "aggregate_service_runtime_fallback";
     total: number | null;
     seriesCount: number;
     pointCount: number;
@@ -86,46 +165,10 @@ export interface GoogleCloudMonitoringResult {
     httpStatus?: number | null;
     retryable?: boolean;
   };
-  quotaUsage: {
-    status: "ready" | "empty" | "error";
-    availableCount: number;
-    retainedCount: number;
-    truncated: boolean;
-    items: GoogleMonitoringQuotaItem[];
-    errorCode?: string;
-    httpStatus?: number | null;
-    retryable?: boolean;
-  };
-  quotaLimits: {
-    status: "ready" | "empty" | "error";
-    availableCount: number;
-    retainedCount: number;
-    truncated: boolean;
-    items: GoogleMonitoringQuotaItem[];
-    errorCode?: string;
-    httpStatus?: number | null;
-    retryable?: boolean;
-  };
+  quotaUsage: QuotaSummary;
+  quotaLimits: QuotaSummary;
   externalBillingSyncs: AdapterExternalBillingSync[];
   partialError?: AdapterError;
-}
-
-interface TimeSeriesResponse {
-  timeSeries?: unknown;
-  nextPageToken?: unknown;
-}
-
-interface QuerySpec {
-  name: QueryName;
-  metricType: string;
-  resourceType: "consumed_api" | "consumer_quota";
-  window: { start: string; end: string };
-  alignment?: {
-    period: string;
-    aligner: "ALIGN_SUM";
-    reducer?: "REDUCE_SUM";
-    groupByFields?: string[];
-  };
 }
 
 function invalidResponse(message: string): never {
@@ -163,7 +206,9 @@ function cleanLabels(value: unknown, field: string): Record<string, string> {
     }
     const text = cleanString(raw);
     if (text == null || text.length > 512) {
-      invalidResponse(`Google Cloud Monitoring ${field} contain an invalid value`);
+      invalidResponse(
+        `Google Cloud Monitoring ${field} contain an invalid value`
+      );
     }
     labels[key] = text;
   }
@@ -195,6 +240,28 @@ function numericPoint(value: unknown): number {
   return number;
 }
 
+function validateResourceProject(
+  labels: Record<string, string>,
+  projectId: string
+): void {
+  if (labels.project_id != null && labels.project_id !== projectId) {
+    invalidResponse(
+      "Google Cloud Monitoring returned a time series for another project"
+    );
+  }
+  const resourceContainer = labels.resource_container;
+  if (
+    resourceContainer != null &&
+    resourceContainer !== projectId &&
+    resourceContainer !== `projects/${projectId}` &&
+    !/^\d+$/.test(resourceContainer)
+  ) {
+    invalidResponse(
+      "Google Cloud Monitoring returned a resource container for another project"
+    );
+  }
+}
+
 function parseSeries(
   value: unknown,
   spec: QuerySpec,
@@ -213,12 +280,12 @@ function parseSeries(
   }
   const metricLabels = cleanLabels(metric?.labels, "metric labels");
   const resourceLabels = cleanLabels(resource?.labels, "resource labels");
+  validateResourceProject(resourceLabels, projectId);
   if (
-    resourceLabels.service !== GEMINI_SERVICE ||
-    (resourceLabels.project_id != null &&
-      resourceLabels.project_id !== projectId)
+    spec.serviceFilter &&
+    resourceLabels.service !== GEMINI_SERVICE
   ) {
-    invalidResponse("Google Cloud Monitoring returned an out-of-scope series");
+    invalidResponse("Google Cloud Monitoring returned an out-of-scope service");
   }
   const points = record.points.map((rawPoint) => {
     const point = asRecord(rawPoint);
@@ -234,11 +301,14 @@ function parseSeries(
   return { metricLabels, resourceLabels, points };
 }
 
-function monitoringFilter(spec: QuerySpec): string {
+function monitoringFilter(spec: QuerySpec, projectId: string): string {
   return [
+    `project = "${projectId}"`,
     `metric.type = "${spec.metricType}"`,
     `resource.type = "${spec.resourceType}"`,
-    `resource.labels.service = "${GEMINI_SERVICE}"`,
+    ...(spec.serviceFilter
+      ? [`resource.labels.service = "${GEMINI_SERVICE}"`]
+      : []),
   ].join(" AND ");
 }
 
@@ -252,15 +322,15 @@ async function fetchTimeSeries(
   let pointCount = 0;
   let pageToken: string | null = null;
 
-  for (let page = 0; page < MAX_PAGES; page++) {
+  for (let page = 0; page < MAX_TIME_SERIES_PAGES; page++) {
     const url = new URL(
       `${MONITORING_API}/projects/${encodeURIComponent(projectId)}/timeSeries`
     );
-    url.searchParams.set("filter", monitoringFilter(spec));
+    url.searchParams.set("filter", monitoringFilter(spec, projectId));
     url.searchParams.set("interval.startTime", spec.window.start);
     url.searchParams.set("interval.endTime", spec.window.end);
     url.searchParams.set("view", "FULL");
-    url.searchParams.set("pageSize", String(PAGE_SIZE));
+    url.searchParams.set("pageSize", String(TIME_SERIES_PAGE_SIZE));
     if (spec.alignment) {
       url.searchParams.set(
         "aggregation.alignmentPeriod",
@@ -292,7 +362,7 @@ async function fetchTimeSeries(
         note: `Google Cloud Monitoring ${spec.name} query failed`,
       });
     }
-    const data = asRecord(response.data) as TimeSeriesResponse | null;
+    const data = asRecord(response.data);
     if (!data) invalidResponse("Google Cloud Monitoring response is malformed");
     if (data.timeSeries != null && !Array.isArray(data.timeSeries)) {
       invalidResponse("Google Cloud Monitoring timeSeries is malformed");
@@ -300,7 +370,7 @@ async function fetchTimeSeries(
     for (const rawSeries of (data.timeSeries as unknown[] | undefined) ?? []) {
       const parsed = parseSeries(rawSeries, spec, projectId);
       pointCount += parsed.points.length;
-      if (pointCount > MAX_POINTS) {
+      if (pointCount > MAX_TIME_SERIES_POINTS) {
         invalidResponse("Google Cloud Monitoring query exceeded the point limit");
       }
       series.push(parsed);
@@ -317,16 +387,180 @@ async function fetchTimeSeries(
   invalidResponse("Google Cloud Monitoring query exceeded the page limit");
 }
 
+function nativeDescriptor(value: unknown): NativeMetricDescriptor | null {
+  const record = asRecord(value);
+  const type = cleanString(record?.type);
+  const metricKind = cleanString(record?.metricKind);
+  const valueType = cleanString(record?.valueType);
+  if (!record || !type || !metricKind || !valueType) {
+    invalidResponse("Google Cloud Monitoring metric descriptor is malformed");
+  }
+  const match = type.match(
+    /^generativelanguage\.googleapis\.com\/quota\/([a-z0-9_]+)\/(usage|limit)$/
+  );
+  if (!match) return null;
+  if (
+    (metricKind !== "DELTA" && metricKind !== "GAUGE") ||
+    valueType !== "INT64"
+  ) {
+    invalidResponse(
+      `Google Cloud Monitoring quota descriptor ${type} has unsupported semantics`
+    );
+  }
+  if (record.monitoredResourceTypes != null) {
+    if (!Array.isArray(record.monitoredResourceTypes)) {
+      invalidResponse(
+        "Google Cloud Monitoring descriptor resource types are malformed"
+      );
+    }
+    const resourceTypes = record.monitoredResourceTypes.map(cleanString);
+    if (
+      resourceTypes.length > 0 &&
+      !resourceTypes.includes(GEMINI_LOCATION_RESOURCE)
+    ) {
+      invalidResponse(
+        `Google Cloud Monitoring quota descriptor ${type} has an unexpected resource type`
+      );
+    }
+  }
+  return {
+    type,
+    metricKind,
+    quotaName: match[1],
+    kind: match[2] as NativeQuotaKind,
+  };
+}
+
+function quotaUnit(quotaName: string): string {
+  if (quotaName.includes("token")) return "tokens";
+  if (quotaName.includes("request")) return "requests";
+  if (quotaName.includes("batch")) return "batches";
+  if (quotaName.includes("file")) return "files";
+  return "units";
+}
+
+function nativeDescriptorPriority(descriptor: NativeMetricDescriptor): string {
+  const unit = quotaUnit(descriptor.quotaName);
+  const priority = unit === "tokens" ? "0" : unit === "requests" ? "1" : "2";
+  return `${priority}:${descriptor.quotaName}:${descriptor.kind}`;
+}
+
+function selectNativeDescriptors(
+  descriptors: NativeMetricDescriptor[]
+): NativeMetricDescriptor[] {
+  const groups = new Map<string, NativeMetricDescriptor[]>();
+  for (const descriptor of descriptors) {
+    const items = groups.get(descriptor.quotaName) ?? [];
+    items.push(descriptor);
+    groups.set(descriptor.quotaName, items);
+  }
+  const orderedGroups = [...groups.values()].sort((left, right) =>
+    nativeDescriptorPriority(left[0]).localeCompare(
+      nativeDescriptorPriority(right[0])
+    )
+  );
+  const selected: NativeMetricDescriptor[] = [];
+  for (const group of orderedGroups) {
+    const sorted = [...group].sort((left, right) =>
+      left.kind.localeCompare(right.kind)
+    );
+    if (selected.length + sorted.length > MAX_NATIVE_QUOTA_QUERIES) break;
+    selected.push(...sorted);
+  }
+  return selected;
+}
+
+function descriptorDiscoveryResult(
+  descriptors: Map<string, NativeMetricDescriptor>,
+  boundedPages: boolean
+): DescriptorDiscoverySuccess {
+  const all = [...descriptors.values()];
+  const selected = selectNativeDescriptors(all);
+  return {
+    status: "ready",
+    availableCount: all.length,
+    selected,
+    truncated: boundedPages || selected.length !== all.length,
+  };
+}
+
+async function discoverNativeDescriptors(
+  projectId: string,
+  token: string
+): Promise<DescriptorDiscoverySuccess> {
+  const descriptors = new Map<string, NativeMetricDescriptor>();
+  const seenTokens = new Set<string>();
+  let pageToken: string | null = null;
+
+  for (let page = 0; page < MAX_DESCRIPTOR_PAGES; page++) {
+    const url = new URL(
+      `${MONITORING_API}/projects/${encodeURIComponent(projectId)}/metricDescriptors`
+    );
+    url.searchParams.set(
+      "filter",
+      `metric.type = starts_with("${NATIVE_QUOTA_PREFIX}")`
+    );
+    url.searchParams.set("activeOnly", "true");
+    url.searchParams.set("pageSize", String(DESCRIPTOR_PAGE_SIZE));
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const response = await fetchJson(
+      url.toString(),
+      { headers: { Authorization: `Bearer ${token}` } },
+      { timeoutMs: REQUEST_TIMEOUT_MS, maxResponseBytes: MAX_RESPONSE_BYTES }
+    );
+    if (!response.ok) {
+      errorResult(response.status, {
+        note: "Google Cloud Monitoring metric descriptor discovery failed",
+      });
+    }
+    const data = asRecord(response.data);
+    if (!data) {
+      invalidResponse("Google Cloud Monitoring descriptor response is malformed");
+    }
+    if (
+      data.metricDescriptors != null &&
+      !Array.isArray(data.metricDescriptors)
+    ) {
+      invalidResponse("Google Cloud Monitoring descriptors are malformed");
+    }
+    for (const value of
+      (data.metricDescriptors as unknown[] | undefined) ?? []) {
+      const descriptor = nativeDescriptor(value);
+      if (descriptor) descriptors.set(descriptor.type, descriptor);
+      if (descriptors.size > MAX_DESCRIPTOR_RESULTS) {
+        invalidResponse(
+          "Google Cloud Monitoring descriptor discovery exceeded the result limit"
+        );
+      }
+    }
+    const nextToken = cleanString(data.nextPageToken);
+    if (!nextToken) {
+      return descriptorDiscoveryResult(descriptors, false);
+    }
+    if (seenTokens.has(nextToken)) {
+      invalidResponse("Google Cloud Monitoring repeated a descriptor page token");
+    }
+    seenTokens.add(nextToken);
+    if (page === MAX_DESCRIPTOR_PAGES - 1) {
+      return descriptorDiscoveryResult(descriptors, true);
+    }
+    pageToken = nextToken;
+  }
+  return descriptorDiscoveryResult(descriptors, true);
+}
+
 function monthWindow(now = new Date()): { start: string; end: string } {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   return { start: start.toISOString(), end: now.toISOString() };
 }
 
 function latestTimestamp(series: MonitoringSeries[]): string | null {
-  return series
-    .flatMap((item) => item.points.map((point) => point.endTime))
-    .sort()
-    .at(-1) ?? null;
+  return (
+    series
+      .flatMap((item) => item.points.map((point) => point.endTime))
+      .sort()
+      .at(-1) ?? null
+  );
 }
 
 function safeSum(values: number[], label: string): number | null {
@@ -336,13 +570,6 @@ function safeSum(values: number[], label: string): number | null {
     invalidResponse(`Google Cloud Monitoring ${label} total is invalid`);
   }
   return total;
-}
-
-function quotaUnit(value: string): "requests" | "tokens" | null {
-  const normalized = value.toLowerCase();
-  if (normalized.includes("token")) return "tokens";
-  if (normalized.includes("request")) return "requests";
-  return null;
 }
 
 function displayQuotaName(value: string): string {
@@ -355,165 +582,42 @@ function displayQuotaName(value: string): string {
     .slice(0, 160);
 }
 
+function quotaTier(quotaName: string): string {
+  const numbered = quotaName.match(/paid_tier_(\d+)/);
+  if (numbered) return `paid tier ${numbered[1]}`;
+  if (quotaName.includes("paid_tier")) return "paid tier";
+  if (quotaName.includes("free_tier")) return "free tier";
+  return "provider-defined tier";
+}
+
 function stableExternalId(prefix: string, values: string[]): string {
   const digest = createHash("sha256")
-    .update("api-usage-monitor:google-monitoring:v1\0", "utf8")
+    .update("api-usage-monitor:google-monitoring:v2\0", "utf8")
     .update(JSON.stringify(values), "utf8")
     .digest("hex")
     .slice(0, 32);
   return `${prefix}:${digest}`;
 }
 
-function aggregateQuotaUsage(series: MonitoringSeries[]): GoogleMonitoringQuotaItem[] {
-  const grouped = new Map<string, GoogleMonitoringQuotaItem>();
-  for (const item of series) {
-    const quotaMetric = cleanString(item.metricLabels.quota_metric);
-    if (!quotaMetric) continue;
-    const unit = quotaUnit(quotaMetric);
-    if (!unit) continue;
-    const value = safeSum(
-      item.points.map((point) => point.value),
-      "quota usage"
-    );
-    const reportThrough = latestTimestamp([item]);
-    if (value == null || reportThrough == null) continue;
-    const location = item.resourceLabels.location || "global";
-    const key = JSON.stringify([quotaMetric, location, unit]);
-    const existing = grouped.get(key);
-    if (existing) {
-      const combined = existing.value + value;
-      if (!Number.isSafeInteger(combined)) {
-        invalidResponse("Google Cloud Monitoring quota usage total is invalid");
-      }
-      existing.value = combined;
-      if (reportThrough > existing.reportThrough) {
-        existing.reportThrough = reportThrough;
-      }
-    } else {
-      grouped.set(key, {
-        quotaMetric,
-        limitName: null,
-        location,
-        unit,
-        value,
-        reportThrough,
-      });
-    }
-  }
-  return [...grouped.values()].sort(
-    (left, right) =>
-      left.quotaMetric.localeCompare(right.quotaMetric) ||
-      left.location.localeCompare(right.location)
-  );
-}
-
-function aggregateQuotaLimits(series: MonitoringSeries[]): GoogleMonitoringQuotaItem[] {
-  const grouped = new Map<string, GoogleMonitoringQuotaItem>();
-  for (const item of series) {
-    const quotaMetric = cleanString(item.metricLabels.quota_metric);
-    const limitName = cleanString(item.metricLabels.limit_name);
-    if (!quotaMetric || !limitName) continue;
-    const unit = quotaUnit(`${quotaMetric} ${limitName}`);
-    if (!unit || item.points.length === 0) continue;
-    const latest = [...item.points].sort((left, right) =>
-      right.endTime.localeCompare(left.endTime)
-    )[0];
-    if (!Number.isSafeInteger(latest.value)) {
-      invalidResponse("Google Cloud Monitoring quota limit is invalid");
-    }
-    const location = item.resourceLabels.location || "global";
-    const key = JSON.stringify([quotaMetric, limitName, location, unit]);
-    const existing = grouped.get(key);
-    if (!existing || latest.endTime > existing.reportThrough) {
-      grouped.set(key, {
-        quotaMetric,
-        limitName,
-        location,
-        unit,
-        value: latest.value,
-        reportThrough: latest.endTime,
-      });
-    } else if (
-      latest.endTime === existing.reportThrough &&
-      latest.value > existing.value
-    ) {
-      // Duplicate dimensions can remain after Google omits a non-grouped
-      // label. Preserve the effective maximum instead of summing limits.
-      existing.value = latest.value;
-    }
-  }
-  return [...grouped.values()].sort(
-    (left, right) =>
-      left.quotaMetric.localeCompare(right.quotaMetric) ||
-      (left.limitName ?? "").localeCompare(right.limitName ?? "") ||
-      left.location.localeCompare(right.location)
-  );
-}
-
-function requestRecord(
-  totalRequests: number,
-  window: { start: string; end: string },
-  reportThrough: string
-): AdapterExternalBillingRecord {
+function querySpecForDescriptor(
+  descriptor: NativeMetricDescriptor,
+  window: { start: string; end: string }
+): QuerySpec {
   return {
-    externalId: "gemini-requests-mtd",
-    kind: "account",
-    serviceName: "Gemini API requests",
-    planName: "Cloud Monitoring month to date",
-    status: "active",
-    currentPeriodStart: window.start,
-    currentPeriodEnd: reportThrough,
-    usageQuantity: totalRequests,
-    usageUnit: "requests",
-    rollupRole: "metadata",
-    dateKind: "report_through",
-  };
-}
-
-function quotaUsageRecord(
-  item: GoogleMonitoringQuotaItem,
-  windowStart: string
-): AdapterExternalBillingRecord {
-  return {
-    externalId: stableExternalId("quota-usage", [
-      item.quotaMetric,
-      item.location,
-      item.unit,
-    ]),
-    kind: "account",
-    serviceName: `Gemini ${displayQuotaName(item.quotaMetric)}`,
-    planName: "Cloud Monitoring month-to-date quota usage",
-    status: "active",
-    currentPeriodStart: windowStart,
-    currentPeriodEnd: item.reportThrough,
-    usageQuantity: item.value,
-    usageUnit: item.unit,
-    rollupRole: "metadata",
-    dateKind: "report_through",
-  };
-}
-
-function quotaLimitRecord(
-  item: GoogleMonitoringQuotaItem
-): AdapterExternalBillingRecord {
-  const label = item.limitName ?? item.quotaMetric;
-  return {
-    externalId: stableExternalId("quota-limit", [
-      item.quotaMetric,
-      label,
-      item.location,
-      item.unit,
-    ]),
-    kind: "account",
-    serviceName: `Gemini ${displayQuotaName(label)}`,
-    planName: "Cloud Monitoring quota limit",
-    status: "active",
-    currentPeriodEnd: item.reportThrough,
-    requestLimit: item.value,
-    requestLimitWindow: displayQuotaName(label),
-    usageUnit: item.unit,
-    rollupRole: "metadata",
-    dateKind: "report_through",
+    name: `native:${descriptor.type}`,
+    metricType: descriptor.type,
+    metricKind: descriptor.metricKind,
+    resourceType: GEMINI_LOCATION_RESOURCE,
+    window,
+    serviceFilter: false,
+    ...(descriptor.metricKind === "DELTA"
+      ? {
+          alignment: {
+            period: "86400s",
+            aligner: "ALIGN_SUM" as const,
+          },
+        }
+      : {}),
   };
 }
 
@@ -548,6 +652,179 @@ async function queryOutcome(
   }
 }
 
+async function queryNativeDescriptors(
+  descriptors: NativeMetricDescriptor[],
+  projectId: string,
+  token: string,
+  window: { start: string; end: string }
+): Promise<NativeQueryOutcome[]> {
+  const outcomes: NativeQueryOutcome[] = [];
+  for (
+    let offset = 0;
+    offset < descriptors.length;
+    offset += NATIVE_QUERY_CONCURRENCY
+  ) {
+    const batch = descriptors.slice(
+      offset,
+      offset + NATIVE_QUERY_CONCURRENCY
+    );
+    outcomes.push(
+      ...(await Promise.all(
+        batch.map(async (descriptor) => ({
+          descriptor,
+          outcome: await queryOutcome(
+            projectId,
+            token,
+            querySpecForDescriptor(descriptor, window)
+          ),
+        }))
+      ))
+    );
+  }
+  return outcomes;
+}
+
+function aggregateNativeQuotas(
+  outcomes: NativeQueryOutcome[],
+  kind: NativeQuotaKind
+): GoogleMonitoringQuotaItem[] {
+  const grouped = new Map<string, GoogleMonitoringQuotaItem>();
+  for (const { descriptor, outcome } of outcomes) {
+    if (descriptor.kind !== kind || outcome.status === "error") continue;
+    for (const series of outcome.series) {
+      if (series.points.length === 0) continue;
+      const model = series.metricLabels.model || "all models";
+      const limitName = series.metricLabels.limit_name || null;
+      const location = series.resourceLabels.location || "global";
+      const tier = quotaTier(descriptor.quotaName);
+      const unit = quotaUnit(descriptor.quotaName);
+      const key = JSON.stringify([
+        descriptor.type,
+        model,
+        limitName,
+        location,
+        tier,
+      ]);
+      const latest = [...series.points].sort((left, right) =>
+        right.endTime.localeCompare(left.endTime)
+      )[0];
+      const value =
+        descriptor.metricKind === "DELTA"
+          ? safeSum(
+              series.points.map((point) => point.value),
+              "native quota usage"
+            )
+          : latest.value;
+      if (value == null || !Number.isSafeInteger(value)) {
+        invalidResponse("Google Cloud Monitoring native quota value is invalid");
+      }
+      const reportThrough =
+        descriptor.metricKind === "DELTA"
+          ? latestTimestamp([series])!
+          : latest.endTime;
+      const existing = grouped.get(key);
+      if (!existing) {
+        grouped.set(key, {
+          metricType: descriptor.type,
+          quotaName: descriptor.quotaName,
+          limitName,
+          model,
+          tier,
+          location,
+          unit,
+          value,
+          reportThrough,
+        });
+      } else if (descriptor.metricKind === "DELTA") {
+        const combined = existing.value + value;
+        if (!Number.isSafeInteger(combined)) {
+          invalidResponse(
+            "Google Cloud Monitoring native quota total is invalid"
+          );
+        }
+        existing.value = combined;
+        if (reportThrough > existing.reportThrough) {
+          existing.reportThrough = reportThrough;
+        }
+      } else if (
+        reportThrough > existing.reportThrough ||
+        (reportThrough === existing.reportThrough && value > existing.value)
+      ) {
+        existing.value = value;
+        existing.reportThrough = reportThrough;
+      }
+    }
+  }
+  return [...grouped.values()].sort(
+    (left, right) =>
+      left.quotaName.localeCompare(right.quotaName) ||
+      left.model.localeCompare(right.model) ||
+      left.tier.localeCompare(right.tier) ||
+      left.location.localeCompare(right.location)
+  );
+}
+
+function requestRecord(
+  totalRequests: number,
+  window: { start: string; end: string },
+  reportThrough: string
+): AdapterExternalBillingRecord {
+  return {
+    externalId: "gemini-requests-mtd",
+    kind: "account",
+    serviceName: "Gemini API aggregate requests",
+    planName: "Service Runtime aggregate fallback",
+    status: "active",
+    currentPeriodStart: window.start,
+    currentPeriodEnd: reportThrough,
+    usageQuantity: totalRequests,
+    usageUnit: "requests",
+    rollupRole: "metadata",
+    dateKind: "report_through",
+  };
+}
+
+function nativeQuotaRecord(
+  item: GoogleMonitoringQuotaItem,
+  kind: NativeQuotaKind,
+  windowStart: string
+): AdapterExternalBillingRecord {
+  const dimensions = [item.model, item.tier, item.location]
+    .filter(Boolean)
+    .join(" · ");
+  const base: AdapterExternalBillingRecord = {
+    externalId: stableExternalId(`native-quota-${kind}`, [
+      item.metricType,
+      item.model,
+      item.limitName ?? "",
+      item.tier,
+      item.location,
+    ]),
+    kind: "account",
+    serviceName: `Gemini ${displayQuotaName(item.quotaName)} · ${dimensions}`,
+    planName: `Cloud Monitoring native quota ${kind}`,
+    status: "active",
+    currentPeriodEnd: item.reportThrough,
+    usageUnit: item.unit,
+    rollupRole: "metadata",
+    dateKind: "report_through",
+  };
+  if (kind === "usage") {
+    return {
+      ...base,
+      currentPeriodStart: windowStart,
+      usageQuantity: item.value,
+    };
+  }
+  return {
+    ...base,
+    requestLimit: item.value,
+    requestLimitWindow: item.limitName
+      ? displayQuotaName(item.limitName)
+      : displayQuotaName(item.quotaName),
+  };
+}
+
 function querySummary(outcome: QueryOutcome) {
   if (outcome.status !== "error") {
     return { status: outcome.status } as const;
@@ -560,7 +837,9 @@ function querySummary(outcome: QueryOutcome) {
   };
 }
 
-function combinedQueryError(failures: QueryFailure[]): AdapterError | undefined {
+function combinedQueryError(
+  failures: Array<{ name: string; error: AdapterError }>
+): AdapterError | undefined {
   if (failures.length === 0) return undefined;
   if (failures.length === 1) return failures[0].error;
   return new AdapterError(
@@ -579,6 +858,66 @@ function combinedQueryError(failures: QueryFailure[]): AdapterError | undefined 
   );
 }
 
+function quotaSummary(input: {
+  discovery: DescriptorDiscoveryOutcome;
+  outcomes: NativeQueryOutcome[];
+  kind: NativeQuotaKind;
+  items: GoogleMonitoringQuotaItem[];
+}): QuotaSummary {
+  if (input.discovery.status === "error") {
+    return {
+      status: "error",
+      descriptorCount: 0,
+      queryFailureCount: 0,
+      availableCount: 0,
+      retainedCount: 0,
+      truncated: false,
+      items: [],
+      errorCode: input.discovery.error.code,
+      httpStatus: input.discovery.error.status,
+      retryable: input.discovery.error.retryable,
+    };
+  }
+  const descriptors = input.discovery.selected.filter(
+    (descriptor) => descriptor.kind === input.kind
+  );
+  const failures = input.outcomes.filter(
+    ({ descriptor, outcome }) =>
+      descriptor.kind === input.kind && outcome.status === "error"
+  );
+  const retained = input.items.slice(0, MAX_RETAINED_QUOTAS);
+  const itemTruncated = retained.length !== input.items.length;
+  const partial =
+    input.discovery.truncated || failures.length > 0 || itemTruncated;
+  return {
+    status: partial
+      ? "partial"
+      : retained.length > 0
+        ? "ready"
+        : "empty",
+    descriptorCount: descriptors.length,
+    queryFailureCount: failures.length,
+    availableCount: input.items.length,
+    retainedCount: retained.length,
+    truncated: input.discovery.truncated || itemTruncated,
+    items: retained,
+    ...(failures[0]?.outcome.status === "error"
+      ? {
+          errorCode: failures[0].outcome.error.code,
+          httpStatus: failures[0].outcome.error.status,
+          retryable: failures.some(
+            ({ outcome }) =>
+              outcome.status === "error" && outcome.error.retryable
+          ),
+        }
+      : {}),
+  };
+}
+
+function isPermissionFailure(error: AdapterError): boolean {
+  return error.status === 401 || error.status === 403;
+}
+
 export async function fetchGoogleCloudMonitoring(
   config: Record<string, unknown>
 ): Promise<GoogleCloudMonitoringResult> {
@@ -591,40 +930,52 @@ export async function fetchGoogleCloudMonitoring(
     GOOGLE_MONITORING_READ_SCOPE
   );
   const window = monthWindow();
-  const specs: QuerySpec[] = [
-    {
-      name: "requests",
-      metricType: REQUEST_COUNT_METRIC,
-      resourceType: "consumed_api",
-      window,
-      alignment: {
-        period: "86400s",
-        aligner: "ALIGN_SUM",
-        reducer: "REDUCE_SUM",
-        groupByFields: ["resource.labels.service"],
-      },
+  const requestSpec: QuerySpec = {
+    name: "aggregateRequestFallback",
+    metricType: REQUEST_COUNT_METRIC,
+    metricKind: "DELTA",
+    resourceType: "consumed_api",
+    window,
+    serviceFilter: true,
+    alignment: {
+      period: "86400s",
+      aligner: "ALIGN_SUM",
+      reducer: "REDUCE_SUM",
+      groupByFields: ["resource.labels.service"],
     },
-    {
-      name: "quotaUsage",
-      metricType: QUOTA_USAGE_METRIC,
-      resourceType: "consumer_quota",
-      window,
-      alignment: { period: "86400s", aligner: "ALIGN_SUM" },
-    },
-    {
-      name: "quotaLimits",
-      metricType: QUOTA_LIMIT_METRIC,
-      resourceType: "consumer_quota",
-      window,
-    },
-  ];
-  const outcomes = await Promise.all(
-    specs.map((spec) => queryOutcome(projectId, token, spec))
-  );
-  const byName = new Map(outcomes.map((outcome) => [outcome.name, outcome]));
-  const requests = byName.get("requests")!;
-  const usage = byName.get("quotaUsage")!;
-  const limits = byName.get("quotaLimits")!;
+  };
+
+  const discoveryPromise: Promise<DescriptorDiscoveryOutcome> =
+    discoverNativeDescriptors(projectId, token).then(
+      (value): DescriptorDiscoveryOutcome => value,
+      (error): DescriptorDiscoveryOutcome => ({
+        status: "error",
+        error:
+          error instanceof AdapterError
+            ? error
+            : new AdapterError(
+                "Google Cloud Monitoring descriptor discovery failed",
+                {
+                  code: "TRANSPORT_ERROR",
+                  retryable: true,
+                  cause: error,
+                }
+              ),
+      })
+    );
+  const [requests, discovery] = await Promise.all([
+    queryOutcome(projectId, token, requestSpec),
+    discoveryPromise,
+  ]);
+  const nativeOutcomes =
+    discovery.status === "ready"
+      ? await queryNativeDescriptors(
+          discovery.selected,
+          projectId,
+          token,
+          window
+        )
+      : [];
   const requestTotal =
     requests.status === "error"
       ? null
@@ -632,42 +983,59 @@ export async function fetchGoogleCloudMonitoring(
           requests.series.flatMap((series) =>
             series.points.map((point) => point.value)
           ),
-          "request"
+          "aggregate request"
         );
   const requestReportThrough =
     requests.status === "error" ? null : latestTimestamp(requests.series);
-  const usageItems =
-    usage.status === "error" ? [] : aggregateQuotaUsage(usage.series);
-  const limitItems =
-    limits.status === "error" ? [] : aggregateQuotaLimits(limits.series);
-  const retainedUsage = usageItems.slice(0, MAX_RETAINED_QUOTAS);
-  const retainedLimits = limitItems.slice(0, MAX_RETAINED_QUOTAS);
-  const usageTruncated = retainedUsage.length !== usageItems.length;
-  const limitsTruncated = retainedLimits.length !== limitItems.length;
-  const failures = outcomes.filter(
-    (outcome): outcome is QueryFailure => outcome.status === "error"
-  );
-  const successes = outcomes.length - failures.length;
-  const anyData = outcomes.some(
-    (outcome) => outcome.status === "ready"
-  );
+  const usageItems = aggregateNativeQuotas(nativeOutcomes, "usage");
+  const limitItems = aggregateNativeQuotas(nativeOutcomes, "limit");
+  const usage = quotaSummary({
+    discovery,
+    outcomes: nativeOutcomes,
+    kind: "usage",
+    items: usageItems,
+  });
+  const limits = quotaSummary({
+    discovery,
+    outcomes: nativeOutcomes,
+    kind: "limit",
+    items: limitItems,
+  });
+  const failures: Array<{ name: string; error: AdapterError }> = [
+    ...(requests.status === "error"
+      ? [{ name: requests.name, error: requests.error }]
+      : []),
+    ...(discovery.status === "error"
+      ? [{ name: "descriptorDiscovery", error: discovery.error }]
+      : []),
+    ...nativeOutcomes.flatMap(({ descriptor, outcome }) =>
+      outcome.status === "error"
+        ? [{ name: descriptor.type, error: outcome.error }]
+        : []
+    ),
+  ];
+  const successfulQueries =
+    (requests.status === "error" ? 0 : 1) +
+    nativeOutcomes.filter(({ outcome }) => outcome.status !== "error").length;
+  const anyData =
+    requestTotal != null || usage.items.length > 0 || limits.items.length > 0;
+  const boundedPartial =
+    discovery.status === "ready" &&
+    (discovery.truncated || usage.truncated || limits.truncated);
   const permissionDenied =
-    failures.length === outcomes.length &&
-    failures.every(({ error }) =>
-      error.status === 401 || error.status === 403
-    );
+    successfulQueries === 0 &&
+    failures.length > 0 &&
+    failures.every(({ error }) => isPermissionFailure(error));
   const status: MonitoringStatus =
-    failures.length > 0
-      ? successes > 0
+    failures.length > 0 || boundedPartial
+      ? successfulQueries > 0
         ? "partial"
         : permissionDenied
           ? "permission_denied"
           : "error"
-      : usageTruncated || limitsTruncated
-        ? "partial"
-        : anyData
-          ? "ready"
-          : "empty";
+      : anyData
+        ? "ready"
+        : "empty";
 
   const externalBillingSyncs: AdapterExternalBillingSync[] = [];
   if (requests.status !== "error") {
@@ -680,21 +1048,26 @@ export async function fetchGoogleCloudMonitoring(
           : [],
     });
   }
-  if (usage.status !== "error") {
-    externalBillingSyncs.push({
-      source: "google-cloud-monitoring-quota-usage",
-      authoritative: !usageTruncated,
-      records: retainedUsage.map((item) =>
-        quotaUsageRecord(item, window.start)
-      ),
-    });
-  }
-  if (limits.status !== "error") {
-    externalBillingSyncs.push({
-      source: "google-cloud-monitoring-quota-limits",
-      authoritative: !limitsTruncated,
-      records: retainedLimits.map(quotaLimitRecord),
-    });
+  if (discovery.status === "ready") {
+    externalBillingSyncs.push(
+      {
+        source: "google-cloud-monitoring-native-quota-usage",
+        // Discovery is intentionally activeOnly, so a missing descriptor means
+        // "no recent series", not authoritative deletion of month-to-date
+        // history. Failed/truncated queries likewise retain prior dimensions.
+        authoritative: false,
+        records: usage.items.map((item) =>
+          nativeQuotaRecord(item, "usage", window.start)
+        ),
+      },
+      {
+        source: "google-cloud-monitoring-native-quota-limits",
+        authoritative: false,
+        records: limits.items.map((item) =>
+          nativeQuotaRecord(item, "limit", window.start)
+        ),
+      }
+    );
   }
 
   return {
@@ -703,16 +1076,35 @@ export async function fetchGoogleCloudMonitoring(
     windowStart: window.start,
     windowEnd: window.end,
     totalRequests: requestTotal,
-    reportThrough: [
-      requestReportThrough,
-      ...retainedUsage.map((item) => item.reportThrough),
-      ...retainedLimits.map((item) => item.reportThrough),
-    ]
-      .filter((value): value is string => value != null)
-      .sort()
-      .at(-1) ?? null,
+    reportThrough:
+      [
+        requestReportThrough,
+        ...usage.items.map((item) => item.reportThrough),
+        ...limits.items.map((item) => item.reportThrough),
+      ]
+        .filter((value): value is string => value != null)
+        .sort()
+        .at(-1) ?? null,
+    descriptorDiscovery:
+      discovery.status === "ready"
+        ? {
+            status: "ready",
+            availableCount: discovery.availableCount,
+            selectedCount: discovery.selected.length,
+            truncated: discovery.truncated,
+          }
+        : {
+            status: "error",
+            availableCount: 0,
+            selectedCount: 0,
+            truncated: false,
+            errorCode: discovery.error.code,
+            httpStatus: discovery.error.status,
+            retryable: discovery.error.retryable,
+          },
     requests: {
       ...querySummary(requests),
+      source: "aggregate_service_runtime_fallback",
       total: requestTotal,
       seriesCount: requests.status === "error" ? 0 : requests.series.length,
       pointCount:
@@ -723,20 +1115,8 @@ export async function fetchGoogleCloudMonitoring(
               0
             ),
     },
-    quotaUsage: {
-      ...querySummary(usage),
-      availableCount: usageItems.length,
-      retainedCount: retainedUsage.length,
-      truncated: usageTruncated,
-      items: retainedUsage,
-    },
-    quotaLimits: {
-      ...querySummary(limits),
-      availableCount: limitItems.length,
-      retainedCount: retainedLimits.length,
-      truncated: limitsTruncated,
-      items: retainedLimits,
-    },
+    quotaUsage: usage,
+    quotaLimits: limits,
     externalBillingSyncs,
     partialError: combinedQueryError(failures),
   };

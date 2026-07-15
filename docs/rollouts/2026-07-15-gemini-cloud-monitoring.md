@@ -26,30 +26,39 @@ export dataset is configured.
 
 ## Official metrics queried
 
-All time-series filters are restricted to
-`resource.labels.service = "generativelanguage.googleapis.com"` and use only
-documented Service Runtime metrics:
+Every time-series filter has an exact `project = "<googleProjectId>"`
+selector. The primary quota path discovers active metric descriptors under:
 
-- `serviceruntime.googleapis.com/api/request_count`
-- `serviceruntime.googleapis.com/quota/rate/net_usage`
-- `serviceruntime.googleapis.com/quota/limit`
+- `generativelanguage.googleapis.com/quota/.../usage`
+- `generativelanguage.googleapis.com/quota/.../limit`
 
-The adapter retains only request/token quota dimensions. Method and credential
-identifiers returned in monitored-resource labels are discarded. Request and
-quota usage are month-to-date; quota limits use the latest returned sample.
+These current Gemini-native metrics use the
+`generativelanguage.googleapis.com/Location` monitored resource and preserve
+model, tier, and location. `DELTA` descriptors are summed month-to-date;
+`GAUGE` descriptors use the newest point. Descriptor discovery and per-metric
+queries are bounded, and a failed metric cannot clear successful siblings.
 
-Google documents up to 1,800 seconds of visibility delay for request counts,
-up to 240 seconds for rate-quota usage, and daily sampling for quota limits.
-Consequently, successful empty results remain unknown (`null`), never false
-zero. Successful empty queries can authoritatively clear only their own stale
-metadata source. A failed query preserves that source's prior records.
+`serviceruntime.googleapis.com/api/request_count` remains only as a clearly
+labelled aggregate request fallback. It is additionally restricted to
+`resource.labels.service = "generativelanguage.googleapis.com"`. Method and
+credential identifiers returned in labels are discarded.
+
+Google currently documents up to 150 seconds of visibility delay for native
+Gemini quota usage and limit metrics and up to 1,800 seconds for aggregate
+request counts. Consequently, successful empty results remain unknown (`null`),
+never false zero. Aggregate request fallback can clear only its own stale
+metadata after a successful empty result. Native discovery is intentionally
+recent-series-only, so native sources remain non-authoritative: absent, failed,
+or bounded dimensions preserve prior records instead of implying deletion.
 
 ## Safety bounds
 
 - 15-second HTTP timeout per Monitoring request
 - 512 KiB response limit
-- 1,000 points per page
+- 1,000 points per time-series page
 - five pages / 5,000 points per metric query
+- two descriptor pages / 2,000 discovered descriptors
+- at most 40 native quota metric queries, in batches of 10
 - 100 retained request/token quota dimensions per usage or limit source
 - repeated page tokens and out-of-scope/malformed series are rejected
 
@@ -58,9 +67,12 @@ cost rollups.
 
 ## References
 
+- [Google Cloud metrics: Gemini API](https://cloud.google.com/monitoring/api/metrics_gcp_d_h)
 - [Google Cloud metrics: Service Runtime](https://cloud.google.com/monitoring/api/metrics_gcp_p_z)
 - [Google Cloud monitored resources](https://cloud.google.com/monitoring/api/resources)
+- [Cloud Monitoring `projects.metricDescriptors.list`](https://cloud.google.com/monitoring/api/ref_v3/rest/v3/projects.metricDescriptors/list)
 - [Cloud Monitoring `projects.timeSeries.list`](https://cloud.google.com/monitoring/api/ref_v3/rest/v3/projects.timeSeries/list)
+- [Cloud Monitoring filters and project selectors](https://cloud.google.com/monitoring/api/v3/filters)
 
 ## Verification
 
