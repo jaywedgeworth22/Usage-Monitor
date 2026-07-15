@@ -617,7 +617,7 @@ describe("Google Cloud Monitoring Gemini enrichment", () => {
 
     const monitoringCalls = fetchMock.mock.calls
       .map(([input]) => String(input))
-      .filter((url) => url.includes("monitoring.googleapis.com"));
+      .filter((url) => new URL(url).hostname === "monitoring.googleapis.com");
     const timeSeriesCalls = monitoringCalls.filter((url) =>
       url.includes("/timeSeries?")
     );
