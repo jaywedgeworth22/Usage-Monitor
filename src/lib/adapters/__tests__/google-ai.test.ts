@@ -406,8 +406,9 @@ describe("google-ai billing adapter", () => {
     });
     expect(
       fetchMock.mock.calls.some(([input]) =>
-        String(input).includes("oauth2.googleapis.com/token") ||
-        String(input).includes("bigquery.googleapis.com")
+        ["oauth2.googleapis.com", "bigquery.googleapis.com"].includes(
+          new URL(String(input)).hostname
+        )
       )
     ).toBe(false);
   });
