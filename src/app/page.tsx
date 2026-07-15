@@ -138,7 +138,11 @@ export default function DashboardPage() {
     // flash the (still-empty) main content before the outcome is known. Foreground calls
     // (initial load, manual refresh/retry) clear it immediately, matching prior behavior.
     if (!background) setError("");
-    setWarnings([]);
+    // Same rationale as the error clear above: clearing warnings up front would blank
+    // the visible warnings banner mid-flight for background refreshes. setWarnings(nextWarnings)
+    // below always runs after Promise.allSettled (which never rejects), so background
+    // outcomes still update the banner atomically once the fetch settles.
+    if (!background) setWarnings([]);
 
     try {
       const [providersResult, usageResult, projectsResult, subscriptionsResult] = await Promise.allSettled([
