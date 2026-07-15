@@ -155,6 +155,14 @@ usage — no special-casing. Idempotent by `(subscriptionId, periodStart)` hash 
   `maintenanceHealthy` boolean into `SchedulerRuntimeStatus.lastRun`; `/api/ready`
   exposes the existing scheduler summary without attaching target/provider IDs,
   env values, billing payloads, provider errors, or other maintenance fields.
+  Cloudflare's Workers API can report `current_period_start` with a creation
+  time but `current_period_end` at UTC midnight on the correct monthly renewal
+  date. General auto-adoption still rejects that non-exact duration; only this
+  exact-UUID handoff may accept it, and only for the exact paid Workers service,
+  Cloudflare source, authoritative/canonical/renewal markers, fresh current
+  exact-cent USD monthly term, and midnight calendar renewal date. After
+  handoff, only that preserved legacy row can use the same duration exception
+  during reconciliation; it is never inserted into the general candidate map.
 - Maintenance first runs `adoptExternalBillingSubscriptions`, which can create a linked
   `Subscription` only when the adapter set that exact record's default-false
   `paidRecurringAuthoritative` marker. `AdapterExternalBillingSync.authoritative` means only that

@@ -12,7 +12,10 @@ import {
   SUBSCRIPTION_SOURCE_APP,
   subscriptionChargeIdempotencyKey,
 } from "@/lib/subscription-charge-identity";
-import type { SubscriptionInterval } from "@/lib/subscriptions";
+import {
+  advancePeriod,
+  type SubscriptionInterval,
+} from "@/lib/subscriptions";
 
 export interface AdoptExternalBillingSubscriptionsResult {
   examined: number;
@@ -57,6 +60,7 @@ export interface PaidRecurringAdoptionRecord
   serviceName: string | null;
   planName: string | null;
   dateKind: string | null;
+  nextRenewalAt: string | Date | null;
 }
 
 export interface PaidRecurringAdoptionCandidate {
@@ -117,6 +121,7 @@ const providerStateSelect = {
       billingInterval: true,
       currentPeriodStart: true,
       currentPeriodEnd: true,
+      nextRenewalAt: true,
       rollupRole: true,
       dateKind: true,
       syncedAt: true,
@@ -139,6 +144,7 @@ interface CloudflareLegacyHandoffConfig {
 const CLOUDFLARE_LEGACY_SOURCE = "cloudflare-subscriptions";
 const CLOUDFLARE_LEGACY_DISPLAY_NAME =
   "Cloudflare Workers Paid (Congress.Trade)";
+const CLOUDFLARE_LEGACY_SERVICE_NAME = "Workers Paid";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -334,6 +340,117 @@ function conflictsWithProviderPlan(
     Number.isFinite(fixedMonthlyCostUsd) &&
     fixedMonthlyCostUsd > 0
   );
+}
+
+function billingTimestamp(value: Date | string | null): Date | null {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+/**
+ * Cloudflare reports paid Workers renewals at UTC midnight on the correct
+ * calendar renewal date even when current_period_start includes a creation
+ * time. That explicit provider window is not an exact calendar-month duration,
+ * so it stays ineligible for general automatic adoption. The one-time guarded
+ * legacy handoff may use it only when every Cloudflare-specific invariant is
+ * exact and the explicit end is midnight on the calendar date produced by
+ * advancing the start one month.
+ */
+function cloudflareLegacyHandoffCandidate(
+  providerId: string,
+  refreshIntervalMin: number,
+  record: PaidRecurringAdoptionRecord,
+  now: Date
+): PaidRecurringAdoptionCandidate | null {
+  const amountCents = exactUsdCents(record.amountUsd);
+  const cadence = normalizeExternalBillingCadence(record.billingInterval);
+  const periodStart = billingTimestamp(record.currentPeriodStart);
+  const periodEnd = billingTimestamp(record.currentPeriodEnd);
+  const nextRenewalAt = billingTimestamp(record.nextRenewalAt);
+  if (
+    record.source !== CLOUDFLARE_LEGACY_SOURCE ||
+    record.paidRecurringAuthoritative !== true ||
+    record.kind.trim().toLowerCase() !== "subscription" ||
+    cleanLabel(record.serviceName) !== CLOUDFLARE_LEGACY_SERVICE_NAME ||
+    record.status?.trim().toLowerCase() !== "paid" ||
+    record.rollupRole?.trim().toLowerCase() !== "canonical" ||
+    record.dateKind?.trim().toLowerCase() !== "renewal" ||
+    record.currency?.trim().toUpperCase() !== "USD" ||
+    cadence !== "monthly" ||
+    amountCents == null ||
+    amountCents <= 0 ||
+    !periodStart ||
+    !periodEnd ||
+    !nextRenewalAt ||
+    nextRenewalAt.getTime() !== periodEnd.getTime() ||
+    !isExternalBillingLinkCandidate(record, {
+      now,
+      staleAfterMs: externalBillingFreshnessWindowMs(refreshIntervalMin),
+    })
+  ) {
+    return null;
+  }
+
+  const exactCadencePeriod = hasExactExternalBillingCadencePeriod(record);
+  const calendarRenewal = advancePeriod(periodStart, "monthly", 1);
+  const explicitMidnightRenewal =
+    periodEnd.getUTCHours() === 0 &&
+    periodEnd.getUTCMinutes() === 0 &&
+    periodEnd.getUTCSeconds() === 0 &&
+    periodEnd.getUTCMilliseconds() === 0 &&
+    periodEnd.getUTCFullYear() === calendarRenewal.getUTCFullYear() &&
+    periodEnd.getUTCMonth() === calendarRenewal.getUTCMonth() &&
+    periodEnd.getUTCDate() === calendarRenewal.getUTCDate();
+  if (!exactCadencePeriod && !explicitMidnightRenewal) {
+    return null;
+  }
+
+  return {
+    providerId,
+    source: record.source,
+    externalId: record.externalId,
+    serviceName: CLOUDFLARE_LEGACY_SERVICE_NAME,
+    planName: cleanLabel(record.planName),
+    amountUsd: amountCents / 100,
+    amountCents,
+    cadence,
+    periodStart,
+    periodEnd,
+    guardKey: externalAdoptionGuardKey(providerId, amountCents, cadence),
+    observedAt:
+      record.syncedAt instanceof Date
+        ? record.syncedAt
+        : new Date(record.syncedAt),
+  };
+}
+
+function hasUniqueCloudflareLegacyHandoffShape(
+  provider: ProviderState,
+  candidatesByExternalKey: Map<string, AdoptionCandidate>,
+  candidate: AdoptionCandidate,
+  now: Date
+): boolean {
+  const identities = new Set<string>();
+  for (const [candidateIdentity, other] of candidatesByExternalKey) {
+    if (other.guardKey === candidate.guardKey) {
+      identities.add(candidateIdentity);
+    }
+  }
+  for (const record of provider.externalBilling) {
+    const other = cloudflareLegacyHandoffCandidate(
+      provider.id,
+      provider.refreshIntervalMin,
+      record,
+      now
+    );
+    if (other?.guardKey === candidate.guardKey) {
+      identities.add(
+        `${provider.id}\u0000${externalKey(record.source, record.externalId)}`
+      );
+    }
+  }
+  return identities.size === 1;
 }
 
 function isTerminalRecord(
@@ -589,6 +706,7 @@ async function handoffCloudflareLegacySubscription(
   tx: AdoptionTransaction,
   providers: ProviderState[],
   candidatesByExternalKey: Map<string, AdoptionCandidate>,
+  now: Date,
   targetId: string | null,
   initialStatus: CloudflareLegacyHandoffStatus
 ): Promise<CloudflareLegacyHandoffStatus> {
@@ -618,11 +736,10 @@ async function handoffCloudflareLegacySubscription(
     subscription.externalBillingSource,
     subscription.externalBillingId
   );
-  if (
-    !provider.externalBilling.some(
-      (record) => externalKey(record.source, record.externalId) === identity
-    )
-  ) {
+  const externalRecord = provider.externalBilling.find(
+    (record) => externalKey(record.source, record.externalId) === identity
+  );
+  if (!externalRecord) {
     return "wrong_identity";
   }
   if (subscription.externalBillingManaged) return "already_managed";
@@ -633,8 +750,11 @@ async function handoffCloudflareLegacySubscription(
     return "provider_plan_conflict";
   }
 
-  const candidate = candidatesByExternalKey.get(
-    `${provider.id}\u0000${identity}`
+  const candidate = cloudflareLegacyHandoffCandidate(
+    provider.id,
+    provider.refreshIntervalMin,
+    externalRecord,
+    now
   );
   if (!candidate) return "external_billing_ineligible";
   if (
@@ -653,9 +773,12 @@ async function handoffCloudflareLegacySubscription(
     return "term_mismatch";
   }
   if (
-    Array.from(candidatesByExternalKey.values()).filter(
-      (other) => other.guardKey === candidate.guardKey
-    ).length !== 1 ||
+    !hasUniqueCloudflareLegacyHandoffShape(
+      provider,
+      candidatesByExternalKey,
+      candidate,
+      now
+    ) ||
     provider.subscriptions.some(
       (other) =>
         other.id !== subscription.id &&
@@ -748,7 +871,22 @@ async function reconcileManagedSubscriptions(
       const externalId = subscription.externalBillingId;
       const key = source && externalId ? externalKey(source, externalId) : null;
       const record = key ? recordsByKey.get(key) : undefined;
-      const candidate = key ? candidatesByExternalKey.get(`${provider.id}\u0000${key}`) : undefined;
+      const generalCandidate = key
+        ? candidatesByExternalKey.get(`${provider.id}\u0000${key}`)
+        : undefined;
+      // The midnight-window exception belongs only to the exact preserved
+      // legacy Cloudflare row after its guarded handoff. Other providers and
+      // other managed Cloudflare subscriptions keep the general exact-period
+      // reconciliation rules.
+      const candidate =
+        record && preservesCloudflareLegacyDisplayName(provider, subscription)
+          ? cloudflareLegacyHandoffCandidate(
+              provider.id,
+              provider.refreshIntervalMin,
+              record,
+              now
+            ) ?? undefined
+          : generalCandidate;
 
       if (!record) {
         if (subscription.status !== "canceled" || subscription.autoRenew) {
@@ -918,18 +1056,20 @@ async function reconcileAndAdopt(
   const candidatesByExternalKey = new Map<string, AdoptionCandidate>();
   for (const provider of providers) {
     for (const record of provider.externalBilling) {
+      const identityKey = `${provider.id}\u0000${externalKey(
+        record.source,
+        record.externalId
+      )}`;
       const candidate = paidRecurringAdoptionCandidate(
         provider.id,
         provider.refreshIntervalMin,
         record,
         now
       );
-      if (!candidate) continue;
-      candidates.push(candidate);
-      candidatesByExternalKey.set(
-        `${provider.id}\u0000${externalKey(record.source, record.externalId)}`,
-        candidate
-      );
+      if (candidate) {
+        candidates.push(candidate);
+        candidatesByExternalKey.set(identityKey, candidate);
+      }
     }
   }
   result.eligible = candidates.length;
@@ -939,6 +1079,7 @@ async function reconcileAndAdopt(
       tx,
       providers,
       candidatesByExternalKey,
+      now,
       legacyHandoff.targetId,
       legacyHandoff.initialStatus
     );
