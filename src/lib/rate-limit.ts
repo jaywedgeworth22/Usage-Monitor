@@ -21,6 +21,21 @@ export interface RateLimiter {
    * Calling this also increments the counter for `key`.
    */
   check(key: string): boolean;
+
+  /**
+   * Returns true if `key` currently has budget remaining, WITHOUT consuming
+   * any of it. Use this to gate work (e.g. "is this request even allowed to
+   * proceed?") when you don't yet know whether the attempt should count
+   * against the limit.
+   */
+  isAllowed(key: string): boolean;
+
+  /**
+   * Consumes one unit of `key`'s budget. Use this to record an attempt after
+   * the fact (e.g. only once you know the attempt failed), separately from
+   * the `isAllowed` check that gated whether it was permitted to happen.
+   */
+  recordAttempt(key: string): void;
 }
 
 /**
@@ -70,11 +85,38 @@ export function createRateLimiter(
       // Rate limit exceeded
       return false;
     },
+
+    isAllowed(key: string): boolean {
+      const now = Date.now();
+      purgeExpired(now);
+
+      const existing = store.get(key);
+      if (!existing || now >= existing.resetAt) {
+        // No active window yet (or the previous one expired) - nothing has
+        // been consumed, so budget is available. Deliberately does not
+        // create an entry: an isAllowed() check alone must never consume.
+        return true;
+      }
+      return existing.count < maxRequests;
+    },
+
+    recordAttempt(key: string): void {
+      const now = Date.now();
+      purgeExpired(now);
+
+      const existing = store.get(key);
+      if (!existing || now >= existing.resetAt) {
+        store.set(key, { count: 1, resetAt: now + windowMs });
+        return;
+      }
+      existing.count += 1;
+    },
   };
 }
 
 /**
- * Extracts the client IP from a Next.js request, checking common proxy headers.
+ * Extracts the nearest trusted peer address from a Next.js request, checking
+ * common proxy headers.
  *
  * Only the rightmost X-Forwarded-For hop is trusted. That entry is the peer
  * address our own reverse proxy (Render) observed and appended when it
@@ -82,6 +124,16 @@ export function createRateLimiter(
  * whatever the client sent and can be freely spoofed - e.g. to rotate
  * through fake IPs and evade per-IP rate limiting. Trusting the leftmost
  * entry (the historical behavior here) makes limiting trivially bypassable.
+ *
+ * IMPORTANT - this is NOT necessarily "the client": usage.jays.services is
+ * fronted by Cloudflare in front of Render, so in production the rightmost
+ * hop Render observes is Cloudflare's own egress IP, which is SHARED by
+ * every Cloudflare-proxied client, not a per-visitor address. Only when a
+ * request reaches Render directly (bypassing Cloudflare) does this hop
+ * identify one true peer. Callers that need to distinguish individual
+ * Cloudflare-proxied clients (e.g. login rate limiting) should pair this
+ * with `cf-connecting-ip` rather than treating this value alone as a client
+ * identity - see `getLoginRateLimitKey` below.
  */
 export function getClientIp(request: Request): string {
   const forwardedFor = request.headers.get("x-forwarded-for");
@@ -94,4 +146,35 @@ export function getClientIp(request: Request): string {
     if (trustedHop) return trustedHop;
   }
   return request.headers.get("x-real-ip")?.trim() || "127.0.0.1";
+}
+
+/**
+ * Builds the rate-limit key used for login attempts: the tuple of (rightmost
+ * X-Forwarded-For hop, CF-Connecting-IP header value or "" when absent).
+ *
+ * Why a tuple instead of `getClientIp` alone: usage.jays.services sits
+ * behind Cloudflare, which proxies to Render. For that path, the rightmost
+ * XFF hop Render observes is Cloudflare's own egress IP - shared by every
+ * Cloudflare-proxied client - so keying only on it would bucket unrelated
+ * visitors together. Cloudflare itself sets `CF-Connecting-IP` from the
+ * TLS-terminated connection before forwarding the request, so a client
+ * arriving through Cloudflare cannot forge it; pairing it with the shared
+ * egress hop separates distinct CF-proxied clients back out again.
+ *
+ * Why it's still safe for traffic that reaches Render directly (bypassing
+ * Cloudflare): there, `CF-Connecting-IP` is just another ordinary header a
+ * client can set to anything, including rotating it per request. But the
+ * rightmost XFF hop in that path is that direct peer's own address as
+ * observed by Render's proxy - unspoofable by the client. Rotating the
+ * forged `CF-Connecting-IP` in that scenario only fragments the tuple key
+ * *under that one unspoofable hop*; it cannot collide with, or exhaust the
+ * budget of, any other source. The login route pairs this tuple limiter with
+ * a second limiter keyed on `getClientIp` alone (the rightmost hop, with no
+ * CF-Connecting-IP component) as a backstop that re-aggregates by that
+ * unspoofable hop even if CF-Connecting-IP is forged and rotated.
+ */
+export function getLoginRateLimitKey(request: Request): string {
+  const rightmostHop = getClientIp(request);
+  const cfConnectingIp = request.headers.get("cf-connecting-ip")?.trim() || "";
+  return `${rightmostHop}|cf-connecting-ip=${cfConnectingIp}`;
 }

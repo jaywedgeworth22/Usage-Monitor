@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createRateLimiter, getClientIp } from "../rate-limit";
+import { createRateLimiter, getClientIp, getLoginRateLimitKey } from "../rate-limit";
 
 describe("createRateLimiter", () => {
   beforeEach(() => {
@@ -35,6 +35,45 @@ describe("createRateLimiter", () => {
     vi.advanceTimersByTime(60_000);
 
     expect(limiter.check("a")).toBe(true);
+  });
+
+  describe("isAllowed / recordAttempt", () => {
+    it("isAllowed never consumes budget, no matter how many times it's called", () => {
+      const limiter = createRateLimiter(60_000, 2);
+      expect(limiter.isAllowed("a")).toBe(true);
+      expect(limiter.isAllowed("a")).toBe(true);
+      expect(limiter.isAllowed("a")).toBe(true);
+      expect(limiter.isAllowed("a")).toBe(true);
+      // Still fully available after repeated checks - only recordAttempt
+      // consumes budget, confirmed by draining it explicitly here.
+      limiter.recordAttempt("a");
+      limiter.recordAttempt("a");
+      expect(limiter.isAllowed("a")).toBe(false);
+    });
+
+    it("recordAttempt consumes budget even without a prior isAllowed call", () => {
+      const limiter = createRateLimiter(60_000, 2);
+      limiter.recordAttempt("a");
+      limiter.recordAttempt("a");
+      expect(limiter.isAllowed("a")).toBe(false);
+    });
+
+    it("isAllowed reflects budget already consumed by recordAttempt", () => {
+      const limiter = createRateLimiter(60_000, 1);
+      expect(limiter.isAllowed("a")).toBe(true);
+      limiter.recordAttempt("a");
+      expect(limiter.isAllowed("a")).toBe(false);
+    });
+
+    it("recordAttempt respects window expiry like check does", () => {
+      const limiter = createRateLimiter(60_000, 1);
+      limiter.recordAttempt("a");
+      expect(limiter.isAllowed("a")).toBe(false);
+
+      vi.advanceTimersByTime(60_000);
+
+      expect(limiter.isAllowed("a")).toBe(true);
+    });
   });
 });
 
@@ -87,5 +126,62 @@ describe("getClientIp", () => {
       headers: { "x-forwarded-for": "  ", "x-real-ip": "198.51.100.7" },
     });
     expect(getClientIp(request)).toBe("198.51.100.7");
+  });
+});
+
+describe("getLoginRateLimitKey", () => {
+  it("gives two Cloudflare-proxied clients sharing the same egress IP distinct keys", () => {
+    // usage.jays.services is fronted by Cloudflare -> Render, so the
+    // rightmost XFF hop is Cloudflare's shared egress IP - identical for
+    // every CF-proxied client - while CF-Connecting-IP (CF-set, untrustworthy
+    // only outside the CF path) still tells them apart.
+    const clientA = new Request("https://usage.jays.services/api/auth/login", {
+      headers: {
+        "x-forwarded-for": "203.0.113.50",
+        "cf-connecting-ip": "198.51.100.11",
+      },
+    });
+    const clientB = new Request("https://usage.jays.services/api/auth/login", {
+      headers: {
+        "x-forwarded-for": "203.0.113.50",
+        "cf-connecting-ip": "198.51.100.22",
+      },
+    });
+    expect(getClientIp(clientA)).toBe(getClientIp(clientB));
+    expect(getLoginRateLimitKey(clientA)).not.toBe(getLoginRateLimitKey(clientB));
+  });
+
+  it("is stable for the same client across repeated requests", () => {
+    const makeRequest = () =>
+      new Request("https://usage.jays.services/api/auth/login", {
+        headers: {
+          "x-forwarded-for": "203.0.113.50",
+          "cf-connecting-ip": "198.51.100.11",
+        },
+      });
+    expect(getLoginRateLimitKey(makeRequest())).toBe(getLoginRateLimitKey(makeRequest()));
+  });
+
+  it("uses an empty cf-connecting-ip component when the header is absent", () => {
+    const withoutCf = new Request("https://usage.jays.services/api/auth/login", {
+      headers: { "x-forwarded-for": "203.0.113.50" },
+    });
+    const withEmptyCf = new Request("https://usage.jays.services/api/auth/login", {
+      headers: { "x-forwarded-for": "203.0.113.50", "cf-connecting-ip": "" },
+    });
+    // Both "absent" and "explicitly empty" resolve to the same "" component,
+    // matching the documented "'' when absent" semantics.
+    expect(getLoginRateLimitKey(withoutCf)).toBe(getLoginRateLimitKey(withEmptyCf));
+    expect(getLoginRateLimitKey(withoutCf)).toContain("cf-connecting-ip=");
+  });
+
+  it("differs from getClientIp alone, so a shared egress IP doesn't collapse distinct tuples", () => {
+    const request = new Request("https://usage.jays.services/api/auth/login", {
+      headers: {
+        "x-forwarded-for": "203.0.113.50",
+        "cf-connecting-ip": "198.51.100.11",
+      },
+    });
+    expect(getLoginRateLimitKey(request)).not.toBe(getClientIp(request));
   });
 });
