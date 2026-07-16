@@ -33,6 +33,7 @@ import {
   RequestBodyTooLargeError,
   readBoundedRequestBody,
 } from "@/lib/bounded-request-body";
+import { SUBSCRIPTION_SOURCE_APP } from "@/lib/subscription-charge-identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -81,6 +82,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Invalid request" },
       { status: error instanceof RequestBodyTooLargeError ? 413 : 400 }
+    );
+  }
+
+  // SUBSCRIPTION_SOURCE_APP is reserved for the internal subscription
+  // materializer, which writes its own charge events directly via
+  // persistExternalUsageEvents (see subscription-materializer.ts) and never
+  // goes through this HTTP route. Reject any event that claims it here so an
+  // external caller cannot forge a materializer-owned charge that
+  // budget-status cross-references by metadata.subscriptionId.
+  if (events.some((event) => event.sourceApp === SUBSCRIPTION_SOURCE_APP)) {
+    return NextResponse.json(
+      { error: `sourceApp "${SUBSCRIPTION_SOURCE_APP}" is reserved` },
+      { status: 400 }
     );
   }
 

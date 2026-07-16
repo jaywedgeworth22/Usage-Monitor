@@ -110,10 +110,17 @@ function readOptionalEnum(
   return value;
 }
 
-function readNumber(record: Record<string, unknown>, key: string): number | undefined {
+function readNumber(
+  record: Record<string, unknown>,
+  key: string,
+  options: { allowNegative?: boolean } = {}
+): number | undefined {
   const raw = record[key];
   if (raw == null || raw === "") return undefined;
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    throw new Error(`${key} must be a finite number`);
+  }
+  if (!options.allowNegative && raw < 0) {
     throw new Error(`${key} must be a non-negative finite number`);
   }
   return raw;
@@ -225,7 +232,15 @@ function parseEvent(value: unknown): ParsedUsageTelemetryEvent {
   const service = readString(record, "service", { max: 120 });
   const label = readString(record, "label", { max: 160 });
   const quantity = readNumber(record, "quantity");
-  const costUsd = readNumber(record, "costUsd");
+  // A negative costUsd is permitted ONLY for metricType "subscription", so a
+  // manual pro-rated upgrade-refund (a real negative cash event) can be
+  // recorded. Every other metricType — and every other numeric field, on
+  // subscription events or otherwise — stays non-negative. See
+  // subscription-charge-identity.ts / receipt-cash.ts for why this cannot
+  // become a receipt-cash-shaped event or a forged materializer charge.
+  const costUsd = readNumber(record, "costUsd", {
+    allowNegative: metricType === "subscription",
+  });
   const requests = readInteger(record, "requests");
   const credits = readNumber(record, "credits");
 
