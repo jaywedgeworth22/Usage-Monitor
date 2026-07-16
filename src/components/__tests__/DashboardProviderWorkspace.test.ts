@@ -1,12 +1,85 @@
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import DashboardProviderWorkspace from "@/components/DashboardProviderWorkspace";
+import DashboardProviderWorkspace, {
+  compareFamiliesBy,
+  emptyStateMessage,
+  familyMatchesFilter,
+  formatRelativeTime,
+  formatShortDate,
+  INITIAL_SORT_DIRECTION,
+} from "@/components/DashboardProviderWorkspace";
 import type { ExternalBillingRecord } from "@/components/ExternalBillingDetails";
 
 type WorkspaceProps = ComponentProps<typeof DashboardProviderWorkspace>;
 type WorkspaceProvider = WorkspaceProps["providers"][number];
 type WorkspaceSubscription = WorkspaceProps["subscriptions"][number];
+type Family = Parameters<typeof compareFamiliesBy>[1];
+
+function family(overrides: Partial<Family> = {}): Family {
+  return {
+    key: "family",
+    detailsId: "provider-family-details-family",
+    displayName: "Family",
+    providerName: "family",
+    providers: [],
+    subscriptions: [],
+    providerExternalBilling: [],
+    searchableExternalBilling: [],
+    financialsAggregated: true,
+    spentUsd: null,
+    projectedUsd: null,
+    budgetUsd: null,
+    spendSortUsd: 0,
+    credits: null,
+    balance: null,
+    alertCount: 0,
+    criticalCount: 0,
+    activeCount: 0,
+    incompleteCostCount: 0,
+    nextRenewalAt: null,
+    latestFetchedAt: null,
+    ...overrides,
+  };
+}
+
+function extractTdInner(html: string, dataLabel: string): string {
+  const pattern = new RegExp(`<td data-label="${dataLabel}"[^>]*>([\\s\\S]*?)<\\/td>`);
+  const match = html.match(pattern);
+  if (!match) throw new Error(`td not found for data-label="${dataLabel}"`);
+  return match[1];
+}
+
+/**
+ * Approximate "does this HTML fragment have exactly one top-level element
+ * child, with no sibling elements and no bare text nodes at the top level"
+ * check — guards the §5.2 mobile-grid single-wrapper contract without a DOM
+ * (this harness is renderToStaticMarkup only, no jsdom).
+ */
+function hasSingleElementChild(html: string): boolean {
+  const trimmed = html.trim();
+  if (!trimmed.startsWith("<")) return false;
+  const tagPattern = /<\/?[a-zA-Z][a-zA-Z0-9]*(?:\s[^>]*)?\/?>/g;
+  let depth = 0;
+  let sawOpen = false;
+  let match: RegExpExecArray | null;
+  while ((match = tagPattern.exec(trimmed))) {
+    const tag = match[0];
+    const isClosing = tag.startsWith("</");
+    const isSelfClosing = /\/>$/.test(tag);
+    if (isClosing) {
+      depth -= 1;
+    } else {
+      sawOpen = true;
+      if (!isSelfClosing) depth += 1;
+    }
+    if (sawOpen && depth === 0) {
+      const remainder = trimmed.slice(tagPattern.lastIndex).trim();
+      return remainder.length === 0;
+    }
+  }
+  return false;
+}
 
 function provider(
   id: string,
@@ -147,7 +220,7 @@ describe("DashboardProviderWorkspace", () => {
     expect(html).toContain(
       'aria-label="Google AI month-to-date spend: $0.00"'
     );
-    expect(html).toContain(">$0.00</p>");
+    expect(html).toContain(">$0.00</span>");
     expect(html).toContain(">Complete</span>");
     expect(html).not.toContain("Cost not reported");
   });
@@ -306,5 +379,241 @@ describe("DashboardProviderWorkspace", () => {
     ]) {
       expect(html).toContain(`href="/providers/${id}"`);
     }
+  });
+});
+
+describe("formatShortDate", () => {
+  const now = Date.parse("2026-07-15T12:00:00.000Z");
+
+  it("formats a same-year date without a year", () => {
+    expect(formatShortDate("2026-06-03T00:00:00.000Z", now)).toBe("Jun 3");
+  });
+
+  it("formats a cross-year date with the year", () => {
+    expect(formatShortDate("2025-06-03T00:00:00.000Z", now)).toBe("Jun 3, 2025");
+  });
+
+  it("formats a future renewal date instead of clamping (the regression this helper exists to prevent)", () => {
+    expect(formatShortDate("2099-02-01T00:00:00.000Z", now)).toBe("Feb 1, 2099");
+  });
+
+  it("returns -- for unparseable input", () => {
+    expect(formatShortDate("not-a-date", now)).toBe("--");
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const now = Date.parse("2026-07-15T12:00:00.000Z");
+  const before = (ms: number) => new Date(now - ms).toISOString();
+
+  it("returns -- for null or unparseable input", () => {
+    expect(formatRelativeTime(null, now)).toBe("--");
+    expect(formatRelativeTime("not-a-date", now)).toBe("--");
+  });
+
+  it("buckets recent and future deltas as just now", () => {
+    expect(formatRelativeTime(before(30_000), now)).toBe("just now");
+    expect(formatRelativeTime(new Date(now + 5_000).toISOString(), now)).toBe("just now");
+  });
+
+  it("buckets minutes, hours, and days", () => {
+    expect(formatRelativeTime(before(90_000), now)).toBe("1m ago");
+    expect(formatRelativeTime(before(59 * 60_000), now)).toBe("59m ago");
+    expect(formatRelativeTime(before(90 * 60_000), now)).toBe("1h ago");
+    expect(formatRelativeTime(before(23.9 * 3_600_000), now)).toBe("23h ago");
+    expect(formatRelativeTime(before(24 * 3_600_000), now)).toBe("1d ago");
+    expect(formatRelativeTime(before(6.9 * 86_400_000), now)).toBe("6d ago");
+  });
+
+  it("delegates to formatShortDate at 7+ days", () => {
+    const value = before(8 * 86_400_000);
+    expect(formatRelativeTime(value, now)).toBe(formatShortDate(value, now));
+  });
+});
+
+describe("compareFamiliesBy", () => {
+  it("orders name ascending via localeCompare", () => {
+    expect(
+      compareFamiliesBy("name", family({ displayName: "Alpha" }), family({ displayName: "Beta" }))
+    ).toBeLessThan(0);
+  });
+
+  it("orders spend ascending by spendSortUsd", () => {
+    expect(
+      compareFamiliesBy("spend", family({ spendSortUsd: 5 }), family({ spendSortUsd: 10 }))
+    ).toBeLessThan(0);
+  });
+
+  it("orders credits ascending, null coerced to 0, tie-broken by balance", () => {
+    expect(
+      compareFamiliesBy("credits", family({ credits: null }), family({ credits: 5 }))
+    ).toBeLessThan(0);
+    expect(
+      compareFamiliesBy(
+        "credits",
+        family({ credits: 0, balance: null }),
+        family({ credits: 0, balance: 5 })
+      )
+    ).toBeLessThan(0);
+  });
+
+  it("orders services by renewal epoch, null as +Infinity, both-null guarded to 0 (NaN guard)", () => {
+    expect(
+      compareFamiliesBy(
+        "services",
+        family({ nextRenewalAt: "2030-01-01T00:00:00.000Z" }),
+        family({ nextRenewalAt: null })
+      )
+    ).toBeLessThan(0);
+    expect(
+      compareFamiliesBy("services", family({ nextRenewalAt: null }), family({ nextRenewalAt: null }))
+    ).toBe(0);
+  });
+
+  it("orders health ascending by criticalCount then alertCount", () => {
+    expect(
+      compareFamiliesBy(
+        "health",
+        family({ criticalCount: 0, alertCount: 1 }),
+        family({ criticalCount: 1, alertCount: 0 })
+      )
+    ).toBeLessThan(0);
+    expect(
+      compareFamiliesBy(
+        "health",
+        family({ criticalCount: 0, alertCount: 1 }),
+        family({ criticalCount: 0, alertCount: 2 })
+      )
+    ).toBeLessThan(0);
+  });
+
+  it("orders lastSync ascending, null sorts oldest", () => {
+    expect(
+      compareFamiliesBy(
+        "lastSync",
+        family({ latestFetchedAt: null }),
+        family({ latestFetchedAt: "2026-01-01T00:00:00.000Z" })
+      )
+    ).toBeLessThan(0);
+  });
+});
+
+describe("INITIAL_SORT_DIRECTION", () => {
+  it("pins the exact per-column initial direction map so a refactor can't silently revert to uniform-asc", () => {
+    expect(INITIAL_SORT_DIRECTION).toEqual({
+      name: "asc",
+      services: "asc",
+      lastSync: "asc",
+      spend: "desc",
+      health: "desc",
+      credits: "desc",
+    });
+  });
+});
+
+describe("familyMatchesFilter", () => {
+  it("matches everything for 'all'", () => {
+    expect(familyMatchesFilter(family(), "all")).toBe(true);
+    expect(
+      familyMatchesFilter(
+        family({ alertCount: 0, activeCount: 0, incompleteCostCount: 0 }),
+        "all"
+      )
+    ).toBe(true);
+  });
+
+  it("filters on open alerts", () => {
+    expect(familyMatchesFilter(family({ alertCount: 1 }), "alerts")).toBe(true);
+    expect(familyMatchesFilter(family({ alertCount: 0 }), "alerts")).toBe(false);
+  });
+
+  it("filters on active accounts", () => {
+    expect(familyMatchesFilter(family({ activeCount: 1 }), "active")).toBe(true);
+    expect(familyMatchesFilter(family({ activeCount: 0 }), "active")).toBe(false);
+  });
+
+  it("filters on incomplete cost coverage", () => {
+    expect(familyMatchesFilter(family({ incompleteCostCount: 1 }), "incomplete")).toBe(true);
+    expect(familyMatchesFilter(family({ incompleteCostCount: 0 }), "incomplete")).toBe(false);
+  });
+});
+
+describe("emptyStateMessage", () => {
+  it("returns the five exact strings from §3.6", () => {
+    expect(emptyStateMessage("gpt", "all")).toBe(
+      "No provider families match the current search."
+    );
+    expect(emptyStateMessage("gpt", "alerts")).toBe(
+      "No provider families match the current search and filter."
+    );
+    expect(emptyStateMessage("", "alerts")).toBe(
+      "No families with open alerts — all clear."
+    );
+    expect(emptyStateMessage("", "active")).toBe("No families with active accounts.");
+    expect(emptyStateMessage("", "incomplete")).toBe(
+      "No families with incomplete cost coverage."
+    );
+  });
+});
+
+describe("Lane B compact markup (default state: compact density, attention sort, All chip)", () => {
+  it("renders a compact single-line Spend cell with a coverage dot, not the comfortable pill", () => {
+    const html = renderWorkspace([provider("p1", { spentUsd: 42, spendCoverage: "complete" })]);
+    const spendCell = extractTdInner(html, "Spend");
+    expect(spendCell).toContain("h-2 w-2");
+    expect(spendCell).not.toContain("rounded-full px-2 py-0.5");
+  });
+
+  it("keeps every compact cell to a single element child (mobile-grid wrapper contract)", () => {
+    const html = renderWorkspace([provider("p1", { spentUsd: 42, spendCoverage: "complete" })]);
+    for (const label of [
+      "Provider family",
+      "Spend",
+      "Credits / balance",
+      "Services",
+      "Health",
+      "Last sync",
+    ]) {
+      expect(hasSingleElementChild(extractTdInner(html, label))).toBe(true);
+    }
+  });
+
+  it("defaults to Compact density, the All filter chip, and the Attention preset all pressed", () => {
+    const html = renderWorkspace([provider("p1")]);
+    expect(html).toContain('aria-label="Row density"');
+    expect(html).toContain('aria-label="Filter provider families"');
+    expect((html.match(/aria-pressed="true"/g) ?? []).length).toBe(3);
+  });
+
+  it("renders all six sortable headers with aria-sort=\"none\" by default", () => {
+    const html = renderWorkspace([provider("p1")]);
+    expect((html.match(/aria-sort="none"/g) ?? []).length).toBe(6);
+    expect(html).not.toContain('aria-sort="ascending"');
+    expect(html).not.toContain('aria-sort="descending"');
+  });
+
+  it("still renders the non-aggregated caveat text in compact density", () => {
+    const html = renderWorkspace([provider("account-one"), provider("account-two")]);
+    expect(html).toContain("Not aggregated");
+    expect(html).toContain("See exact account values below");
+  });
+
+  it("carries the budget text in the compact Spend cell's title", () => {
+    const html = renderWorkspace([
+      provider("p1", {
+        spentUsd: 10,
+        spendCoverage: "complete",
+        plan: {
+          fixedMonthlyCostUsd: null,
+          monthlyBudgetUsd: 50,
+          monthlyRequestLimit: null,
+          renewalDate: null,
+          billingInterval: "monthly",
+          notes: null,
+        },
+      }),
+    ]);
+    const spendCell = extractTdInner(html, "Spend");
+    expect(spendCell).toContain("$50.00 budget");
   });
 });
