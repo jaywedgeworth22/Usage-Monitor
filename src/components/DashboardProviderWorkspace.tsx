@@ -1,9 +1,10 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
   ChevronRight,
   KeyRound,
@@ -13,6 +14,7 @@ import {
 import type { ExternalBillingRecord } from "@/components/ExternalBillingDetails";
 import type { ProviderCostCoverage } from "@/components/ProviderCard";
 import type { SubscriptionRow } from "@/components/SubscriptionsPanel";
+import SortHeader, { type SortDirection } from "@/components/table/SortHeader";
 
 interface WorkspaceProvider {
   id: string;
@@ -115,7 +117,51 @@ interface DashboardProviderWorkspaceProps {
   subscriptions: SubscriptionRow[];
 }
 
-type SortMode = "attention" | "spend" | "name" | "renewal";
+export type WorkspaceSortField =
+  | "attention"
+  | "name"
+  | "spend"
+  | "credits"
+  | "services"
+  | "health"
+  | "lastSync";
+
+export type FilterChip = "all" | "alerts" | "active" | "incomplete";
+
+type Density = "compact" | "comfortable";
+
+const WORKSPACE_SORT_FIELDS: readonly WorkspaceSortField[] = [
+  "attention",
+  "name",
+  "spend",
+  "credits",
+  "services",
+  "health",
+  "lastSync",
+];
+
+// Per-column INITIAL sort direction. Deliberate deviation from a uniform
+// new-field->asc pattern: the retired dashboard "Spend" preset was one-click
+// DESC, and persistence (see below) would otherwise pin a $0-rows-first order
+// across sessions for spend/health/credits.
+export const INITIAL_SORT_DIRECTION = {
+  name: "asc",
+  services: "asc",
+  lastSync: "asc",
+  spend: "desc",
+  health: "desc",
+  credits: "desc",
+} as const;
+
+const SORT_STORAGE_KEY = "usage-monitor:dashboard-sort";
+const DENSITY_STORAGE_KEY = "usage-monitor:dashboard-density";
+
+const FILTER_CHIPS: ReadonlyArray<readonly [FilterChip, string]> = [
+  ["all", "All"],
+  ["alerts", "Alerts only"],
+  ["active", "Active only"],
+  ["incomplete", "Incomplete cost"],
+];
 
 function familyKey(provider: WorkspaceProvider): string {
   return provider.name.trim().toLowerCase() || provider.type.trim().toLowerCase() || provider.id;
@@ -209,6 +255,43 @@ function formatDate(value: string | null): string {
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return "--";
   return new Date(time).toLocaleDateString(undefined, { timeZone: "UTC" });
+}
+
+/**
+ * Short absolute date for a NON-relative context (e.g. a future renewal).
+ * Never route a renewal or any future-dated value through
+ * `formatRelativeTime` — its future/negative clamp collapses to "just now",
+ * which is silently wrong for a renewal date.
+ */
+export function formatShortDate(value: string, nowMs: number): string {
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return "--";
+  const date = new Date(time);
+  const now = new Date(nowMs);
+  const formatted = date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+  return date.getUTCFullYear() === now.getUTCFullYear()
+    ? formatted
+    : `${formatted}, ${date.getUTCFullYear()}`;
+}
+
+/** "Last sync" relative-time formatter ONLY — see `formatShortDate` above. */
+export function formatRelativeTime(value: string | null, nowMs: number): string {
+  if (!value) return "--";
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return "--";
+  const delta = nowMs - time;
+  if (delta < 60_000) return "just now";
+  const minutes = delta / 60_000;
+  if (minutes < 60) return `${Math.floor(minutes)}m ago`;
+  const hours = delta / 3_600_000;
+  if (hours < 24) return `${Math.floor(hours)}h ago`;
+  const days = delta / 86_400_000;
+  if (days < 7) return `${Math.floor(days)}d ago`;
+  return formatShortDate(value, nowMs);
 }
 
 function costCoverageLabel(family: ProviderFamily): string {
@@ -330,14 +413,458 @@ function externalBillingDateSummary(
   }
 }
 
+/** Pure comparator for a single sortable column, ascending. `attention` is
+ * handled separately as a fixed composite and never reaches this function. */
+export function compareFamiliesBy(
+  field: Exclude<WorkspaceSortField, "attention">,
+  a: ProviderFamily,
+  b: ProviderFamily
+): number {
+  switch (field) {
+    case "name":
+      return a.displayName.localeCompare(b.displayName);
+    case "spend":
+      return a.spendSortUsd - b.spendSortUsd;
+    case "credits": {
+      const creditsDiff = (a.credits ?? 0) - (b.credits ?? 0);
+      if (creditsDiff !== 0) return creditsDiff;
+      return (a.balance ?? 0) - (b.balance ?? 0);
+    }
+    case "services": {
+      const left = a.nextRenewalAt ? Date.parse(a.nextRenewalAt) : Number.POSITIVE_INFINITY;
+      const right = b.nextRenewalAt ? Date.parse(b.nextRenewalAt) : Number.POSITIVE_INFINITY;
+      if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
+      return left - right;
+    }
+    case "health": {
+      const criticalDiff = a.criticalCount - b.criticalCount;
+      if (criticalDiff !== 0) return criticalDiff;
+      return a.alertCount - b.alertCount;
+    }
+    case "lastSync": {
+      const left = a.latestFetchedAt ? Date.parse(a.latestFetchedAt) : 0;
+      const right = b.latestFetchedAt ? Date.parse(b.latestFetchedAt) : 0;
+      return left - right;
+    }
+  }
+}
+
+/** Pure predicate backing the single-select filter chip group (§3.5). */
+export function familyMatchesFilter(family: ProviderFamily, chip: FilterChip): boolean {
+  switch (chip) {
+    case "alerts":
+      return family.alertCount > 0;
+    case "active":
+      return family.activeCount > 0;
+    case "incomplete":
+      return family.incompleteCostCount > 0;
+    case "all":
+    default:
+      return true;
+  }
+}
+
+/** Pure empty-state string builder (§3.6). */
+export function emptyStateMessage(query: string, chip: FilterChip): string {
+  const hasQuery = query.trim().length > 0;
+  if (hasQuery) {
+    return chip === "all"
+      ? "No provider families match the current search."
+      : "No provider families match the current search and filter.";
+  }
+  switch (chip) {
+    case "alerts":
+      return "No families with open alerts — all clear.";
+    case "active":
+      return "No families with active accounts.";
+    case "incomplete":
+      return "No families with incomplete cost coverage.";
+    case "all":
+    default:
+      return "No provider families match the current search.";
+  }
+}
+
+function toggleButtonClass(active: boolean): string {
+  return `rounded-lg px-3 py-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 ${
+    active
+      ? "bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900"
+      : "border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+  }`;
+}
+
+function isWorkspaceSortField(value: unknown): value is WorkspaceSortField {
+  return typeof value === "string" && (WORKSPACE_SORT_FIELDS as readonly string[]).includes(value);
+}
+
+function isSortDirection(value: unknown): value is SortDirection {
+  return value === "asc" || value === "desc";
+}
+
+function isDensity(value: unknown): value is Density {
+  return value === "compact" || value === "comfortable";
+}
+
+function coverageDotClass(family: ProviderFamily): string {
+  return family.financialsAggregated && family.incompleteCostCount === 0
+    ? "h-2 w-2 shrink-0 rounded-full bg-emerald-600 dark:bg-emerald-400"
+    : "h-2 w-2 shrink-0 rounded-full bg-amber-600 dark:bg-amber-400";
+}
+
+function CompactFamilyCells({
+  family,
+  isCollapsed,
+  onToggle,
+  familySpendLabel,
+  nowMs,
+}: {
+  family: ProviderFamily;
+  isCollapsed: boolean;
+  onToggle: () => void;
+  familySpendLabel: string;
+  nowMs: number;
+}) {
+  const accountCount = family.providers.length;
+  const dotClass = coverageDotClass(family);
+
+  const budgetOrProjectionText =
+    family.budgetUsd != null
+      ? `${formatCurrency(family.budgetUsd)} budget`
+      : family.projectedUsd != null
+        ? `${formatCurrency(family.projectedUsd)} projected`
+        : "Projection unavailable";
+  const spendTitle = `${budgetOrProjectionText} · Coverage: ${costCoverageLabel(family)}`;
+
+  const creditsBalanceTitle = `Credits ${formatNumber(family.credits)} · Balance ${formatCurrency(family.balance)}`;
+
+  const recordCount = family.subscriptions.length + family.providerExternalBilling.length;
+  const shortDate = family.nextRenewalAt ? formatShortDate(family.nextRenewalAt, nowMs) : null;
+  const servicesTitle = `${recordCount} record${recordCount === 1 ? "" : "s"} · ${
+    family.nextRenewalAt ? `Next renewal ${formatDate(family.nextRenewalAt)}` : "No active future renewal"
+  }`;
+
+  const alertPlural = family.alertCount === 1 ? "" : "s";
+  const accountPlural = family.activeCount === 1 ? "" : "s";
+  const criticalSegment = family.criticalCount > 0 ? `, ${family.criticalCount} critical` : "";
+  const healthAriaLabel = `${family.alertCount} open alert${alertPlural}${criticalSegment}, ${family.activeCount} active account${accountPlural}`;
+  const healthTitle = `${family.alertCount} open alert${alertPlural}${criticalSegment} · ${family.activeCount} active`;
+
+  const lastSyncTitle = family.latestFetchedAt
+    ? `${new Date(family.latestFetchedAt).toLocaleString()} · ${family.providerName}`
+    : family.providerName;
+
+  return (
+    <>
+      <td data-label="Provider family" className="px-4 py-2 sm:px-6">
+        <button
+          type="button"
+          aria-expanded={!isCollapsed}
+          aria-controls={family.detailsId}
+          aria-label={`${isCollapsed ? "Show" : "Hide"} ${family.displayName} account and service details`}
+          onClick={onToggle}
+          className="flex min-w-0 items-center gap-2 text-left"
+        >
+          {isCollapsed ? (
+            <ChevronRight className="h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
+          )}
+          <span
+            className="block max-w-[16rem] truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
+            title={family.displayName}
+          >
+            {family.displayName}
+          </span>
+          {accountCount > 1 && (
+            <span className="inline-flex shrink-0 items-center rounded-full bg-gray-100 px-1.5 text-[11px] font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+              <span aria-hidden="true">{accountCount}</span>
+              <span className="sr-only">
+                {accountCount} account{accountCount === 1 ? "" : "s"} / key{accountCount === 1 ? "" : "s"}
+              </span>
+            </span>
+          )}
+        </button>
+      </td>
+      <td data-label="Spend" className="px-4 py-2">
+        {family.financialsAggregated ? (
+          <p
+            aria-label={`${family.displayName} month-to-date spend: ${familySpendLabel}`}
+            title={spendTitle}
+            className="flex items-center gap-1.5 text-sm sm:whitespace-nowrap"
+          >
+            <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">{familySpendLabel}</span>
+            <span aria-hidden="true" className={dotClass} />
+            <span className="sr-only">{costCoverageLabel(family)}</span>
+          </p>
+        ) : (
+          <span className="block" title={`Coverage: ${costCoverageLabel(family)}`}>
+            <span className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 dark:text-gray-100 sm:whitespace-nowrap">
+              Not aggregated <span aria-hidden="true" className={dotClass} />
+              <span className="sr-only">Not aggregated</span>
+            </span>
+            <span className="block text-xs text-gray-500 dark:text-gray-400">See exact account values below</span>
+          </span>
+        )}
+      </td>
+      <td data-label="Credits / balance" className="px-4 py-2">
+        {family.financialsAggregated ? (
+          <p className="text-sm sm:whitespace-nowrap" title={creditsBalanceTitle}>
+            {family.credits == null && family.balance == null ? (
+              <span className="text-gray-500 dark:text-gray-400">--</span>
+            ) : family.credits != null && family.balance != null ? (
+              <>
+                <span className="font-medium tabular-nums text-gray-800 dark:text-gray-200">{formatNumber(family.credits)} credits</span>
+                <span className="text-xs tabular-nums text-gray-500 dark:text-gray-400"> · {formatCurrency(family.balance)}</span>
+              </>
+            ) : family.credits != null ? (
+              <span className="font-medium tabular-nums text-gray-800 dark:text-gray-200">{formatNumber(family.credits)} credits</span>
+            ) : (
+              <span className="text-xs tabular-nums text-gray-500 dark:text-gray-400">{formatCurrency(family.balance)} balance</span>
+            )}
+          </p>
+        ) : (
+          <p
+            className="text-sm text-gray-500 dark:text-gray-400 sm:whitespace-nowrap"
+            title="Financials tracked per account — expand for exact values"
+          >
+            Per account
+          </p>
+        )}
+      </td>
+      <td data-label="Services" className="px-4 py-2">
+        <p className="text-sm sm:whitespace-nowrap" title={servicesTitle}>
+          <span className="font-medium tabular-nums text-gray-800 dark:text-gray-200">{recordCount}</span>
+          {" · "}
+          <span className="text-xs text-gray-500 dark:text-gray-400">{shortDate ?? "--"}</span>
+        </p>
+      </td>
+      <td data-label="Health" className="px-4 py-2">
+        <span
+          className="flex items-center gap-1.5 sm:whitespace-nowrap"
+          aria-label={healthAriaLabel}
+          title={healthTitle}
+        >
+          {family.alertCount > 0 ? (
+            <>
+              <span
+                aria-hidden="true"
+                className={`h-2 w-2 shrink-0 rounded-full ${family.criticalCount > 0 ? "bg-red-600 dark:bg-red-400" : "bg-amber-600 dark:bg-amber-400"}`}
+              />
+              <span className="text-sm font-medium tabular-nums text-gray-800 dark:text-gray-200">{family.alertCount}</span>
+            </>
+          ) : (
+            <>
+              <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              <span className="sr-only">No open alerts</span>
+            </>
+          )}
+        </span>
+      </td>
+      <td data-label="Last sync" className="px-4 py-2 sm:px-6">
+        <p
+          className="text-sm tabular-nums text-gray-800 dark:text-gray-200 sm:whitespace-nowrap"
+          title={lastSyncTitle}
+        >
+          {formatRelativeTime(family.latestFetchedAt, nowMs)}
+        </p>
+      </td>
+    </>
+  );
+}
+
+/** Byte-identical to the pre-density-redesign markup; gated behind
+ * density === "comfortable". */
+function ComfortableFamilyCells({
+  family,
+  isCollapsed,
+  onToggle,
+  familySpendLabel,
+}: {
+  family: ProviderFamily;
+  isCollapsed: boolean;
+  onToggle: () => void;
+  familySpendLabel: string;
+}) {
+  return (
+    <>
+      <td data-label="Provider family" className="px-4 py-4 sm:px-6">
+        <button
+          type="button"
+          aria-expanded={!isCollapsed}
+          aria-controls={family.detailsId}
+          aria-label={`${isCollapsed ? "Show" : "Hide"} ${family.displayName} account and service details`}
+          onClick={onToggle}
+          className="flex min-w-0 items-start gap-2 text-left"
+        >
+          {isCollapsed ? (
+            <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
+          )}
+          <span className="min-w-0">
+            <span className="block truncate font-semibold text-gray-900 dark:text-gray-100">{family.displayName}</span>
+            <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+              {family.providers.length} account{family.providers.length === 1 ? "" : "s"} / key{family.providers.length === 1 ? "" : "s"}
+            </span>
+          </span>
+        </button>
+      </td>
+      <td data-label="Spend" className="px-4 py-4">
+        {family.financialsAggregated ? (
+          <>
+            <p
+              aria-label={`${family.displayName} month-to-date spend: ${familySpendLabel}`}
+              className="font-semibold text-gray-900 dark:text-gray-100"
+            >
+              {familySpendLabel}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {family.budgetUsd != null
+                ? `${formatCurrency(family.budgetUsd)} budget`
+                : family.projectedUsd != null
+                  ? `${formatCurrency(family.projectedUsd)} projected`
+                  : "Projection unavailable"}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="font-semibold text-gray-900 dark:text-gray-100">Not aggregated</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              See exact account values below
+            </p>
+          </>
+        )}
+        <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+          family.financialsAggregated && family.incompleteCostCount === 0
+            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+            : "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+        }`}>
+          {costCoverageLabel(family)}
+        </span>
+      </td>
+      <td data-label="Credits / balance" className="px-4 py-4">
+        {family.financialsAggregated ? (
+          <>
+            <p className="font-medium text-gray-800 dark:text-gray-200">{formatNumber(family.credits)} credits</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{formatCurrency(family.balance)} balance</p>
+          </>
+        ) : (
+          <>
+            <p className="font-medium text-gray-800 dark:text-gray-200">Per account</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">No duplicate totals</p>
+          </>
+        )}
+      </td>
+      <td data-label="Services" className="px-4 py-4">
+        <p className="font-medium text-gray-800 dark:text-gray-200">
+          {family.subscriptions.length + family.providerExternalBilling.length} record{family.subscriptions.length + family.providerExternalBilling.length === 1 ? "" : "s"}
+        </p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {family.nextRenewalAt
+            ? `Next renewal ${formatDate(family.nextRenewalAt)}`
+            : "No active future renewal"}
+        </p>
+      </td>
+      <td data-label="Health" className="px-4 py-4">
+        {family.alertCount > 0 ? (
+          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+            family.criticalCount > 0
+              ? "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300"
+              : "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+          }`}>
+            <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+            {family.alertCount} alert{family.alertCount === 1 ? "" : "s"}
+          </span>
+        ) : (
+          <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+            Clear
+          </span>
+        )}
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{family.activeCount} active</p>
+      </td>
+      <td data-label="Last sync" className="px-4 py-4 sm:px-6">
+        <p className="font-medium text-gray-800 dark:text-gray-200">{formatDate(family.latestFetchedAt)}</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">{family.providerName}</p>
+      </td>
+    </>
+  );
+}
+
 export default function DashboardProviderWorkspace({
   providers,
   subscriptions,
 }: DashboardProviderWorkspaceProps) {
   const [query, setQuery] = useState("");
-  const [sortMode, setSortMode] = useState<SortMode>("attention");
+  const [filterChip, setFilterChip] = useState<FilterChip>("all");
+  const [density, setDensity] = useState<Density>("compact");
+  const [sortField, setSortField] = useState<WorkspaceSortField>("attention");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [referenceNow] = useState(() => Date.now());
+  const [hydratedFromStorage, setHydratedFromStorage] = useState(false);
+
+  // Post-mount read only (never during render, per the persistence contract).
+  // The hydrate-from-storage-on-mount pattern below intentionally sets state
+  // synchronously in this effect (same pattern as Nav.tsx's mounted flag).
+  useEffect(() => {
+    try {
+      const rawSort = window.localStorage.getItem(SORT_STORAGE_KEY);
+      if (rawSort) {
+        const parsed: unknown = JSON.parse(rawSort);
+        if (parsed && typeof parsed === "object") {
+          const field = (parsed as { field?: unknown }).field;
+          const direction = (parsed as { direction?: unknown }).direction;
+          if (isWorkspaceSortField(field) && isSortDirection(direction)) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            setSortField(field);
+            setSortDirection(direction);
+          }
+        }
+      }
+      const rawDensity = window.localStorage.getItem(DENSITY_STORAGE_KEY);
+      if (isDensity(rawDensity)) {
+        setDensity(rawDensity);
+      }
+    } catch {
+      // Ignore corrupted/unavailable storage — fall back to defaults.
+    } finally {
+      setHydratedFromStorage(true);
+    }
+  }, []);
+
+  // Write is gated on the read above so mount doesn't clobber stored values.
+  useEffect(() => {
+    if (!hydratedFromStorage) return;
+    try {
+      window.localStorage.setItem(
+        SORT_STORAGE_KEY,
+        JSON.stringify({ field: sortField, direction: sortDirection })
+      );
+      window.localStorage.setItem(DENSITY_STORAGE_KEY, density);
+    } catch {
+      // Ignore write failures (private mode, quota, etc.).
+    }
+  }, [sortField, sortDirection, density, hydratedFromStorage]);
+
+  const handleSort = (field: WorkspaceSortField) => {
+    if (field === "attention") {
+      setSortField("attention");
+      setSortDirection("desc");
+      return;
+    }
+    if (sortField === field) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection(INITIAL_SORT_DIRECTION[field]);
+    }
+  };
+
+  const sortHeaderProps = {
+    activeField: sortField,
+    direction: sortDirection,
+    onSort: handleSort,
+  };
 
   const families = useMemo<ProviderFamily[]>(() => {
     const providersByFamily = new Map<string, WorkspaceProvider[]>();
@@ -451,7 +978,7 @@ export default function DashboardProviderWorkspace({
 
   const visibleFamilies = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    const filtered = normalizedQuery
+    const searched = normalizedQuery
       ? families.filter((family) => {
           const haystack = [
             family.displayName,
@@ -486,28 +1013,22 @@ export default function DashboardProviderWorkspace({
         })
       : families;
 
+    const filtered = searched.filter((family) => familyMatchesFilter(family, filterChip));
+
     return filtered.toSorted((a, b) => {
-      switch (sortMode) {
-        case "spend":
-          return b.spendSortUsd - a.spendSortUsd || a.displayName.localeCompare(b.displayName);
-        case "name":
-          return a.displayName.localeCompare(b.displayName);
-        case "renewal": {
-          const left = a.nextRenewalAt ? Date.parse(a.nextRenewalAt) : Number.POSITIVE_INFINITY;
-          const right = b.nextRenewalAt ? Date.parse(b.nextRenewalAt) : Number.POSITIVE_INFINITY;
-          return left - right || a.displayName.localeCompare(b.displayName);
-        }
-        case "attention":
-        default:
-          return (
-            b.criticalCount - a.criticalCount ||
-            b.alertCount - a.alertCount ||
-            b.spendSortUsd - a.spendSortUsd ||
-            a.displayName.localeCompare(b.displayName)
-          );
+      if (sortField === "attention") {
+        return (
+          b.criticalCount - a.criticalCount ||
+          b.alertCount - a.alertCount ||
+          b.spendSortUsd - a.spendSortUsd ||
+          a.displayName.localeCompare(b.displayName)
+        );
       }
+      const comparison = compareFamiliesBy(sortField, a, b);
+      const directed = sortDirection === "asc" ? comparison : -comparison;
+      return directed || a.displayName.localeCompare(b.displayName);
     });
-  }, [families, query, sortMode]);
+  }, [families, query, filterChip, sortField, sortDirection]);
 
   if (providers.length === 0) {
     return (
@@ -523,8 +1044,20 @@ export default function DashboardProviderWorkspace({
     );
   }
 
+  // Deliberately NOT memoized/frozen (unlike `referenceNow` above): this
+  // component only renders client-side after the initial fetch (page.tsx
+  // SSRs the loading skeleton, so there is no hydration mismatch), and a
+  // fresh `Date.now()` per render keeps "Last sync"/renewal labels current
+  // across the 60s background refresh (see §3.3 of the density-redesign spec).
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now();
+  const resetFilters = () => {
+    setQuery("");
+    setFilterChip("all");
+  };
+
   return (
-    <section className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" aria-labelledby="provider-workspace-heading">
+    <section className="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" aria-labelledby="provider-workspace-heading">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 px-4 py-4 dark:border-gray-700 sm:px-6">
         <div>
           <h2 id="provider-workspace-heading" className="text-base font-semibold text-gray-900 dark:text-gray-100">
@@ -540,7 +1073,7 @@ export default function DashboardProviderWorkspace({
         </Link>
       </div>
 
-      <div className="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+      <div className="flex flex-col gap-3 border-b border-gray-100 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800 sm:sticky sm:top-16 z-40 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <label className="relative block min-w-0 flex-1 sm:max-w-md">
           <span className="sr-only">Search provider families</span>
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
@@ -552,40 +1085,59 @@ export default function DashboardProviderWorkspace({
           />
         </label>
         <div className="flex flex-wrap items-center gap-2">
-          {([
-            ["attention", "Attention"],
-            ["spend", "Spend"],
-            ["renewal", "Renewal"],
-            ["name", "Name"],
-          ] as const).map(([mode, label]) => (
+          <button
+            type="button"
+            aria-pressed={sortField === "attention"}
+            onClick={() => handleSort("attention")}
+            className={toggleButtonClass(sortField === "attention")}
+          >
+            Attention
+          </button>
+          <div role="group" aria-label="Filter provider families" className="flex flex-wrap items-center gap-2">
+            {FILTER_CHIPS.map(([chip, label]) => (
+              <button
+                key={chip}
+                type="button"
+                aria-pressed={filterChip === chip}
+                onClick={() => setFilterChip(chip)}
+                className={toggleButtonClass(filterChip === chip)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div role="group" aria-label="Row density" className="flex items-center gap-2 sm:border-l sm:border-gray-200 sm:pl-2 dark:sm:border-gray-700">
             <button
-              key={mode}
               type="button"
-              aria-pressed={sortMode === mode}
-              onClick={() => setSortMode(mode)}
-              className={`rounded-lg px-3 py-2 text-xs font-semibold ${
-                sortMode === mode
-                  ? "bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900"
-                  : "border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
-              }`}
+              aria-pressed={density === "compact"}
+              onClick={() => setDensity("compact")}
+              className={toggleButtonClass(density === "compact")}
             >
-              {label}
+              Compact
             </button>
-          ))}
+            <button
+              type="button"
+              aria-pressed={density === "comfortable"}
+              onClick={() => setDensity("comfortable")}
+              className={toggleButtonClass(density === "comfortable")}
+            >
+              Comfortable
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto rounded-b-lg">
         <table className="responsive-table w-full text-sm">
           <caption className="sr-only">Provider families with expandable account, service, usage, quota, renewal, and alert rows</caption>
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50 dark:border-gray-700 dark:bg-gray-900/60">
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 sm:px-6">Provider family</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Spend</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Credits / balance</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Services</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400">Health</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 sm:px-6">Last sync</th>
+              <SortHeader {...sortHeaderProps} field="name" label="Provider family" paddingClassName="px-4 py-3 sm:px-6" labelClassName="text-xs" />
+              <SortHeader {...sortHeaderProps} field="spend" label="Spend" paddingClassName="px-4 py-3" labelClassName="text-xs" />
+              <SortHeader {...sortHeaderProps} field="credits" label="Credits / balance" paddingClassName="px-4 py-3" labelClassName="text-xs" />
+              <SortHeader {...sortHeaderProps} field="services" label="Services" paddingClassName="px-4 py-3" labelClassName="text-xs" title="Sort by next renewal date" />
+              <SortHeader {...sortHeaderProps} field="health" label="Health" paddingClassName="px-4 py-3" labelClassName="text-xs" />
+              <SortHeader {...sortHeaderProps} field="lastSync" label="Last sync" paddingClassName="px-4 py-3 sm:px-6" labelClassName="text-xs" />
             </tr>
           </thead>
           <tbody>
@@ -596,108 +1148,33 @@ export default function DashboardProviderWorkspace({
                 : `${formatCurrency(family.spentUsd)}${
                     family.providers[0]?.spendCoverage === "partial" ? " known" : ""
                   }`;
+              const onToggle = () =>
+                setCollapsed((current) => ({ ...current, [family.key]: !isCollapsed }));
               return (
                 <Fragment key={family.key}>
-                  <tr className="border-b border-gray-100 align-top hover:bg-gray-50/70 dark:border-gray-700 dark:hover:bg-gray-700/40">
-                    <td data-label="Provider family" className="px-4 py-4 sm:px-6">
-                      <button
-                        type="button"
-                        aria-expanded={!isCollapsed}
-                        aria-controls={family.detailsId}
-                        aria-label={`${isCollapsed ? "Show" : "Hide"} ${family.displayName} account and service details`}
-                        onClick={() => setCollapsed((current) => ({ ...current, [family.key]: !isCollapsed }))}
-                        className="flex min-w-0 items-start gap-2 text-left"
-                      >
-                        {isCollapsed ? (
-                          <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
-                        ) : (
-                          <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
-                        )}
-                        <span className="min-w-0">
-                          <span className="block truncate font-semibold text-gray-900 dark:text-gray-100">{family.displayName}</span>
-                          <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-                            {family.providers.length} account{family.providers.length === 1 ? "" : "s"} / key{family.providers.length === 1 ? "" : "s"}
-                          </span>
-                        </span>
-                      </button>
-                    </td>
-                    <td data-label="Spend" className="px-4 py-4">
-                      {family.financialsAggregated ? (
-                        <>
-                          <p
-                            aria-label={`${family.displayName} month-to-date spend: ${familySpendLabel}`}
-                            className="font-semibold text-gray-900 dark:text-gray-100"
-                          >
-                            {familySpendLabel}
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            {family.budgetUsd != null
-                              ? `${formatCurrency(family.budgetUsd)} budget`
-                              : family.projectedUsd != null
-                                ? `${formatCurrency(family.projectedUsd)} projected`
-                                : "Projection unavailable"}
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <p className="font-semibold text-gray-900 dark:text-gray-100">Not aggregated</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            See exact account values below
-                          </p>
-                        </>
-                      )}
-                      <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                        family.financialsAggregated && family.incompleteCostCount === 0
-                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
-                          : "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-                      }`}>
-                        {costCoverageLabel(family)}
-                      </span>
-                    </td>
-                    <td data-label="Credits / balance" className="px-4 py-4">
-                      {family.financialsAggregated ? (
-                        <>
-                          <p className="font-medium text-gray-800 dark:text-gray-200">{formatNumber(family.credits)} credits</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{formatCurrency(family.balance)} balance</p>
-                        </>
-                      ) : (
-                        <>
-                          <p className="font-medium text-gray-800 dark:text-gray-200">Per account</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">No duplicate totals</p>
-                        </>
-                      )}
-                    </td>
-                    <td data-label="Services" className="px-4 py-4">
-                      <p className="font-medium text-gray-800 dark:text-gray-200">
-                        {family.subscriptions.length + family.providerExternalBilling.length} record{family.subscriptions.length + family.providerExternalBilling.length === 1 ? "" : "s"}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {family.nextRenewalAt
-                          ? `Next renewal ${formatDate(family.nextRenewalAt)}`
-                          : "No active future renewal"}
-                      </p>
-                    </td>
-                    <td data-label="Health" className="px-4 py-4">
-                      {family.alertCount > 0 ? (
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                          family.criticalCount > 0
-                            ? "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300"
-                            : "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-                        }`}>
-                          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-                          {family.alertCount} alert{family.alertCount === 1 ? "" : "s"}
-                        </span>
-                      ) : (
-                        <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-                          Clear
-                        </span>
-                      )}
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{family.activeCount} active</p>
-                    </td>
-                    <td data-label="Last sync" className="px-4 py-4 sm:px-6">
-                      <p className="font-medium text-gray-800 dark:text-gray-200">{formatDate(family.latestFetchedAt)}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{family.providerName}</p>
-                    </td>
+                  <tr
+                    className={
+                      density === "compact"
+                        ? "border-b border-gray-100 align-middle hover:bg-gray-50/70 dark:border-gray-700 dark:hover:bg-gray-700/40"
+                        : "border-b border-gray-100 align-top hover:bg-gray-50/70 dark:border-gray-700 dark:hover:bg-gray-700/40"
+                    }
+                  >
+                    {density === "compact" ? (
+                      <CompactFamilyCells
+                        family={family}
+                        isCollapsed={isCollapsed}
+                        onToggle={onToggle}
+                        familySpendLabel={familySpendLabel}
+                        nowMs={nowMs}
+                      />
+                    ) : (
+                      <ComfortableFamilyCells
+                        family={family}
+                        isCollapsed={isCollapsed}
+                        onToggle={onToggle}
+                        familySpendLabel={familySpendLabel}
+                      />
+                    )}
                   </tr>
                   <tr
                     id={family.detailsId}
@@ -837,9 +1314,16 @@ export default function DashboardProviderWorkspace({
         </table>
       </div>
 
-      {visibleFamilies.length === 0 && (
+      {visibleFamilies.length === 0 && families.length > 0 && (
         <div className="px-4 py-10 text-center text-sm text-gray-500 dark:text-gray-400 sm:px-6">
-          No provider families match the current search.
+          <p>{emptyStateMessage(query, filterChip)}</p>
+          <button
+            type="button"
+            onClick={resetFilters}
+            className={`mt-3 ${toggleButtonClass(false)}`}
+          >
+            Reset search & filters
+          </button>
         </div>
       )}
     </section>

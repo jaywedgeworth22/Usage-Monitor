@@ -3,6 +3,7 @@ import { type Provider } from "@/app/settings/page";
 import { isExternalBillingStale } from "@/components/ExternalBillingDetails";
 import ProviderIntegrationInfo, { publicConfigFieldNames } from "@/components/ProviderIntegrationInfo";
 import { getProviderIntegrationProfile } from "@/lib/provider-integration-catalog";
+import SortHeader, { type SortDirection } from "@/components/table/SortHeader";
 
 interface ProviderTableProps {
   providers: Provider[];
@@ -18,46 +19,6 @@ interface ProviderTableProps {
 }
 
 type SortField = "name" | "type" | "status" | "spend" | "alerts" | "credits" | "lastFetched";
-type SortDirection = "asc" | "desc";
-
-function SortHeader({
-  field,
-  label,
-  className = "",
-  align = "left",
-  activeField,
-  direction,
-  onSort,
-}: {
-  field: SortField;
-  label: string;
-  className?: string;
-  align?: "left" | "right";
-  activeField: SortField;
-  direction: SortDirection;
-  onSort: (field: SortField) => void;
-}) {
-  const isActive = activeField === field;
-  return (
-    <th
-      aria-sort={isActive ? (direction === "asc" ? "ascending" : "descending") : "none"}
-      className={`px-6 py-3 font-medium text-gray-500 dark:text-gray-400 ${className}`}
-    >
-      <button
-        type="button"
-        onClick={() => onSort(field)}
-        className={`group flex w-full items-center hover:text-gray-800 dark:hover:text-gray-100 ${
-          align === "right" ? "justify-end text-right" : "justify-start text-left"
-        }`}
-      >
-        {label}
-        <span className={`ml-1 ${isActive ? "text-gray-500 dark:text-gray-300" : "text-gray-300 opacity-0 group-hover:opacity-100 group-focus:opacity-100 dark:text-gray-600"}`}>
-          {isActive ? (direction === "asc" ? "↑" : "↓") : "↕"}
-        </span>
-      </button>
-    </th>
-  );
-}
 
 function providerProfile(provider: Provider) {
   return getProviderIntegrationProfile(provider.name, provider.type);
