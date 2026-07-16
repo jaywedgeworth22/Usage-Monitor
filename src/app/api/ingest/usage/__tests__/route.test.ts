@@ -23,7 +23,10 @@ vi.mock("@/lib/prisma", () => ({
 import { POST } from "../route";
 import { tryAcquireIngestAdmission } from "@/lib/ingest-admission";
 import { signReceiptCashEvent } from "@/lib/receipt-cash";
-import { MAX_USAGE_TELEMETRY_BODY_BYTES } from "@/lib/usage-telemetry";
+import {
+  MAX_NEGATIVE_SUBSCRIPTION_COST_USD,
+  MAX_USAGE_TELEMETRY_BODY_BYTES,
+} from "@/lib/usage-telemetry";
 
 const USAGE_TOKEN = "usage-test-token";
 const RECEIPT_TOKEN = "receipt-test-token-distinct";
@@ -269,6 +272,124 @@ describe("POST /api/ingest/usage admission", () => {
     ]);
     expect((await POST(receiptRequest())).status).toBe(400);
     expect(externalUsageMocks.persist).not.toHaveBeenCalled();
+  });
+
+  it("rejects an event that claims the reserved subscription sourceApp", async () => {
+    const response = await POST(
+      nextRequest(
+        {
+          sourceApp: "subscription",
+          provider: "anthropic",
+          metricType: "subscription",
+          costUsd: 5,
+          occurredAt: "2026-07-14T00:00:00.000Z",
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining("reserved"),
+    });
+    expect(externalUsageMocks.persist).not.toHaveBeenCalled();
+  });
+
+  it("rejects the reserved sourceApp even when it rides alongside ordinary events in a batch", async () => {
+    const response = await POST(
+      nextRequest(
+        {
+          events: [
+            {
+              sourceApp: "socratic-trade",
+              provider: "openai",
+              metricType: "usage",
+              occurredAt: "2026-07-14T00:00:00.000Z",
+            },
+            {
+              sourceApp: "subscription",
+              provider: "anthropic",
+              metricType: "subscription",
+              costUsd: 5,
+              occurredAt: "2026-07-14T00:00:00.000Z",
+            },
+          ],
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(response.status).toBe(400);
+    expect(externalUsageMocks.persist).not.toHaveBeenCalled();
+  });
+
+  it("rejects a negative-cost subscription event that is shaped like a receipt-cash event", async () => {
+    // A manual adjustment event can legally carry a negative costUsd (see
+    // usage-telemetry.test.ts), but it must never be able to masquerade as a
+    // receipt-cash cash-in event by reusing that channel's trigger fields.
+    // looksLikeReceiptCashEvent matches on sourceApp/service/label alone, so
+    // this batch is routed into the receipt-cash verification path, whose
+    // signature/shape checks (metricType "cost", costUsd > 0) reject it.
+    const response = await POST(
+      nextRequest(
+        {
+          sourceApp: "billing-receipt-import",
+          provider: "anthropic",
+          service: "api-prepaid-funding",
+          label: "receipt_cash_paid",
+          metricType: "subscription",
+          billingMode: "actual",
+          unit: "usd",
+          confidence: "actual",
+          costUsd: -19.15,
+          occurredAt: "2026-07-14T00:00:00.000Z",
+        },
+        RECEIPT_TOKEN
+      )
+    );
+    expect(response.status).toBe(400);
+    expect(externalUsageMocks.persist).not.toHaveBeenCalled();
+  });
+
+  it("rejects a negative-cost subscription event whose magnitude exceeds the bound", async () => {
+    const response = await POST(
+      nextRequest(
+        {
+          sourceApp: "manual-billing-adjustment",
+          provider: "anthropic",
+          metricType: "subscription",
+          billingMode: "manual",
+          unit: "usd",
+          confidence: "estimated",
+          costUsd: -(MAX_NEGATIVE_SUBSCRIPTION_COST_USD + 0.01),
+          occurredAt: "2026-07-14T00:00:00.000Z",
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining("costUsd"),
+    });
+    expect(externalUsageMocks.persist).not.toHaveBeenCalled();
+  });
+
+  it("accepts a negative-cost subscription event exactly at the magnitude bound", async () => {
+    const response = await POST(
+      nextRequest(
+        {
+          sourceApp: "manual-billing-adjustment",
+          provider: "anthropic",
+          metricType: "subscription",
+          billingMode: "manual",
+          unit: "usd",
+          confidence: "estimated",
+          costUsd: -MAX_NEGATIVE_SUBSCRIPTION_COST_USD,
+          occurredAt: "2026-07-14T00:00:00.000Z",
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(response.status).toBe(202);
+    expect(externalUsageMocks.persist).toHaveBeenCalled();
   });
 
   it("validates every provider ID/name pair in a receipt batch", async () => {

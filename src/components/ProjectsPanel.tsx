@@ -61,7 +61,16 @@ export default function ProjectsPanel({ projects, summary }: ProjectsPanelProps)
       )}
       <div className="divide-y divide-gray-100">
         {projects.map((project) => {
-          const usagePercent = project.percentUsed != null ? project.percentUsed * 100 : null;
+          const rawUsagePercent =
+            project.percentUsed != null ? project.percentUsed * 100 : null;
+          // A manual subscription refund (negative costUsd) can push spend, and
+          // therefore percentUsed, below zero. Clamp to [0, 100]: CSS silently
+          // drops a negative width, and an aria-valuenow below aria-valuemin=0
+          // violates ARIA, so the raw value must never reach either attribute.
+          const usagePercent =
+            rawUsagePercent != null
+              ? Math.max(0, Math.min(rawUsagePercent, 100))
+              : null;
           const spendCoverage = project.spendCoverage ?? "unknown";
           const hasKnownSpend =
             spendCoverage === "complete" || spendCoverage === "partial";
@@ -116,7 +125,7 @@ export default function ProjectsPanel({ projects, summary }: ProjectsPanelProps)
                     aria-label={`${project.name} ${spendCoverage === "partial" ? "known " : ""}monthly budget used`}
                     aria-valuemin={0}
                     aria-valuemax={100}
-                    aria-valuenow={Math.min(usagePercent, 100)}
+                    aria-valuenow={usagePercent}
                     className="h-2 bg-gray-100 rounded-full overflow-hidden"
                   >
                     <div
@@ -127,7 +136,7 @@ export default function ProjectsPanel({ projects, summary }: ProjectsPanelProps)
                             ? "bg-amber-500"
                             : "bg-emerald-500"
                       }`}
-                      style={{ width: `${Math.min(usagePercent, 100)}%` }}
+                      style={{ width: `${usagePercent}%` }}
                     />
                   </div>
                 </div>
