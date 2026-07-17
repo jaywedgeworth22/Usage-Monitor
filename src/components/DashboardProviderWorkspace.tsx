@@ -105,14 +105,19 @@ interface ProviderFamily {
   criticalCount: number;
   activeCount: number;
   incompleteCostCount: number;
-  // Count of member providers with a costCoverageCaveat set. Kept separate
-  // from incompleteCostCount above (spendCoverage) - a caveat is a distinct
-  // "totalCost is known-incomplete for a specific reason" signal that must
-  // stay visible on its own even if spendCoverage reads "complete".
+  // Count of active member providers with a costCoverageCaveat set. Kept
+  // separate from incompleteCostCount above (spendCoverage) - a caveat is a
+  // distinct "totalCost is known-incomplete for a specific reason" signal
+  // that must stay visible on its own even if spendCoverage reads
+  // "complete". Filtered to isActive, same as incompleteCostCount: a
+  // deactivated provider is no longer polled (fetchAllDueProviders only
+  // covers isActive providers), so its last-recorded caveat can never be
+  // cleared by a fresh snapshot and must not keep the badge showing.
   costCoverageCaveatCount: number;
-  // First member's caveat message, shown as the family-level warning's
-  // tooltip/detail text. Families are almost always a single account per
-  // provider today, so "first" is effectively "the" caveat in practice.
+  // First active member's caveat message, shown as the family-level
+  // warning's tooltip/detail text. Families are almost always a single
+  // account per provider today, so "first" is effectively "the" caveat in
+  // practice.
   costCoverageCaveatMessage: string | null;
   nextRenewalAt: string | null;
   latestFetchedAt: string | null;
@@ -998,9 +1003,9 @@ export default function DashboardProviderWorkspace({
         ),
         activeCount: groupProviders.filter((provider) => provider.isActive).length,
         incompleteCostCount: groupProviders.filter((provider) => provider.isActive && provider.spendCoverage !== "complete").length,
-        costCoverageCaveatCount: groupProviders.filter((provider) => provider.costCoverageCaveat != null).length,
+        costCoverageCaveatCount: groupProviders.filter((provider) => provider.isActive && provider.costCoverageCaveat != null).length,
         costCoverageCaveatMessage:
-          groupProviders.find((provider) => provider.costCoverageCaveat != null)
+          groupProviders.find((provider) => provider.isActive && provider.costCoverageCaveat != null)
             ?.costCoverageCaveat?.message ?? null,
         nextRenewalAt: earliestFutureDate(
           [...subscriptionRenewals, ...externalRenewals],

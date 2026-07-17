@@ -417,6 +417,30 @@ describe("DashboardProviderWorkspace", () => {
 
     expect(html).not.toContain("Cost coverage gap");
   });
+
+  it("does not show a stale cost coverage gap badge on the family row for a deactivated provider", () => {
+    // A deactivated provider is no longer polled (fetchAllDueProviders only
+    // covers isActive:true), so its last-recorded caveat can never be
+    // cleared by a fresh snapshot. The family-row badge must not keep
+    // displaying it indefinitely for an account that isn't even monitored.
+    const html = renderWorkspace([
+      provider("cloudflare-account", {
+        name: "cloudflare",
+        displayName: "Cloudflare",
+        groupId: null,
+        isActive: false,
+        spentUsd: 5,
+        spendCoverage: "complete",
+        costCoverageCaveat: {
+          code: "cloudflare_paygo_usage_unavailable",
+          message: "Usage-based costs (D1, R2, Workers, Queues overage) are not visible for this account — only the fixed subscription fee is shown. Cost may be understated.",
+        },
+      }),
+    ]);
+
+    const spendCell = extractTdInner(html, "Spend");
+    expect(spendCell).not.toContain("Cost coverage gap");
+  });
 });
 
 describe("formatShortDate", () => {

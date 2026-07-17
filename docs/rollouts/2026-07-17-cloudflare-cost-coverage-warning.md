@@ -70,7 +70,12 @@ orange banner/badge with an `AlertTriangle` icon and the literal caveat message,
 inline (never behind a collapsed/expand click):
 
 - `ProviderCard.tsx`: an orange banner ("Cost coverage gap: ...") below the existing blue
-  provider-billing banner.
+  provider-billing banner. Note: as of this change, `ProviderCard` is not mounted anywhere in the
+  live app - `src/app/page.tsx`, `src/app/settings/page.tsx`, and
+  `src/app/providers/[id]/page.tsx` only import its exported types, never its component (`grep -rn
+  "<ProviderCard" src/` returns nothing on `main` or this branch). It is exercised solely by its
+  own unit test. The banner is still added here to keep the component's props/rendering complete
+  and ready if/when it is wired up, but it is not one of the currently-live UI surfaces.
 - `ProviderTable.tsx`: an orange line inside the always-visible "Spend / Budget" cell (individual
   provider rows in this table are not collapsed by default; only the type-level group header is,
   same as before this change).
