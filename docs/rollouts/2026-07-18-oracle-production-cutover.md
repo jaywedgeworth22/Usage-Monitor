@@ -92,9 +92,10 @@ The Garage authenticated dry-run and Coolify container/disk probes are green.
   consecutive degraded ticks against an alert threshold of three. This is an
   operational follow-up, not a failed cutover.
 - Production remains intentionally pinned to
-  `80d79e522826c5676d9ad3defa3418c7561b9920`. Repository `main` advanced one
-  commit after the freeze. Future releases need an Oracle ARM64 build/deploy and
-  rollback workflow; Render auto-deploy is not the production release path.
+  `80d79e522826c5676d9ad3defa3418c7561b9920`. At cutover completion,
+  repository `main` had advanced one commit after the freeze. Future releases
+  need an Oracle ARM64 build/deploy and rollback workflow; Render auto-deploy is
+  not the production release path.
 
 ## Rollback boundary
 
