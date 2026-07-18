@@ -18,8 +18,8 @@ function currentUsage() {
   };
 }
 
-function workspacePage(items: unknown[], total = items.length) {
-  return { items, total };
+function workspacePage(items: unknown[], total = items.length, page = 1) {
+  return { items, total, page, page_size: 100 };
 }
 
 describe("Mistral billing adapter", () => {
@@ -70,34 +70,21 @@ describe("Mistral billing adapter", () => {
   });
 
   it("paginates workspace inventory and emits bounded, non-additive workspace components", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn()
-        .mockResolvedValueOnce(json(currentUsage()))
-        .mockResolvedValueOnce(json({ limits: { completion: { usage_limit: 100 }, currency: "USD" } }))
-        .mockResolvedValueOnce(json({ requests_per_second: 5 }))
-        .mockResolvedValueOnce(json(workspacePage([{ uuid: "one", name: "One" }], 101)))
-        .mockResolvedValueOnce(json(workspacePage([{ uuid: "two", name: "Two" }], 101)))
-    );
-
-    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
-    // The production page size is 100; a short page with total 101 proves the
-    // adapter follows the documented total instead of treating the first page
-    // as a complete list. The remaining 99 records are supplied on page 2.
-    const secondPage = Array.from({ length: 100 }, (_, index) => ({
-      uuid: index === 0 ? "two" : `workspace-${index + 2}`,
-      name: `Workspace ${index + 2}`,
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      uuid: index === 0 ? "one" : `workspace-${index + 1}`,
+      name: index === 0 ? "One" : `Workspace ${index + 1}`,
     }));
-    fetchMock.mockReset();
+    const fetchMock = vi.fn();
     fetchMock
       .mockResolvedValueOnce(json(currentUsage()))
       .mockResolvedValueOnce(json({ limits: { completion: { usage_limit: 100 }, currency: "USD" } }))
       .mockResolvedValueOnce(json({ requests_per_second: 5 }))
-      .mockResolvedValueOnce(json(workspacePage([{ uuid: "one", name: "One" }], 101)))
-      .mockResolvedValueOnce(json(workspacePage(secondPage, 101)));
+      .mockResolvedValueOnce(json(workspacePage(firstPage, 101)))
+      .mockResolvedValueOnce(json(workspacePage([{ uuid: "two", name: "Two" }], 101, 2)));
     for (let index = 0; index < 50; index += 1) {
       fetchMock.mockResolvedValueOnce(json(currentUsage()));
     }
+    vi.stubGlobal("fetch", fetchMock);
 
     const result = await fetchUsage("admin-key");
     const workspaceSync = result.externalBillingSyncs?.find(
@@ -113,7 +100,15 @@ describe("Mistral billing adapter", () => {
       status: "cost_unavailable",
     });
     expect(result.rawData).toMatchObject({
-      workspaceCoverage: { complete: true, capped: true, enumerated: 101 },
+      workspaceCoverage: {
+        enumerationComplete: true,
+        reportsAttempted: 50,
+        reportsSucceeded: 50,
+        reportsFailed: 0,
+        reportsCapped: true,
+        complete: false,
+        enumerated: 101,
+      },
     });
     expect(fetchMock.mock.calls[4][0]).toContain("page=2&page_size=100");
     expect(fetchMock.mock.calls[5][0]).toContain("workspace_id=one");
@@ -143,9 +138,116 @@ describe("Mistral billing adapter", () => {
     expect(workspaceSync?.authoritative).toBe(false);
     expect(workspaceSync?.records).toHaveLength(1);
     expect(result.totalCost).toBeNull();
+    expect(result.rawData).toMatchObject({
+      workspaceCoverage: {
+        enumerationComplete: true,
+        reportsAttempted: 2,
+        reportsSucceeded: 1,
+        reportsFailed: 1,
+        complete: false,
+      },
+    });
   });
 
-  it("rejects wrong currency and wrong UTC-month windows without returning a false zero", async () => {
+  it("accepts the official nullable usage currency while keeping cash unavailable", async () => {
+    const nullableCurrencyUsage = { ...currentUsage(), currency: null };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(json(nullableCurrencyUsage))
+        .mockResolvedValueOnce(json({ limits: { completion: { usage_limit: 100 }, currency: "USD" } }))
+        .mockResolvedValueOnce(json({ requests_per_second: 5 }))
+        .mockResolvedValueOnce(json(workspacePage([{ uuid: "one", name: "One" }])))
+        .mockResolvedValueOnce(json(nullableCurrencyUsage))
+    );
+
+    const result = await fetchUsage("admin-key");
+    const organization = result.externalBillingSyncs?.find(
+      (sync) => sync.source === "mistral-usage-billing"
+    );
+    const workspace = result.externalBillingSyncs?.find(
+      (sync) => sync.source === "mistral-workspace-usage"
+    );
+    expect(organization?.records[0]).toMatchObject({ amountUsd: null, currency: null });
+    expect(workspace?.records[0]).toMatchObject({ amountUsd: null, currency: null });
+    expect(result.totalCost).toBeNull();
+  });
+
+  it("isolates an optional endpoint transport failure from valid organization usage", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(json(currentUsage()))
+        .mockRejectedValueOnce(new Error("spend-limit transport failed"))
+        .mockResolvedValueOnce(json({ requests_per_second: 5 }))
+        .mockResolvedValueOnce(json(workspacePage([])))
+    );
+
+    const result = await fetchUsage("admin-key");
+    expect(result.externalBillingSyncs?.map((sync) => sync.source)).toEqual([
+      "mistral-usage-billing",
+      "mistral-rate-limits",
+      "mistral-workspace-usage",
+    ]);
+    expect(result.totalCost).toBeNull();
+  });
+
+  it("hard-bounds excessive workspace totals and marks collection incomplete", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      uuid: `workspace-${index}`,
+      name: `Workspace ${index}`,
+    }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json(currentUsage()))
+      .mockResolvedValueOnce(json({ limits: { completion: { usage_limit: 100 }, currency: "USD" } }))
+      .mockResolvedValueOnce(json({ requests_per_second: 5 }))
+      .mockResolvedValueOnce(json(workspacePage(firstPage, 1001)));
+    for (let index = 0; index < 50; index += 1) {
+      fetchMock.mockResolvedValueOnce(json(currentUsage()));
+    }
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchUsage("admin-key");
+    const workspace = result.externalBillingSyncs?.find(
+      (sync) => sync.source === "mistral-workspace-usage"
+    );
+    expect(workspace?.authoritative).toBe(false);
+    expect(workspace?.records).toHaveLength(50);
+    expect(result.rawData).toMatchObject({
+      workspaceCoverage: {
+        enumerationComplete: false,
+        enumerated: 100,
+        reportsCapped: true,
+        complete: false,
+      },
+    });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/workspaces")))
+      .toHaveLength(1);
+  });
+
+  it("does not treat inconsistent empty pagination metadata as authoritative", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(json(currentUsage()))
+        .mockResolvedValueOnce(json({ limits: { completion: { usage_limit: 100 }, currency: "USD" } }))
+        .mockResolvedValueOnce(json({ requests_per_second: 5 }))
+        .mockResolvedValueOnce(json(workspacePage([{ uuid: "impossible" }], 0)))
+    );
+    const result = await fetchUsage("admin-key");
+    expect(result.externalBillingSyncs?.map((sync) => sync.source)).not.toContain(
+      "mistral-workspace-usage"
+    );
+    expect(result.rawData).toMatchObject({
+      workspaceCoverage: {
+        enumerationComplete: false,
+        enumerated: 0,
+        complete: false,
+      },
+    });
+  });
+
+  it("keeps non-USD usage metadata but rejects non-USD caps and wrong UTC-month windows", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn()

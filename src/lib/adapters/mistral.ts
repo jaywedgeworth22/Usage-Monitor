@@ -9,8 +9,13 @@ import {
 
 const ADMIN_BASE_URL = "https://console.mistral.ai/api/admin";
 const WORKSPACE_PAGE_SIZE = 100;
+const MAX_WORKSPACE_PAGES = 10;
+const MAX_WORKSPACE_INVENTORY_ITEMS =
+  WORKSPACE_PAGE_SIZE * MAX_WORKSPACE_PAGES;
 const MAX_WORKSPACE_COMPONENTS = 50;
 const WORKSPACE_USAGE_CONCURRENCY = 5;
+
+type FetchJsonResult = Awaited<ReturnType<typeof fetchJson>>;
 
 type MistralUsageReport = {
   start_date?: unknown;
@@ -27,6 +32,8 @@ type MistralWorkspace = {
 type MistralWorkspacePage = {
   items?: unknown;
   total?: unknown;
+  page?: unknown;
+  page_size?: unknown;
 };
 
 type MistralSpendLimits = {
@@ -71,11 +78,12 @@ function parseCurrency(value: unknown): string | null {
 function validateCurrentUtcUsageWindow(
   report: MistralUsageReport,
   now: Date
-): { start: string; end: string; currency: string } | null {
+): { start: string; end: string; currency: string | null } | null {
   const start = parseIsoDate(report.start_date);
   const end = parseIsoDate(report.end_date);
-  const currency = parseCurrency(report.currency);
-  if (!start || !end || !currency) return null;
+  if (!start || !end || !Object.hasOwn(report, "currency")) return null;
+  const currency = report.currency == null ? null : parseCurrency(report.currency);
+  if (report.currency != null && currency == null) return null;
 
   const expectedStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
   const nextMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
@@ -86,6 +94,17 @@ function validateCurrentUtcUsageWindow(
   }
 
   return { start, end, currency };
+}
+
+async function isolatedFetchJson(
+  url: string,
+  headers: Record<string, string>
+): Promise<{ response: FetchJsonResult | null; error: unknown | null }> {
+  try {
+    return { response: await fetchJson(url, { headers }), error: null };
+  } catch (error) {
+    return { response: null, error };
+  }
 }
 
 function normalizeWorkspace(value: unknown): { uuid: string; name: string | null } | null {
@@ -120,21 +139,58 @@ async function listWorkspaces(
   }
   if (!first.ok) return { attempted: true, complete: false, workspaces: [] };
 
+  const deduped = new Map<string, { uuid: string; name: string | null }>();
+  const addPageItems = (items: unknown[]): boolean => {
+    if (items.length > WORKSPACE_PAGE_SIZE) return false;
+    for (const item of items) {
+      const workspace = normalizeWorkspace(item);
+      if (!workspace || deduped.has(workspace.uuid)) return false;
+      deduped.set(workspace.uuid, workspace);
+    }
+    return true;
+  };
+  const workspaces = () => [...deduped.values()];
+  const validPage = (
+    data: MistralWorkspacePage,
+    expectedPage: number,
+    expectedTotal: number
+  ): data is MistralWorkspacePage & { items: unknown[] } => {
+    if (
+      !Array.isArray(data.items) ||
+      data.page !== expectedPage ||
+      data.page_size !== WORKSPACE_PAGE_SIZE ||
+      data.total !== expectedTotal
+    ) {
+      return false;
+    }
+    const offset = (expectedPage - 1) * WORKSPACE_PAGE_SIZE;
+    const expectedItems = Math.max(
+      0,
+      Math.min(WORKSPACE_PAGE_SIZE, expectedTotal - offset)
+    );
+    return data.items.length === expectedItems;
+  };
+
   const firstPage = (first.data ?? {}) as MistralWorkspacePage;
   if (
-    !Array.isArray(firstPage.items) ||
     typeof firstPage.total !== "number" ||
     !Number.isSafeInteger(firstPage.total) ||
-    firstPage.total < 0
+    firstPage.total < 0 ||
+    !validPage(firstPage, 1, firstPage.total) ||
+    !addPageItems(firstPage.items)
   ) {
-    return { attempted: true, complete: false, workspaces: [] };
+    return { attempted: true, complete: false, workspaces: workspaces() };
   }
 
   const total = firstPage.total;
-  const pages = Math.ceil(total / WORKSPACE_PAGE_SIZE);
-  if (pages === 0) return { attempted: true, complete: true, workspaces: [] };
+  const pages = Math.max(1, Math.ceil(total / WORKSPACE_PAGE_SIZE));
+  if (total > MAX_WORKSPACE_INVENTORY_ITEMS || pages > MAX_WORKSPACE_PAGES) {
+    return { attempted: true, complete: false, workspaces: workspaces() };
+  }
+  if (total === 0) {
+    return { attempted: true, complete: true, workspaces: [] };
+  }
 
-  const items = [...firstPage.items];
   for (let page = 2; page <= pages; page += 1) {
     let response;
     try {
@@ -143,28 +199,22 @@ async function listWorkspaces(
         { headers }
       );
     } catch {
-      return { attempted: true, complete: false, workspaces: [] };
+      return { attempted: true, complete: false, workspaces: workspaces() };
     }
     const data = (response.data ?? {}) as MistralWorkspacePage;
-    if (!response.ok || !Array.isArray(data.items)) {
-      return { attempted: true, complete: false, workspaces: [] };
+    if (
+      !response.ok ||
+      !validPage(data, page, total) ||
+      !addPageItems(data.items)
+    ) {
+      return { attempted: true, complete: false, workspaces: workspaces() };
     }
-    items.push(...data.items);
-  }
-
-  const deduped = new Map<string, { uuid: string; name: string | null }>();
-  for (const item of items) {
-    const workspace = normalizeWorkspace(item);
-    if (!workspace || deduped.has(workspace.uuid)) {
-      return { attempted: true, complete: false, workspaces: [] };
-    }
-    deduped.set(workspace.uuid, workspace);
   }
 
   return {
     attempted: true,
     complete: deduped.size === total,
-    workspaces: [...deduped.values()],
+    workspaces: workspaces(),
   };
 }
 
@@ -192,7 +242,13 @@ async function fetchWorkspaceUsageRecords(
   workspaces: Array<{ uuid: string; name: string | null }>,
   headers: Record<string, string>,
   now: Date
-): Promise<{ records: AdapterExternalBillingRecord[]; complete: boolean }> {
+): Promise<{
+  records: AdapterExternalBillingRecord[];
+  attempted: number;
+  failed: number;
+  capped: boolean;
+  complete: boolean;
+}> {
   const bounded = workspaces.slice(0, MAX_WORKSPACE_COMPONENTS);
   const results = await mapWithConcurrency<
     { uuid: string; name: string | null },
@@ -229,11 +285,17 @@ async function fetchWorkspaceUsageRecords(
     };
   });
 
-  return {
-    records: results.filter(
+  const records = results.filter(
       (record): record is AdapterExternalBillingRecord => record != null
-    ),
-    complete: bounded.length === workspaces.length && results.every((record) => record != null),
+    );
+  return {
+    records,
+    attempted: bounded.length,
+    failed: bounded.length - records.length,
+    capped: bounded.length < workspaces.length,
+    complete:
+      bounded.length === workspaces.length &&
+      results.every((record) => record != null),
   };
 }
 
@@ -250,32 +312,38 @@ export async function fetchUsage(
     year: String(now.getUTCFullYear()),
   });
 
-  const [usageResponse, limitsResponse, rateResponse, workspaceList] = await Promise.all([
-    fetchJson(`${ADMIN_BASE_URL}/usage?${params}`, { headers }),
-    fetchJson(`${ADMIN_BASE_URL}/spend-limit`, { headers }),
-    fetchJson(`${ADMIN_BASE_URL}/rate-limit`, { headers }),
+  const [usageAttempt, limitsAttempt, rateAttempt, workspaceList] = await Promise.all([
+    isolatedFetchJson(`${ADMIN_BASE_URL}/usage?${params}`, headers),
+    isolatedFetchJson(`${ADMIN_BASE_URL}/spend-limit`, headers),
+    isolatedFetchJson(`${ADMIN_BASE_URL}/rate-limit`, headers),
     listWorkspaces(headers),
   ]);
+  const usageResponse = usageAttempt.response;
+  const limitsResponse = limitsAttempt.response;
+  const rateResponse = rateAttempt.response;
 
-  if (!usageResponse.ok && !limitsResponse.ok && !rateResponse.ok) {
+  if (!usageResponse?.ok && !limitsResponse?.ok && !rateResponse?.ok) {
+    const transportError =
+      usageAttempt.error ?? limitsAttempt.error ?? rateAttempt.error;
+    if (transportError) throw transportError;
     return errorResult(
-      usageResponse.status || limitsResponse.status || rateResponse.status,
+      usageResponse?.status || limitsResponse?.status || rateResponse?.status || 0,
       { note: "Mistral billing endpoints require a Backoffice Admin API key" }
     );
   }
 
-  const usage = (usageResponse.data ?? {}) as MistralUsageReport;
-  const limits = (limitsResponse.data ?? {}) as MistralSpendLimits;
-  const rate = (rateResponse.data ?? {}) as MistralRateLimits;
+  const usage = (usageResponse?.data ?? {}) as MistralUsageReport;
+  const limits = (limitsResponse?.data ?? {}) as MistralSpendLimits;
+  const rate = (rateResponse?.data ?? {}) as MistralRateLimits;
   const completion = limits.limits?.completion;
-  const usageWindow = usageResponse.ok
+  const usageWindow = usageResponse?.ok
     ? validateCurrentUtcUsageWindow(usage, now)
     : null;
   const limitsCurrency = parseCurrency(limits.limits?.currency);
   const spendLimitUsd = limitsCurrency === "USD"
     ? parseNumber(completion?.usage_limit) ?? parseNumber(completion?.usage_limit_organization)
     : null;
-  const requestLimit = rateResponse.ok ? parseNumber(rate.requests_per_second) : null;
+  const requestLimit = rateResponse?.ok ? parseNumber(rate.requests_per_second) : null;
   const status = limits.limits?.last_payment_failure === true
     ? "payment_failed"
     : completion?.monthly_limit_reached === true
@@ -306,7 +374,7 @@ export async function fetchUsage(
       ],
     });
   }
-  if (limitsResponse.ok) {
+  if (limitsResponse?.ok) {
     billingSyncs.push({
       source: "mistral-spend-limits",
       authoritative: true,
@@ -341,8 +409,15 @@ export async function fetchUsage(
     });
   }
 
+  let workspaceUsage: Awaited<ReturnType<typeof fetchWorkspaceUsageRecords>> = {
+    records: [],
+    attempted: 0,
+    failed: 0,
+    capped: false,
+    complete: workspaceList.complete && workspaceList.workspaces.length === 0,
+  };
   if (workspaceList.complete || workspaceList.workspaces.length > 0) {
-    const workspaceUsage = await fetchWorkspaceUsageRecords(
+    workspaceUsage = await fetchWorkspaceUsageRecords(
       workspaceList.workspaces,
       headers,
       now
@@ -367,21 +442,25 @@ export async function fetchUsage(
     totalRequests: null,
     credits: null,
     rawData: {
-      usage: usageResponse.ok ? usage : null,
-      spendLimit: limitsResponse.ok ? limits : null,
-      rateLimit: rateResponse.ok ? rate : null,
+      usage: usageResponse?.ok ? usage : null,
+      spendLimit: limitsResponse?.ok ? limits : null,
+      rateLimit: rateResponse?.ok ? rate : null,
       workspaceCoverage: {
         attempted: workspaceList.attempted,
         enumerated: workspaceList.workspaces.length,
-        complete: workspaceList.complete,
-        capped: workspaceList.workspaces.length > MAX_WORKSPACE_COMPONENTS,
+        enumerationComplete: workspaceList.complete,
+        reportsAttempted: workspaceUsage.attempted,
+        reportsSucceeded: workspaceUsage.records.length,
+        reportsFailed: workspaceUsage.failed,
+        reportsCapped: workspaceUsage.capped,
+        complete: workspaceList.complete && workspaceUsage.complete,
       },
       capabilities: {
         actualCost: false,
         usageBreakdown: usageWindow != null,
         spendLimit: spendLimitUsd != null,
         rateLimit: requestLimit != null,
-        workspaceUsage: workspaceList.complete,
+        workspaceUsage: workspaceList.complete && workspaceUsage.complete,
         credential: "Mistral Backoffice Admin API key",
       },
     },
