@@ -135,7 +135,7 @@ export default function ProviderCard({
 }: ProviderCardProps) {
   const dotColor =
     typeColors[name.toLowerCase()] ?? "bg-purple-500";
-  const usageUnitLabel = usageUnitLabelForProvider(name);
+  const usageUnitLabel = usageUnitLabelForProvider(name, type);
 
   const isCreditBased = creditBasedProviders.has(name.toLowerCase());
   const hasCredits = latestSnapshot?.credits != null;

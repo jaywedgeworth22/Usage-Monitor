@@ -228,7 +228,7 @@ export default function ProviderDetailPage() {
 
   const latest = snapshots[snapshots.length - 1];
   const latestReading = latest ?? provider.latestSnapshot ?? null;
-  const usageUnitLabel = usageUnitLabelForProvider(provider.name);
+  const usageUnitLabel = usageUnitLabelForProvider(provider.name, provider.type);
   const newestSnapshots = [...snapshots].reverse();
   const totalSnapshotPages = Math.max(1, Math.ceil(newestSnapshots.length / SNAPSHOT_PAGE_SIZE));
   const currentSnapshotPage = Math.min(snapshotPage, totalSnapshotPages);

@@ -63,6 +63,11 @@ describe("usageUnitLabelForProvider", () => {
     expect(usageUnitLabelForProvider("")).toBe("Requests");
   });
 
+  it("does not apply built-in labels to custom providers reusing a built-in slug", () => {
+    expect(usageUnitLabelForProvider("render", "custom")).toBe("Requests");
+    expect(usageUnitLabelForProvider("render", "CUSTOM")).toBe("Requests");
+  });
+
   it("keeps every declared usageUnitLabel non-empty", () => {
     for (const provider of BUILT_IN_PROVIDERS) {
       if (provider.usageUnitLabel !== undefined) {

@@ -104,7 +104,13 @@ export const DEFAULT_USAGE_UNIT_LABEL = "Requests";
  * (e.g. "google_ai") resolve alongside their built-in definition. Unknown or
  * custom providers fall back to "Requests".
  */
-export function usageUnitLabelForProvider(name: string): string {
+export function usageUnitLabelForProvider(
+  name: string,
+  providerType: string = "builtin"
+): string {
+  if (providerType.trim().toLowerCase() !== "builtin") {
+    return DEFAULT_USAGE_UNIT_LABEL;
+  }
   const canonical = canonicalProviderKey(name);
   const definition = BUILT_IN_PROVIDERS.find(
     (provider) => canonicalProviderKey(provider.name) === canonical
