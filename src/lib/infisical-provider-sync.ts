@@ -1,6 +1,11 @@
 import { Prisma } from "@prisma/client";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { decrypt, encrypt, encryptJson } from "@/lib/crypto";
+import {
+  decrypt,
+  encrypt,
+  encryptJson,
+  managedApiKeyFingerprint,
+} from "@/lib/crypto";
 import { geminiApiKeyFingerprint } from "@/lib/gemini-key-status";
 import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
 import { prisma } from "@/lib/prisma";
@@ -977,7 +982,7 @@ function splitApiKeyList(value: string): Array<{ apiKey: string; fingerprint: st
     if (Buffer.byteLength(apiKey, "utf8") > MAX_SPLIT_API_KEY_BYTES) {
       throw new InfisicalSyncError("split_api_key_too_large");
     }
-    const fingerprint = createHash("sha256").update(apiKey, "utf8").digest("hex");
+    const fingerprint = managedApiKeyFingerprint(apiKey);
     if (!unique.has(fingerprint)) unique.set(fingerprint, { apiKey, fingerprint });
     if (unique.size > MAX_SPLIT_API_KEYS) {
       throw new InfisicalSyncError("split_api_key_list_too_large");

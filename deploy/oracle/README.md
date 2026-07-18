@@ -2,7 +2,10 @@
 
 The production candidate is one `VM.Standard.A1.Flex` VM with a separate block
 volume mounted at `/data`. `usage-monitor.service` refuses to start unless that
-mount exists, preventing SQLite from silently writing to the boot volume.
+mount exists, preventing SQLite from silently writing to the boot volume. The
+unit also sets the mount root to UID/GID `1000:1000`, matching the unprivileged
+`node` user in the official Node image; Oracle's Ubuntu login user is normally
+UID 1001 and must not own the container's SQLite directory.
 
 Runtime secrets live only in `/etc/usage-monitor/usage-monitor.env` (mode 0600).
 Non-secret host settings live in `/etc/usage-monitor/host.env`:

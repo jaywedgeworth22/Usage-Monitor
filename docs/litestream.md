@@ -98,6 +98,11 @@ Render's R2 credentials or replica endpoint onto Oracle: Litestream 0.5 permits
 one replica per database, and a future rollback must not leave two hosts
 publishing divergent SQLite histories to one object prefix.
 
+The S3 uploader is intentionally limited to one multipart part at a time in
+`litestream.yml`. This keeps each minimum-size S3 part within the reverse
+proxy's request deadline on slower cross-region links; normal LTX uploads are
+small, so reliability is more important than initial-seed parallelism here.
+
 ### 3. Deploy
 
 Saving env vars in Render's dashboard triggers a redeploy automatically (or trigger one

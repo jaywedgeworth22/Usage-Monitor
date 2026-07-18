@@ -8,6 +8,7 @@ services:
       - /etc/usage-monitor/usage-monitor.env
     environment:
       DATABASE_URL: file:/data/prod.db
+      GIT_COMMIT_SHA: ${USAGE_MONITOR_REVISION:-unknown}
       PORT: "3000"
     volumes:
       - /data:/data

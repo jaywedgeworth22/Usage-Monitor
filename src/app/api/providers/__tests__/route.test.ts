@@ -3,7 +3,6 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { NextRequest } from "next/server";
-import { createHash } from "node:crypto";
 import { setupPrismaSqliteTestDb } from "@/lib/__tests__/setup-test-db";
 
 // GET /api/providers is the dashboard's (and Settings/Connections') primary
@@ -23,6 +22,7 @@ let GET: typeof import("../route").GET;
 let prisma: typeof import("@/lib/prisma").prisma;
 let encrypt: typeof import("@/lib/crypto").encrypt;
 let encryptJson: typeof import("@/lib/crypto").encryptJson;
+let managedApiKeyFingerprint: typeof import("@/lib/crypto").managedApiKeyFingerprint;
 let geminiApiKeyFingerprint: typeof import("@/lib/gemini-key-status").geminiApiKeyFingerprint;
 let geminiBillingConfigFingerprint: typeof import("@/lib/gemini-key-status").geminiBillingConfigFingerprint;
 let geminiMonitoringConfigFingerprint: typeof import("@/lib/gemini-key-status").geminiMonitoringConfigFingerprint;
@@ -38,7 +38,7 @@ beforeAll(async () => {
 
   ({ GET } = await import("../route"));
   ({ prisma } = await import("@/lib/prisma"));
-  ({ encrypt, encryptJson } = await import("@/lib/crypto"));
+  ({ encrypt, encryptJson, managedApiKeyFingerprint } = await import("@/lib/crypto"));
   ({
     geminiApiKeyFingerprint,
     geminiBillingConfigFingerprint,
@@ -273,9 +273,7 @@ describe("GET /api/providers - managed key previews", () => {
             type: "builtin",
             apiKey: encrypt(apiKey),
             secretConfig: encryptJson({
-              infisicalCredential: binding(
-                createHash("sha256").update(apiKey).digest("hex")
-              ),
+              infisicalCredential: binding(managedApiKeyFingerprint(apiKey)),
             }),
           },
         })
