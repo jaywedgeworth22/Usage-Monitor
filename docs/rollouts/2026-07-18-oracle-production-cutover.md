@@ -86,9 +86,11 @@ The Garage authenticated dry-run and Coolify container/disk probes are green.
 
 - The controlled maintenance window lasted approximately 25 minutes, from the
   Render HTTP 503 gate through public Oracle TLS/readiness confirmation.
-- Strict readiness remains green, but the latest independent check observed one
-  degraded provider-fetch tick: zero successful providers, four failures, and
-  42 skipped providers. This is an operational follow-up, not a failed cutover.
+- Strict readiness remained green at the 22:39 UTC independent check. The
+  first post-cutover provider-fetch tick had zero successes, four failures, and
+  42 skips; the next had one success, four failures, and 41 skips. That was two
+  consecutive degraded ticks against an alert threshold of three. This is an
+  operational follow-up, not a failed cutover.
 - Production remains intentionally pinned to
   `80d79e522826c5676d9ad3defa3418c7561b9920`. Repository `main` advanced one
   commit after the freeze. Future releases need an Oracle ARM64 build/deploy and
