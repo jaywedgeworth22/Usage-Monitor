@@ -102,6 +102,10 @@ not copied from the obsolete gray-cloud setup.
   retained permanently so late producer retries cannot be counted twice)
 - `DATA_RETENTION_ENABLE_VACUUM` (optional, defaults off; full SQLite compaction
   is operator-only because it takes an exclusive lock and rewrites the database)
+- `BUDGET_STATUS_CACHE_TTL_MS` (optional; defaults to `60000`; stale-while-revalidate TTL for
+  `computeBudgetStatus`, the sole read path for `/api/providers`, `/api/projects`, and
+  `/api/budget-status`'s combined poll+pushed+subscription spend. A request always gets the last
+  computed value immediately; a background refresh runs once it's older than this)
 - `DATA_RETENTION_DISABLE_VACUUM` (legacy override; any true value prevents the
   opt-in compaction above)
 - `ADAPTER_HTTP_TIMEOUT_MS` / `ADAPTER_PROVIDER_TIMEOUT_MS` (optional bounded
