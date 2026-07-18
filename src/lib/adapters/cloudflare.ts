@@ -273,12 +273,13 @@ export async function fetchUsage(
   const failedStatuses: number[] = [];
 
   // 1. Analytics dashboard (general stats)
-  const now = new Date();
-  const monthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const requestStartedAt = new Date();
+  const thirtyDaysAgo = new Date(
+    requestStartedAt.getTime() - 30 * 24 * 60 * 60 * 1000
+  );
   const analyticsParams = new URLSearchParams({
     since: thirtyDaysAgo.toISOString(),
-    until: now.toISOString(),
+    until: requestStartedAt.toISOString(),
     continuous: "true",
   });
 
@@ -334,25 +335,42 @@ export async function fetchUsage(
   // least-privilege Cloudflare token permission for this endpoint. Usage
   // overages are intentionally not inferred from analytics (Cloudflare states
   // that analytics datasets are not billing-grade).
+  let subscriptionsResult: Awaited<
+    ReturnType<typeof fetchAllSubscriptions>
+  > | null = null;
   try {
-    const { rows, pages } = await fetchAllSubscriptions(baseUrl, headers);
-    // Classify the response against a clock captured after all subscription
-    // pages arrive. The earlier request timestamp is used only to bound the
-    // analytics query; using it here could keep an Expired term live when the
-    // network request crosses current_period_end.
-    const subscriptionClassificationTime = new Date();
-    const subscriptionNowMs = subscriptionClassificationTime.getTime();
-    const subscriptionMonthStartMs = Date.UTC(
-      subscriptionClassificationTime.getUTCFullYear(),
-      subscriptionClassificationTime.getUTCMonth(),
-      1
-    );
+    subscriptionsResult = await fetchAllSubscriptions(baseUrl, headers);
+  } catch (error) {
+    if (error instanceof AdapterError && error.code === "INVALID_RESPONSE") {
+      throw error;
+    }
+    rawData.subscriptionsCapability = {
+      available: false,
+      error: error instanceof Error ? error.message : "Failed",
+      requiredPermission: "Account Billing Read",
+    };
+  }
+
+  // Use one clock captured after every subscription page (or the failed
+  // attempt) for every cost-bearing result below. If a request crosses a UTC
+  // month boundary, fixed subscriptions, PayGo query/filtering, and the
+  // returned snapshot window therefore all stay in the same accounting month.
+  const accountingTime = new Date();
+  const accountingNowMs = accountingTime.getTime();
+  const accountingMonthStartMs = Date.UTC(
+    accountingTime.getUTCFullYear(),
+    accountingTime.getUTCMonth(),
+    1
+  );
+
+  if (subscriptionsResult) {
+    const { rows, pages } = subscriptionsResult;
     successfulCalls++;
     // Keep only the small set of fields needed to explain plan entitlements.
     // Cloudflare's full response can contain zone names and component payloads,
     // neither of which is needed for billing reconciliation.
     rawData.subscriptions = rows.map((subscription) =>
-      sanitizeSubscription(subscription, subscriptionClassificationTime)
+      sanitizeSubscription(subscription, accountingTime)
     );
 
     let billedThisMonthUsd = 0;
@@ -367,15 +385,15 @@ export async function fetchUsage(
         : Number.NaN;
       const normalizedState = normalizedSubscriptionState(
         subscription,
-        subscriptionClassificationTime
+        accountingTime
       );
       const isPaid = normalizedState === "paid";
       if (
         price != null && price > 0 &&
         currency === "USD" &&
         normalizedState === "paid" &&
-        periodStart >= subscriptionMonthStartMs &&
-        periodStart <= subscriptionNowMs
+        periodStart >= accountingMonthStartMs &&
+        periodStart <= accountingNowMs
       ) {
         billedThisMonthUsd += price;
         foundBilledSubscription = true;
@@ -437,15 +455,6 @@ export async function fetchUsage(
         usageOverageCost: false,
       },
     };
-  } catch (error) {
-    if (error instanceof AdapterError && error.code === "INVALID_RESPONSE") {
-      throw error;
-    }
-    rawData.subscriptionsCapability = {
-      available: false,
-      error: error instanceof Error ? error.message : "Failed",
-      requiredPermission: "Account Billing Read",
-    };
   }
 
   // 4. PayGo billable usage is Cloudflare's billing-grade alpha endpoint.
@@ -456,8 +465,8 @@ export async function fetchUsage(
   let paygoCapabilityAvailable = false;
   try {
     const paygoParams = new URLSearchParams({
-      from: new Date(monthStartMs).toISOString().slice(0, 10),
-      to: now.toISOString().slice(0, 10),
+      from: new Date(accountingMonthStartMs).toISOString().slice(0, 10),
+      to: accountingTime.toISOString().slice(0, 10),
     });
     const paygoResponse = await fetchJson(
       `${baseUrl}/paygo-usage?${paygoParams}`,
@@ -505,8 +514,8 @@ export async function fetchUsage(
           ? Date.parse(row.ChargePeriodStart)
           : Number.NaN;
         return Number.isFinite(chargePeriodStart) &&
-          chargePeriodStart >= monthStartMs &&
-          chargePeriodStart <= now.getTime();
+          chargePeriodStart >= accountingMonthStartMs &&
+          chargePeriodStart <= accountingNowMs;
       });
       let paygoCostUsd = 0;
       let foundPaygoCost = false;
@@ -554,7 +563,7 @@ export async function fetchUsage(
         return Date.parse(row.ChargePeriodStart) < Date.parse(earliest)
           ? row.ChargePeriodStart
           : earliest;
-      }, null) ?? new Date(monthStartMs).toISOString();
+      }, null) ?? new Date(accountingMonthStartMs).toISOString();
       const periodEnd = rows.reduce<string | null>((latest, row) => {
         if (
           !row.ChargePeriodEnd ||
@@ -566,7 +575,7 @@ export async function fetchUsage(
           Date.parse(row.ChargePeriodEnd) > Date.parse(latest)
           ? row.ChargePeriodEnd
           : latest;
-      }, null) ?? now.toISOString();
+      }, null) ?? accountingTime.toISOString();
       rawData.paygoBilling = {
         currentPeriodCostUsd: foundPaygoCost ? paygoCostUsd : null,
         recordCount: rows.length,
@@ -721,8 +730,8 @@ export async function fetchUsage(
     totalCost,
     fixedCostIncludedUsd,
     costWindowStart:
-      totalCost != null ? new Date(monthStartMs) : null,
-    costWindowEnd: totalCost != null ? now : null,
+      totalCost != null ? new Date(accountingMonthStartMs) : null,
+    costWindowEnd: totalCost != null ? accountingTime : null,
     costScope: totalCost != null ? "calendar_month_to_date" : "unknown",
     costCoverageCaveat,
     totalRequests,

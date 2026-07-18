@@ -242,6 +242,95 @@ describe("cloudflare adapter", () => {
     });
   });
 
+  it("uses one new-month accounting window when subscription fetching crosses UTC month end", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-31T23:59:59.999Z"));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json({ result: { totals: { requests: 10 } } }))
+      .mockResolvedValueOnce(json({}, 403))
+      .mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
+        return json({
+          result: [
+            {
+              id: "august-workers-paid",
+              currency: "USD",
+              current_period_start: "2026-08-01T00:00:00.000Z",
+              current_period_end: "2026-09-01T00:00:00.000Z",
+              frequency: "monthly",
+              price: 5,
+              rate_plan: { public_name: "Workers Paid" },
+              state: "Expired",
+            },
+          ],
+          result_info: { count: 1, page: 1, per_page: 50, total_count: 1 },
+        });
+      })
+      .mockResolvedValueOnce(
+        json({
+          success: true,
+          result: [
+            {
+              BillingCurrency: "USD",
+              ChargePeriodStart: "2026-07-31T23:00:00.000Z",
+              ChargePeriodEnd: "2026-08-01T00:00:00.000Z",
+              ContractedCost: 100,
+              ConsumedQuantity: 100,
+              ServiceName: "Prior-month usage",
+            },
+            {
+              BillingCurrency: "USD",
+              ChargePeriodStart: "2026-08-01T00:00:00.000Z",
+              ChargePeriodEnd: "2026-08-01T01:00:00.000Z",
+              ContractedCost: 2,
+              ConsumedQuantity: 2,
+              ServiceName: "Current-month usage",
+            },
+          ],
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchUsage("token", {
+      accountId: "account-id",
+      authMode: "api_token",
+    });
+
+    const paygoUrl = new URL(String(fetchMock.mock.calls[3][0]));
+    expect(paygoUrl.searchParams.get("from")).toBe("2026-08-01");
+    expect(paygoUrl.searchParams.get("to")).toBe("2026-08-01");
+    expect(result.totalCost).toBe(7);
+    expect(result.fixedCostIncludedUsd).toBe(5);
+    expect(new Date(result.costWindowStart!).toISOString()).toBe(
+      "2026-08-01T00:00:00.000Z"
+    );
+    expect(new Date(result.costWindowEnd!).toISOString()).toBe(
+      "2026-08-01T00:00:00.000Z"
+    );
+    expect(result.rawData).toMatchObject({
+      billing: { fixedSubscriptionBilledThisMonthUsd: 5 },
+      paygoBilling: {
+        currentPeriodCostUsd: 2,
+        recordCount: 1,
+        excludedOutOfPeriodRecords: 1,
+      },
+    });
+    expect(JSON.stringify(result.externalBillingSyncs)).not.toContain(
+      "Prior-month usage"
+    );
+    expect(
+      result.externalBillingSyncs
+        ?.find((sync) => sync.source === "cloudflare-subscriptions")
+        ?.records[0]
+    ).toMatchObject({
+      externalId: "august-workers-paid",
+      status: "paid",
+      paidRecurringAuthoritative: true,
+      rollupRole: "canonical",
+    });
+  });
+
   it("uses explicit API-token auth even when a legacy account email remains", async () => {
     const fetchMock = vi
       .fn()
