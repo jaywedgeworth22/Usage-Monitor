@@ -9,6 +9,7 @@ import { setupPrismaSqliteTestDb } from "./setup-test-db";
 let dbPath: string;
 let prisma: typeof import("@/lib/prisma").prisma;
 let reconcileProviderExternalBilling: typeof import("../provider-external-billing").reconcileProviderExternalBilling;
+let computeBudgetStatus: typeof import("../budget-status").computeBudgetStatus;
 let providerId: string;
 
 const privateKey = generateKeyPairSync("rsa", { modulusLength: 2048 })
@@ -32,6 +33,7 @@ beforeAll(async () => {
   setupPrismaSqliteTestDb(dbPath);
   ({ prisma } = await import("@/lib/prisma"));
   ({ reconcileProviderExternalBilling } = await import("../provider-external-billing"));
+  ({ computeBudgetStatus } = await import("../budget-status"));
 });
 
 beforeEach(async () => {
@@ -75,5 +77,34 @@ describe("OCI service-detail persistence", () => {
       expect.objectContaining({ source: "oci-usage-canonical", amountUsd: 3, rollupRole: "canonical" }),
       expect.objectContaining({ source: "oci-usage-service-detail", serviceName: "Compute", amountUsd: 2, rollupRole: "component" }),
     ]));
+  });
+
+  it("keeps OCI's exact snapshot cash but marks budget coverage partial during publication lag", async () => {
+    await prisma.usageSnapshot.create({
+      data: {
+        providerId,
+        fetchedAt: new Date("2026-07-15T12:00:00.000Z"),
+        totalCost: 7.25,
+        costWindowStart: new Date("2026-07-01T00:00:00.000Z"),
+        costWindowEnd: new Date("2026-07-15T00:00:00.000Z"),
+        costScope: "calendar_month_to_date",
+        rawData: {
+          __apiUsageMonitor: {
+            version: 1,
+            costCoverageCaveat: {
+              code: "oci_usage_cost_publication_lag",
+              message: "OCI Usage API cost can publish up to 48 hours late.",
+            },
+          },
+        },
+      },
+    });
+
+    const status = await computeBudgetStatus(new Date("2026-07-15T12:00:00.000Z"));
+    expect(status.providers.find((item) => item.id === providerId)).toMatchObject({
+      snapshotCostUsd: 7.25,
+      spentUsd: 7.25,
+      spendCoverage: "partial",
+    });
   });
 });

@@ -13,6 +13,19 @@ const MAX_USAGE_PAGES = 100;
 const MAX_COST_COMPONENTS = 250;
 const MAX_LIMIT_SERVICES = 20;
 const MAX_LIMIT_RECORDS = 500;
+// This connector constructs the commercial-realm endpoint suffix itself. Keep
+// the supported region set deliberately narrow instead of signing a request
+// for a different OCI realm with the commercial hostname.
+const SUPPORTED_COMMERCIAL_HOME_REGIONS = new Set([
+  "us-ashburn-1",
+  "us-chicago-1",
+  "us-phoenix-1",
+  "us-sanjose-1",
+]);
+const OCI_PUBLICATION_LAG_CAVEAT = {
+  code: "oci_usage_cost_publication_lag",
+  message: "OCI Usage API cost can publish up to 48 hours late. The reported USD amount is preserved exactly, but current-month spend coverage is incomplete until OCI publishes delayed usage.",
+} as const;
 
 interface OciConfig {
   tenancyOcid: string;
@@ -74,10 +87,10 @@ function requiredConfig(config: Record<string, unknown>, key: string): string {
 
 function parseRegion(value: string): string {
   const normalized = value.trim().toLowerCase();
-  // OCI public regions use lower-case hyphenated names such as us-ashburn-1.
-  // This rejects arbitrary hostnames rather than turning config into an SSRF path.
-  if (!/^[a-z]{2,3}(?:-[a-z0-9]+)+-\d+$/.test(normalized)) {
-    configurationError("OCI region must be a public OCI region identifier (for example us-ashburn-1)");
+  if (!SUPPORTED_COMMERCIAL_HOME_REGIONS.has(normalized)) {
+    configurationError(
+      "OCI region must be a supported commercial-realm tenancy home region (us-ashburn-1, us-chicago-1, us-phoenix-1, or us-sanjose-1)"
+    );
   }
   return normalized;
 }
@@ -534,7 +547,7 @@ export async function fetchUsage(_apiKey: string, rawConfig: Record<string, unkn
     costScope: usdCost == null ? "unknown" : "calendar_month_to_date",
     costCoverageCaveat: currencies.some((value) => value !== "USD")
       ? { code: "oci_non_usd_cost_not_converted", message: "OCI returned non-USD costs; only the direct USD amount is included because no FX conversion is inferred." }
-      : null,
+      : OCI_PUBLICATION_LAG_CAVEAT,
     totalRequests: null,
     credits: null,
     rawData: {

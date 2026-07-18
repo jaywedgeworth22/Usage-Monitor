@@ -93,6 +93,15 @@ describe("Oracle Cloud Infrastructure adapter", () => {
     await expect(fetchUsage("", config)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
+  it("rejects alternate-realm and unknown regions instead of signing commercial endpoints for them", async () => {
+    await expect(fetchUsage("", { ...config, region: "us-gov-ashburn-1" })).rejects.toMatchObject({
+      code: "CONFIGURATION_ERROR",
+    });
+    await expect(fetchUsage("", { ...config, region: "us-future-99" })).rejects.toMatchObject({
+      code: "CONFIGURATION_ERROR",
+    });
+  });
+
   it("does not reconcile malformed optional service detail while retaining canonical cash", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       const url = new URL(input);
@@ -146,6 +155,28 @@ describe("Oracle Cloud Infrastructure adapter", () => {
     const result = await fetchUsage("", config);
     expect(result.externalBillingSyncs?.find((sync) => sync.source === "oci-budgets")?.records[0]).toMatchObject({
       spendLimitUsd: null, requestLimit: 10, usageUnit: "customer rate-card currency (unverified)",
+    });
+  });
+
+  it("preserves OCI's exact reported cash while labelling publication-lagged MTD coverage", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = new URL(input);
+      if (url.hostname.startsWith("usageapi.")) {
+        const body = JSON.parse(String(init?.body));
+        return json(body.groupBy.length === 0
+          ? { items: [{ currency: "USD", computedAmount: 7.25 }] }
+          : { items: [] });
+      }
+      if (url.hostname.startsWith("usage.")) return json([]);
+      throw new Error(`unexpected URL ${input}`);
+    }));
+
+    const result = await fetchUsage("", config);
+
+    expect(result.totalCost).toBe(7.25);
+    expect(result.costCoverageCaveat).toMatchObject({
+      code: "oci_usage_cost_publication_lag",
+      message: expect.stringContaining("48 hours"),
     });
   });
 });
