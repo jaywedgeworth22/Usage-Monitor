@@ -33,6 +33,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.usage-monitor-garage-s3.entrypoints=garage
+      - 'traefik.http.routers.usage-monitor-garage-s3.rule=Host(`s3-lm5xwdc9ml1hkfdp2n9d90eh.135.181.192.190.sslip.io`)'
+      - traefik.http.routers.usage-monitor-garage-s3.tls=true
+      - traefik.http.routers.usage-monitor-garage-s3.tls.certresolver=letsencrypt
+      - traefik.http.routers.usage-monitor-garage-s3.service=usage-monitor-garage-s3
+      - traefik.http.services.usage-monitor-garage-s3.loadbalancer.server.port=3900
 
 volumes:
   garage-meta:

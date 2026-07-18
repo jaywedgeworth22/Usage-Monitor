@@ -102,6 +102,11 @@ The S3 uploader is intentionally limited to one multipart part at a time in
 `litestream.yml`. This keeps each minimum-size S3 part within the reverse
 proxy's request deadline on slower cross-region links; normal LTX uploads are
 small, so reliability is more important than initial-seed parallelism here.
+The deployed Garage router also uses the dedicated TLS entrypoint on port 9443,
+whose request-body read timeout is five minutes. Keep Oracle's
+`LITESTREAM_S3_ENDPOINT` on that `:9443` URL. Do not raise the shared HTTPS
+entrypoint timeout for every Coolify workload just to accommodate backup
+uploads.
 
 ### 3. Deploy
 
