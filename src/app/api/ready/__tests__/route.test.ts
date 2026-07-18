@@ -98,6 +98,27 @@ describe("GET /api/ready", () => {
     await expect(response.json()).resolves.toMatchObject({ ok: true, status: "ready" });
   });
 
+  it("treats an intentionally disabled standby scheduler as not required", async () => {
+    vi.stubEnv("USAGE_SCHEDULER_ENABLED", "false");
+    resetRuntimeHealthForTests();
+
+    const response = await GET(
+      new Request("https://usage-oracle.example/api/ready?strict=1")
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      checks: {
+        scheduler: {
+          ok: true,
+          required: false,
+          readinessReason: "disabled",
+        },
+      },
+    });
+  });
+
   it("backs off failed SQLite probes and retries after the failure window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-14T09:00:00.000Z"));

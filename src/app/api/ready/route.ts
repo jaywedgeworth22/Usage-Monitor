@@ -167,7 +167,13 @@ export async function GET(request: Request) {
     Promise.resolve(getStartupRuntimeStatus()),
   ]);
   const schedulerReadiness = getSchedulerReadiness();
-  const schedulerReady = schedulerReadiness.ok;
+  // A preview/cold-standby host deliberately disables its scheduler to avoid
+  // becoming a second SQLite writer. That intentional circuit breaker must not
+  // make strict HTTP readiness fail; production keeps the default-required
+  // behavior whenever the flag is unset or true.
+  const schedulerRequired =
+    process.env.USAGE_SCHEDULER_ENABLED?.trim().toLowerCase() !== "false";
+  const schedulerReady = !schedulerRequired || schedulerReadiness.ok;
   const backupReady = !backup.required || backup.active;
   const startupReady = !startup.required || startup.active;
   const ok = database.ok && schedulerReady && backupReady && startupReady;
@@ -209,7 +215,10 @@ export async function GET(request: Request) {
         },
         scheduler: {
           ok: schedulerReady,
-          readinessReason: schedulerReadiness.reason,
+          required: schedulerRequired,
+          readinessReason: schedulerRequired
+            ? schedulerReadiness.reason
+            : "disabled",
           staleAfterMs: schedulerReadiness.staleAfterMs,
           failureThreshold: schedulerReadiness.failureThreshold,
           // Provider-fetch degradation (most attempted provider polls
