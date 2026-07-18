@@ -554,10 +554,6 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 ## Planned / Reserved
 
 
-- **Bound generic usage-ingest request bodies before JSON decoding (unassigned, S).** OTLP ingest uses
-  a streaming 1 MiB limit; the generic route's corresponding 4 MiB contract-derived streaming cap and
-  declared/chunked 413 regressions are implemented and fully verified locally on
-  `residual-security-hardening`, pending parent integration.
 - **Separate session signing from the dashboard password and remove production CSP `unsafe-inline`
   (unassigned, L).** Session HMACs currently use `DASHBOARD_PASSWORD` directly, making a stolen cookie
   an offline password verifier and offering no per-session revocation. Provision `SESSION_SECRET`,
@@ -752,3 +748,4 @@ Jul 8 18:10 CT)._
 - **Resolve Agent Sync Relay noise and Anthropic must-keep-funded alerts (AG)** — COMPLETED (Branch `agent/ag-alert-cleanup`, awaiting merge). Updated `ensureAgentSyncProviderSeeded` to automatically disable the Agent Sync Relay provider on startup/poll, silencing the spurious missing_snapshot PagerDuty alerts. Also added a migration step in the same boot sequence to unflag `mustKeepFunded` for Anthropic since Anthropic does not expose a wallet balance. Tests green.
 
 - 2026-07-15 — MONET: board reconciliation — moved 12 stale/mislocated In Progress rows (10 CODEX rows confirmed merged+live to Deployed with dated receipts citing PR #296/#293/#295/#291/#288/#281/#280/#273/#269/#262; 2 zombie duplicate rows [Cursor quality sweep, budget-status 401] to Completed with previously-merged annotations), added 4 missing PR rows (#266, #267, #208, #263) to Deployed, filed 14 new Planned/Reserved rows from the eval-sweep audit, and synced docs/EFFORT-LOG.md mirror to match.
+- 2026-07-18 — AG: Re-verified payload bounding was merged, fixed tests on main, and removed stale Bound generic usage-ingest row from Planned.
