@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -10,13 +10,13 @@ import { setupPrismaSqliteTestDb } from "@/lib/__tests__/setup-test-db";
 // (39 providers x large per-provider raw API payloads), plus ran the exact
 // same full-provider-with-rawData query a SECOND time inside
 // computeBudgetStatus(), plus a THIRD, differently-scoped rawData read via
-// budget-status.ts's latestCostSnapshots, plus two serialized per-provider
-// findFirst N+1 loops for Gemini status - all under the app's
-// connection_limit=1 single SQLite connection. That combination of DB
-// read/JSON-parse volume and query serialization is what OOM-crashed the
-// 512MB Render instance. These tests guard the fix: the response must keep
-// every field the client reads while no longer forcing a full rawData
-// blob through the query/response pipeline for every provider.
+// budget-status.ts's latestCostSnapshots - all under the app's
+// connection_limit=1 single SQLite connection. That DB read/JSON-parse volume
+// is what OOM-crashed the 512MB Render instance. These tests guard the fix:
+// the response must keep every field the client reads, no full rawData blob
+// may flow through the query/response pipeline for every provider, AND the
+// Gemini rawData reads must stay bounded to the latest snapshot per Gemini
+// provider (never re-widening to read every retained blob).
 let GET: typeof import("../route").GET;
 let prisma: typeof import("@/lib/prisma").prisma;
 let encrypt: typeof import("@/lib/crypto").encrypt;
@@ -52,6 +52,10 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await prisma.provider.deleteMany();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("GET /api/providers - rawData exclusion and cost-coverage caveat", () => {
@@ -362,5 +366,123 @@ describe("GET /api/providers - budget-status Gemini cost-identity quarantine (sc
     expect(entry.snapshotCostUsd).toBeNull();
     expect(entry.spentUsd).toBe(0);
     expect(entry.spendCoverage).not.toBe("complete");
+  });
+});
+
+describe("GET /api/providers - Gemini rawData reads stay bounded (no re-unbounding)", () => {
+  it("materializes at most one rawData blob per Gemini provider even with many retained snapshots", async () => {
+    // Regression guard for the OOM class this PR kills. A single Gemini
+    // provider accumulates many retained non-null-rawData snapshots (45-day
+    // retention x 15-min polling). The CORRECT implementation reads only the
+    // latest snapshot's rawData per Gemini provider (bounded findFirst =
+    // LIMIT 1); a regression to an unbounded `findMany(where providerId in
+    // gemini)` would materialize and JSON-parse ALL of them. Both the route
+    // itself AND computeBudgetStatus() (invoked by the route) read Gemini
+    // rawData, so a single GET() exercises - and this test guards - both.
+    const apiKey = "gemini-bounded-key";
+    const billingConfig = {
+      billingDataset: "billing-project.billing_export",
+      googleProjectId: "gemini-production",
+      serviceAccountJson: "bounded-service-account-json",
+    };
+    const RETAINED = 12;
+    // Distinct large filler per snapshot so an unbounded read is unambiguously
+    // heavier; the marker also lets us assert no raw blob leaks to the client.
+    const olderSnapshots = Array.from({ length: RETAINED }, (_, i) => ({
+      fetchedAt: new Date(Date.UTC(2026, 5, i + 1)),
+      totalCost: i,
+      rawData: {
+        filler: `retained-blob-${i}-`.repeat(400),
+        keyValidation: {
+          ok: true,
+          status: 200,
+          availableModelCount: 1,
+          // Stale fingerprint - only the LATEST snapshot carries the current
+          // one, so "reads the latest" is also asserted behaviorally below.
+          credentialFingerprint: "0".repeat(64),
+        },
+      },
+    }));
+    const provider = await prisma.provider.create({
+      data: {
+        name: "google-ai",
+        displayName: "Google AI",
+        type: "builtin",
+        apiKey: encrypt(apiKey),
+        config: {
+          billingDataset: billingConfig.billingDataset,
+          googleProjectId: billingConfig.googleProjectId,
+        },
+        secretConfig: encryptJson({
+          serviceAccountJson: billingConfig.serviceAccountJson,
+        }),
+        refreshIntervalMin: 60,
+        snapshots: {
+          create: [
+            ...olderSnapshots,
+            {
+              fetchedAt: new Date("2026-07-14T23:00:00.000Z"),
+              totalCost: 999,
+              rawData: {
+                keyValidation: {
+                  ok: true,
+                  status: 200,
+                  availableModelCount: 77,
+                  credentialFingerprint: geminiApiKeyFingerprint(apiKey),
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const findManySpy = vi.spyOn(prisma.usageSnapshot, "findMany");
+    const findFirstSpy = vi.spyOn(prisma.usageSnapshot, "findFirst");
+
+    const response = await GET();
+    const body = await response.json();
+    const serialized = JSON.stringify(body);
+    const entry = body.find((p: { id: string }) => p.id === provider.id);
+
+    // Count how many rawData-bearing rows every UsageSnapshot query actually
+    // returned across the whole request. Bounded reads keep this at O(Gemini
+    // providers); an unbounded providerId findMany would return all RETAINED.
+    const countRawRows = async (
+      spy: ReturnType<typeof vi.spyOn>
+    ): Promise<number> => {
+      let total = 0;
+      for (let i = 0; i < spy.mock.calls.length; i++) {
+        const args = spy.mock.calls[i][0] as
+          | { select?: { rawData?: unknown } }
+          | undefined;
+        if (!args?.select?.rawData) continue;
+        const value = await spy.mock.results[i].value;
+        total += Array.isArray(value) ? value.length : value ? 1 : 0;
+      }
+      return total;
+    };
+    const rawRowsRead =
+      (await countRawRows(findManySpy)) + (await countRawRows(findFirstSpy));
+
+    expect(response.status).toBe(200);
+    // 1 Gemini provider. Expected bounded rawData reads: route.ts status
+    // findFirst (1) + budget-status.ts status findFirst (1) + budget-status.ts
+    // geminiCostRawData findMany by snapshot id (<=1) = at most 3, regardless
+    // of the 13 retained snapshots. The threshold sits far below RETAINED so
+    // any re-unbounding (which would read >=12) fails loudly.
+    expect(rawRowsRead).toBeLessThanOrEqual(3);
+    expect(rawRowsRead).toBeLessThan(RETAINED);
+
+    // Behavioral proof it read the LATEST snapshot (current fingerprint),
+    // not an arbitrary/all-of-them result.
+    expect(entry.geminiKeyStatus).toEqual({
+      state: "valid",
+      httpStatus: 200,
+      availableModelCount: 77,
+      checkedAt: "2026-07-14T23:00:00.000Z",
+    });
+    // And no retained raw blob leaked into the response.
+    expect(serialized).not.toContain("retained-blob-");
   });
 });

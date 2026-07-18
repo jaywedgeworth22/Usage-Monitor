@@ -194,40 +194,42 @@ export async function GET() {
       provider.type.trim().toLowerCase() === "builtin" &&
       canonicalProviderKey(provider.name) === "google-ai"
   );
-  // Batched (not per-provider N+1): under the app's single SQLite connection
-  // (connection_limit=1, see prisma.ts), N per-provider findFirst calls
-  // serialize into N round trips even though they're all issued via
-  // Promise.all. One findMany ordered by fetchedAt desc, deduped to the
-  // first (=latest) row per providerId in JS, gets the same "latest
-  // non-null-rawData snapshot per provider" result in a single query. This
-  // is also run alongside the costCoverageCaveat batch query below.
-  const geminiProviderIds = geminiProviders.map((provider) => provider.id);
+  // Read the latest non-null-rawData snapshot for EACH Gemini provider with a
+  // bounded, per-provider findFirst (SQL LIMIT 1) - one rawData blob apiece.
+  // This is intentionally NOT a single `findMany(where providerId in gemini)`:
+  // that has no per-provider bound, so it would materialize and JSON-parse
+  // EVERY retained non-null-rawData snapshot for each Gemini provider (45-day
+  // retention x 15-min polling = potentially thousands of large blobs) only to
+  // discard all but the latest in JS - reintroducing the exact OOM this change
+  // exists to kill. The loop is a per-provider N+1, but ONLY over the Gemini
+  // subset (canonical name "google-ai"), which is typically 1 and rarely more
+  // than a handful, so the serialization under connection_limit=1 is
+  // negligible while the per-blob read stays O(1) per provider. Runs alongside
+  // the (already bounded) costCoverageCaveat json_extract batch below.
   const latestSnapshotIds = providers
     .map((provider) => provider.snapshots[0]?.id)
     .filter((id): id is string => typeof id === "string");
-  const [geminiRawSnapshots, costCoverageCaveatBySnapshotId] =
+  const [geminiSnapshotEntries, costCoverageCaveatBySnapshotId] =
     await Promise.all([
-      geminiProviderIds.length
-        ? prisma.usageSnapshot.findMany({
-            where: {
-              providerId: { in: geminiProviderIds },
-              rawData: { not: Prisma.DbNull },
-            },
-            orderBy: { fetchedAt: "desc" },
-            select: { providerId: true, rawData: true, fetchedAt: true },
-          })
-        : Promise.resolve([]),
+      Promise.all(
+        geminiProviders.map(
+          async (provider) =>
+            [
+              provider.id,
+              await prisma.usageSnapshot.findFirst({
+                where: {
+                  providerId: provider.id,
+                  rawData: { not: Prisma.DbNull },
+                },
+                orderBy: { fetchedAt: "desc" },
+                select: { rawData: true, fetchedAt: true },
+              }),
+            ] as const
+        )
+      ),
       batchSnapshotCostCoverageCaveats(latestSnapshotIds),
     ]);
-  const geminiStatusSnapshots = new Map<
-    string,
-    { rawData: unknown; fetchedAt: Date }
-  >();
-  for (const snapshot of geminiRawSnapshots) {
-    if (!geminiStatusSnapshots.has(snapshot.providerId)) {
-      geminiStatusSnapshots.set(snapshot.providerId, snapshot);
-    }
-  }
+  const geminiStatusSnapshots = new Map(geminiSnapshotEntries);
   const budgetByProviderId = new Map(
     budget.providers.map((entry) => [entry.id, entry])
   );

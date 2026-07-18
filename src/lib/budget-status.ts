@@ -320,31 +320,31 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
       provider.type.trim().toLowerCase() === "builtin" &&
       canonicalProviderKey(provider.name) === "google-ai"
   );
-  // Batched (not per-provider N+1): under the app's single SQLite connection
-  // (connection_limit=1, see prisma.ts), N per-provider findFirst calls
-  // serialize into N round trips even though they're all issued via
-  // Promise.all. One findMany ordered by fetchedAt desc, deduped to the
-  // first (=latest) row per providerId in JS, gets the same "latest
-  // non-null-rawData snapshot per provider" result in a single query.
-  const geminiProviderIds = geminiProviders.map((provider) => provider.id);
-  const geminiRawSnapshots = geminiProviderIds.length
-    ? await prisma.usageSnapshot.findMany({
-        where: {
-          providerId: { in: geminiProviderIds },
-          rawData: { not: Prisma.DbNull },
-        },
-        orderBy: { fetchedAt: "desc" },
-        select: { providerId: true, rawData: true, fetchedAt: true },
-      })
-    : [];
+  // Read the latest non-null-rawData snapshot for EACH Gemini provider with a
+  // bounded, per-provider findFirst (SQL LIMIT 1) - one rawData blob apiece.
+  // Deliberately NOT a single `findMany(where providerId in gemini)`: without a
+  // per-provider bound that materializes and JSON-parses EVERY retained
+  // non-null-rawData snapshot for each Gemini provider (45-day retention x
+  // 15-min polling = potentially thousands of large blobs) just to keep the
+  // latest of each - reintroducing the OOM this change exists to kill. The loop
+  // is a per-provider N+1, but ONLY over the Gemini subset (canonical name
+  // "google-ai"), which is typically 1 and rarely more than a handful, so
+  // serialization under connection_limit=1 is negligible and each read stays
+  // O(1). Mirrors the identical bounded strategy in app/api/providers/route.ts.
   const geminiStatusSnapshots = new Map<
     string,
     { rawData: unknown; fetchedAt: Date }
   >();
-  for (const snapshot of geminiRawSnapshots) {
-    if (!geminiStatusSnapshots.has(snapshot.providerId)) {
-      geminiStatusSnapshots.set(snapshot.providerId, snapshot);
-    }
+  for (const provider of geminiProviders) {
+    const snapshot = await prisma.usageSnapshot.findFirst({
+      where: {
+        providerId: provider.id,
+        rawData: { not: Prisma.DbNull },
+      },
+      orderBy: { fetchedAt: "desc" },
+      select: { rawData: true, fetchedAt: true },
+    });
+    if (snapshot) geminiStatusSnapshots.set(provider.id, snapshot);
   }
 
   const materializedChargeByIdempotencyKey = new Map<
