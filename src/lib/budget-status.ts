@@ -206,7 +206,14 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
             costIncludesUnknownFixed: true,
             totalRequests: true,
             credits: true,
-            rawData: true,
+            // rawData is deliberately NOT selected here: nothing in this
+            // function reads p.snapshots[0].rawData - the two places that
+            // need Gemini rawData (geminiStatusSnapshots and
+            // latestCostSnapshots below) fetch it themselves, scoped to only
+            // the google-ai provider(s). Selecting it here pulled the full
+            // adapter raw-response blob for all 39 providers on every call
+            // for no reason and was a major contributor to the OOM crash on
+            // the 512MB instance (see #392).
             fetchedAt: true,
           },
         },
@@ -313,21 +320,32 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
       provider.type.trim().toLowerCase() === "builtin" &&
       canonicalProviderKey(provider.name) === "google-ai"
   );
-  const geminiStatusSnapshots = new Map(
-    await Promise.all(
-      geminiProviders.map(async (provider) => [
-        provider.id,
-        await prisma.usageSnapshot.findFirst({
-          where: {
-            providerId: provider.id,
-            rawData: { not: Prisma.DbNull },
-          },
-          orderBy: { fetchedAt: "desc" },
-          select: { rawData: true, fetchedAt: true },
-        }),
-      ] as const)
-    )
-  );
+  // Read the latest non-null-rawData snapshot for EACH Gemini provider with a
+  // bounded, per-provider findFirst (SQL LIMIT 1) - one rawData blob apiece.
+  // Deliberately NOT a single `findMany(where providerId in gemini)`: without a
+  // per-provider bound that materializes and JSON-parses EVERY retained
+  // non-null-rawData snapshot for each Gemini provider (45-day retention x
+  // 15-min polling = potentially thousands of large blobs) just to keep the
+  // latest of each - reintroducing the OOM this change exists to kill. The loop
+  // is a per-provider N+1, but ONLY over the Gemini subset (canonical name
+  // "google-ai"), which is typically 1 and rarely more than a handful, so
+  // serialization under connection_limit=1 is negligible and each read stays
+  // O(1). Mirrors the identical bounded strategy in app/api/providers/route.ts.
+  const geminiStatusSnapshots = new Map<
+    string,
+    { rawData: unknown; fetchedAt: Date }
+  >();
+  for (const provider of geminiProviders) {
+    const snapshot = await prisma.usageSnapshot.findFirst({
+      where: {
+        providerId: provider.id,
+        rawData: { not: Prisma.DbNull },
+      },
+      orderBy: { fetchedAt: "desc" },
+      select: { rawData: true, fetchedAt: true },
+    });
+    if (snapshot) geminiStatusSnapshots.set(provider.id, snapshot);
+  }
 
   const materializedChargeByIdempotencyKey = new Map<
     string,
@@ -373,12 +391,18 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
         },
         orderBy: { fetchedAt: "desc" },
         select: {
+          id: true,
           providerId: true,
           fetchedAt: true,
           totalCost: true,
           fixedCostIncludedUsd: true,
           costIncludesUnknownFixed: true,
-          rawData: true,
+          // rawData is NOT selected here (see geminiCostRawDataById below) -
+          // this query runs for every provider with a cost snapshot this
+          // month (typically close to all 39), and rawData is only ever
+          // consulted for the google-ai provider's billing-config identity
+          // check. Pulling the full blob for every provider just to read it
+          // for one was the other half of this endpoint's OOM (see #392).
         },
       })
     : [];
@@ -391,6 +415,22 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
       latestCostByProviderId.set(snapshot.providerId, snapshot);
     }
   }
+  // Fetch rawData for only the Gemini provider(s)' picked cost snapshot -
+  // the sole consumer is geminiCostIdentityStatus below, which itself
+  // short-circuits to null for every non-google-ai provider before touching
+  // rawData at all.
+  const geminiCostSnapshotIds = geminiProviders
+    .map((provider) => latestCostByProviderId.get(provider.id)?.id)
+    .filter((id): id is string => typeof id === "string");
+  const geminiCostRawDataRows = geminiCostSnapshotIds.length
+    ? await prisma.usageSnapshot.findMany({
+        where: { id: { in: geminiCostSnapshotIds } },
+        select: { id: true, rawData: true },
+      })
+    : [];
+  const geminiCostRawDataById = new Map(
+    geminiCostRawDataRows.map((row) => [row.id, row.rawData])
+  );
 
   const providerIdentityCandidates = providers.map((provider) => ({
     id: provider.id,
@@ -437,7 +477,12 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
       providerName: p.name,
       providerType: p.type,
       billingConfig: currentBillingConfig,
-      latestSnapshot: latestCostSnapshot,
+      latestSnapshot: latestCostSnapshot
+        ? {
+            rawData: geminiCostRawDataById.get(latestCostSnapshot.id) ?? null,
+            fetchedAt: latestCostSnapshot.fetchedAt,
+          }
+        : null,
     });
     const fixedMonthlyCostUsd = plan?.fixedMonthlyCostUsd ?? 0;
     const billingConfigurationChanged =
