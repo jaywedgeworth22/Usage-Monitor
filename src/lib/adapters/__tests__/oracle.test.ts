@@ -97,9 +97,33 @@ describe("Oracle Cloud Infrastructure adapter", () => {
     await expect(fetchUsage("", { ...config, region: "us-gov-ashburn-1" })).rejects.toMatchObject({
       code: "CONFIGURATION_ERROR",
     });
+    await expect(fetchUsage("", { ...config, region: "eu-jovanovac-1" })).rejects.toMatchObject({
+      code: "CONFIGURATION_ERROR",
+    });
     await expect(fetchUsage("", { ...config, region: "us-future-99" })).rejects.toMatchObject({
       code: "CONFIGURATION_ERROR",
     });
+  });
+
+  it("accepts a non-US OC1 tenancy home region and signs only its commercial endpoints", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      requests.push(input);
+      const url = new URL(input);
+      if (url.hostname.startsWith("usageapi.")) {
+        const body = JSON.parse(String(init?.body));
+        return json(body.groupBy.length === 0
+          ? { items: [{ currency: "USD", computedAmount: 1 }] }
+          : { items: [] });
+      }
+      if (url.hostname.startsWith("usage.")) return json([]);
+      throw new Error(`unexpected URL ${input}`);
+    }));
+
+    await fetchUsage("", { ...config, region: "eu-frankfurt-1", limitServices: "" });
+
+    expect(requests.length).toBeGreaterThan(0);
+    expect(requests.every((url) => new URL(url).hostname.endsWith(".eu-frankfurt-1.oci.oraclecloud.com"))).toBe(true);
   });
 
   it("does not reconcile malformed optional service detail while retaining canonical cash", async () => {
