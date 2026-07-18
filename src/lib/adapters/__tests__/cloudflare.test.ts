@@ -195,7 +195,7 @@ describe("cloudflare adapter", () => {
     );
   });
 
-  it("does not promote an Expired row that duplicates a real current Paid term", async () => {
+  it("preserves equivalent Paid and Expired identities while charging their exact term once", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-17T12:00:00.000Z"));
     const currentPeriodStart = "2026-07-16T19:02:36.000Z";
@@ -255,13 +255,66 @@ describe("cloudflare adapter", () => {
         }),
         expect.objectContaining({
           externalId: "duplicate-expired-term",
-          status: "expired",
-          paidRecurringAuthoritative: false,
-          rollupRole: "metadata",
-          nextRenewalAt: null,
+          status: "paid",
+          paidRecurringAuthoritative: true,
+          rollupRole: "canonical",
+          nextRenewalAt: currentPeriodEnd,
         }),
       ])
     );
+  });
+
+  it("keeps distinct raw Paid identities additive even when their term shapes match", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-17T12:00:00.000Z"));
+    const currentPeriodStart = "2026-07-16T19:02:36.000Z";
+    const currentPeriodEnd = "2026-08-16T00:00:00.000Z";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(json({ result: { totals: { requests: 10 } } }))
+        .mockResolvedValueOnce(json({}, 403))
+        .mockResolvedValueOnce(
+          json({
+            result: ["paid-a", "paid-b"].map((id) => ({
+              id,
+              currency: "USD",
+              current_period_start: currentPeriodStart,
+              current_period_end: currentPeriodEnd,
+              frequency: "monthly",
+              price: 5,
+              rate_plan: { id: "workers", public_name: "Workers Paid" },
+              state: "Paid",
+            })),
+            result_info: { count: 2, page: 1, per_page: 50, total_count: 2 },
+          })
+        )
+        .mockResolvedValueOnce(json({}, 403))
+    );
+
+    const result = await fetchUsage("token", {
+      accountId: "account-id",
+      authMode: "api_token",
+    });
+
+    expect(result.totalCost).toBe(10);
+    expect(result.fixedCostIncludedUsd).toBe(10);
+    expect(
+      result.externalBillingSyncs?.find(
+        (sync) => sync.source === "cloudflare-subscriptions"
+      )?.records
+    ).toEqual([
+      expect.objectContaining({
+        externalId: "paid-a",
+        paidRecurringAuthoritative: true,
+        rollupRole: "canonical",
+      }),
+      expect.objectContaining({
+        externalId: "paid-b",
+        paidRecurringAuthoritative: true,
+        rollupRole: "canonical",
+      }),
+    ]);
   });
 
   it("keeps an Expired term terminal when subscription fetching crosses current_period_end", async () => {

@@ -21,6 +21,8 @@ let adoptExternalBillingSubscriptions: typeof import("../external-billing-subscr
 let externalAdoptionGuardKey: typeof import("../external-billing-subscription-adoption").externalAdoptionGuardKey;
 let materializeDueSubscriptions: typeof import("../subscription-materializer").materializeDueSubscriptions;
 let computeBudgetStatus: typeof import("../budget-status").computeBudgetStatus;
+let fetchCloudflareUsage: typeof import("../adapters/cloudflare").fetchUsage;
+let reconcileProviderExternalBilling: typeof import("../provider-external-billing").reconcileProviderExternalBilling;
 let updateSubscription: typeof import("@/app/api/subscriptions/[id]/route").PUT;
 let createSubscription: typeof import("@/app/api/subscriptions/route").POST;
 let createSessionToken: typeof import("@/lib/auth").createSessionToken;
@@ -48,6 +50,10 @@ beforeAll(async () => {
     "../subscription-materializer"
   ));
   ({ computeBudgetStatus } = await import("../budget-status"));
+  ({ fetchUsage: fetchCloudflareUsage } = await import("../adapters/cloudflare"));
+  ({ reconcileProviderExternalBilling } = await import(
+    "../provider-external-billing"
+  ));
   ({ PUT: updateSubscription } = await import(
     "@/app/api/subscriptions/[id]/route"
   ));
@@ -79,7 +85,15 @@ describe("adoptExternalBillingSubscriptions", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
+
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  }
 
   async function createProvider(name = "cloudflare") {
     return prisma.provider.create({
@@ -1609,6 +1623,261 @@ describe("adoptExternalBillingSubscriptions", () => {
       })
     ).toMatchObject({ status: "canceled", autoRenew: false });
   });
+
+  it("preserves a managed Cloudflare identity across an equivalent Paid and Expired response without double-counting", async () => {
+    const provider = await createProvider();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ result: { totals: { requests: 10 } } })
+      )
+      .mockResolvedValueOnce(jsonResponse({}, 403))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          result: [
+            {
+              id: "replacement-paid-id",
+              currency: "USD",
+              current_period_start: PERIOD_START.toISOString(),
+              current_period_end: PERIOD_END.toISOString(),
+              frequency: "monthly",
+              price: 5,
+              rate_plan: {
+                id: "workers",
+                public_name: "Workers Paid",
+              },
+              state: "Paid",
+            },
+            {
+              id: "preserved-expired-id",
+              currency: "USD",
+              current_period_start: PERIOD_START.toISOString(),
+              current_period_end: PERIOD_END.toISOString(),
+              frequency: "monthly",
+              price: 5,
+              rate_plan: {
+                id: "workers",
+                public_name: "Workers Paid",
+              },
+              state: "Expired",
+            },
+          ],
+          result_info: {
+            count: 2,
+            page: 1,
+            per_page: 50,
+            total_count: 2,
+          },
+        })
+      )
+      .mockResolvedValueOnce(jsonResponse({}, 403));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapterResult = await fetchCloudflareUsage("token", {
+      accountId: "account-id",
+      authMode: "api_token",
+    });
+    const subscriptionSync = adapterResult.externalBillingSyncs?.find(
+      (sync) => sync.source === "cloudflare-subscriptions"
+    );
+    expect(adapterResult).toMatchObject({
+      totalCost: 5,
+      fixedCostIncludedUsd: 5,
+    });
+    expect(subscriptionSync?.records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          externalId: "replacement-paid-id",
+          status: "paid",
+          paidRecurringAuthoritative: true,
+          rollupRole: "canonical",
+        }),
+        expect.objectContaining({
+          externalId: "preserved-expired-id",
+          status: "paid",
+          paidRecurringAuthoritative: true,
+          rollupRole: "canonical",
+        }),
+      ])
+    );
+    await reconcileProviderExternalBilling(provider.id, subscriptionSync!);
+    await prisma.usageSnapshot.create({
+      data: {
+        providerId: provider.id,
+        fetchedAt: NOW,
+        totalCost: adapterResult.totalCost,
+        fixedCostIncludedUsd: adapterResult.fixedCostIncludedUsd,
+      },
+    });
+    const managed = await prisma.subscription.create({
+      data: {
+        providerId: provider.id,
+        externalBillingSource: "cloudflare-subscriptions",
+        externalBillingId: "preserved-expired-id",
+        externalBillingManaged: true,
+        externalAdoptionGuardKey: externalAdoptionGuardKey(
+          provider.id,
+          500,
+          "monthly"
+        ),
+        name: "Cloudflare Workers Paid (Congress.Trade)",
+        costUsd: 5,
+        currency: "USD",
+        interval: "monthly",
+        intervalCount: 1,
+        startDate: PERIOD_START,
+        currentPeriodStart: PERIOD_START,
+        nextRenewalAt: PERIOD_END,
+        autoRenew: false,
+        status: "active",
+      },
+    });
+
+    const adoption = await adoptExternalBillingSubscriptions(NOW);
+    expect(adoption).toMatchObject({
+      eligible: 2,
+      adopted: 0,
+      existing: 1,
+      ambiguous: 1,
+      reconciled: 0,
+      deactivated: 0,
+    });
+    expect(
+      await prisma.subscription.findUniqueOrThrow({ where: { id: managed.id } })
+    ).toMatchObject({
+      externalBillingId: "preserved-expired-id",
+      externalBillingManaged: true,
+      status: "active",
+      autoRenew: false,
+    });
+    expect(await prisma.subscription.count()).toBe(1);
+    expect(await materializeDueSubscriptions(NOW)).toMatchObject({
+      charged: 1,
+      eventsWritten: 1,
+    });
+
+    const budget = await computeBudgetStatus(NOW);
+    expect(
+      budget.providers.find((row) => row.id === provider.id)
+    ).toMatchObject({
+      subscriptionMonthToDateUsd: 5,
+      snapshotFixedCostIncludedUsd: 5,
+      linkedFixedDedupeUsd: 5,
+      fixedCostConflict: false,
+      fixedAccruedUsd: 5,
+      spentUsd: 5,
+    });
+
+    // Exact term shape is not enough to adopt either identity when no durable
+    // exact link exists. Preserve both provider records and fail closed on the
+    // ambiguous first-time adoption instead of choosing an alias by shape.
+    await prisma.externalUsageEvent.deleteMany();
+    await prisma.subscription.delete({ where: { id: managed.id } });
+    expect(await adoptExternalBillingSubscriptions(NOW)).toMatchObject({
+      eligible: 2,
+      adopted: 0,
+      existing: 0,
+      ambiguous: 2,
+    });
+    expect(await prisma.subscription.count()).toBe(0);
+  });
+
+  it.each([
+    {
+      label: "stale exact identity",
+      linkedRecord: {
+        syncedAt: new Date("2026-07-15T08:00:00.000Z"),
+      },
+      expectedStatus: "paused",
+    },
+    {
+      label: "canceled exact identity",
+      linkedRecord: { status: "canceled" },
+      expectedStatus: "canceled",
+    },
+    {
+      label: "ambiguous non-live exact identity",
+      linkedRecord: { status: "trial" },
+      expectedStatus: "paused",
+    },
+    {
+      label: "unrelated replacement identity",
+      linkedRecord: null,
+      expectedStatus: "canceled",
+    },
+  ] as const)(
+    "fails open instead of transferring proof for a $label",
+    async ({ linkedRecord, expectedStatus }) => {
+      const provider = await createProvider();
+      const managed = await prisma.subscription.create({
+        data: {
+          providerId: provider.id,
+          externalBillingSource: "cloudflare-subscriptions",
+          externalBillingId: "historical-expired-id",
+          externalBillingManaged: true,
+          externalAdoptionGuardKey: externalAdoptionGuardKey(
+            provider.id,
+            500,
+            "monthly"
+          ),
+          name: "Cloudflare Workers Paid (Congress.Trade)",
+          costUsd: 5,
+          currency: "USD",
+          interval: "monthly",
+          intervalCount: 1,
+          startDate: PERIOD_START,
+          currentPeriodStart: PERIOD_START,
+          nextRenewalAt: PERIOD_END,
+          autoRenew: false,
+          status: "active",
+        },
+      });
+      expect(await materializeDueSubscriptions(NOW)).toMatchObject({
+        charged: 1,
+        eventsWritten: 1,
+      });
+      await createExternalBilling(provider.id, "replacement-paid-id");
+      if (linkedRecord != null) {
+        await createExternalBilling(
+          provider.id,
+          "historical-expired-id",
+          linkedRecord
+        );
+      }
+      await prisma.usageSnapshot.create({
+        data: {
+          providerId: provider.id,
+          fetchedAt: NOW,
+          totalCost: 5,
+          fixedCostIncludedUsd: 5,
+        },
+      });
+
+      await adoptExternalBillingSubscriptions(NOW);
+      expect(
+        await prisma.subscription.findUniqueOrThrow({
+          where: { id: managed.id },
+        })
+      ).toMatchObject({
+        externalBillingId: "historical-expired-id",
+        status: expectedStatus,
+        autoRenew: false,
+      });
+      expect(await prisma.subscription.count()).toBe(1);
+
+      const budget = await computeBudgetStatus(NOW);
+      expect(
+        budget.providers.find((row) => row.id === provider.id)
+      ).toMatchObject({
+        subscriptionMonthToDateUsd: 5,
+        snapshotFixedCostIncludedUsd: 5,
+        linkedFixedDedupeUsd: 0,
+        fixedCostConflict: true,
+        fixedAccruedUsd: 10,
+        spentUsd: 10,
+      });
+    }
+  );
 
   it("charges each fresh explicit period_end term once without autonomous renewal", async () => {
     const provider = await createProvider("period-end-provider");

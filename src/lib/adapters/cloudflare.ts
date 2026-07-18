@@ -104,8 +104,7 @@ function subscriptionTermKey(
 
 function normalizedSubscriptionState(
   subscription: CloudflareSubscription,
-  now: Date,
-  livePaidTermKeys: ReadonlySet<string>
+  now: Date
 ): string {
   const state = rawSubscriptionState(subscription);
   if (state !== "expired") return state;
@@ -128,18 +127,16 @@ function normalizedSubscriptionState(
     Number.isFinite(periodEnd) &&
     periodStart <= now.getTime() &&
     now.getTime() < periodEnd;
-  const termKey = subscriptionTermKey(subscription);
-  const hasEquivalentLivePaidTerm =
-    termKey != null && livePaidTermKeys.has(termKey);
-
   // Cloudflare defines current_period_end as both the end of the current
   // period and the next billing due date. A fresh response that calls a paid
   // term Expired while that provider-reported period is still current is
-  // internally contradictory. Treat only that narrow case as paid when the
-  // response does not also contain an equivalent real Paid term. The real
-  // term remains canonical while its duplicate Expired row stays metadata;
-  // actual expired and canceled terms also remain terminal.
-  return isCurrentPaidTerm && !hasEquivalentLivePaidTerm ? "paid" : state;
+  // internally contradictory. Treat only that narrow case as paid. Preserve
+  // every provider identity returned for the exact term: an existing managed
+  // Subscription may be linked to either ID, and downstream reconciliation
+  // must continue to require that exact source + external ID. The promoted
+  // alias is omitted from snapshot cost below only when an exact raw Paid twin
+  // exists. Actual expired and canceled terms remain terminal.
+  return isCurrentPaidTerm ? "paid" : state;
 }
 
 function subscriptionPlanName(subscription: CloudflareSubscription): string | null {
@@ -149,14 +146,13 @@ function subscriptionPlanName(subscription: CloudflareSubscription): string | nu
 
 function sanitizeSubscription(
   subscription: CloudflareSubscription,
-  now: Date,
-  livePaidTermKeys: ReadonlySet<string>
+  now: Date
 ): SanitizedCloudflareSubscription {
   return {
     id: subscription.id!,
     planId: cleanOptionalString(subscription.rate_plan?.id),
     planName: subscriptionPlanName(subscription),
-    status: normalizedSubscriptionState(subscription, now, livePaidTermKeys),
+    status: normalizedSubscriptionState(subscription, now),
     price: parseNumber(subscription.price),
     currency: cleanOptionalString(subscription.currency)?.toUpperCase() ?? null,
     billingInterval: cleanOptionalString(subscription.frequency),
@@ -410,7 +406,7 @@ export async function fetchUsage(
 
   if (subscriptionsResult) {
     const { rows, pages } = subscriptionsResult;
-    const livePaidTermKeys = new Set(
+    const rawPaidTermKeys = new Set(
       rows.flatMap((subscription) => {
         if (rawSubscriptionState(subscription) !== "paid") return [];
         const termKey = subscriptionTermKey(subscription);
@@ -422,7 +418,7 @@ export async function fetchUsage(
     // Cloudflare's full response can contain zone names and component payloads,
     // neither of which is needed for billing reconciliation.
     rawData.subscriptions = rows.map((subscription) =>
-      sanitizeSubscription(subscription, accountingTime, livePaidTermKeys)
+      sanitizeSubscription(subscription, accountingTime)
     );
 
     let billedThisMonthUsd = 0;
@@ -437,8 +433,7 @@ export async function fetchUsage(
         : Number.NaN;
       const normalizedState = normalizedSubscriptionState(
         subscription,
-        accountingTime,
-        livePaidTermKeys
+        accountingTime
       );
       const isPaid = normalizedState === "paid";
       if (
@@ -448,8 +443,21 @@ export async function fetchUsage(
         periodStart >= accountingMonthStartMs &&
         periodStart <= accountingNowMs
       ) {
-        billedThisMonthUsd += price;
-        foundBilledSubscription = true;
+        const termKey = subscriptionTermKey(subscription);
+        // Cloudflare may return the same current paid term under both its
+        // historical Expired ID and replacement Paid ID. Keep both exact
+        // identities authoritative for reconciliation, but omit only the
+        // promoted raw Expired alias from this snapshot when an exact raw Paid
+        // twin exists. Two genuinely Paid identities remain additive because
+        // equal term shape is not durable billing identity.
+        const isPromotedAliasOfRawPaid =
+          rawSubscriptionState(subscription) === "expired" &&
+          termKey != null &&
+          rawPaidTermKeys.has(termKey);
+        if (!isPromotedAliasOfRawPaid) {
+          billedThisMonthUsd += price;
+          foundBilledSubscription = true;
+        }
       }
 
       // Zero-dollar Free/Base plans are useful entitlement metadata, but they
