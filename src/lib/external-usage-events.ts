@@ -746,11 +746,50 @@ export async function sumMonthToDateReceiptCashByProviderId(
 
 type ReceiptCashEventLikeWithCost = Parameters<typeof receiptCashProviderId>[0];
 
+// One-time diagnostic: log how many raw ExternalUsageEvent rows the
+// current-month groupBy below actually scans. rawSince == monthStart for
+// every current-month call (the daily-rollup branch never applies to the
+// current month - only to days older than the raw-retention cutoff), so
+// this is effectively "how big is the current month's raw event volume,"
+// which is what determines whether the ~11.4s this query used to take
+// (see the SWR cache on computeBudgetStatus in budget-status.ts) is normal
+// telemetry volume or a sign retention isn't keeping up. Logged once per
+// process rather than per-call since the cache above means this now runs
+// rarely anyway, and the count barely changes call-to-call.
+let loggedExternalEventsRawSizeOnce = false;
+
 export async function sumMonthToDateExternalCostByProvider(
   monthStart: Date,
   rawCutoff: Date
 ): Promise<Map<string, ProviderPushedCost>> {
   const rawSince = monthStart > rawCutoff ? monthStart : rawCutoff;
+
+  if (!loggedExternalEventsRawSizeOnce) {
+    loggedExternalEventsRawSizeOnce = true;
+    // Fire-and-forget: sizing telemetry must never add latency to (or, on
+    // failure, break) the real computation below. Guarded with a typeof
+    // check + try/catch (not just a .catch()) because some tests replace
+    // `prisma` with a partial mock that doesn't implement .count - that must
+    // stay a no-op here, never a thrown/rejected surprise.
+    if (typeof prisma.externalUsageEvent?.count === "function") {
+      try {
+        prisma.externalUsageEvent
+          .count({ where: { occurredAt: { gte: rawSince } } })
+          .then((rawSinceRows) => {
+            // eslint-disable-next-line no-console -- one-time diagnostic, see comment above
+            console.info(
+              "[external-events-size]",
+              JSON.stringify({ rawSinceRows, monthStart, rawCutoff })
+            );
+          })
+          .catch((error) => {
+            console.warn("[external-events-size] row-count diagnostic failed", error);
+          });
+      } catch (error) {
+        console.warn("[external-events-size] row-count diagnostic failed", error);
+      }
+    }
+  }
 
   const [rawGroups, rollups] = await Promise.all([
     prisma.externalUsageEvent.groupBy({

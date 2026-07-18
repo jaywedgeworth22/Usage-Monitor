@@ -158,33 +158,9 @@ function forecastSubscriptionRenewals(
   return total;
 }
 
-export async function computeBudgetStatus(now: Date = new Date()): Promise<BudgetStatusResponse> {
-  // TEMPORARY DIAGNOSTIC INSTRUMENTATION (see #397 investigation, mirrors
-  // route.ts's [providers-timing]) - this function is one of the two
-  // top-level branches GET /api/providers awaits concurrently, so its own
-  // internal per-query timing is what tells us whether IT is the ~11.5s
-  // dominant step, and if so, which query inside it. Wrap each awaited query
-  // with Date.now() deltas and emit ONE structured [budget-timing] log line
-  // at the end. Remove once the slow step is identified and fixed.
-  const fnStart = Date.now();
-  let q_providersMs = -1;
-  let q_pushedByProviderMs = -1;
-  let q_receiptCashMs = -1;
-  let q_snapshotGroupByMs = -1;
-  let q_externalFindManyMs = -1;
-  let q_geminiFindFirstMs = -1;
-  let q_latestCostMs = -1;
-  let q_geminiCostRawDataMs = -1;
-  let q_providerStatusMapMs = -1;
-
+async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusResponse> {
   const monthStart = monthStartUtc(now);
   const rawCutoff = getExternalEventRawCutoff(now);
-
-  const providersStart = Date.now();
-  const pushedByProviderStart = Date.now();
-  const receiptCashStart = Date.now();
-  const snapshotGroupByStart = Date.now();
-  const externalFindManyStart = Date.now();
 
   const [
     providers,
@@ -297,20 +273,9 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
           },
         },
       },
-    }).then((r) => {
-      q_providersMs = Date.now() - providersStart;
-      return r;
     }),
-    sumMonthToDateExternalCostByProvider(monthStart, rawCutoff).then((r) => {
-      q_pushedByProviderMs = Date.now() - pushedByProviderStart;
-      return r;
-    }),
-    sumMonthToDateReceiptCashByProviderId(monthStart, rawCutoff, now).then(
-      (r) => {
-        q_receiptCashMs = Date.now() - receiptCashStart;
-        return r;
-      }
-    ),
+    sumMonthToDateExternalCostByProvider(monthStart, rawCutoff),
+    sumMonthToDateReceiptCashByProviderId(monthStart, rawCutoff, now),
     prisma.usageSnapshot.groupBy({
       by: ["providerId"],
       where: {
@@ -332,9 +297,6 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
         ],
       },
       _max: { fetchedAt: true },
-    }).then((r) => {
-      q_snapshotGroupByMs = Date.now() - snapshotGroupByStart;
-      return r;
     }),
     prisma.externalUsageEvent.findMany({
       where: {
@@ -350,9 +312,6 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
         windowStart: true,
         windowEnd: true,
       },
-    }).then((r) => {
-      q_externalFindManyMs = Date.now() - externalFindManyStart;
-      return r;
     }),
   ]);
 
@@ -376,7 +335,6 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
     string,
     { rawData: unknown; fetchedAt: Date }
   >();
-  const geminiFindFirstStart = Date.now();
   for (const provider of geminiProviders) {
     const snapshot = await prisma.usageSnapshot.findFirst({
       where: {
@@ -388,7 +346,6 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
     });
     if (snapshot) geminiStatusSnapshots.set(provider.id, snapshot);
   }
-  q_geminiFindFirstMs = Date.now() - geminiFindFirstStart;
 
   const materializedChargeByIdempotencyKey = new Map<
     string,
@@ -423,7 +380,6 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
     });
   }
 
-  const latestCostStart = Date.now();
   const latestCostSnapshots = latestCostTimes.length
     ? await prisma.usageSnapshot.findMany({
         where: {
@@ -450,7 +406,6 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
         },
       })
     : [];
-  q_latestCostMs = Date.now() - latestCostStart;
   const latestCostByProviderId = new Map<
     string,
     (typeof latestCostSnapshots)[number]
@@ -467,14 +422,12 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
   const geminiCostSnapshotIds = geminiProviders
     .map((provider) => latestCostByProviderId.get(provider.id)?.id)
     .filter((id): id is string => typeof id === "string");
-  const geminiCostRawDataStart = Date.now();
   const geminiCostRawDataRows = geminiCostSnapshotIds.length
     ? await prisma.usageSnapshot.findMany({
         where: { id: { in: geminiCostSnapshotIds } },
         select: { id: true, rawData: true },
       })
     : [];
-  q_geminiCostRawDataMs = Date.now() - geminiCostRawDataStart;
   const geminiCostRawDataById = new Map(
     geminiCostRawDataRows.map((row) => [row.id, row.rawData])
   );
@@ -509,7 +462,6 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
     pushedByProviderId.set(owner.id, bucket);
   }
 
-  const providerStatusMapStart = Date.now();
   const providerStatuses: ProviderBudgetStatus[] = providers.map((p) => {
     const plan = p.plan;
     const latestSnapshot = p.snapshots[0] ?? null;
@@ -927,7 +879,6 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
       alerts: budgetAlerts,
     };
   });
-  q_providerStatusMapMs = Date.now() - providerStatusMapStart;
 
   const budgeted = providerStatuses.filter((p) => p.monthlyBudgetUsd != null && p.monthlyBudgetUsd > 0);
   const totalBudgetUsd = budgeted.reduce((s, p) => s + (p.monthlyBudgetUsd ?? 0), 0);
@@ -936,24 +887,6 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
   const estimatedApiEquivalentUsd = providerStatuses.reduce(
     (sum, provider) => sum + provider.estimatedApiEquivalentUsd,
     0
-  );
-
-  const totalMs = Date.now() - fnStart;
-  // eslint-disable-next-line no-console -- temporary diagnostic instrumentation, see comment above computeBudgetStatus()
-  console.info(
-    "[budget-timing]",
-    JSON.stringify({
-      total: totalMs,
-      q_providers: q_providersMs,
-      q_pushedByProvider: q_pushedByProviderMs,
-      q_receiptCash: q_receiptCashMs,
-      q_snapshotGroupBy: q_snapshotGroupByMs,
-      q_externalFindMany: q_externalFindManyMs,
-      q_geminiFindFirst: q_geminiFindFirstMs,
-      q_latestCost: q_latestCostMs,
-      q_geminiCostRawData: q_geminiCostRawDataMs,
-      q_providerStatusMap: q_providerStatusMapMs,
-    })
   );
 
   return {
@@ -973,6 +906,143 @@ export async function computeBudgetStatus(now: Date = new Date()): Promise<Budge
       warning: providerStatuses.some((p) => p.status === "warning"),
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Stale-while-revalidate cache for computeBudgetStatus.
+//
+// computeBudgetStatusUncached's sumMonthToDateExternalCostByProvider call
+// live-groups the ENTIRE current month of raw ExternalUsageEvent rows on
+// every invocation (the daily-rollup branch only ever applies to days older
+// than the raw-retention cutoff, never to the current month) - measured at
+// ~11.4s in production, which is effectively all of GET /api/providers's
+// ~11.5s. A second overlapping request (the dashboard auto-refreshes) then
+// 502s the single Render instance. Everything else this function reads stays
+// well under 100ms.
+//
+// Rather than changing what gets computed (a money-path calculation with a
+// lot of reconciliation logic - see the comment atop this file), this caches
+// the OUTPUT: the exact same object computeBudgetStatusUncached returns
+// today, memoized for a short TTL. The dashboard is fine reading numbers up
+// to TTL seconds stale (this is explicitly an accepted trade-off, not an
+// oversight).
+//
+// Design:
+//   - Single module-level cache entry (this app runs numInstances:1, so a
+//     per-process cache is equivalent to a shared one - no cross-instance
+//     staleness/coherency concerns).
+//   - Cache key is the UTC month-start timestamp, so the cache auto-drops
+//     stale data at month rollover instead of serving last month's spend
+//     into the new month. `now` is computeBudgetStatus's only input, and
+//     every other value the computation reads (DB rows, env-driven
+//     retention cutoff) comes from the current process's live state at
+//     compute time, not from any other argument - so the month-start key is
+//     complete for this cache's correctness contract.
+//   - TTL is env-overridable via BUDGET_STATUS_CACHE_TTL_MS (default 60s).
+//   - Stale-while-revalidate: once a value exists for the current key, every
+//     call returns it immediately - even past TTL. A stale hit kicks off a
+//     background refresh (deduped: only one refresh in flight at a time) and
+//     still returns the old value immediately rather than making the caller
+//     wait on it. Only a cold cache (nothing cached yet for the current
+//     month) or a month rollover computes inline/blocking, and concurrent
+//     callers during that blocking compute share the same in-flight promise
+//     instead of each starting their own 11s query.
+//   - A background refresh that throws is caught and logged at warn; the
+//     last good cached value keeps being served. A blocking (cold-start)
+//     compute that throws propagates the error as before - there is no
+//     "last good value" to fall back to yet.
+//
+// Disabled under the Vitest test runner by default: the existing test suite
+// calls computeBudgetStatus/computeProjectBudgetStatus repeatedly with a
+// fixed `now` across many distinct DB fixtures within the same test file
+// (module instance), and a real cache keyed only on month-start would serve
+// one test's provider data to every later test in that file. Production has
+// no VITEST env var, so this only ever affects `vitest run`. The dedicated
+// cache-behavior tests below force it on via
+// __setBudgetStatusCacheOverrideForTests.
+interface BudgetStatusCacheEntry {
+  key: string;
+  value: BudgetStatusResponse;
+  computedAt: number;
+}
+
+let budgetStatusCache: BudgetStatusCacheEntry | null = null;
+let budgetStatusRefreshPromise: Promise<void> | null = null;
+let budgetStatusCacheOverride: boolean | null = null;
+
+function budgetStatusCacheTtlMs(): number {
+  const raw = process.env.BUDGET_STATUS_CACHE_TTL_MS;
+  const parsed = raw != null ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 60_000;
+}
+
+function budgetStatusCacheKey(now: Date): string {
+  return monthStartUtc(now).toISOString();
+}
+
+function budgetStatusCacheEnabled(): boolean {
+  if (budgetStatusCacheOverride !== null) return budgetStatusCacheOverride;
+  return process.env.VITEST !== "true";
+}
+
+async function refreshBudgetStatusCache(now: Date, key: string): Promise<void> {
+  try {
+    const value = await computeBudgetStatusUncached(now);
+    budgetStatusCache = { key, value, computedAt: Date.now() };
+  } catch (error) {
+    // A background refresh (there IS a last-good value for this key) must
+    // never crash the process or surface to the caller that triggered it -
+    // keep serving what we have and try again on the next stale hit. A cold
+    // start (no cached value yet for this key) has nothing to fall back to,
+    // so it rethrows and the caller sees the failure, exactly like an
+    // uncached call would today.
+    // eslint-disable-next-line no-console -- intentional: surfaces cache-refresh failures for on-call visibility
+    console.warn("[budget-status-cache] refresh failed; serving last good value if available", error);
+    if (!budgetStatusCache || budgetStatusCache.key !== key) {
+      throw error;
+    }
+  } finally {
+    budgetStatusRefreshPromise = null;
+  }
+}
+
+/** Test-only: force the cache on/off regardless of the Vitest-default gate. Pass null to restore the default. */
+export function __setBudgetStatusCacheOverrideForTests(enabled: boolean | null): void {
+  budgetStatusCacheOverride = enabled;
+}
+
+/** Test-only: drop any cached value/in-flight refresh so the next call recomputes from scratch. */
+export function __resetBudgetStatusCacheForTests(): void {
+  budgetStatusCache = null;
+  budgetStatusRefreshPromise = null;
+}
+
+export async function computeBudgetStatus(now: Date = new Date()): Promise<BudgetStatusResponse> {
+  if (!budgetStatusCacheEnabled()) {
+    return computeBudgetStatusUncached(now);
+  }
+
+  const key = budgetStatusCacheKey(now);
+  const cached = budgetStatusCache;
+  if (cached && cached.key === key) {
+    const age = Date.now() - cached.computedAt;
+    if (age >= budgetStatusCacheTtlMs() && !budgetStatusRefreshPromise) {
+      // Fire-and-forget: don't let a slow/failing background refresh delay
+      // (or, via an unhandled rejection, crash) the caller that happened to
+      // notice the value was stale.
+      budgetStatusRefreshPromise = refreshBudgetStatusCache(now, key).catch(() => {});
+    }
+    return cached.value;
+  }
+
+  // Cold cache or month rollover: nothing usable to serve immediately.
+  // Compute inline, deduping concurrent callers onto one in-flight promise
+  // rather than each kicking off their own ~11s query.
+  if (!budgetStatusRefreshPromise) {
+    budgetStatusRefreshPromise = refreshBudgetStatusCache(now, key);
+  }
+  await budgetStatusRefreshPromise;
+  return budgetStatusCache!.value;
 }
 
 export interface ProjectBudgetStatus {
@@ -1020,14 +1090,6 @@ export interface ProjectBudgetStatusResponse {
 }
 
 export async function computeProjectBudgetStatus(now: Date = new Date()): Promise<ProjectBudgetStatusResponse> {
-  // TEMPORARY DIAGNOSTIC INSTRUMENTATION (see #397 investigation). Note this
-  // function is NOT in the GET /api/providers call path (that route calls
-  // computeBudgetStatus() directly, not this wrapper) - it's instrumented
-  // here for completeness/coverage of budget-status.ts's other Promise.all,
-  // reusing the [budget-timing] tag with an "fn" discriminator so a grep for
-  // [budget-timing] surfaces both without conflating their shapes. Remove
-  // alongside the rest of this diagnostic pass.
-  const projectFnStart = Date.now();
   const [providerStatus, projects, attribution, identityProviders] = await Promise.all([
     computeBudgetStatus(now),
     prisma.project.findMany({
@@ -1045,7 +1107,6 @@ export async function computeProjectBudgetStatus(now: Date = new Date()): Promis
       },
     }),
   ]);
-  const q_projectBudgetPromiseAllMs = Date.now() - projectFnStart;
 
   // Use the same oldest-row canonical resolver as ingest for the legacy
   // sourceApp-name fallback. Existing alias duplicates are therefore stable
@@ -1166,7 +1227,6 @@ export async function computeProjectBudgetStatus(now: Date = new Date()): Promis
     }
   }
 
-  const projectStatusMapStart = Date.now();
   const projectStatuses: ProjectBudgetStatus[] = projects.map((proj) => {
     // 1. Direct per-event attribution (projectId, plus legacy name match).
     const directUsd = directByProjectId.get(proj.id) ?? 0;
@@ -1293,7 +1353,6 @@ export async function computeProjectBudgetStatus(now: Date = new Date()): Promis
       status,
     };
   });
-  const q_projectStatusMapMs = Date.now() - projectStatusMapStart;
 
   const budgeted = projectStatuses.filter((p) => p.monthlyBudgetUsd != null && p.monthlyBudgetUsd > 0);
   const totalBudgetUsd = budgeted.reduce((s, p) => s + (p.monthlyBudgetUsd ?? 0), 0);
@@ -1305,17 +1364,6 @@ export async function computeProjectBudgetStatus(now: Date = new Date()): Promis
   // derive the app-wide total from only the visible project rows.
   const totalSpentUsd = providerStatus.summary.totalSpentUsd;
   const unassignedSpentUsd = Math.max(0, totalSpentUsd - attributedProjectSpentUsd);
-
-  // eslint-disable-next-line no-console -- temporary diagnostic instrumentation, see comment above computeProjectBudgetStatus()
-  console.info(
-    "[budget-timing]",
-    JSON.stringify({
-      fn: "computeProjectBudgetStatus",
-      total: Date.now() - projectFnStart,
-      q_projectBudgetPromiseAll: q_projectBudgetPromiseAllMs,
-      q_projectStatusMap: q_projectStatusMapMs,
-    })
-  );
 
   return {
     ok: true,

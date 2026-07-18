@@ -16,6 +16,18 @@ export async function register() {
   const { applySqliteNativeMemoryPragmas } = await import("@/lib/prisma");
   await applySqliteNativeMemoryPragmas();
 
+  // Warm the budget-status SWR cache in the background so the dashboard's
+  // first request after a deploy doesn't have to eat the cold ~11s
+  // computeBudgetStatus recompute itself (see the cache in
+  // @/lib/budget-status). Deliberately NOT awaited - a slow or erroring DB
+  // at boot must not delay/block server readiness; if this hasn't finished
+  // by the time the first request lands, that request just computes inline
+  // as it always did before this cache existed.
+  const { computeBudgetStatus } = await import("@/lib/budget-status");
+  computeBudgetStatus().catch((error) => {
+    console.warn("[budget-status-cache] boot warm-up failed", error);
+  });
+
   if (!isUsageSchedulerEnabled()) {
     console.warn(
       "[usage-scheduler] disabled by USAGE_SCHEDULER_ENABLED=false"
