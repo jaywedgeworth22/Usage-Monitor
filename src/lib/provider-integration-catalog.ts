@@ -118,13 +118,13 @@ function defineBlindProfile(input: BlindInput): ProviderIntegrationProfile {
 const CATALOG: Record<CatalogProviderName, ProviderIntegrationProfile> = {
   openai: defineProfile({
     name: "openai", displayName: "OpenAI", category: "LLM/AI", mode: "direct",
-    summary: "Reads organization month-to-date cost and selected usage/billing metadata; an Organization Admin key gives the authoritative cost path.",
-    reads: ["Organization Costs API buckets for the current month.", "Daily request count plus legacy credit-grant, limit, and billing-usage endpoints when available."],
-    stores: ["Aggregated USD cost, request count, credit balance, and limit metadata; never prompt or response content."],
+    summary: "Reads one canonical organization month-to-date cash total plus non-additive project and line-item cost components; an Organization Admin key gives the authoritative cost path.",
+    reads: ["Organization Costs API buckets for the current month, plus bounded project and line-item cost breakdowns.", "Daily request count plus legacy credit-grant, limit, and billing-usage endpoints when available."],
+    stores: ["One canonical aggregated USD cost, non-additive project/line-item component rows, request count, credit balance, and limit metadata; never prompt or response content."],
     credentialInputs: ["Primary API key.", "Optional Organization Admin key, encrypted separately, for organization cost access."],
     billing: { visibility: "actual", summary: "Actual organization MTD cost is direct with an Admin key; legacy credit/limit endpoints are best-effort, not subscription authority." },
-    canAdd: ["Organization usage breakdowns by project, user, model, or API key could be mapped from official admin reporting."],
-    cannotAdd: ["ChatGPT consumer subscriptions, payment methods, and invoice PDFs are not exposed to project API keys."],
+    canAdd: ["Usage-only reporting can separately add project, user, model, or API-key activity without treating it as cash spend."],
+    cannotAdd: ["This monitor does not infer or report cash cost by API key; it keeps project and line-item components separate from the one canonical cash total.", "ChatGPT consumer subscriptions, payment methods, and invoice PDFs are not exposed to project API keys."],
     limitations: ["A normal project key may validate and show partial legacy data but cannot read authoritative organization cost."],
     source: "src/lib/adapters/openai.ts",
   }),
