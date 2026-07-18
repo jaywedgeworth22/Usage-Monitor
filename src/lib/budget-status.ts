@@ -921,12 +921,12 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
 // sumMonthToDateExternalCostAttribution call has the identical shape and
 // cost (same live-group-the-current-month root cause) and is the entire
 // reason GET /api/projects and GET /api/budget-status were STILL ~11s after
-// computeBudgetStatus grew its own cache: neither endpoint calls
-// computeBudgetStatus directly - both call computeProjectBudgetStatus, whose
-// Promise.all runs that separate uncached query alongside the (by-then-fast)
-// cached computeBudgetStatus call. A second overlapping request (the
-// dashboard auto-refreshes) then 502s the single Render instance. Everything
-// else either function reads stays well under 100ms.
+// computeBudgetStatus grew its own cache. A stale provider hit can also start
+// its refresh in the background while a project refresh proceeds to its own
+// attribution aggregate. The two ExternalUsageEvent summary functions now
+// share a FIFO lease around their complete bodies, so neither cold nor stale
+// paths can retain both aggregate result sets at once. Everything else either
+// function reads stays well under 100ms.
 //
 // Rather than changing what gets computed (a money-path calculation with a
 // lot of reconciliation logic - see the comment atop this file), this caches
@@ -1196,12 +1196,12 @@ export interface ProjectBudgetStatusResponse {
 }
 
 async function computeProjectBudgetStatusUncached(now: Date): Promise<ProjectBudgetStatusResponse> {
-  // On a cold cache, both provider cost and project attribution aggregate the
-  // current month's raw ExternalUsageEvent rows. Running them concurrently
-  // doubles their peak SQLite/Prisma result memory and exceeded the 512 MB
-  // production instance. Provider totals remain the source of truth; finish
-  // that computation first, then build the attribution view. Once warm, the
-  // first await is an immediate cache hit.
+  // On a cold cache this await completes provider totals before attribution.
+  // On a stale hit it intentionally returns the cached provider view and may
+  // start a background provider refresh, preserving SWR latency. The shared
+  // exclusive lease inside the two ExternalUsageEvent summary functions then
+  // queues attribution behind that refresh through result processing. Do not
+  // take a higher-level lock here: this nested provider call would deadlock.
   const providerStatus = await computeBudgetStatus(now);
   const [projects, attribution, identityProviders] = await Promise.all([
     prisma.project.findMany({

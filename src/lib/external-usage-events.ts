@@ -758,6 +758,38 @@ type ReceiptCashEventLikeWithCost = Parameters<typeof receiptCashProviderId>[0];
 // rarely anyway, and the count barely changes call-to-call.
 let loggedExternalEventsRawSizeOnce = false;
 
+// Provider totals and project attribution both scan and materialize the
+// current month's raw ExternalUsageEvent rows. A stale provider-cache hit can
+// start its refresh in the background and return immediately; a stale project
+// cache refresh may then reach its separate attribution aggregate before that
+// provider refresh finishes. On the 512 MB production instance, retaining
+// both aggregate result sets at once is enough to kill the process.
+//
+// Serialize the complete aggregation bodies, not just their groupBy calls, so
+// the next aggregate cannot start while the prior query result is still being
+// classified into application maps. The lease lives below the SWR caches:
+// stale callers still receive their cached response immediately, while only
+// background/cold recomputation queues. Keeping it here also covers every
+// caller and avoids taking a higher-level lock before a nested budget compute.
+let externalUsageCostAggregationTail: Promise<void> = Promise.resolve();
+
+async function withExclusiveExternalUsageCostAggregation<T>(
+  work: () => Promise<T>
+): Promise<T> {
+  const previous = externalUsageCostAggregationTail;
+  let release!: () => void;
+  externalUsageCostAggregationTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+  }
+}
+
 /**
  * Return a narrow superset of possible raw receipt-cash rows. Full identity
  * validation still happens through isReceiptCashEvent so a malformed
@@ -821,6 +853,15 @@ const NON_RECEIPT_CANDIDATE_WHERE: Prisma.ExternalUsageEventWhereInput = {
 };
 
 export async function sumMonthToDateExternalCostByProvider(
+  monthStart: Date,
+  rawCutoff: Date
+): Promise<Map<string, ProviderPushedCost>> {
+  return withExclusiveExternalUsageCostAggregation(() =>
+    sumMonthToDateExternalCostByProviderUnserialized(monthStart, rawCutoff)
+  );
+}
+
+async function sumMonthToDateExternalCostByProviderUnserialized(
   monthStart: Date,
   rawCutoff: Date
 ): Promise<Map<string, ProviderPushedCost>> {
@@ -996,6 +1037,15 @@ export async function sumMonthToDateExternalCostByProvider(
 // lets budget-status avoid the previous double-count between the provider-keyed
 // and sourceApp-keyed aggregations.
 export async function sumMonthToDateExternalCostAttribution(
+  monthStart: Date,
+  rawCutoff: Date
+): Promise<ExternalCostAttributionRow[]> {
+  return withExclusiveExternalUsageCostAggregation(() =>
+    sumMonthToDateExternalCostAttributionUnserialized(monthStart, rawCutoff)
+  );
+}
+
+async function sumMonthToDateExternalCostAttributionUnserialized(
   monthStart: Date,
   rawCutoff: Date
 ): Promise<ExternalCostAttributionRow[]> {
