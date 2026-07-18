@@ -22,6 +22,7 @@ let GET: typeof import("../route").GET;
 let prisma: typeof import("@/lib/prisma").prisma;
 let encrypt: typeof import("@/lib/crypto").encrypt;
 let encryptJson: typeof import("@/lib/crypto").encryptJson;
+let managedApiKeyFingerprint: typeof import("@/lib/crypto").managedApiKeyFingerprint;
 let geminiApiKeyFingerprint: typeof import("@/lib/gemini-key-status").geminiApiKeyFingerprint;
 let geminiBillingConfigFingerprint: typeof import("@/lib/gemini-key-status").geminiBillingConfigFingerprint;
 let geminiMonitoringConfigFingerprint: typeof import("@/lib/gemini-key-status").geminiMonitoringConfigFingerprint;
@@ -37,7 +38,7 @@ beforeAll(async () => {
 
   ({ GET } = await import("../route"));
   ({ prisma } = await import("@/lib/prisma"));
-  ({ encrypt, encryptJson } = await import("@/lib/crypto"));
+  ({ encrypt, encryptJson, managedApiKeyFingerprint } = await import("@/lib/crypto"));
   ({
     geminiApiKeyFingerprint,
     geminiBillingConfigFingerprint,
@@ -250,6 +251,50 @@ describe("GET /api/providers - rawData exclusion and cost-coverage caveat", () =
     expect(response.status).toBe(200);
     expect(entry.costCoverageCaveat).toBeNull();
     expect(entry.latestSnapshot).toBeNull();
+  });
+});
+
+describe("GET /api/providers - managed key previews", () => {
+  it("uses each managed row's own key for a masked preview without exposing the key or binding", async () => {
+    const firstKey = "alpha-managed-one1";
+    const secondKey = "bravo-managed-two2";
+    const binding = (fingerprint: string) => ({
+      scope: "ct",
+      source: "ct",
+      providerName: "llamaindex",
+      keyFingerprint: fingerprint,
+    });
+    const [first, second] = await Promise.all(
+      [firstKey, secondKey].map((apiKey) =>
+        prisma.provider.create({
+          data: {
+            name: "llamaindex",
+            displayName: "LlamaIndex",
+            type: "builtin",
+            apiKey: encrypt(apiKey),
+            secretConfig: encryptJson({
+              infisicalCredential: binding(managedApiKeyFingerprint(apiKey)),
+            }),
+          },
+        })
+      )
+    );
+
+    const response = await GET(
+      new NextRequest("https://usage.jays.services/api/providers")
+    );
+    const body = await response.json();
+    const firstEntry = body.find((entry: { id: string }) => entry.id === first.id);
+    const secondEntry = body.find((entry: { id: string }) => entry.id === second.id);
+    const serialized = JSON.stringify(body);
+
+    expect(firstEntry.keyPreview).toBe("alpha-...one1");
+    expect(secondEntry.keyPreview).toBe("bravo-...two2");
+    // The preview comes from its own encrypted row; neither full key nor the
+    // stable server-only fingerprint reaches clients.
+    expect(serialized).not.toContain(firstKey);
+    expect(serialized).not.toContain(secondKey);
+    expect(serialized).not.toContain("keyFingerprint");
   });
 });
 

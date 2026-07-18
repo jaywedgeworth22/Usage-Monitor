@@ -32,3 +32,7 @@ dbs:
       endpoint: ${LITESTREAM_S3_ENDPOINT}
       access-key-id: ${LITESTREAM_S3_ACCESS_KEY_ID}
       secret-access-key: ${LITESTREAM_S3_SECRET_ACCESS_KEY}
+      # Keep each 5 MiB multipart part within reverse-proxy request deadlines
+      # on bandwidth-constrained cross-region links. Five concurrent parts can
+      # each exceed the deadline while competing for the same uplink.
+      concurrency: 1

@@ -15,6 +15,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import { GET } from "../route";
 
+const READY_REQUEST = new Request("https://usage.jays.services/api/ready");
 const resetReadinessStateForTests = (globalThis as any).resetReadinessStateForTests;
 
 describe("GET /api/ready", () => {
@@ -33,7 +34,7 @@ describe("GET /api/ready", () => {
   });
 
   it("returns ready only after the scheduler starts and SQLite responds", async () => {
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -55,7 +56,7 @@ describe("GET /api/ready", () => {
     vi.spyOn(process, "uptime").mockReturnValue(301);
     mocks.queryRawUnsafe.mockRejectedValue(new Error("database unavailable"));
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -73,13 +74,58 @@ describe("GET /api/ready", () => {
     });
   });
 
+  it("returns transport failure for an independent strict readiness monitor", async () => {
+    vi.spyOn(process, "uptime").mockReturnValue(301);
+    mocks.queryRawUnsafe.mockRejectedValue(new Error("database unavailable"));
+
+    const response = await GET(
+      new Request("https://usage.jays.services/api/ready?strict=1")
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("x-readiness-status")).toBe("not_ready");
+    expect(body).toMatchObject({ ok: false, status: "not_ready" });
+  });
+
+  it("keeps strict readiness green when every dependency is ready", async () => {
+    const response = await GET(
+      new Request("https://usage.jays.services/api/ready?strict=1")
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-readiness-status")).toBe("ready");
+    await expect(response.json()).resolves.toMatchObject({ ok: true, status: "ready" });
+  });
+
+  it("treats an intentionally disabled standby scheduler as not required", async () => {
+    vi.stubEnv("USAGE_SCHEDULER_ENABLED", "false");
+    resetRuntimeHealthForTests();
+
+    const response = await GET(
+      new Request("https://usage-oracle.example/api/ready?strict=1")
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      checks: {
+        scheduler: {
+          ok: true,
+          required: false,
+          readinessReason: "disabled",
+        },
+      },
+    });
+  });
+
   it("backs off failed SQLite probes and retries after the failure window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-14T09:00:00.000Z"));
     vi.spyOn(process, "uptime").mockReturnValue(301);
     mocks.queryRawUnsafe.mockRejectedValue(new Error("database unavailable"));
 
-    const firstResponse = await GET();
+    const firstResponse = await GET(READY_REQUEST);
     const firstBody = await firstResponse.json();
     expect(firstResponse.status).toBe(200);
     expect(mocks.queryRawUnsafe).toHaveBeenCalledTimes(1);
@@ -92,7 +138,7 @@ describe("GET /api/ready", () => {
     });
 
     await vi.advanceTimersByTimeAsync(5_000);
-    const cachedResponse = await GET();
+    const cachedResponse = await GET(READY_REQUEST);
     const cachedBody = await cachedResponse.json();
     expect(cachedResponse.status).toBe(200);
     expect(mocks.queryRawUnsafe).toHaveBeenCalledTimes(1);
@@ -106,7 +152,7 @@ describe("GET /api/ready", () => {
 
     mocks.queryRawUnsafe.mockResolvedValue([{ "1": 1 }]);
     await vi.advanceTimersByTimeAsync(55_000);
-    const retriedResponse = await GET();
+    const retriedResponse = await GET(READY_REQUEST);
     const retriedBody = await retriedResponse.json();
     expect(retriedResponse.status).toBe(200);
     expect(mocks.queryRawUnsafe).toHaveBeenCalledTimes(2);
@@ -123,7 +169,7 @@ describe("GET /api/ready", () => {
     vi.spyOn(process, "uptime").mockReturnValue(30);
     mocks.queryRawUnsafe.mockRejectedValue(new Error("database still opening"));
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -138,10 +184,10 @@ describe("GET /api/ready", () => {
 
   it("never re-enters cold-start grace after the first successful database probe", async () => {
     vi.spyOn(process, "uptime").mockReturnValue(30);
-    expect((await GET()).status).toBe(200);
+    expect((await GET(READY_REQUEST)).status).toBe(200);
 
     mocks.queryRawUnsafe.mockRejectedValue(new Error("database became unavailable"));
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -158,7 +204,7 @@ describe("GET /api/ready", () => {
     vi.spyOn(process, "uptime").mockReturnValue(301);
     mocks.queryRawUnsafe.mockRejectedValue(new Error("database unavailable"));
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -175,7 +221,7 @@ describe("GET /api/ready", () => {
     vi.stubEnv("RENDER_READINESS_HTTP_COMPATIBILITY", "true");
     vi.spyOn(process, "uptime").mockReturnValue(301);
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(mocks.queryRawUnsafe).not.toHaveBeenCalled();
@@ -202,7 +248,7 @@ describe("GET /api/ready", () => {
     vi.stubEnv("LITESTREAM_REQUIRED", "true");
     vi.stubEnv("LITESTREAM_ACTIVE", "false");
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(mocks.queryRawUnsafe).not.toHaveBeenCalled();
@@ -225,7 +271,7 @@ describe("GET /api/ready", () => {
     markSchedulerTickCompleted(false, null);
     markSchedulerTickCompleted(false, null);
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(mocks.queryRawUnsafe).not.toHaveBeenCalled();
@@ -246,7 +292,7 @@ describe("GET /api/ready", () => {
     vi.stubEnv("RENDER_READINESS_HTTP_COMPATIBILITY", "true");
     vi.spyOn(process, "uptime").mockReturnValue(30);
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -273,7 +319,7 @@ describe("GET /api/ready", () => {
     );
 
     try {
-      const firstRequest = GET();
+      const firstRequest = GET(READY_REQUEST);
       await vi.advanceTimersByTimeAsync(2_000);
       const firstResponse = await firstRequest;
       expect(firstResponse.status).toBe(200);
@@ -289,7 +335,7 @@ describe("GET /api/ready", () => {
       });
       expect(mocks.queryRawUnsafe).toHaveBeenCalledTimes(1);
 
-      const secondRequest = GET();
+      const secondRequest = GET(READY_REQUEST);
       expect(mocks.queryRawUnsafe).toHaveBeenCalledTimes(1);
 
       finishProbe?.([{ "1": 1 }]);
@@ -303,7 +349,7 @@ describe("GET /api/ready", () => {
   it("stays ready after one transient scheduler failure", async () => {
     markSchedulerTickCompleted(false, null);
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -319,7 +365,7 @@ describe("GET /api/ready", () => {
     markSchedulerTickCompleted(false, null);
     markSchedulerTickCompleted(false, null);
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -347,7 +393,7 @@ describe("GET /api/ready", () => {
     };
     markSchedulerTickCompleted(false, unsafeSummary);
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -392,7 +438,7 @@ describe("GET /api/ready", () => {
     };
     markSchedulerTickCompleted(true, degradedRun);
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -419,7 +465,7 @@ describe("GET /api/ready", () => {
     markSchedulerTickCompleted(true, degradedRun);
     markSchedulerTickCompleted(true, degradedRun);
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     // The service itself is still serving correctly - a provider-fetch
@@ -443,7 +489,7 @@ describe("GET /api/ready", () => {
     vi.stubEnv("LITESTREAM_REQUIRED", "true");
     vi.stubEnv("LITESTREAM_ACTIVE", "false");
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -458,7 +504,7 @@ describe("GET /api/ready", () => {
   it("reports startup not-ready without failing HTTP liveness", async () => {
     vi.stubEnv("RENDER", "true");
 
-    const response = await GET();
+    const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
