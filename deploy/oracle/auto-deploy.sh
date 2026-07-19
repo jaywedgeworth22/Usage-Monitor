@@ -29,7 +29,13 @@ read_env_value() {
     $1 == wanted {
       value = substr($0, index($0, "=") + 1)
       gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-      gsub(/^['\''\"]|['\''\"]$/, "", value)
+      apostrophe = sprintf("%c", 39)
+      first = substr(value, 1, 1)
+      last = substr(value, length(value), 1)
+      if ((first == "\"" && last == "\"") ||
+          (first == apostrophe && last == apostrophe)) {
+        value = substr(value, 2, length(value) - 2)
+      }
       print value
       exit
     }
