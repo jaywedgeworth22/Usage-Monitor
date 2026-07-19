@@ -594,7 +594,7 @@ describe("computeProjectBudgetStatus stale-while-revalidate cache", () => {
       }) as never);
 
       // Go stale -> the SWR hit returns 15 immediately and starts refresh R,
-      // which is now parked inside provider.findMany.
+      // which is now parked inside usageSnapshot.findMany.
       process.env.BUDGET_STATUS_CACHE_TTL_MS = "0";
       expect(await computeBudgetStatus(NOW)).toBe(warm);
       await waitUntil(async () => findManyReads === 1);
