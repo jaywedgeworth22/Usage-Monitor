@@ -172,8 +172,8 @@ describe("coolify adapter", () => {
     expect(urls).toContain("https://app.coolify.io/api/v1/servers");
     expect(urls).toContain("https://app.coolify.io/api/v1/applications");
     expect(urls).toContain("https://app.coolify.io/api/v1/servers/srv-1/resources");
-    for (const [, init] of fetchMock.mock.calls) {
-      expect((init as RequestInit)?.headers).toMatchObject({
+    for (const call of fetchMock.mock.calls as unknown as Array<[unknown, RequestInit | undefined]>) {
+      expect(call[1]?.headers).toMatchObject({
         Authorization: "Bearer coolify-token",
       });
     }
