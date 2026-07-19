@@ -72,7 +72,6 @@ for (const [pattern, message] of [
   [/capture_quiescent_backup_watermark/, "post-stop Garage watermark capture"],
   [/-integrity-check full/, "post-cutover Garage restore"],
   [/verify_render_retirement/, "durable Render retirement proof"],
-  [/api\.render\.com\/v1\/services/, "live Render retirement verification"],
   [/env-vars\/USAGE_SCHEDULER_ENABLED/, "exact Render scheduler lookup without pagination"],
   [/--kill-after=60s 2700/, "bounded target-controlled image build"],
   [/--kill-after=30s 900/, "bounded target-controlled scratch migration"],
@@ -84,6 +83,10 @@ for (const [pattern, message] of [
 }
 forbidText(deploy, /reset --hard|docker (system|builder) prune|rm -rf/, "broad destructive cleanup is forbidden");
 forbidText(deploy, /set -x/, "deployment must never trace secrets");
+assert.ok(
+  deploy.includes("https://api.render.com/v1/services/"),
+  "deploy script must enforce live Render retirement verification",
+);
 
 requireText(poller, /MAX_FAILURES=3/, "poller must have a bounded retry circuit breaker");
 requireText(poller, /blocked-sha/, "poller must persist the blocked revision");
