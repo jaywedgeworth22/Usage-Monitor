@@ -3,11 +3,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setupPrismaSqliteTestDb } from "./setup-test-db";
-import { deriveComplianceState, isVerifiableVisibility } from "../provider-compliance";
 
+// Every import of provider-compliance must be DYNAMIC and happen inside
+// beforeAll, after DATABASE_URL is set: the module pulls in @/lib/prisma, which
+// binds a PrismaClient to the connection string at module-load time. A
+// top-level static import would therefore connect to the wrong database and
+// fail with "table does not exist".
 let testDir: string;
 let prisma: typeof import("@/lib/prisma").prisma;
 let getProviderComplianceSummary: typeof import("../provider-compliance").getProviderComplianceSummary;
+let deriveComplianceState: typeof import("../provider-compliance").deriveComplianceState;
+let isVerifiableVisibility: typeof import("../provider-compliance").isVerifiableVisibility;
 
 beforeAll(async () => {
   process.env.ENCRYPTION_KEY = "44".repeat(32);
@@ -16,7 +22,11 @@ beforeAll(async () => {
   process.env.DATABASE_URL = `file:${dbPath}`;
   setupPrismaSqliteTestDb(dbPath);
   ({ prisma } = await import("@/lib/prisma"));
-  ({ getProviderComplianceSummary } = await import("../provider-compliance"));
+  ({
+    getProviderComplianceSummary,
+    deriveComplianceState,
+    isVerifiableVisibility,
+  } = await import("../provider-compliance"));
 }, 60_000);
 
 afterAll(async () => {
