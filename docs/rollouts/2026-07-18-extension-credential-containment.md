@@ -36,9 +36,23 @@ Lane: owner-directed urgent security containment of the shipped `chrome-extensio
   scraper files absent, and no `document.cookie`/`localStorage`/`/api/ingest/keys`/
   `SYNC_KEYS` in executable source).
 
-The Safari tree (`safari-extension/`) is a hollow Xcode wrapper with no content
-scripts and no `manifest.json`, so it carried none of the scraping payload and
-needs no change.
+### Safari
+
+The Safari Xcode project references the shared `chrome-extension/` folder
+(`manifest.json`, `popup/`, `scripts/`) as build resources for **both** the
+macOS and iOS extension targets
+(`safari-extension/.../project.pbxproj`). So the Safari build packages the *same*
+`chrome-extension/` payload — it was **not** a hollow wrapper, and the vulnerable
+v1.0.0 manifest/scripts shipped there too. Sanitizing `chrome-extension/`
+therefore remediates Safari as well; both now build from the clean shared source.
+Safari carries no scraper of its own — its only script,
+`Shared (App)/Resources/Script.js`, is Apple's app-UI boilerplate.
+
+Cosmetic follow-up: the pbxproj still lists the now-removed
+`chrome-extension/scripts/` folder (and an `icons/` folder that never existed) as
+resource references, which produces a harmless Xcode "missing file" warning. The
+`.pbxproj` was left untouched here to avoid risking the Xcode project; the
+stale references can be pruned in a separate Safari-only change.
 
 ## Scope / safety
 
