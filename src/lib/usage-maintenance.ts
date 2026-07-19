@@ -95,7 +95,6 @@ export async function verifyOpenRouterGenerations(): Promise<number> {
       keyRef: {
         not: null,
         startsWith: "gen-",
-      },
       OR: [
         { verificationStatus: null },
         { verificationStatus: { in: ["pending", "error"] } },
@@ -218,6 +217,7 @@ export async function reconcileProviderUsage(): Promise<number> {
     const deltaRatio = localCost > 0 ? deltaUsd / localCost : null;
     const status = Math.abs(deltaUsd) > 0.01 ? "discrepancy" : "ok";
 
+<<<<<<< HEAD
     await prisma.providerUsageReconciliation.upsert({
       where: {
         providerId_periodStart_periodEnd_keyRef: {
