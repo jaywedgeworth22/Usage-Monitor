@@ -96,7 +96,10 @@ export async function verifyOpenRouterGenerations(): Promise<number> {
         not: null,
         startsWith: "gen-",
       },
-      verificationStatus: null,
+      OR: [
+        { verificationStatus: null },
+        { verificationStatus: { in: ["pending", "error"] } },
+      ],
     },
     take: 50,
   });
@@ -170,6 +173,7 @@ export async function verifyOpenRouterGenerations(): Promise<number> {
 export async function reconcileProviderUsage(): Promise<number> {
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   const rawCutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000); // 90 days retention
 
   const [providers, pushedCosts] = await Promise.all([
@@ -214,19 +218,29 @@ export async function reconcileProviderUsage(): Promise<number> {
     const deltaRatio = localCost > 0 ? deltaUsd / localCost : null;
     const status = Math.abs(deltaUsd) > 0.01 ? "discrepancy" : "ok";
 
-    // Clean up older reconciliations for the same provider and month to keep it clean
-    await prisma.providerUsageReconciliation.deleteMany({
+    await prisma.providerUsageReconciliation.upsert({
       where: {
-        providerId: provider.id,
-        periodStart: monthStart,
+        providerId_periodStart_periodEnd_keyRef: {
+          providerId: provider.id,
+          periodStart: monthStart,
+          periodEnd: monthEnd,
+          keyRef: "",
+        },
       },
-    });
-
-    await prisma.providerUsageReconciliation.create({
-      data: {
+      update: {
+        reportedCostUsd: localCost,
+        reportedEventCount: localEventCount,
+        verifiedCostUsd: providerCost,
+        verifiedSource: "usage-snapshot",
+        deltaUsd,
+        deltaRatio,
+        status,
+        checkedAt: now,
+      },
+      create: {
         providerId: provider.id,
         periodStart: monthStart,
-        periodEnd: now,
+        periodEnd: monthEnd,
         reportedCostUsd: localCost,
         reportedEventCount: localEventCount,
         verifiedCostUsd: providerCost,
