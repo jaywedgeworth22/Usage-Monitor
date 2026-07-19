@@ -58,6 +58,47 @@ let databaseProbeInFlight: Promise<DatabaseCheck> | null = null;
 let databaseProbeHasSucceeded = false;
 let databaseFailureCache: DatabaseFailureCache | null = null;
 
+interface BudgetControlsReadiness {
+  enabled: boolean;
+  pausedProviderCount: number | null;
+  keyDisableRecommendedProviderCount: number | null;
+}
+
+// Cheap, fail-safe readiness view of the budget-breach control layer. When the
+// master flag is off (the default) this does ZERO database work so the hot
+// readiness path is byte-identical to before this feature. When on, it runs two
+// trivial provider counts and swallows any error into nulls; it never blocks or
+// affects readiness `ok`.
+async function budgetControlsReadiness(): Promise<BudgetControlsReadiness> {
+  const raw = process.env.BUDGET_AUTO_CONTROLS_ENABLED?.trim().toLowerCase();
+  const enabled = raw === "true" || raw === "1" || raw === "yes";
+  if (!enabled) {
+    return {
+      enabled: false,
+      pausedProviderCount: null,
+      keyDisableRecommendedProviderCount: null,
+    };
+  }
+  try {
+    const [pausedProviderCount, keyDisableRecommendedProviderCount] =
+      await Promise.all([
+        prisma.provider.count({ where: { budgetPausedAt: { not: null } } }),
+        prisma.provider.count({ where: { keyDisableRecommended: true } }),
+      ]);
+    return {
+      enabled: true,
+      pausedProviderCount,
+      keyDisableRecommendedProviderCount,
+    };
+  } catch {
+    return {
+      enabled: true,
+      pausedProviderCount: null,
+      keyDisableRecommendedProviderCount: null,
+    };
+  }
+}
+
 function databaseProbe(): Promise<DatabaseCheck> {
   const now = Date.now();
   if (databaseFailureCache && now < databaseFailureCache.retryAfterMs) {
@@ -227,6 +268,11 @@ export async function GET(request: Request) {
     Promise.resolve(getBackupRuntimeStatus()),
     Promise.resolve(getStartupRuntimeStatus()),
   ]);
+  // Budget-breach control observability. Default-OFF is zero added cost: with
+  // BUDGET_AUTO_CONTROLS_ENABLED unset we skip the DB entirely. When enabled we
+  // add two trivial counts, fully fail-safe (a failure yields nulls) and never
+  // feeding into `ok` — a control-layer problem must not flip readiness.
+  const budgetControls = await budgetControlsReadiness();
   const schedulerReadiness = getSchedulerReadiness();
   // A preview/cold-standby host deliberately disables its scheduler to avoid
   // becoming a second SQLite writer. That intentional circuit breaker must not
@@ -296,6 +342,10 @@ export async function GET(request: Request) {
         ok: startupReady,
         ...startup,
       },
+      // Observability only — never part of `ok`. Reports the master flag and,
+      // when enabled, how many providers are currently budget-paused / carry a
+      // (advisory) key-disable recommendation.
+      budgetControls,
     },
   };
 
