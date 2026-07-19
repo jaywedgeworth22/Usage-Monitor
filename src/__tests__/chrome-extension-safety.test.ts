@@ -5,31 +5,53 @@ import path from "node:path";
 // Regression guard for the browser-extension credential-scraping containment.
 // v1.0.0 of chrome-extension/ scraped document.cookie + full localStorage from
 // provider dashboards and POSTed them (with a stored monitor token) to a
-// nonexistent /api/ingest/keys endpoint under an <all_urls> grant. These tests
-// lock in the least-privilege launcher and fail loudly if any scraping,
-// exfiltration, or broad host access is reintroduced.
+// nonexistent /api/ingest/keys endpoint under an <all_urls> grant. That exact
+// payload was removed once, then re-merged via a "restore extension" PR, so this
+// test exists to make any reintroduction fail CI. Because the Safari Xcode
+// project bundles this same chrome-extension/ folder as its build resources,
+// keeping this folder clean also keeps the Safari build clean.
 
-const extDir = path.join(process.cwd(), "chrome-extension");
+const repoRoot = process.cwd();
+const extDir = path.join(repoRoot, "chrome-extension");
+const safariDir = path.join(repoRoot, "safari-extension");
 const manifestPath = path.join(extDir, "manifest.json");
 
 function readManifest(): Record<string, unknown> {
   return JSON.parse(readFileSync(manifestPath, "utf8"));
 }
 
-// Concatenate only the EXECUTABLE surface (js/html/json). The README is prose
-// and legitimately documents the removed behavior, so it is not scanned.
-function executableSource(): string {
+// Concatenate the EXECUTABLE surface (any script/markup/config), not prose.
+// The README legitimately documents the removed behavior, so *.md is excluded.
+function collectSource(rootDir: string): string {
   const chunks: string[] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(p);
-      else if (/\.(js|html|json)$/.test(entry.name)) chunks.push(readFileSync(p, "utf8"));
+      else if (/\.(m?js|cjs|ts|jsx|tsx|html|json|swift)$/.test(entry.name)) {
+        chunks.push(readFileSync(p, "utf8"));
+      }
     }
   };
-  walk(extDir);
+  walk(rootDir);
   return chunks.join("\n");
 }
+
+// Signatures of credential capture / exfiltration that must never reappear in
+// executable extension source (Chrome or Safari).
+const EXFIL_PATTERNS: Array<[string, RegExp]> = [
+  ["document.cookie read", /document\.cookie/],
+  ["localStorage access", /localStorage/],
+  ["sessionStorage access", /sessionStorage/],
+  ["ingest-keys sink", /\/api\/ingest\/keys/],
+  ["SYNC_KEYS message", /SYNC_KEYS/],
+  ["message-passing worker", /chrome\.runtime\.onMessage/],
+  ["stored api token", /apiToken/],
+  ["network fetch", /\bfetch\s*\(/],
+  ["XMLHttpRequest", /XMLHttpRequest/],
+  ["sendBeacon", /sendBeacon/],
+  ["bearer auth", /Bearer\s|Authorization/],
+];
 
 describe("chrome-extension credential-scraping containment", () => {
   it("requests no broad host access", () => {
@@ -65,13 +87,26 @@ describe("chrome-extension credential-scraping containment", () => {
     }
   });
 
-  it("captures no credentials and posts to no ingest sink", () => {
-    const src = executableSource();
-    expect(src).not.toMatch(/document\.cookie/);
-    expect(src).not.toMatch(/localStorage/);
-    expect(src).not.toMatch(/\/api\/ingest\/keys/);
-    expect(src).not.toMatch(/SYNC_KEYS/);
-    expect(src).not.toMatch(/chrome\.runtime\.onMessage/);
-    expect(src).not.toMatch(/apiToken/);
+  it("captures no credentials and exfiltrates nothing (chrome-extension)", () => {
+    const src = collectSource(extDir);
+    for (const [label, pattern] of EXFIL_PATTERNS) {
+      expect(pattern.test(src), `chrome-extension executable source must not contain ${label}`).toBe(false);
+    }
+  });
+
+  it("Safari build resources carry no scraping payload", () => {
+    // Safari's Xcode project references chrome-extension/{manifest,popup,scripts}
+    // as build resources, so it inherits whatever lives there. It must also carry
+    // no scraper of its own (its only script is Apple's app-UI boilerplate).
+    if (!existsSync(safariDir)) return; // tolerate a repo layout without Safari
+    const src = collectSource(safariDir);
+    for (const [label, pattern] of [
+      ["document.cookie read", /document\.cookie/],
+      ["ingest-keys sink", /\/api\/ingest\/keys/],
+      ["SYNC_KEYS message", /SYNC_KEYS/],
+      ["stored api token", /apiToken/],
+    ] as Array<[string, RegExp]>) {
+      expect(pattern.test(src), `safari-extension must not contain ${label}`).toBe(false);
+    }
   });
 });
