@@ -166,9 +166,14 @@ verify_public_revision_samples() {
   local revision="$1"
   local body sample
   for sample in 1 2 3; do
-    body="$(fetch_public_ready)"
-    ready_matches_revision "${body}" "${revision}" || \
+    if ! body="$(fetch_public_ready)"; then
+      die "public readiness sample ${sample} was unavailable"
+      return 1
+    fi
+    if ! ready_matches_revision "${body}" "${revision}"; then
       die "public readiness sample ${sample} did not report ${revision}"
+      return 1
+    fi
     if (( sample < 3 )); then sleep 5; fi
   done
   log "three public readiness samples report ${revision}."
@@ -268,20 +273,34 @@ verify_backup_path() {
   dry_run_path="${DATA_DIR}/.deploy-garage-dry-run.db"
   unlink "${dry_run_path}" 2>/dev/null || true
 
-  read_backup_state
-  latest_epoch="$(date -u -d "${LAST_BACKUP_CREATED}" +%s)"
+  if ! read_backup_state; then
+    die "Garage returned no parseable LTX objects"
+    return 1
+  fi
+  if ! latest_epoch="$(date -u -d "${LAST_BACKUP_CREATED}" +%s)"; then
+    die "Garage returned an invalid LTX timestamp"
+    return 1
+  fi
   now_epoch="$(date -u +%s)"
   age_seconds=$((now_epoch - latest_epoch))
-  (( age_seconds >= 0 && age_seconds <= 3600 )) || \
+  if (( age_seconds < 0 || age_seconds > 3600 )); then
     die "Garage newest LTX object is ${age_seconds}s old (limit 3600s)"
+    return 1
+  fi
 
-  timeout 180 docker exec "${APP_CONTAINER}" \
-    /app/bin/litestream restore \
-      -config /app/litestream.yml \
-      -dry-run \
-      -o "${dry_run_path}" \
-      /data/prod.db >/dev/null
-  [[ ! -e "${dry_run_path}" ]] || die "Litestream dry-run unexpectedly wrote ${dry_run_path}"
+  if ! timeout 180 docker exec "${APP_CONTAINER}" \
+      /app/bin/litestream restore \
+        -config /app/litestream.yml \
+        -dry-run \
+        -o "${dry_run_path}" \
+        /data/prod.db >/dev/null; then
+    die "Garage authenticated restore dry-run failed"
+    return 1
+  fi
+  if [[ -e "${dry_run_path}" ]]; then
+    die "Litestream dry-run unexpectedly wrote ${dry_run_path}"
+    return 1
+  fi
   log "Garage LTX freshness and authenticated restore dry-run passed."
 }
 
@@ -420,12 +439,12 @@ verify_render_retirement() {
 
   if ! env_json="$(curl -fsS --max-time 20 \
     --config "${RENDER_CURL_CONFIG}" \
-    --url 'https://api.render.com/v1/services/srv-d9181tpo3t8c73crf310/env-vars')"; then
+    --url 'https://api.render.com/v1/services/srv-d9181tpo3t8c73crf310/env-vars/USAGE_SCHEDULER_ENABLED')"; then
     log "Render scheduler configuration is temporarily unavailable; deferring deployment."
     return 75
   fi
   jq -e '
-    [.[] | select(.envVar.key == "USAGE_SCHEDULER_ENABLED") | .envVar.value] == ["false"]
+    .key == "USAGE_SCHEDULER_ENABLED" and .value == "false"
   ' >/dev/null <<<"${env_json}" || die "live Render USAGE_SCHEDULER_ENABLED is not exactly false"
   unset env_json
 
@@ -589,8 +608,8 @@ cleanup_scratch() {
 write_host_revision() {
   local revision="$1"
   local temporary
-  temporary="$(mktemp /etc/usage-monitor/.host.env.XXXXXX)"
-  awk -F= -v revision="${revision}" '
+  temporary="$(mktemp /etc/usage-monitor/.host.env.XXXXXX)" || return 1
+  if ! awk -F= -v revision="${revision}" '
     BEGIN { replaced = 0 }
     $1 == "USAGE_MONITOR_REVISION" {
       print "USAGE_MONITOR_REVISION=" revision
@@ -601,10 +620,16 @@ write_host_revision() {
     END {
       if (!replaced) print "USAGE_MONITOR_REVISION=" revision
     }
-  ' "${HOST_ENV}" >"${temporary}"
-  chown root:root "${temporary}"
-  chmod 0600 "${temporary}"
-  mv "${temporary}" "${HOST_ENV}"
+  ' "${HOST_ENV}" >"${temporary}"; then
+    unlink "${temporary}" 2>/dev/null || true
+    return 1
+  fi
+  if ! chown root:root "${temporary}" || \
+    ! chmod 0600 "${temporary}" || \
+    ! mv "${temporary}" "${HOST_ENV}"; then
+    unlink "${temporary}" 2>/dev/null || true
+    return 1
+  fi
 }
 
 write_receipt() {
@@ -613,9 +638,9 @@ write_receipt() {
   local previous_revision="$3"
   local backup_path="$4"
   local image_digest temporary
-  image_digest="$(timeout 30 docker image inspect "${APP_IMAGE_REPOSITORY}:${active_revision}" --format '{{.Id}}')"
-  temporary="$(mktemp "${STATE_DIR}/.receipt.XXXXXX")"
-  jq -n \
+  image_digest="$(timeout 30 docker image inspect "${APP_IMAGE_REPOSITORY}:${active_revision}" --format '{{.Id}}')" || return 1
+  temporary="$(mktemp "${STATE_DIR}/.receipt.XXXXXX")" || return 1
+  if ! jq -n \
     --arg status "${status}" \
     --arg activeRevision "${active_revision}" \
     --arg previousRevision "${previous_revision}" \
@@ -623,9 +648,14 @@ write_receipt() {
     --arg backupPath "${backup_path}" \
     --arg completedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{status:$status,activeRevision:$activeRevision,previousRevision:$previousRevision,imageDigest:$imageDigest,backupPath:$backupPath,completedAt:$completedAt}' \
-    >"${temporary}"
-  chmod 0600 "${temporary}"
-  mv "${temporary}" "${RECEIPT_FILE}"
+    >"${temporary}"; then
+    unlink "${temporary}" 2>/dev/null || true
+    return 1
+  fi
+  if ! chmod 0600 "${temporary}" || ! mv "${temporary}" "${RECEIPT_FILE}"; then
+    unlink "${temporary}" 2>/dev/null || true
+    return 1
+  fi
 }
 
 prune_old_backups() {
@@ -646,10 +676,13 @@ prune_old_backups() {
 rollback_candidate() {
   local failed_status="$1"
   local rollback_started
+  local rollback_ok=true
   trap - ERR INT TERM HUP
   set +e
   log "candidate failed (exit ${failed_status}); rolling code back to ${PREVIOUS_SHA} without restoring SQLite."
-  compose_for_revision "${TARGET_SHA}" stop --timeout 60 app >/dev/null 2>&1
+  if ! compose_for_revision "${TARGET_SHA}" stop --timeout 60 app >/dev/null 2>&1; then
+    log "rollback warning: candidate stop command failed; validation remains fail-closed."
+  fi
 
   if ! timeout 30 docker image inspect "${APP_IMAGE_REPOSITORY}:${PREVIOUS_SHA}" >/dev/null 2>&1; then
     log "FATAL: previous image ${PREVIOUS_SHA} is unavailable; leaving all app writers stopped."
@@ -658,15 +691,37 @@ rollback_candidate() {
   fi
 
   rollback_started="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-  if compose_for_revision "${PREVIOUS_SHA}" up \
-      --detach --no-deps --no-build --force-recreate app && \
-    timeout 30 docker update --restart=no "${APP_CONTAINER}" >/dev/null && \
-    wait_for_revision "${PREVIOUS_SHA}" "${rollback_started}" "rollback" && \
-    verify_backup_path && \
-    verify_public_revision_samples "${PREVIOUS_SHA}"; then
-    write_host_revision "${PREVIOUS_SHA}"
-    timeout 30 docker update --restart=unless-stopped "${APP_CONTAINER}" >/dev/null
-    write_receipt "rolled_back" "${PREVIOUS_SHA}" "${TARGET_SHA}" "${FINAL_BACKUP}"
+  if ! compose_for_revision "${PREVIOUS_SHA}" up \
+      --detach --no-deps --no-build --force-recreate app; then
+    log "rollback validation: previous image did not start."
+    rollback_ok=false
+  fi
+  if [[ "${rollback_ok}" == "true" ]] && \
+    ! timeout 30 docker update --restart=no "${APP_CONTAINER}" >/dev/null; then
+    log "rollback validation: could not enforce restart=no."
+    rollback_ok=false
+  fi
+  if [[ "${rollback_ok}" == "true" ]] && \
+    ! wait_for_revision "${PREVIOUS_SHA}" "${rollback_started}" "rollback"; then
+    rollback_ok=false
+  fi
+  if [[ "${rollback_ok}" == "true" ]] && ! verify_backup_path; then
+    rollback_ok=false
+  fi
+  if [[ "${rollback_ok}" == "true" ]] && ! verify_public_revision_samples "${PREVIOUS_SHA}"; then
+    rollback_ok=false
+  fi
+  if [[ "${rollback_ok}" == "true" ]] && ! write_host_revision "${PREVIOUS_SHA}"; then
+    log "rollback validation: could not restore the reboot revision pointer."
+    rollback_ok=false
+  fi
+  if [[ "${rollback_ok}" == "true" ]] && \
+    ! write_receipt "rolled_back" "${PREVIOUS_SHA}" "${TARGET_SHA}" "${FINAL_BACKUP}"; then
+    log "rollback validation: could not persist the rollback receipt."
+    rollback_ok=false
+  fi
+
+  if [[ "${rollback_ok}" == "true" ]]; then
     log "rollback to ${PREVIOUS_SHA} succeeded; SQLite was preserved in place."
     exit "${failed_status}"
   fi
@@ -749,7 +804,7 @@ if [[ "${PREVIOUS_SHA}" == "${TARGET_SHA}" ]]; then
   wait_for_revision "${TARGET_SHA}" "${clear_candidate_start}" "idempotent production"
   verify_backup_path
   verify_public_revision_samples "${TARGET_SHA}"
-  timeout 30 docker update --restart=unless-stopped "${APP_CONTAINER}" >/dev/null
+  timeout 30 docker update --restart=no "${APP_CONTAINER}" >/dev/null
   write_receipt "already_current" "${TARGET_SHA}" "${PREVIOUS_SHA}" ""
   DEPLOY_SUCCEEDED=true
   exit 0
@@ -779,7 +834,10 @@ log "preserved verified offline rollback snapshot ${FINAL_BACKUP}."
 
 # If main changes during writer stop or snapshot creation, restore the accepted
 # previous image and let the next timer transaction build the new main.
-post_stop_main="$(remote_main_sha)"
+if ! post_stop_main="$(remote_main_sha)"; then
+  log "could not re-resolve main during cutover; restoring ${PREVIOUS_SHA}."
+  rollback_candidate 75
+fi
 if [[ ! "${post_stop_main}" =~ ^[0-9a-f]{40}$ || "${post_stop_main}" != "${TARGET_SHA}" ]]; then
   log "main changed to ${post_stop_main:-unknown} during cutover; restoring ${PREVIOUS_SHA}."
   rollback_candidate 75
@@ -797,9 +855,20 @@ verify_backup_path
 verify_backup_restore
 verify_public_revision_samples "${TARGET_SHA}"
 
+# Candidate validation can take minutes. Never commit a reboot pointer for a
+# revision that ceased to be main during scheduler/backup acceptance.
+if ! accepted_main="$(remote_main_sha)"; then
+  log "could not re-resolve main after candidate acceptance; restoring ${PREVIOUS_SHA}."
+  rollback_candidate 75
+fi
+if [[ ! "${accepted_main}" =~ ^[0-9a-f]{40}$ || "${accepted_main}" != "${TARGET_SHA}" ]]; then
+  log "main changed to ${accepted_main:-unknown} during candidate acceptance; restoring ${PREVIOUS_SHA}."
+  rollback_candidate 75
+fi
+
 # Commit the reboot pointer only after the candidate is independently green.
 write_host_revision "${TARGET_SHA}"
-timeout 30 docker update --restart=unless-stopped "${APP_CONTAINER}" >/dev/null
+timeout 30 docker update --restart=no "${APP_CONTAINER}" >/dev/null
 write_receipt "deployed" "${TARGET_SHA}" "${PREVIOUS_SHA}" "${FINAL_BACKUP}"
 prune_old_backups
 DEPLOY_SUCCEEDED=true

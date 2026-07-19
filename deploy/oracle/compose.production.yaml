@@ -17,9 +17,9 @@ services:
     user: "1000:1000"
     volumes:
       - /data:/data
-    # The deploy transaction enables `unless-stopped` only after the candidate
-    # passes exact-revision readiness, a fresh scheduler tick, and backup checks.
-    # systemd applies the same policy after a verified boot-time start.
+    # Keep Docker-level restart disabled permanently. Only systemd may start the
+    # SQLite writer, after ConditionPathIsMountPoint/RequiresMountsFor verify
+    # that /data is the dedicated block volume.
     restart: "no"
     stop_grace_period: 60s
     mem_limit: 4g

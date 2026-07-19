@@ -73,6 +73,7 @@ for (const [pattern, message] of [
   [/-integrity-check full/, "post-cutover Garage restore"],
   [/verify_render_retirement/, "durable Render retirement proof"],
   [/api\.render\.com\/v1\/services/, "live Render retirement verification"],
+  [/env-vars\/USAGE_SCHEDULER_ENABLED/, "exact Render scheduler lookup without pagination"],
   [/--kill-after=60s 2700/, "bounded target-controlled image build"],
   [/--kill-after=30s 900/, "bounded target-controlled scratch migration"],
   [/on_signal TERM 143/, "signal-safe rollback"],
@@ -88,12 +89,20 @@ requireText(poller, /MAX_FAILURES=3/, "poller must have a bounded retry circuit 
 requireText(poller, /blocked-sha/, "poller must persist the blocked revision");
 requireText(poller, /CHECK_RETRY_SECONDS=300/, "failed checks must be re-evaluated without hot polling");
 requireText(poller, /git ls-remote/, "poller must resolve public main without credentials");
+requireText(poller, /systemctl restart usage-monitor\.service/, "stopped writers must recover only through the mount-gated unit");
+requireText(poller, /mountpoint -q/, "writer recovery must require the data mount");
+requireText(poller, /docker update --restart=no/, "the poller must retrofit mount-safe restart policy before honoring pause");
+requireText(poller, /flock -w 10 8/, "recovery must share the deployment transaction lock");
+requireText(poller, /flock -u 8/, "the poller must release its recovery lock before the child transaction");
 requireText(deployService, /SuccessExitStatus=75/, "pending checks must not fail systemd");
 requireText(deployService, /TimeoutStartSec=90min/, "systemd must bound an unexpectedly wedged transaction");
 requireText(deployService, /TimeoutStopSec=45min/, "systemd must allow bounded signal rollback to finish");
 requireText(timer, /OnUnitInactiveSec=1min/, "timer must detect merged main promptly");
 requireText(service, /\/etc\/usage-monitor\/compose\.yaml/, "boot must use root-owned stable compose");
 requireText(service, /--no-build/, "boot must never build a mutable checkout");
+requireText(service, /--restart=no/, "systemd must keep Docker-level writer restart disabled");
+forbidText(service, /--restart=unless-stopped/, "Docker must not bypass the systemd data-mount gate");
+forbidText(deploy, /--restart=unless-stopped/, "accepted and rollback writers must remain systemd-gated");
 
 assert.deepEqual(
   {
@@ -132,8 +141,21 @@ assert.ok(
   "same-SHA acceptance must occur before any image rebuild or retag",
 );
 assert.ok(
-  (deploy.match(/require_current_main "\$\{TARGET_SHA\}"/g) ?? []).length >= 3,
+  (deploy.match(/require_current_main "\$\{TARGET_SHA\}"/g) ?? []).length >= 3 &&
+    deploy.includes('accepted_main="$(remote_main_sha)"'),
   "main must be rechecked after build and immediately before cutover",
+);
+
+const recoveryLock = poller.indexOf('flock -w 10 8');
+const recoveryCall = poller.indexOf('recover_current_app_if_stopped "${current_sha}"');
+const recoveryUnlock = poller.indexOf('flock -u 8');
+const childDeploy = poller.indexOf('"${DEPLOY_COMMAND}" "${target_sha}"');
+assert.ok(
+  recoveryLock >= 0 &&
+    recoveryCall > recoveryLock &&
+    recoveryUnlock > recoveryCall &&
+    childDeploy > recoveryUnlock,
+  "recovery must hold the shared transaction lock and release it before child deployment",
 );
 
 console.log("Oracle auto-deploy configuration checks passed.");

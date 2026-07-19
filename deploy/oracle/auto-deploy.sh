@@ -12,7 +12,9 @@ readonly FAILURE_FILE="${STATE_DIR}/failure-state"
 readonly BLOCKED_FILE="${STATE_DIR}/blocked-sha"
 readonly CHECK_RETRY_FILE="${STATE_DIR}/check-retry-state"
 readonly DEPLOY_COMMAND="/usr/local/sbin/usage-monitor-deploy"
+readonly LOCK_FILE="/run/lock/usage-monitor-deploy.lock"
 readonly PUBLIC_READY_URL="https://usage.jays.services/api/ready?strict=1"
+readonly DATA_DIR="/data"
 readonly MAX_FAILURES=3
 readonly CHECK_RETRY_SECONDS=300
 
@@ -50,6 +52,70 @@ clear_failure_state() {
   unlink "${CHECK_RETRY_FILE}" 2>/dev/null || true
 }
 
+recover_current_app_if_stopped() {
+  local revision="$1"
+  local container_ids count container_id restart_policy body
+  if ! container_ids="$(timeout 30 docker ps \
+    --filter 'label=com.docker.compose.project=oracle' \
+    --filter 'label=com.docker.compose.service=app' \
+    --format '{{.ID}}')"; then
+    log "Docker state is temporarily unavailable."
+    return 75
+  fi
+  count="$(awk 'NF { count += 1 } END { print count + 0 }' <<<"${container_ids}")"
+  if [[ "${count}" == "1" ]]; then
+    container_id="$(awk 'NF { print; exit }' <<<"${container_ids}")"
+    if ! restart_policy="$(timeout 30 docker inspect \
+      --format '{{.HostConfig.RestartPolicy.Name}}' "${container_id}")"; then
+      log "ERROR: could not inspect the accepted app restart policy."
+      return 1
+    fi
+    if [[ "${restart_policy}" != "no" ]]; then
+      log "disabling Docker-level restart so only the mount-gated systemd unit can start the writer."
+      if ! timeout 30 docker update --restart=no "${container_id}" >/dev/null; then
+        log "ERROR: could not disable Docker-level app restart."
+        return 1
+      fi
+    fi
+    if [[ "$(timeout 30 docker inspect \
+      --format '{{.HostConfig.RestartPolicy.Name}}' "${container_id}")" != "no" ]]; then
+      log "ERROR: accepted app restart policy is not no."
+      return 1
+    fi
+    return 0
+  fi
+  if [[ "${count}" != "0" ]]; then
+    log "ERROR: expected at most one app container, found ${count}; refusing recovery."
+    return 1
+  fi
+  if ! mountpoint -q "${DATA_DIR}"; then
+    log "ERROR: ${DATA_DIR} is not mounted; refusing to start the SQLite writer."
+    return 1
+  fi
+
+  log "the accepted app container is stopped; restarting it through the mount-gated systemd unit."
+  if ! timeout --signal=TERM --kill-after=30s 600 \
+    systemctl restart usage-monitor.service; then
+    log "ERROR: mount-gated usage-monitor.service recovery failed."
+    return 1
+  fi
+  for _ in {1..60}; do
+    if body="$(curl -fsS --max-time 5 "${PUBLIC_READY_URL}" 2>/dev/null)" && \
+      jq -e --arg revision "${revision}" '
+        .status == "ready" and .revision == $revision and
+        .checks.database.ok == true and .checks.backup.ok == true and
+        .checks.backup.required == true and .checks.scheduler.ok == true and
+        .checks.scheduler.required == true
+      ' >/dev/null <<<"${body}"; then
+      log "mount-gated recovery restored accepted revision ${revision}."
+      return 0
+    fi
+    sleep 5
+  done
+  log "ERROR: recovered app did not become ready at ${revision} within ten minutes."
+  return 1
+}
+
 if [[ "${EUID}" -ne 0 ]]; then
   log "ERROR: must run as root."
   exit 1
@@ -67,8 +133,36 @@ if (( $# != 0 )); then
   exit 64
 fi
 
+# Recovery and the deployment transaction share one lock. This prevents a
+# timer pass from reviving the accepted writer while a manual transaction is
+# inside its deliberate writer-stop cutover window.
+exec 8>"${LOCK_FILE}"
+if ! flock -w 10 8; then
+  log "deployment lock is already held; deferring app recovery."
+  exit 75
+fi
+
+current_sha="$(read_env_value "${HOST_ENV}" USAGE_MONITOR_REVISION)"
+if [[ ! "${current_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+  log "ERROR: host state contains no valid accepted revision."
+  exit 1
+fi
+set +e
+recover_current_app_if_stopped "${current_sha}"
+recovery_status=$?
+set -e
+if (( recovery_status != 0 )); then
+  exit "${recovery_status}"
+fi
+
+# The child transaction acquires this same lock itself. Release the recovery
+# lease first so the timer never self-deadlocks; any competing transaction that
+# wins the gap remains protected and makes the child defer with status 75.
+flock -u 8
+exec 8>&-
+
 if [[ -e "${PAUSE_FILE}" ]]; then
-  log "paused by ${PAUSE_FILE}."
+  log "deployments paused by ${PAUSE_FILE}; mount-gated app recovery remains active."
   exit 0
 fi
 
@@ -98,7 +192,6 @@ if [[ -f "${CHECK_RETRY_FILE}" ]]; then
   unlink "${CHECK_RETRY_FILE}"
 fi
 
-current_sha="$(read_env_value "${HOST_ENV}" USAGE_MONITOR_REVISION)"
 if [[ "${current_sha}" == "${target_sha}" ]]; then
   if curl -fsS --max-time 15 "${PUBLIC_READY_URL}" \
     | jq -e --arg revision "${target_sha}" \

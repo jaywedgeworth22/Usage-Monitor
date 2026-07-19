@@ -68,6 +68,14 @@ an operator fixes a transient external condition,
 `sudo /usr/local/sbin/usage-monitor-auto-deploy --retry-blocked` explicitly
 rearms the same SHA.
 
+The app container permanently keeps Docker restart policy `no`. This prevents
+the Docker daemon from starting the SQLite writer against a boot-disk `/data`
+directory before the block volume mounts. Only `usage-monitor.service` starts
+the app, with mount conditions enforced; the timer can recover a stopped
+accepted revision through that unit even while new deployments are paused.
+Recovery and deployment use the same host lock, so the timer cannot revive the
+previous writer during a manual transaction's intentional cutover stop.
+
 Each transaction builds in a root-owned exact-SHA release checkout while the
 old app remains live. It validates a target-image migration against a
 transaction-consistent scratch database before stopping anything. The brief
