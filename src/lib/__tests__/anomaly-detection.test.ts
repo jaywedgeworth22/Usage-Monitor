@@ -160,7 +160,7 @@ describe("resolveAnomalyConfig", () => {
       ANOMALY_CRITICAL_SIGMA: "2", // below threshold → clamped up to threshold
       ANOMALY_MIN_COST_USD: "5",
       ANOMALY_DIRECTION: "both",
-    } as NodeJS.ProcessEnv);
+    });
     expect(config.enabled).toBe(false);
     expect(config.windowDays).toBe(30);
     expect(config.sigmaThreshold).toBe(4);
