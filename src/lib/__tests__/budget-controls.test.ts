@@ -293,8 +293,8 @@ describe("readBudgetControlConfig + budgetAutoControlsEnabled", () => {
 });
 
 describe("budgetPollingPaused (scheduler gate)", () => {
-  const on = { BUDGET_AUTO_CONTROLS_ENABLED: "true" } as NodeJS.ProcessEnv;
-  const off = {} as NodeJS.ProcessEnv;
+  const on = { BUDGET_AUTO_CONTROLS_ENABLED: "true" };
+  const off = {};
 
   it("returns false whenever the master flag is off, even for a paused opted-in provider", () => {
     expect(

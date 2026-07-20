@@ -17,17 +17,17 @@ let applyBudgetControls: typeof import("../budget-controls").applyBudgetControls
 
 let testDir: string;
 
-const ON_TICKS_1: NodeJS.ProcessEnv = {
+const ON_TICKS_1: Partial<NodeJS.ProcessEnv> = {
   BUDGET_AUTO_CONTROLS_ENABLED: "true",
   BUDGET_CONTROL_BREACH_TICKS: "1",
   BUDGET_CONTROL_COOLDOWN_MS: "0",
 };
-const ON_TICKS_3: NodeJS.ProcessEnv = {
+const ON_TICKS_3: Partial<NodeJS.ProcessEnv> = {
   BUDGET_AUTO_CONTROLS_ENABLED: "true",
   BUDGET_CONTROL_BREACH_TICKS: "3",
   BUDGET_CONTROL_COOLDOWN_MS: "0",
 };
-const OFF_ENV: NodeJS.ProcessEnv = { BUDGET_AUTO_CONTROLS_ENABLED: "false" };
+const OFF_ENV: Partial<NodeJS.ProcessEnv> = { BUDGET_AUTO_CONTROLS_ENABLED: "false" };
 
 const MARCH = new Date("2026-03-10T00:00:00.000Z");
 const APRIL = new Date("2026-04-02T00:00:00.000Z");

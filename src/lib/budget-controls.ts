@@ -88,13 +88,13 @@ function boundedNumber(
 
 /** Master gate. When false the entire control layer is inert (byte-identical to notify-only). */
 export function budgetAutoControlsEnabled(
-  env: NodeJS.ProcessEnv = process.env
+  env: Partial<NodeJS.ProcessEnv> = process.env
 ): boolean {
   return parseBooleanFlag(env.BUDGET_AUTO_CONTROLS_ENABLED);
 }
 
 export function readBudgetControlConfig(
-  env: NodeJS.ProcessEnv = process.env
+  env: Partial<NodeJS.ProcessEnv> = process.env
 ): BudgetControlConfig {
   return {
     masterEnabled: budgetAutoControlsEnabled(env),
@@ -462,7 +462,7 @@ type BudgetControlsPrisma = Pick<
 
 export interface ApplyBudgetControlsOptions {
   now?: Date;
-  env?: NodeJS.ProcessEnv;
+  env?: Partial<NodeJS.ProcessEnv>;
   prismaClient?: BudgetControlsPrisma;
   computeStatus?: (
     now: Date
@@ -682,7 +682,7 @@ export function budgetPollingPaused(
     budgetControlsEnabled?: boolean | null;
     budgetPausedAt?: Date | null;
   },
-  env: NodeJS.ProcessEnv = process.env
+  env: Partial<NodeJS.ProcessEnv> = process.env
 ): boolean {
   if (!budgetAutoControlsEnabled(env)) return false;
   return Boolean(provider.budgetControlsEnabled) && provider.budgetPausedAt != null;
