@@ -17,6 +17,8 @@ import { buildCanonicalProjectIdMap } from "@/lib/project-resolver";
 import { buildProviderAlertState, type ProviderAlert } from "@/lib/provider-alerts";
 import { getExternalEventRawCutoff } from "@/lib/data-retention";
 import { calculateEomForecast } from "@/lib/forecasting";
+import { resolveAnomalyConfig, type AnomalyResult } from "@/lib/anomaly-detection";
+import { loadSpendAnomaliesByProviderId } from "@/lib/anomaly-loader";
 import { advancePeriod, isSubscriptionInterval } from "@/lib/subscriptions";
 import {
   canLinkSubscriptionToExternalBilling,
@@ -54,6 +56,9 @@ export interface ProviderBudgetStatus {
   fixedMonthlyCostUsd: number;
   snapshotCostUsd: number | null;
   snapshotCostFetchedAt: string | null;
+  snapshotCostWindowStart: string | null;
+  snapshotCostWindowEnd: string | null;
+  snapshotCostScope: string | null;
   snapshotFixedCostIncludedUsd: number;
   snapshotCostIncludesUnknownFixed: boolean;
   pushedMonthToDateUsd: number;
@@ -272,6 +277,11 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
             rollupRole: true,
             syncedAt: true,
           },
+        },
+        usageReconciliations: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { deltaUsd: true, status: true },
         },
       },
     }),
@@ -500,6 +510,21 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
     bucket.unpricedEventCount += pushed.unpricedEventCount;
     bucket.unclassifiedCostEventCount += pushed.unclassifiedCostEventCount;
     pushedByProviderId.set(owner.id, bucket);
+  }
+
+  // Statistical spike/anomaly detection over per-provider daily spend history.
+  // Env-gated (ANOMALY_ALERTS_ENABLED) and fully defensive: any failure or a
+  // partial/mocked DB degrades to "no anomalies" rather than breaking the
+  // canonical budget computation. The detector + robustness live in
+  // anomaly-detection.ts; the loader is one capped, scalar-only snapshot query.
+  const anomalyConfig = resolveAnomalyConfig();
+  let anomaliesByProviderId = new Map<string, AnomalyResult[]>();
+  if (anomalyConfig.enabled) {
+    try {
+      anomaliesByProviderId = await loadSpendAnomaliesByProviderId(now, anomalyConfig);
+    } catch (error) {
+      console.warn("[anomaly-detection] spend anomaly load failed; skipping", error);
+    }
   }
 
   const providerStatuses: ProviderBudgetStatus[] = providers.map((p) => {
@@ -845,11 +870,18 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
         },
         trackedSpendUsd: spentUsd,
         fixedAccruedUsd,
+        reconciliationDiscrepancyUsd: p.usageReconciliations?.[0]?.status === "discrepancy" ? p.usageReconciliations[0].deltaUsd : null,
+        anomalies: anomaliesByProviderId.get(p.id),
       },
       now
     );
     const budgetAlerts = alertState.alerts.filter(
-      (a) => a.code === "budget_exceeded" || a.code === "budget_warning"
+      (a) =>
+        a.code === "budget_exceeded" ||
+        a.code === "budget_warning" ||
+        a.code === "usage_reconciliation_discrepancy" ||
+        a.code === "spend_anomaly" ||
+        a.code === "request_anomaly"
     );
     if (fixedCostConflict) {
       budgetAlerts.push({
@@ -908,6 +940,15 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       snapshotCostFetchedAt: billingSnapshotQuarantined
         ? null
         : latestCostSnapshot?.fetchedAt.toISOString() ?? null,
+      snapshotCostWindowStart: billingSnapshotQuarantined
+        ? null
+        : latestCostSnapshot?.costWindowStart?.toISOString() ?? null,
+      snapshotCostWindowEnd: billingSnapshotQuarantined
+        ? null
+        : latestCostSnapshot?.costWindowEnd?.toISOString() ?? null,
+      snapshotCostScope: billingSnapshotQuarantined
+        ? null
+        : latestCostSnapshot?.costScope ?? null,
       snapshotFixedCostIncludedUsd,
       snapshotCostIncludesUnknownFixed,
       pushedMonthToDateUsd,
@@ -1038,6 +1079,20 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
 //     last good cached value keeps being served. A blocking (cold-start)
 //     compute that throws propagates the error as before - there is no
 //     "last good value" to fall back to yet.
+//   - Explicit invalidation (bustBudgetStatusCache, called by the project and
+//     provider mutation routes) drops the entry AND bumps a generation
+//     counter. The generation is required for correctness: the cache key is
+//     just the month-start string, which an invalidation does not change, so
+//     ownership of the in-flight slot is (key, generation). Without it, a
+//     refresh that began before the mutation still matched on key at
+//     completion - because a post-bust caller had re-claimed the slot for the
+//     same month - and would write its pre-mutation snapshot into the
+//     just-busted cache, clear the slot out from under the post-bust refresh,
+//     and thereby get that refresh's correct result discarded. The user then
+//     saw the deleted project (or the missing new one) for another full TTL.
+//     With the generation, pre-invalidation work can never be published:
+//     worst case it is discarded and the next reader pays a cold compute,
+//     which is the fail-safe direction (slower, never wrong).
 //
 // Disabled under the Vitest test runner by default: the existing test suite
 // calls computeBudgetStatus/computeProjectBudgetStatus repeatedly with a
@@ -1066,11 +1121,19 @@ function createStaleWhileRevalidateCache<T>(options: {
   ttlMs: () => number;
 }) {
   let entry: StaleWhileRevalidateCacheEntry<T> | null = null;
-  // The key of the refresh that currently "owns" refreshPromise. A refresh
-  // only writes to `entry` / clears these two slots while it still owns
-  // them at completion - see the file comment above.
+  // The key AND generation of the refresh that currently "owns"
+  // refreshPromise. A refresh only writes to `entry` / clears these slots
+  // while it still owns them at completion - see the file comment above.
   let refreshPromise: Promise<void> | null = null;
   let refreshKey: string | null = null;
+  let refreshGeneration = -1;
+  // Bumped by invalidate(). The cache key alone (a month-start string) cannot
+  // express "the underlying rows changed", so ownership is (key, generation):
+  // without the generation, a refresh that started BEFORE an invalidation
+  // still saw `refreshKey === key` at completion - because a post-invalidation
+  // caller had re-claimed the slot for the same month - and wrote its
+  // pre-mutation snapshot into the freshly-busted cache.
+  let generation = 0;
   let override: boolean | null = null;
 
   function enabled(): boolean {
@@ -1078,7 +1141,11 @@ function createStaleWhileRevalidateCache<T>(options: {
     return process.env.VITEST !== "true";
   }
 
-  async function refresh(now: Date, key: string): Promise<void> {
+  function ownsSlot(key: string, gen: number): boolean {
+    return refreshKey === key && refreshGeneration === gen;
+  }
+
+  async function refresh(now: Date, key: string, gen: number): Promise<void> {
     try {
       const value = await options.compute(now);
       // Only adopt this result if a newer request hasn't already taken over
@@ -1086,7 +1153,14 @@ function createStaleWhileRevalidateCache<T>(options: {
       // fresh compute for the new key while this now-stale-key refresh was
       // still in flight) - otherwise a slow, superseded refresh could
       // clobber a more current cache entry after the fact.
-      if (refreshKey === key) {
+      //
+      // `generation === gen` additionally rejects a result computed from rows
+      // read BEFORE an invalidation: that data is known-stale by definition,
+      // so it must never be published, even though its month key still
+      // matches. Discarding is the fail-safe direction - the next reader just
+      // recomputes (today's cold-cache cost) rather than being served numbers
+      // the user has already invalidated.
+      if (ownsSlot(key, gen) && generation === gen) {
         entry = { key, value, computedAt: Date.now() };
       }
     } catch (error) {
@@ -1105,9 +1179,15 @@ function createStaleWhileRevalidateCache<T>(options: {
         throw error;
       }
     } finally {
-      if (refreshKey === key) {
+      // Only clear the slot if we still own it. Checking the generation too
+      // stops a superseded pre-invalidation refresh from releasing the slot
+      // that a post-invalidation refresh has since claimed - which used to
+      // make that newer refresh fail its own ownership check and throw away
+      // its (correct) result.
+      if (ownsSlot(key, gen)) {
         refreshPromise = null;
         refreshKey = null;
+        refreshGeneration = -1;
       }
     }
   }
@@ -1122,13 +1202,15 @@ function createStaleWhileRevalidateCache<T>(options: {
     if (cached && cached.key === key) {
       if (
         Date.now() - cached.computedAt >= options.ttlMs() &&
-        !(refreshPromise && refreshKey === key)
+        !(refreshPromise && ownsSlot(key, generation))
       ) {
         // Fire-and-forget: don't let a slow/failing background refresh delay
         // (or, via an unhandled rejection, crash) the caller that happened
         // to notice the value was stale.
+        const gen = generation;
         refreshKey = key;
-        refreshPromise = refresh(now, key).catch(() => {});
+        refreshGeneration = gen;
+        refreshPromise = refresh(now, key, gen).catch(() => {});
       }
       return cached.value;
     }
@@ -1140,12 +1222,17 @@ function createStaleWhileRevalidateCache<T>(options: {
     // own rollover) must never be awaited here: it would resolve to the
     // wrong key's data and could block us needlessly.
     for (;;) {
+      // Re-read the generation each attempt: an invalidation that lands while
+      // we are awaiting must send us round the loop for a genuinely fresh
+      // compute rather than letting us adopt pre-invalidation work.
+      const gen = generation;
       let inFlight: Promise<void>;
-      if (refreshPromise && refreshKey === key) {
+      if (refreshPromise && ownsSlot(key, gen)) {
         inFlight = refreshPromise;
       } else {
         refreshKey = key;
-        inFlight = refresh(now, key);
+        refreshGeneration = gen;
+        inFlight = refresh(now, key, gen);
         refreshPromise = inFlight;
       }
       await inFlight;
@@ -1158,15 +1245,25 @@ function createStaleWhileRevalidateCache<T>(options: {
     }
   }
 
+  function invalidate(): void {
+    // Bumping the generation is what actually evicts in-flight work: any
+    // refresh already running was computed from pre-invalidation rows, so it
+    // loses ownership here and its result is dropped on completion.
+    generation++;
+    entry = null;
+    refreshPromise = null;
+    refreshKey = null;
+    refreshGeneration = -1;
+  }
+
   return {
     get,
+    invalidate,
     setOverrideForTests(value: boolean | null): void {
       override = value;
     },
     resetForTests(): void {
-      entry = null;
-      refreshPromise = null;
-      refreshKey = null;
+      invalidate();
     },
   };
 }
@@ -1202,6 +1299,30 @@ export function __setBudgetStatusCacheOverrideForTests(enabled: boolean | null):
 /** Test-only: drop any cached value/in-flight refresh so the next call recomputes from scratch. */
 export function __resetBudgetStatusCacheForTests(): void {
   budgetStatusSwrCache.resetForTests();
+}
+
+/**
+ * Invalidate both the computeBudgetStatus and computeProjectBudgetStatus
+ * caches, so the next read of either recomputes from current rows.
+ *
+ * Call this from a mutation AFTER its write has committed, whenever that write
+ * changes what these summaries report: provider create/update/delete and
+ * project create/update/delete. Both caches are always busted together -
+ * computeProjectBudgetStatus's output embeds computeBudgetStatus's, so
+ * invalidating only one would leave the other serving a contradicting view.
+ *
+ * Deliberately NOT wired to usage ingest (/api/ingest/usage, OTLP, scheduled
+ * fetches): those write continuously, and busting per event would defeat the
+ * cache entirely and restore the ~11s page loads it exists to prevent. Usage
+ * numbers stay TTL-eventual (BUDGET_STATUS_CACHE_TTL_MS, default 60s), exactly
+ * as before; only user-visible add/remove/edit actions are made immediate.
+ *
+ * Invalidation is generation-based, so a refresh that started before this call
+ * cannot publish its (pre-mutation) result afterwards.
+ */
+export function bustBudgetStatusCache(): void {
+  budgetStatusSwrCache.invalidate();
+  projectBudgetStatusSwrCache.invalidate();
 }
 
 export async function computeBudgetStatus(now: Date = new Date()): Promise<BudgetStatusResponse> {

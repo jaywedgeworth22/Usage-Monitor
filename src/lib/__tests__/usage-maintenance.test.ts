@@ -65,6 +65,24 @@ function dependencies(
     rollForwardRenewals: vi.fn(async () => providerRenewals),
     runRetention: vi.fn(async () => retention),
     deliverAlerts,
+    verifyOpenRouterGenerations: vi.fn(async () => ({
+      examined: 0,
+      matched: 0,
+      discrepancies: 0,
+      errors: 0,
+      exhausted: 0,
+      verifiedCount: 0,
+      truncated: false,
+      degraded: false,
+    })),
+    reconcileProviderUsage: vi.fn(async () => ({
+      examined: 0,
+      reconciled: 0,
+      discrepancies: 0,
+      unverifiable: 0,
+      pending: 0,
+      reconciledCount: 0,
+    })),
   };
 }
 
@@ -188,6 +206,24 @@ describe("runUsageMaintenance", () => {
           model: "ProviderAlertNotification",
           message: "SQLite socket timeout",
         },
+      },
+      openrouterVerification: {
+        examined: 0,
+        matched: 0,
+        discrepancies: 0,
+        errors: 0,
+        exhausted: 0,
+        verifiedCount: 0,
+        truncated: false,
+        degraded: false,
+      },
+      reconciliation: {
+        examined: 0,
+        reconciled: 0,
+        discrepancies: 0,
+        unverifiable: 0,
+        pending: 0,
+        reconciledCount: 0,
       },
     });
     expect(isUsageMaintenanceHealthy(result)).toBe(false);
