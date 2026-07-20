@@ -129,6 +129,28 @@ targets:
     dependencies:
       - target: UsageMonitor
 
+  # -------------------------------------------------------------------------
+  # Widget unit tests — the widget's pure presentation logic compiled into a
+  # standalone test bundle (app-extension symbols can't be imported by the Kit
+  # tests or the app test bundle, so WidgetPresentation.swift is compiled in
+  # directly alongside the tests).
+  # -------------------------------------------------------------------------
+  UsageMonitorWidgetTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: UsageMonitorWidgetTests
+      - path: UsageMonitorWidget/WidgetPresentation.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: services.jays.usage.monitor.widgettests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - package: UsageMonitorKit
+        product: DesignSystem
+      - package: UsageMonitorKit
+        product: WidgetShared
+
 schemes:
   UsageMonitor:
     build:
@@ -141,3 +163,4 @@ schemes:
       config: Debug
       targets:
         - UsageMonitorTests
+        - UsageMonitorWidgetTests

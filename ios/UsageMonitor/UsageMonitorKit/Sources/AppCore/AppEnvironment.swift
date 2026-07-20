@@ -30,6 +30,12 @@ public final class AppEnvironment {
     /// The shared budget-status store. Every budget-driven feature reads this.
     public let budgetStore: BudgetStore
 
+    /// Programmatic tab selection, wired by the app shell (`RootView`). Lets any
+    /// feature lane request a jump to another tab — e.g. a "No API token" error
+    /// state offering "Connect your monitor" that lands the user on Settings, so
+    /// no screen is ever a dead end. `nil` in previews/tests (no shell attached).
+    public var selectTab: ((AppTab) -> Void)?
+
     private let tokenStore: TokenStoring
 
     /// - Parameters:
@@ -40,10 +46,15 @@ public final class AppEnvironment {
     ///     cache + widget snapshot). Defaults to a no-op; the app target wires
     ///     the real `OfflineCache`/`WidgetShared` adapter.
     public init(
-        settings: AppSettings = AppSettings(),
-        tokenStore: TokenStoring = KeychainTokenStore(),
+        settings: AppSettings? = nil,
+        tokenStore: TokenStoring? = nil,
         snapshotSink: BudgetSnapshotSink = NullBudgetSnapshotSink()
     ) {
+        // Construct the defaults here (inside the MainActor-isolated init body)
+        // rather than as default-argument expressions, which are evaluated in a
+        // nonisolated context and cannot call these @MainActor initializers.
+        let settings = settings ?? AppSettings()
+        let tokenStore = tokenStore ?? KeychainTokenStore()
         self.settings = settings
         self.tokenStore = tokenStore
         let configuration = Self.resolveConfiguration(host: settings.baseHost)

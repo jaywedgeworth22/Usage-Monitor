@@ -64,6 +64,17 @@
                ReferencedContainer = "container:UsageMonitor.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "697B0B4631A2FF72678DE8B3"
+               BuildableName = "UsageMonitorWidgetTests.xctest"
+               BlueprintName = "UsageMonitorWidgetTests"
+               ReferencedContainer = "container:UsageMonitor.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

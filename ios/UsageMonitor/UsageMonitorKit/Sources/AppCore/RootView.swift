@@ -73,7 +73,10 @@ public struct AppFeatures {
 public struct RootView: View {
     private let environment: AppEnvironment
     private let features: AppFeatures
-    @State private var selection: AppTab
+    @State private var internalSelection: AppTab
+    /// When the app drives tab selection externally (deep links / push taps),
+    /// it passes a binding; otherwise the shell owns selection internally.
+    private let externalSelection: Binding<AppTab>?
 
     public init(
         environment: AppEnvironment,
@@ -82,11 +85,32 @@ public struct RootView: View {
     ) {
         self.environment = environment
         self.features = features
-        self._selection = State(initialValue: initialTab)
+        self.externalSelection = nil
+        self._internalSelection = State(initialValue: initialTab)
+    }
+
+    /// Selection-driven initializer: the app owns an `AppTab` state (seeded from
+    /// a cold-launch deep link and updated on warm-launch notification taps) and
+    /// passes it here so tab switching can be driven programmatically.
+    public init(
+        environment: AppEnvironment,
+        features: AppFeatures,
+        selection: Binding<AppTab>
+    ) {
+        self.environment = environment
+        self.features = features
+        self.externalSelection = selection
+        self._internalSelection = State(initialValue: selection.wrappedValue)
+    }
+
+    /// The effective selection binding: the app-provided one when present, else
+    /// the shell's own state.
+    private var selection: Binding<AppTab> {
+        externalSelection ?? $internalSelection
     }
 
     public var body: some View {
-        TabView(selection: $selection) {
+        TabView(selection: selection) {
             tab(.dashboard) { features.dashboard() }
             tab(.providers) { features.providers() }
             tab(.alerts) { features.alerts() }
@@ -94,6 +118,12 @@ public struct RootView: View {
             tab(.settings) { features.settings() }
         }
         .tint(Theme.Colors.accent)
+        // Give every lane a way to drive tab selection (e.g. an error-state CTA
+        // that jumps to Settings). Bound here because the shell owns selection.
+        .onAppear {
+            let binding = selection
+            environment.selectTab = { binding.wrappedValue = $0 }
+        }
         // Canonical injection: everything is reachable via AppEnvironment;
         // BudgetStore and AppSettings are also provided directly for ergonomic
         // `@Environment(BudgetStore.self)` / `@Environment(AppSettings.self)`.

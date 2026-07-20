@@ -10,14 +10,30 @@ public enum CurrencyFormat {
     }
 
     /// Compact money for tiles/widgets: `$1.2K`, `$948`, `$4.16`.
+    ///
+    /// The compact-name branch is hand-rolled rather than using
+    /// `.notation(.compactName)` because that modifier is iOS 18+ and the app
+    /// targets iOS 17. This produces the same `$1.2K` / `$3.4M` / `$1.1B`
+    /// shapes on iOS 17.
     public static func compactUSD(_ value: Double) -> String {
         let magnitude = abs(value)
         if magnitude >= 1_000 {
-            return value.formatted(
-                .currency(code: "USD")
-                    .notation(.compactName)
-                    .precision(.fractionLength(0...1))
-            )
+            let sign = value < 0 ? "-" : ""
+            let scaled: Double
+            let suffix: String
+            switch magnitude {
+            case 1_000_000_000...:
+                scaled = value / 1_000_000_000
+                suffix = "B"
+            case 1_000_000...:
+                scaled = value / 1_000_000
+                suffix = "M"
+            default:
+                scaled = value / 1_000
+                suffix = "K"
+            }
+            let number = abs(scaled).formatted(.number.precision(.fractionLength(0...1)))
+            return "\(sign)$\(number)\(suffix)"
         }
         if magnitude >= 100 {
             return value.formatted(.currency(code: "USD").precision(.fractionLength(0)))

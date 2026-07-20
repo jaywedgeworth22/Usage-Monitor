@@ -160,8 +160,8 @@ public extension BudgetStatusResponse {
         ok: true,
         generatedAt: "2026-07-19T09:15:00.000Z",
         month: "2026-07",
-        providers: .sampleList,
-        projects: .sampleList,
+        providers: ProviderBudgetStatus.sampleList,
+        projects: ProjectBudgetStatus.sampleList,
         summary: .sample
     )
 

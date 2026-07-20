@@ -1,13 +1,21 @@
 import SwiftUI
 
-/// A centered error state with a title, message, and (when the failure is
-/// retryable) a "Try again" button. Feature view-models pass the mapped title
-/// and message from their typed error; whether to offer retry is the caller's
-/// decision (e.g. `APIError.isRetryable`).
+/// A centered error state with a title, message, an optional prominent call to
+/// action (e.g. "Connect your monitor" for a non-retryable-but-actionable
+/// failure), and — when the failure is retryable — a "Try again" button.
+///
+/// Feature view-models pass the mapped title and message from their typed error;
+/// whether to offer retry is the caller's decision (e.g. `APIError.isRetryable`).
+/// The prominent `action` is for failures that *can't* be retried in place but
+/// still have a clear next step (missing token → open Settings), so the user is
+/// never left at a dead end.
 public struct ErrorState: View {
     private let systemImage: String
     private let title: String
     private let message: String
+    private let actionTitle: String?
+    private let actionSystemImage: String
+    private let action: (() -> Void)?
     private let retryTitle: String?
     private let retry: (() -> Void)?
 
@@ -15,12 +23,18 @@ public struct ErrorState: View {
         systemImage: String = "exclamationmark.triangle.fill",
         title: String,
         message: String,
+        actionTitle: String? = nil,
+        actionSystemImage: String = "arrow.right.circle.fill",
+        action: (() -> Void)? = nil,
         retryTitle: String? = "Try again",
         retry: (() -> Void)? = nil
     ) {
         self.systemImage = systemImage
         self.title = title
         self.message = message
+        self.actionTitle = actionTitle
+        self.actionSystemImage = actionSystemImage
+        self.action = action
         self.retryTitle = retryTitle
         self.retry = retry
     }
@@ -42,6 +56,17 @@ public struct ErrorState: View {
                     .font(Theme.Typography.callout)
                     .foregroundStyle(Theme.Colors.secondaryText)
                     .multilineTextAlignment(.center)
+            }
+
+            if let actionTitle, let action {
+                Button(action: action) {
+                    Label(actionTitle, systemImage: actionSystemImage)
+                        .font(Theme.Typography.callout.weight(.semibold))
+                        .padding(.horizontal, Theme.Spacing.lg)
+                        .padding(.vertical, Theme.Spacing.sm)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.Colors.accent)
             }
 
             if let retryTitle, let retry {

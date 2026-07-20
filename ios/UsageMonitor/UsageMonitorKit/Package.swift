@@ -74,7 +74,7 @@ let package = Package(
         ),
         .target(
             name: "Settings",
-            dependencies: ["AppCore", "DesignSystem", "Networking", "Models"]
+            dependencies: ["AppCore", "DesignSystem", "Networking", "Models", "PushScaffold"]
         ),
 
         // ---- Integrations (one target each) -----------------------------
@@ -88,7 +88,12 @@ let package = Package(
         // ---- Tests (foundation-owned; feature agents add their own) -----
         .testTarget(
             name: "UsageMonitorKitTests",
-            dependencies: ["Models", "Networking", "AppCore", "DesignSystem"]
+            dependencies: [
+                "Models", "Networking", "AppCore", "DesignSystem",
+                "Dashboard", "Providers", "Alerts", "ProjectBudgets",
+                "Settings", "AppLock", "OfflineCache", "WidgetShared",
+                "PushScaffold",
+            ]
         ),
     ]
 )
