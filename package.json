@@ -61,7 +61,7 @@
     "autoprefixer": "^10.5.4",
     "dotenv": "^16.6.1",
     "eslint": "^8.57.1",
-    "eslint-config-next": "^15.5.19",
+    "eslint-config-next": "^16.2.10",
     "pg": "^8.22.0",
     "postcss": "^8.5.10",
     "prisma": "^6.0.0",
