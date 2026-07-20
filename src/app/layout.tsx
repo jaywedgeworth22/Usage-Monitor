@@ -4,7 +4,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "API Usage Monitor",
+  title: "Usage Monitor",
   description: "Monitor usage and balance across multiple API providers",
   robots: {
     index: false,
@@ -25,6 +25,20 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var d = localStorage.getItem('display-density') || 'comfortable';
+                  document.documentElement.classList.add('density-' + d);
+                } catch (e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
       <body className="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 antialiased min-h-screen">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <Nav />

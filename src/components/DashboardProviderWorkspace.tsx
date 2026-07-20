@@ -18,7 +18,10 @@ import type {
 } from "@/components/ProviderCard";
 import type { SubscriptionRow } from "@/components/SubscriptionsPanel";
 import SortHeader, { type SortDirection } from "@/components/table/SortHeader";
+import { costCoverageHelpText } from "@/lib/cost-coverage-help";
 import { providerFinancialSemantics } from "@/lib/provider-financial-semantics";
+import { aggregateProviderFamilyMoney } from "@/lib/provider-money-aggregation";
+import { canonicalProviderKey } from "@/lib/provider-identity";
 
 interface WorkspaceProvider {
   id: string;
@@ -27,6 +30,10 @@ interface WorkspaceProvider {
   type: string;
   isActive: boolean;
   groupId: string | null;
+  billingAccount?: {
+    matchKey: string;
+    evidence: "explicit_account" | "shared_credential";
+  } | null;
   label: string | null;
   keyPreview?: string | null;
   geminiKeyStatus?: {
@@ -56,6 +63,17 @@ interface WorkspaceProvider {
   receiptCashPaidUsd?: number;
   receiptCashEventCount?: number;
   observedVariableUsageUsd?: number;
+  snapshotCostUsd?: number | null;
+  snapshotCostFetchedAt?: string | null;
+  snapshotCostWindowStart?: string | null;
+  snapshotCostWindowEnd?: string | null;
+  snapshotCostScope?: string | null;
+  pushedMonthToDateUsd?: number;
+  subscriptionMonthToDateUsd?: number;
+  fixedMonthlyCostUsd?: number;
+  linkedFixedDedupeUsd?: number;
+  forecastedSubscriptionRenewalsUsd?: number;
+  snapshotFixedCostIncludedUsd?: number;
   estimatedApiEquivalentUsd?: number;
   spendCoverage: ProviderCostCoverage;
   costCoverageCaveat?: ProviderCostCoverageCaveat | null;
@@ -186,7 +204,7 @@ const FILTER_CHIPS: ReadonlyArray<readonly [FilterChip, string]> = [
 ];
 
 function familyKey(provider: WorkspaceProvider): string {
-  return provider.name.trim().toLowerCase() || provider.type.trim().toLowerCase() || provider.id;
+  return canonicalProviderKey(provider.name) || provider.type.trim().toLowerCase() || provider.id;
 }
 
 function familyDisplayName(providers: WorkspaceProvider[]): string {
@@ -317,7 +335,17 @@ export function formatRelativeTime(value: string | null, nowMs: number): string 
 }
 
 function costCoverageLabel(family: ProviderFamily): string {
-  if (!family.financialsAggregated) return "Not aggregated";
+  if (!family.financialsAggregated) return "Account identity unresolved";
+  // Only a genuinely multi-account family needs this coarser "some member
+  // isn't complete" signal — family.providers[0] is an arbitrary pick once
+  // there's more than one, so per-coverage nuance (complete/partial/unknown/
+  // legacy_unknown) is no longer meaningful at the family level. For a single
+  // provider, family.providers[0] IS the authoritative account: defer to the
+  // switch below so a fully "unknown" reading is never relabeled "Partial",
+  // which would wrongly imply some known-good amount exists.
+  if (family.providers.length > 1 && family.incompleteCostCount > 0) {
+    return "Partial";
+  }
   switch (family.providers[0]?.spendCoverage) {
     case "complete":
       return "Complete";
@@ -326,6 +354,19 @@ function costCoverageLabel(family: ProviderFamily): string {
     default:
       return "Unknown";
   }
+}
+
+/** Plain-language tooltip to pair with `costCoverageLabel` above - same
+ * "Complete"/"Partial"/"Unknown" branching, but returning the coverage kind
+ * `costCoverageHelpText` expects rather than the short display label. Null
+ * for the "Account identity unresolved" case, which isn't one of the four
+ * cost-coverage states and has its own explanation in the UI already. */
+function familyCostCoverageKind(family: ProviderFamily): ProviderCostCoverage | null {
+  if (!family.financialsAggregated) return null;
+  if (family.providers.length > 1 && family.incompleteCostCount > 0) {
+    return "partial";
+  }
+  return family.providers[0]?.spendCoverage ?? "unknown";
 }
 
 function childLabel(provider: WorkspaceProvider): string {
@@ -556,7 +597,14 @@ function CompactFamilyCells({
       : family.projectedUsd != null
         ? `${formatCurrency(family.projectedUsd)} projected`
         : "Projection unavailable";
-  const spendTitle = `${budgetOrProjectionText} · Coverage: ${costCoverageLabel(family)}`;
+  const coverageKind = familyCostCoverageKind(family);
+  const spendTitle = [
+    budgetOrProjectionText,
+    `Coverage: ${costCoverageLabel(family)}`,
+    coverageKind && coverageKind !== "complete" ? costCoverageHelpText(coverageKind) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const creditsBalanceTitle = `${financialSemantics.creditsLabel} ${formatNumber(family.credits)} · ${financialSemantics.balanceLabel} ${formatCurrency(family.balance)}`;
 
@@ -626,8 +674,8 @@ function CompactFamilyCells({
         ) : (
           <span className="block" title={`Coverage: ${costCoverageLabel(family)}`}>
             <span className="flex items-center gap-1.5 text-sm font-semibold text-gray-900 dark:text-gray-100 sm:whitespace-nowrap">
-              Not aggregated <span aria-hidden="true" className={dotClass} />
-              <span className="sr-only">Not aggregated</span>
+              Account total unresolved <span aria-hidden="true" className={dotClass} />
+              <span className="sr-only">Account identity unresolved</span>
             </span>
             <span className="block text-xs text-gray-500 dark:text-gray-400">See exact account values below</span>
           </span>
@@ -765,17 +813,23 @@ function ComfortableFamilyCells({
           </>
         ) : (
           <>
-            <p className="font-semibold text-gray-900 dark:text-gray-100">Not aggregated</p>
+            <p className="font-semibold text-gray-900 dark:text-gray-100">Account total unresolved</p>
             <p className="text-xs text-gray-500 dark:text-gray-400">
               See exact account values below
             </p>
           </>
         )}
-        <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
-          family.financialsAggregated && family.incompleteCostCount === 0
-            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
-            : "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-        }`}>
+        <span
+          className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+            family.financialsAggregated && family.incompleteCostCount === 0
+              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+              : "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+          }`}
+          title={(() => {
+            const kind = familyCostCoverageKind(family);
+            return kind && kind !== "complete" ? costCoverageHelpText(kind) : undefined;
+          })()}
+        >
           {costCoverageLabel(family)}
         </span>
         {family.costCoverageCaveatCount > 0 && (
@@ -969,10 +1023,29 @@ export default function DashboardProviderWorkspace({
       const orderedProviders = groupProviders.toSorted((a, b) =>
         a.displayName.localeCompare(b.displayName)
       );
-      const financialsAggregated = groupProviders.length === 1;
-      const onlyProvider = financialsAggregated ? groupProviders[0] : null;
+      // Override each member's spentUsd with the coverage-aware value (null,
+      // not a literal 0, when spendCoverage is unknown/legacy_unknown) so an
+      // untrustworthy reading can never surface as an authoritative "$0.00"
+      // once it flows through family-level aggregation.
+      const moneyMembers = groupProviders.map((groupProvider) => ({
+        ...groupProvider,
+        spentUsd: providerSpend(groupProvider),
+      }));
+      const money = aggregateProviderFamilyMoney(
+        moneyMembers,
+        new Date(referenceNow)
+      );
+      const financialsAggregated = money.exact;
+      const onlyProvider = groupProviders.length === 1 ? groupProviders[0] : null;
       const spendValues = groupProviders.map(providerSpend);
-      const onlyProviderSpend = onlyProvider ? spendValues[0] : null;
+      const oneAccount = money.exact && money.accountCount === 1;
+      const latestAccountProvider = oneAccount
+        ? groupProviders.toSorted(
+            (left, right) =>
+              Date.parse(right.latestSnapshot?.fetchedAt ?? "") -
+              Date.parse(left.latestSnapshot?.fetchedAt ?? "")
+          )[0]
+        : null;
       const externalRenewals = allProviderExternalBilling
         .filter(({ record }) => isExternalBillingRenewal(record))
         .map(({ record }) => record.nextRenewalAt);
@@ -1001,18 +1074,17 @@ export default function DashboardProviderWorkspace({
         ),
         searchableExternalBilling: allProviderExternalBilling,
         financialsAggregated,
-        spentUsd: onlyProviderSpend,
-        projectedUsd:
-          onlyProvider && onlyProviderSpend != null
-            ? onlyProvider.projectedEomUsd
-            : null,
+        spentUsd: money.spentUsd,
+        projectedUsd: money.projectedEomUsd,
         budgetUsd: onlyProvider?.plan?.monthlyBudgetUsd ?? null,
-        spendSortUsd: Math.max(
-          0,
-          ...spendValues.filter((value): value is number => value != null)
-        ),
-        credits: onlyProvider?.latestSnapshot?.credits ?? null,
-        balance: onlyProvider?.latestSnapshot?.balance ?? null,
+        spendSortUsd: money.exact
+          ? money.spentUsd ?? 0
+          : Math.max(
+              0,
+              ...spendValues.filter((value): value is number => value != null)
+            ),
+        credits: latestAccountProvider?.latestSnapshot?.credits ?? null,
+        balance: latestAccountProvider?.latestSnapshot?.balance ?? null,
         alertCount: groupProviders.reduce(
           (sum, provider) => sum + provider.alerts.filter((alert) => alert.severity !== "info").length,
           0
@@ -1117,7 +1189,7 @@ export default function DashboardProviderWorkspace({
   };
 
   return (
-    <section className="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" aria-labelledby="provider-workspace-heading">
+    <section className="workspace-container rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" aria-labelledby="provider-workspace-heading">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 px-4 py-4 dark:border-gray-700 sm:px-6">
         <div>
           <h2 id="provider-workspace-heading" className="text-base font-semibold text-gray-900 dark:text-gray-100">
