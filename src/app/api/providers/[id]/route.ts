@@ -4,10 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { decrypt, encrypt, encryptJson } from "@/lib/crypto";
 import { parseProviderUpdateInput, readJsonBody } from "@/lib/provider-input";
 import { buildProviderAlertState } from "@/lib/provider-alerts";
-import { computeBudgetStatus } from "@/lib/budget-status";
+import { computeBudgetStatus, bustBudgetStatusCache } from "@/lib/budget-status";
 import { toPrismaProviderPlanData } from "@/lib/provider-plan";
 import { canonicalProviderKey } from "@/lib/provider-identity";
 import { buildKeyPreview } from "@/lib/provider-key-preview";
+import { getProviderComplianceSummary } from "@/lib/provider-compliance";
 import {
   decryptProviderSecretConfig,
   hasProviderSecrets,
@@ -193,6 +194,17 @@ export async function GET(
   const costCoverageCaveat = snapshotCostCoverageCaveat(
     latestSnapshotWithRawData?.rawData ?? null
   );
+  // Display-only read-back of the §3c/§3d audit layer. Never feeds budgets,
+  // alerts, or the max() spend logic; a failure here must not take down the
+  // provider page, so it degrades to null.
+  const compliance = await getProviderComplianceSummary({
+    id: provider.id,
+    name: provider.name,
+    type: provider.type,
+  }).catch((error) => {
+    console.error("[providers] compliance summary failed:", error);
+    return null;
+  });
   const decryptedKey = decryptKey(apiKey);
   const adapterConfig = serverConfig(config, secretConfig);
   const billingAccount = projectProviderBillingAccountMatches([
@@ -289,11 +301,15 @@ export async function GET(
     // CostCoverageCaveat in adapters/helpers.ts for why these must not be
     // conflated.
     costCoverageCaveat,
+    compliance,
     alerts,
-    estimatedMonthlyCostUsd: alertState.estimatedMonthlyCostUsd,
-    spentUsd: canonicalBudget?.spentUsd ?? latestSnapshot?.totalCost ?? 0,
-    snapshotCostUsd:
-      canonicalBudget?.snapshotCostUsd ?? latestSnapshot?.totalCost ?? null,
+    estimatedMonthlyCostUsd:
+      canonicalBudget != null
+        ? (canonicalBudget.spentUsd ?? alertState.estimatedMonthlyCostUsd)
+        : null,
+    // Fail closed: never invent complete $0 from a bare snapshot.
+    spentUsd: canonicalBudget?.spentUsd ?? null,
+    snapshotCostUsd: canonicalBudget?.snapshotCostUsd ?? null,
     snapshotCostFetchedAt: canonicalBudget?.snapshotCostFetchedAt ?? null,
     snapshotCostWindowStart: canonicalBudget?.snapshotCostWindowStart ?? null,
     snapshotCostWindowEnd: canonicalBudget?.snapshotCostWindowEnd ?? null,
@@ -314,9 +330,7 @@ export async function GET(
     pushedUnpricedEventCount: canonicalBudget?.pushedUnpricedEventCount ?? 0,
     pushedUnclassifiedCostEventCount:
       canonicalBudget?.pushedUnclassifiedCostEventCount ?? 0,
-    spendCoverage:
-      canonicalBudget?.spendCoverage ??
-      (latestSnapshot?.totalCost != null ? "complete" : "unknown"),
+    spendCoverage: canonicalBudget?.spendCoverage ?? "unknown",
     subscriptionMonthToDateUsd:
       canonicalBudget?.subscriptionMonthToDateUsd ?? 0,
     fixedMonthlyCostUsd: canonicalBudget?.fixedMonthlyCostUsd ?? 0,
@@ -326,7 +340,8 @@ export async function GET(
     forecastedSubscriptionRenewalsUsd:
       canonicalBudget?.forecastedSubscriptionRenewalsUsd ?? 0,
     projectedEomUsd:
-      canonicalBudget?.projectedEomUsd ?? alertState.projectedEomUsd,
+      canonicalBudget?.projectedEomUsd ??
+      (canonicalBudget != null ? alertState.projectedEomUsd : null),
     billingMode: alertState.billingMode,
     duplicateNameWarning:
       duplicateProviderIds.length > 1
@@ -341,14 +356,17 @@ export async function PUT(
 ) {
   const { id } = await params;
 
-  const existing = await prisma.provider.findUnique({ where: { id } });
+  const existing = await prisma.provider.findUnique({
+    where: { id },
+    include: { plan: { select: { fixedMonthlyCostUsd: true } } },
+  });
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   let input;
   try {
-    input = parseProviderUpdateInput(await readJsonBody(request));
+    input = parseProviderUpdateInput(await readJsonBody(request), existing.name);
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Invalid request" },
@@ -472,6 +490,28 @@ export async function PUT(
   }
   if (input.plan !== undefined) {
     const planData = toPrismaProviderPlanData(input.plan);
+    const nextFixed =
+      planData.fixedMonthlyCostUsd === undefined
+        ? existing.plan?.fixedMonthlyCostUsd
+        : planData.fixedMonthlyCostUsd;
+    if (nextFixed != null && Number(nextFixed) > 0) {
+      const activeSubscription = await prisma.subscription.findFirst({
+        where: {
+          providerId: id,
+          status: { in: ["active", "considering"] },
+        },
+        select: { id: true },
+      });
+      if (activeSubscription) {
+        return NextResponse.json(
+          {
+            error:
+              "This provider already has an active/considering Subscription. Clear Plan price / mo or cancel the Subscription — modeling the same fee both ways double-counts spend.",
+          },
+          { status: 400 }
+        );
+      }
+    }
     updateData.plan = {
       upsert: {
         create: planData,
@@ -524,6 +564,8 @@ export async function PUT(
     },
   });
 
+  bustBudgetStatusCache();
+
   return NextResponse.json(provider);
 }
 
@@ -550,5 +592,6 @@ export async function DELETE(
   }
 
   await prisma.provider.delete({ where: { id } });
+  bustBudgetStatusCache();
   return NextResponse.json({ success: true });
 }

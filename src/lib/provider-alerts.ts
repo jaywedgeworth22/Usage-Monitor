@@ -1,4 +1,5 @@
 import { calculateEomForecast } from "@/lib/forecasting";
+import { type AnomalyResult, describeAnomaly } from "@/lib/anomaly-detection";
 import { isSubscriptionInterval, rollForwardRenewal } from "@/lib/subscriptions";
 
 export type AlertSeverity = "critical" | "warning" | "info";
@@ -18,7 +19,20 @@ export interface ProviderAlert {
     | "missing_balance_visibility"
     | "stale_snapshot"
     | "missing_snapshot"
-    | "unconfigured_budget";
+    | "unconfigured_budget"
+    | "usage_reconciliation_discrepancy"
+    // Statistical spike/anomaly alerts (see anomaly-detection.ts). Consumed by
+    // the generic providerId:code alert-delivery machinery like any other code.
+    | "spend_anomaly"
+    | "request_anomaly"
+    // Advisory codes emitted by the budget-breach control layer (see
+    // budget-controls.ts / budget-status.ts). budget_control_paused surfaces a
+    // provider whose polling was auto-paused on a sustained budget breach;
+    // key_disable_recommended is advisory only and never reflects a credential
+    // mutation. Produced in budget-status.ts, not here — this file only carries
+    // the code names.
+    | "budget_control_paused"
+    | "key_disable_recommended";
   severity: AlertSeverity;
   message: string;
 }
@@ -43,6 +57,8 @@ export interface UsageSnapshotForAlerts {
   fetchedAt: Date | string;
 }
 
+export type BudgetAlertTier = "ok" | "warning" | "exceeded";
+
 export interface ProviderAlertInput {
   isActive: boolean;
   refreshIntervalMin: number;
@@ -57,6 +73,18 @@ export interface ProviderAlertInput {
   // Portion of trackedSpendUsd that is already a discrete/fixed charge and
   // must not be linearly extrapolated to month end.
   fixedAccruedUsd?: number;
+  reconciliationDiscrepancyUsd?: number | null;
+  // Pre-computed statistical anomalies (see anomaly-detection.ts /
+  // anomaly-loader.ts). The detector runs upstream; this layer only maps each
+  // structured result into an alert so the existing persistence/delivery/dedup
+  // machinery carries it. Absent for callers that do not run detection.
+  anomalies?: AnomalyResult[];
+  /**
+   * Prior budget tier for hysteresis (Wave C / C9). When omitted, enter
+   * thresholds apply (80% warn / 100% exceed). When present, clear thresholds
+   * are lower (75% / 95%) so spend oscillating around a boundary does not flap.
+   */
+  previousBudgetTier?: BudgetAlertTier;
 }
 
 export interface ProviderAlertState {
@@ -67,8 +95,41 @@ export interface ProviderAlertState {
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const WARNING_RATIO = 0.8;
+/** Enter budget_warning at or above this ratio of monthly budget. */
+const WARNING_ENTER_RATIO = 0.8;
+/** Stay in warning until spend drops below this (hysteresis clear). */
+const WARNING_CLEAR_RATIO = 0.75;
+/** Stay in exceeded until spend drops below this (hysteresis clear). */
+const EXCEEDED_CLEAR_RATIO = 0.95;
 const RENEWAL_WARNING_DAYS = 7;
+
+/**
+ * Map spend/budget ratio to a budget alert tier with optional hysteresis.
+ * Pure so unit tests can cover flap-free transitions without DB state.
+ */
+export function resolveBudgetAlertTier(
+  spendUsd: number,
+  budgetUsd: number,
+  previous: BudgetAlertTier = "ok"
+): BudgetAlertTier {
+  if (!(budgetUsd > 0) || !Number.isFinite(spendUsd)) {
+    return "ok";
+  }
+  const ratio = spendUsd / budgetUsd;
+  if (previous === "exceeded") {
+    if (ratio >= EXCEEDED_CLEAR_RATIO) return "exceeded";
+    if (ratio >= WARNING_CLEAR_RATIO) return "warning";
+    return "ok";
+  }
+  if (previous === "warning") {
+    if (ratio >= 1) return "exceeded";
+    if (ratio >= WARNING_CLEAR_RATIO) return "warning";
+    return "ok";
+  }
+  if (ratio >= 1) return "exceeded";
+  if (ratio >= WARNING_ENTER_RATIO) return "warning";
+  return "ok";
+}
 
 export function providerSnapshotStaleAt(
   fetchedAt: Date | string,
@@ -150,7 +211,12 @@ export function buildProviderAlertState(
   }
 
   if (plan?.monthlyBudgetUsd != null && plan.monthlyBudgetUsd > 0) {
-    if (estimatedMonthlyCostUsd >= plan.monthlyBudgetUsd) {
+    const budgetTier = resolveBudgetAlertTier(
+      estimatedMonthlyCostUsd,
+      plan.monthlyBudgetUsd,
+      input.previousBudgetTier ?? "ok"
+    );
+    if (budgetTier === "exceeded") {
       alerts.push({
         code: "budget_exceeded",
         severity: "critical",
@@ -158,7 +224,7 @@ export function buildProviderAlertState(
           plan.monthlyBudgetUsd
         )} monthly budget.`,
       });
-    } else if (estimatedMonthlyCostUsd >= plan.monthlyBudgetUsd * WARNING_RATIO) {
+    } else if (budgetTier === "warning") {
       alerts.push({
         code: "budget_warning",
         severity: "warning",
@@ -170,7 +236,16 @@ export function buildProviderAlertState(
   }
 
   if (latestSnapshot?.totalRequests != null && plan?.monthlyRequestLimit) {
-    if (latestSnapshot.totalRequests >= plan.monthlyRequestLimit) {
+    // Request-limit hysteresis mirrors budget: clear below 95% / 75% when
+    // previously open so delivery does not flap on boundary noise.
+    const requestTier = resolveBudgetAlertTier(
+      latestSnapshot.totalRequests,
+      plan.monthlyRequestLimit,
+      // Map prior request alerts if caller passed budget tier only — keep
+      // enter/clear pure on current ratio without prior when unknown.
+      "ok"
+    );
+    if (requestTier === "exceeded") {
       alerts.push({
         code: "request_limit",
         severity: "critical",
@@ -178,7 +253,7 @@ export function buildProviderAlertState(
           plan.monthlyRequestLimit
         )} monthly limit.`,
       });
-    } else if (latestSnapshot.totalRequests >= plan.monthlyRequestLimit * WARNING_RATIO) {
+    } else if (requestTier === "warning") {
       alerts.push({
         code: "request_limit_warning",
         severity: "warning",
@@ -252,6 +327,25 @@ export function buildProviderAlertState(
         }.`,
       });
     }
+  }
+
+  if (input.reconciliationDiscrepancyUsd != null && Math.abs(input.reconciliationDiscrepancyUsd) > 0.01) {
+    alerts.push({
+      code: "usage_reconciliation_discrepancy",
+      severity: "warning",
+      message: `Usage reconciliation discrepancy of ${formatUsd(input.reconciliationDiscrepancyUsd)} detected.`,
+    });
+  }
+
+  // Emit statistical spike/anomaly alerts from pre-computed detector results.
+  // The heavy lifting (baseline, robustness, thresholds) lives in
+  // anomaly-detection.ts; here we only translate each result into an alert.
+  for (const anomaly of input.anomalies ?? []) {
+    alerts.push({
+      code: anomaly.metric === "requests" ? "request_anomaly" : "spend_anomaly",
+      severity: anomaly.severity,
+      message: describeAnomaly(anomaly),
+    });
   }
 
   return { alerts, estimatedMonthlyCostUsd, projectedEomUsd, billingMode };

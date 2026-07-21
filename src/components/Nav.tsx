@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Moon, Sun } from "lucide-react";
+import { useDisplayDensity, setStoredDisplayDensity } from "@/lib/display-density";
 
 export default function Nav() {
   const pathname = usePathname();
@@ -15,11 +16,15 @@ export default function Nav() {
 
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const density = useDisplayDensity();
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     setMounted(true);
   }, []);
+
+  const toggleDensity = () => {
+    setStoredDisplayDensity(density === "comfortable" ? "compact" : "comfortable");
+  };
 
   const links = [
     { href: "/", label: "Dashboard" },
@@ -68,7 +73,7 @@ export default function Nav() {
                 </svg>
               </div>
               <span className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                API Monitor
+                Usage Monitor
               </span>
             </Link>
             <div className="hidden gap-1 sm:flex">
@@ -94,14 +99,32 @@ export default function Nav() {
           </div>
           <div className="hidden items-center gap-2 sm:flex">
             {mounted && (
-              <button
-                type="button"
-                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                className="p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
-                aria-label="Toggle dark mode"
-              >
-                {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={toggleDensity}
+                  className="p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  aria-label={`Toggle display density (currently ${density})`}
+                >
+                  {density === "compact" ? (
+                    <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                    </svg>
+                  ) : (
+                    <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                  className="p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-50 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  aria-label="Toggle dark mode"
+                >
+                  {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+                </button>
+              </>
             )}
             {logoutError && <span role="alert" className="max-w-48 text-xs text-red-600 dark:text-red-300">{logoutError}</span>}
             <button
@@ -151,6 +174,36 @@ export default function Nav() {
                 </Link>
               );
             })}
+            <div className="flex items-center gap-2 px-3 py-2">
+              {mounted && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-gray-200 dark:border-gray-700 text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+                    <span>Theme</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleDensity}
+                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-gray-200 dark:border-gray-700 text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    {density === "compact" ? (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                      </svg>
+                    )}
+                    <span>{density === "compact" ? "Compact" : "Comfortable"}</span>
+                  </button>
+                </>
+              )}
+            </div>
             <button
               type="button"
               onClick={handleLogout}

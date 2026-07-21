@@ -24,6 +24,18 @@ import {
   type CloudflareLegacyHandoffStatus,
 } from "@/lib/external-billing-subscription-adoption";
 import { quarantineLegacyMistralSpendLimitSnapshots } from "@/lib/mistral-snapshot-quarantine";
+import {
+  verifyOpenRouterGenerations,
+  type OpenRouterVerificationResult,
+} from "@/lib/openrouter-generation-verification";
+import {
+  reconcileProviderUsage,
+  type ProviderUsageReconciliationResult,
+} from "@/lib/provider-usage-reconciliation";
+import {
+  applyBudgetControls,
+  type BudgetControlsResult,
+} from "@/lib/budget-controls";
 
 export interface UsageMaintenanceResult {
   subscriptionAdoption: SubscriptionAdoptionMaintenanceResult;
@@ -31,6 +43,13 @@ export interface UsageMaintenanceResult {
   providerRenewals: RollForwardProviderRenewalsResult;
   retention: DataRetentionResult | ScheduledRetentionSkipped;
   alerts: AlertMaintenanceResult;
+  openrouterVerification?: OpenRouterVerificationResult;
+  reconciliation?: ProviderUsageReconciliationResult;
+  // Budget-breach automated control actions. Default-off and fail-safe: the
+  // apply layer never throws (it degrades to notify-only internally). This is
+  // deliberately NOT folded into isUsageMaintenanceHealthy — a control-layer
+  // problem must never flip scheduler/readiness health.
+  budgetControls?: BudgetControlsResult;
 }
 
 export interface SubscriptionAdoptionMaintenanceError {
@@ -62,6 +81,9 @@ export interface UsageMaintenanceDependencies {
   rollForwardRenewals?: typeof rollForwardProviderRenewals;
   runRetention?: typeof runScheduledDataRetentionMaintenance;
   deliverAlerts?: typeof deliverProviderAlerts;
+  verifyOpenRouterGenerations?: typeof verifyOpenRouterGenerations;
+  reconcileProviderUsage?: typeof reconcileProviderUsage;
+  runBudgetControls?: typeof applyBudgetControls;
 }
 
 const HEALTHY_CLOUDFLARE_LEGACY_HANDOFF_STATUSES = new Set<
@@ -75,7 +97,11 @@ export function isUsageMaintenanceHealthy(result: UsageMaintenanceResult): boole
       result.subscriptionAdoption.cloudflareLegacyHandoff
     ) &&
     result.alerts.deferredError === null &&
-    result.alerts.persistenceDegraded.length === 0
+    result.alerts.persistenceDegraded.length === 0 &&
+    // A key that cannot read generations (401/403) silently disables the
+    // per-call audit layer. Reporting healthy in that state would recreate
+    // exactly the blind spot §3c exists to remove.
+    result.openrouterVerification?.degraded !== true
   );
 }
 
@@ -194,12 +220,72 @@ export async function runUsageMaintenance(
         deferredError: deferredAlertMaintenanceError(error),
       };
     }
+    const verifyOpenRouter = dependencies.verifyOpenRouterGenerations ?? verifyOpenRouterGenerations;
+    const reconcileUsage = dependencies.reconcileProviderUsage ?? reconcileProviderUsage;
+
+    // Both jobs acquire write admission internally around their DB writes ONLY
+    // — verification's HTTP calls must not hold the single SQLite writer (the
+    // same discipline alert-delivery follows). Neither is allowed to fail the
+    // maintenance tick: this is an audit layer beside the money path.
+    let openrouterVerification: OpenRouterVerificationResult = {
+      examined: 0,
+      matched: 0,
+      discrepancies: 0,
+      errors: 0,
+      exhausted: 0,
+      verifiedCount: 0,
+      truncated: false,
+      degraded: false,
+    };
+    try {
+      openrouterVerification = await verifyOpenRouter();
+    } catch (error) {
+      console.error("[usage-maintenance] OpenRouter verification job failed:", error);
+      openrouterVerification = { ...openrouterVerification, degraded: true };
+    }
+
+    let reconciliation: ProviderUsageReconciliationResult = {
+      examined: 0,
+      reconciled: 0,
+      discrepancies: 0,
+      unverifiable: 0,
+      pending: 0,
+      reconciledCount: 0,
+    };
+    try {
+      reconciliation = await reconcileUsage();
+    } catch (error) {
+      console.error("[usage-maintenance] Provider usage reconciliation failed:", error);
+    }
+
+    // Budget-breach automated control actions run AFTER alerts so the pause/
+    // recommendation decision sees the same canonical spend the alert path just
+    // evaluated. applyBudgetControls is default-off and fully fail-safe (it
+    // never throws: it self-wraps its own SQLite writes with the internal
+    // admission lease and degrades to notify-only on any error), so the extra
+    // try/catch here is belt-and-suspenders — a control-layer failure can never
+    // break the poll/maintenance cycle.
+    let budgetControls: BudgetControlsResult | undefined;
+    try {
+      budgetControls = await (
+        dependencies.runBudgetControls ?? applyBudgetControls
+      )({});
+    } catch (error) {
+      console.error(
+        "[usage-maintenance] budget-controls stage failed unexpectedly; continuing notify-only",
+        error
+      );
+    }
+
     return {
       subscriptionAdoption,
       subscriptions,
       providerRenewals,
       retention,
       alerts,
+      openrouterVerification,
+      reconciliation,
+      budgetControls,
     };
   })();
 

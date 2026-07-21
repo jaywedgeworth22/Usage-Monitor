@@ -65,6 +65,24 @@ function dependencies(
     rollForwardRenewals: vi.fn(async () => providerRenewals),
     runRetention: vi.fn(async () => retention),
     deliverAlerts,
+    verifyOpenRouterGenerations: vi.fn(async () => ({
+      examined: 0,
+      matched: 0,
+      discrepancies: 0,
+      errors: 0,
+      exhausted: 0,
+      verifiedCount: 0,
+      truncated: false,
+      degraded: false,
+    })),
+    reconcileProviderUsage: vi.fn(async () => ({
+      examined: 0,
+      reconciled: 0,
+      discrepancies: 0,
+      unverifiable: 0,
+      pending: 0,
+      reconciledCount: 0,
+    })),
   };
 }
 
@@ -188,6 +206,38 @@ describe("runUsageMaintenance", () => {
           model: "ProviderAlertNotification",
           message: "SQLite socket timeout",
         },
+      },
+      openrouterVerification: {
+        examined: 0,
+        matched: 0,
+        discrepancies: 0,
+        errors: 0,
+        exhausted: 0,
+        verifiedCount: 0,
+        truncated: false,
+        degraded: false,
+      },
+      reconciliation: {
+        examined: 0,
+        reconciled: 0,
+        discrepancies: 0,
+        unverifiable: 0,
+        pending: 0,
+        reconciledCount: 0,
+      },
+      // Budget-breach automated control layer (src/lib/budget-controls.ts) is
+      // default-off; with BUDGET_AUTO_CONTROLS_ENABLED unset in the test env,
+      // applyBudgetControls short-circuits to this zeroed, enabled:false shape.
+      budgetControls: {
+        enabled: false,
+        evaluated: 0,
+        breachesObserved: 0,
+        paused: 0,
+        resumed: 0,
+        recommendationsRaised: 0,
+        recommendationsCleared: 0,
+        auditRowsWritten: 0,
+        degraded: false,
       },
     });
     expect(isUsageMaintenanceHealthy(result)).toBe(false);

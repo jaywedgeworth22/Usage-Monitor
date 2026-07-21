@@ -8,6 +8,7 @@ import {
   getSchedulerRuntimeStatus,
   getStartupRuntimeStatus,
 } from "@/lib/runtime-health";
+import { getIngestAdmissionMetrics } from "@/lib/ingest-admission";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,47 @@ type DatabaseFailureCache = Omit<DatabaseCheck, "cached" | "probeInFlight"> & {
 let databaseProbeInFlight: Promise<DatabaseCheck> | null = null;
 let databaseProbeHasSucceeded = false;
 let databaseFailureCache: DatabaseFailureCache | null = null;
+
+interface BudgetControlsReadiness {
+  enabled: boolean;
+  pausedProviderCount: number | null;
+  keyDisableRecommendedProviderCount: number | null;
+}
+
+// Cheap, fail-safe readiness view of the budget-breach control layer. When the
+// master flag is off (the default) this does ZERO database work so the hot
+// readiness path is byte-identical to before this feature. When on, it runs two
+// trivial provider counts and swallows any error into nulls; it never blocks or
+// affects readiness `ok`.
+async function budgetControlsReadiness(): Promise<BudgetControlsReadiness> {
+  const raw = process.env.BUDGET_AUTO_CONTROLS_ENABLED?.trim().toLowerCase();
+  const enabled = raw === "true" || raw === "1" || raw === "yes";
+  if (!enabled) {
+    return {
+      enabled: false,
+      pausedProviderCount: null,
+      keyDisableRecommendedProviderCount: null,
+    };
+  }
+  try {
+    const [pausedProviderCount, keyDisableRecommendedProviderCount] =
+      await Promise.all([
+        prisma.provider.count({ where: { budgetPausedAt: { not: null } } }),
+        prisma.provider.count({ where: { keyDisableRecommended: true } }),
+      ]);
+    return {
+      enabled: true,
+      pausedProviderCount,
+      keyDisableRecommendedProviderCount,
+    };
+  } catch {
+    return {
+      enabled: true,
+      pausedProviderCount: null,
+      keyDisableRecommendedProviderCount: null,
+    };
+  }
+}
 
 function databaseProbe(): Promise<DatabaseCheck> {
   const now = Date.now();
@@ -219,14 +261,19 @@ export async function GET(request: Request) {
   // without starting the blocking probe at all.
   const databaseHealthCheckCompatibilityRequested =
     process.env.RENDER_READINESS_HTTP_COMPATIBILITY === "true";
-  const [database, scheduler, backup, startup] = await Promise.all([
-    databaseHealthCheckCompatibilityRequested
-      ? Promise.resolve(skippedDatabaseCheck())
-      : checkDatabase(),
-    Promise.resolve(getSchedulerRuntimeStatus()),
-    Promise.resolve(getBackupRuntimeStatus()),
-    Promise.resolve(getStartupRuntimeStatus()),
-  ]);
+  // Budget-breach control observability runs inside the same Promise.all as
+  // the other probes so it cannot serialize behind a stalled DB check and
+  // bypass readiness timeout/cache shapes (owner review F5).
+  const [database, scheduler, backup, startup, budgetControls] =
+    await Promise.all([
+      databaseHealthCheckCompatibilityRequested
+        ? Promise.resolve(skippedDatabaseCheck())
+        : checkDatabase(),
+      Promise.resolve(getSchedulerRuntimeStatus()),
+      Promise.resolve(getBackupRuntimeStatus()),
+      Promise.resolve(getStartupRuntimeStatus()),
+      budgetControlsReadiness(),
+    ]);
   const schedulerReadiness = getSchedulerReadiness();
   // A preview/cold-standby host deliberately disables its scheduler to avoid
   // becoming a second SQLite writer. That intentional circuit breaker must not
@@ -235,7 +282,12 @@ export async function GET(request: Request) {
   const schedulerRequired =
     process.env.USAGE_SCHEDULER_ENABLED?.trim().toLowerCase() !== "false";
   const schedulerReady = !schedulerRequired || schedulerReadiness.ok;
-  const backupReady = !backup.required || backup.active;
+  // Backup: required implies active env flag. When a replica side-channel is
+  // configured (Wave C / C4), replicaOk === false fails ready even if
+  // LITESTREAM_ACTIVE is true so Garage/R2 death is not silent.
+  const backupReady =
+    !backup.required ||
+    (backup.active && backup.replicaOk !== false);
   const startupReady = !startup.required || startup.active;
   const ok = database.ok && schedulerReady && backupReady && startupReady;
   const databaseOnlyFailure =
@@ -296,6 +348,13 @@ export async function GET(request: Request) {
         ok: startupReady,
         ...startup,
       },
+      // Observability only — never part of `ok`. Reports the master flag and,
+      // when enabled, how many providers are currently budget-paused / carry a
+      // (advisory) key-disable recommendation.
+      budgetControls,
+      // Observability only (Wave C / C8): process-local ingest admission
+      // reject/admit counters + waiter depth. Not a readiness gate.
+      admission: getIngestAdmissionMetrics(),
     },
   };
 

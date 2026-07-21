@@ -18,6 +18,13 @@ import type {
 } from "@/components/ProviderCard";
 import type { SubscriptionRow } from "@/components/SubscriptionsPanel";
 import SortHeader, { type SortDirection } from "@/components/table/SortHeader";
+import { costCoverageHelpText } from "@/lib/cost-coverage-help";
+import {
+  useDisplayDensity,
+  setStoredDisplayDensity,
+  getStoredDisplayDensity,
+  type DisplayDensity,
+} from "@/lib/display-density";
 import { providerFinancialSemantics } from "@/lib/provider-financial-semantics";
 import { aggregateProviderFamilyMoney } from "@/lib/provider-money-aggregation";
 import { canonicalProviderKey } from "@/lib/provider-identity";
@@ -193,7 +200,8 @@ export const INITIAL_SORT_DIRECTION = {
 } as const;
 
 const SORT_STORAGE_KEY = "usage-monitor:dashboard-sort";
-const DENSITY_STORAGE_KEY = "usage-monitor:dashboard-density";
+/** Legacy key — migrated once into the global display-density store (Wave D / D3). */
+const LEGACY_DENSITY_STORAGE_KEY = "usage-monitor:dashboard-density";
 
 const FILTER_CHIPS: ReadonlyArray<readonly [FilterChip, string]> = [
   ["all", "All"],
@@ -222,7 +230,9 @@ function providerSpend(provider: WorkspaceProvider): number | null {
   ) {
     return null;
   }
-  return provider.spentUsd ?? provider.latestSnapshot?.totalCost ?? provider.estimatedMonthlyCostUsd ?? 0;
+  // Never treat estimated monthly cost as "spent" — that is a forecast, not MTD cash.
+  if (provider.spentUsd != null) return provider.spentUsd;
+  return null;
 }
 
 function providerSpendLabel(provider: WorkspaceProvider): string {
@@ -353,6 +363,19 @@ function costCoverageLabel(family: ProviderFamily): string {
     default:
       return "Unknown";
   }
+}
+
+/** Plain-language tooltip to pair with `costCoverageLabel` above - same
+ * "Complete"/"Partial"/"Unknown" branching, but returning the coverage kind
+ * `costCoverageHelpText` expects rather than the short display label. Null
+ * for the "Account identity unresolved" case, which isn't one of the four
+ * cost-coverage states and has its own explanation in the UI already. */
+function familyCostCoverageKind(family: ProviderFamily): ProviderCostCoverage | null {
+  if (!family.financialsAggregated) return null;
+  if (family.providers.length > 1 && family.incompleteCostCount > 0) {
+    return "partial";
+  }
+  return family.providers[0]?.spendCoverage ?? "unknown";
 }
 
 function childLabel(provider: WorkspaceProvider): string {
@@ -583,7 +606,14 @@ function CompactFamilyCells({
       : family.projectedUsd != null
         ? `${formatCurrency(family.projectedUsd)} projected`
         : "Projection unavailable";
-  const spendTitle = `${budgetOrProjectionText} · Coverage: ${costCoverageLabel(family)}`;
+  const coverageKind = familyCostCoverageKind(family);
+  const spendTitle = [
+    budgetOrProjectionText,
+    `Coverage: ${costCoverageLabel(family)}`,
+    coverageKind && coverageKind !== "complete" ? costCoverageHelpText(coverageKind) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const creditsBalanceTitle = `${financialSemantics.creditsLabel} ${formatNumber(family.credits)} · ${financialSemantics.balanceLabel} ${formatCurrency(family.balance)}`;
 
@@ -798,11 +828,17 @@ function ComfortableFamilyCells({
             </p>
           </>
         )}
-        <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
-          family.financialsAggregated && family.incompleteCostCount === 0
-            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
-            : "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-        }`}>
+        <span
+          className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+            family.financialsAggregated && family.incompleteCostCount === 0
+              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+              : "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+          }`}
+          title={(() => {
+            const kind = familyCostCoverageKind(family);
+            return kind && kind !== "complete" ? costCoverageHelpText(kind) : undefined;
+          })()}
+        >
           {costCoverageLabel(family)}
         </span>
         {family.costCoverageCaveatCount > 0 && (
@@ -875,7 +911,10 @@ export default function DashboardProviderWorkspace({
 }: DashboardProviderWorkspaceProps) {
   const [query, setQuery] = useState("");
   const [filterChip, setFilterChip] = useState<FilterChip>("all");
-  const [density, setDensity] = useState<Density>("compact");
+  // Unified with Nav global density (Wave D / D3). Legacy workspace key is
+  // migrated once into DISPLAY_DENSITY_STORAGE_KEY on first mount.
+  const density = useDisplayDensity();
+  const setDensity = (next: DisplayDensity) => setStoredDisplayDensity(next);
   const [sortField, setSortField] = useState<WorkspaceSortField>("attention");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -900,9 +939,24 @@ export default function DashboardProviderWorkspace({
           }
         }
       }
-      const rawDensity = window.localStorage.getItem(DENSITY_STORAGE_KEY);
-      if (isDensity(rawDensity)) {
-        setDensity(rawDensity);
+      // One-time migrate legacy workspace density into the global key.
+      const legacy = window.localStorage.getItem(LEGACY_DENSITY_STORAGE_KEY);
+      if (isDensity(legacy)) {
+        const current = getStoredDisplayDensity();
+        // Prefer explicit global if already set; otherwise adopt legacy.
+        if (
+          !window.localStorage.getItem("display-density") &&
+          isDensity(legacy)
+        ) {
+          setStoredDisplayDensity(legacy);
+        } else if (current) {
+          // no-op — global already authoritative
+        }
+        try {
+          window.localStorage.removeItem(LEGACY_DENSITY_STORAGE_KEY);
+        } catch {
+          // ignore
+        }
       }
     } catch {
       // Ignore corrupted/unavailable storage — fall back to defaults.
@@ -919,11 +973,10 @@ export default function DashboardProviderWorkspace({
         SORT_STORAGE_KEY,
         JSON.stringify({ field: sortField, direction: sortDirection })
       );
-      window.localStorage.setItem(DENSITY_STORAGE_KEY, density);
     } catch {
       // Ignore write failures (private mode, quota, etc.).
     }
-  }, [sortField, sortDirection, density, hydratedFromStorage]);
+  }, [sortField, sortDirection, hydratedFromStorage]);
 
   const handleSort = (field: WorkspaceSortField) => {
     if (field === "attention") {
@@ -1049,7 +1102,14 @@ export default function DashboardProviderWorkspace({
         financialsAggregated,
         spentUsd: money.spentUsd,
         projectedUsd: money.projectedEomUsd,
-        budgetUsd: onlyProvider?.plan?.monthlyBudgetUsd ?? null,
+        // Multi-key families: sum member budgets when any are set (not only the singleton).
+        budgetUsd: (() => {
+          const budgets = groupProviders
+            .map((p) => p.plan?.monthlyBudgetUsd)
+            .filter((v): v is number => v != null && Number.isFinite(v) && v > 0);
+          if (budgets.length === 0) return null;
+          return budgets.reduce((sum, v) => sum + v, 0);
+        })(),
         spendSortUsd: money.exact
           ? money.spentUsd ?? 0
           : Math.max(
@@ -1162,7 +1222,7 @@ export default function DashboardProviderWorkspace({
   };
 
   return (
-    <section className="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" aria-labelledby="provider-workspace-heading">
+    <section className="workspace-container rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800" aria-labelledby="provider-workspace-heading">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 px-4 py-4 dark:border-gray-700 sm:px-6">
         <div>
           <h2 id="provider-workspace-heading" className="text-base font-semibold text-gray-900 dark:text-gray-100">
@@ -1248,10 +1308,13 @@ export default function DashboardProviderWorkspace({
           <tbody>
             {visibleFamilies.map((family) => {
               const isCollapsed = collapsed[family.key] ?? !initiallyExpanded;
+              const familyHasPartial = family.providers.some(
+                (p) => p.isActive && p.spendCoverage === "partial"
+              );
               const familySpendLabel = family.spentUsd == null
                 ? "Cost not reported"
                 : `${formatCurrency(family.spentUsd)}${
-                    family.providers[0]?.spendCoverage === "partial" ? " known" : ""
+                    familyHasPartial || family.incompleteCostCount > 0 ? " known" : ""
                   }`;
               const onToggle = () =>
                 setCollapsed((current) => ({ ...current, [family.key]: !isCollapsed }));
