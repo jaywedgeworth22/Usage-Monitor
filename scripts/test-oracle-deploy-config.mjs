@@ -71,6 +71,7 @@ for (const [pattern, message] of [
   [/wait_for_backup_advancement/, "post-cutover Garage TXID advancement"],
   [/capture_quiescent_backup_watermark/, "post-stop Garage watermark capture"],
   [/-integrity-check full/, "post-cutover Garage restore"],
+  [/name != '_deploy_heartbeat'/, "quoted exclusion for the unmanaged deployment heartbeat object"],
   [/verify_render_retirement/, "durable Render retirement proof"],
   [/env-vars\/USAGE_SCHEDULER_ENABLED/, "exact Render scheduler lookup without pagination"],
   [/--kill-after=60s 2700/, "bounded target-controlled image build"],
@@ -82,6 +83,7 @@ for (const [pattern, message] of [
   requireText(deploy, pattern, `deploy script must enforce ${message}`);
 }
 forbidText(deploy, /reset --hard|docker (system|builder) prune|rm -rf/, "broad destructive cleanup is forbidden");
+forbidText(deploy, /name != "_deploy_heartbeat"/, "SQLite identifiers must not be shell-quote corrupted");
 forbidText(deploy, /set -x/, "deployment must never trace secrets");
 
 requireText(poller, /MAX_FAILURES=3/, "poller must have a bounded retry circuit breaker");
