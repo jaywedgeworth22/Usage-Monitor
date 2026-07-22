@@ -243,4 +243,75 @@ describe("resolveProviderKeyAttribution", () => {
       "2026-07-22T17:00:00.000Z"
     );
   });
+
+  it("prefers exact provider name matches before alias family fallback", () => {
+    const geminiCustom: AttributionIdentity = {
+      id: "identity-gemini",
+      providerId: "provider-gemini",
+      providerName: "gemini",
+      status: "active",
+      createdAt: new Date("2026-06-01T00:00:00.000Z"),
+      retiredAt: null,
+      providerReportedKeyIdFingerprint: null,
+    };
+    const googleAi: AttributionIdentity = {
+      id: "identity-google-ai",
+      providerId: "provider-google-ai",
+      providerName: "google-ai",
+      status: "active",
+      createdAt: new Date("2026-06-01T00:00:00.000Z"),
+      retiredAt: null,
+      providerReportedKeyIdFingerprint: null,
+    };
+    const geminiBinding = binding({
+      id: "binding-gemini",
+      identityId: "identity-gemini",
+      producerKeyRef: "primary",
+      providerConnectionRef: null,
+      billingAccountRef: null,
+    });
+    const googleBinding = binding({
+      id: "binding-google",
+      identityId: "identity-google-ai",
+      producerKeyRef: "primary",
+      providerConnectionRef: null,
+      billingAccountRef: null,
+    });
+    const geminiObservation = observation({
+      providerName: "gemini",
+      producerKeyRef: "primary",
+      providerConnectionRef: null,
+      billingAccountRef: null,
+    });
+
+    // Exact `gemini` observation must not pull google-ai identities (or go ambiguous).
+    expect(
+      resolveProviderKeyAttribution(
+        geminiObservation,
+        [geminiCustom, googleAi],
+        [geminiBinding, googleBinding]
+      )
+    ).toEqual({
+      status: "matched",
+      identityId: "identity-gemini",
+      bindingId: "binding-gemini",
+      projectId: "project-a",
+      projectName: "Congress.Trade",
+      matchedBy: "producer_key_ref",
+    });
+
+    // Alias-only labels still resolve via canonical family when no exact row exists.
+    expect(
+      resolveProviderKeyAttribution(
+        observation({
+          providerName: "Google AI Studio",
+          producerKeyRef: "primary",
+          providerConnectionRef: null,
+          billingAccountRef: null,
+        }),
+        [googleAi],
+        [googleBinding]
+      )
+    ).toMatchObject({ status: "matched", identityId: "identity-google-ai" });
+  });
 });

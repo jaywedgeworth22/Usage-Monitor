@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { canonicalProviderKey } from "@/lib/provider-identity";
+import { canonicalProviderKey, normalizedProviderName } from "@/lib/provider-identity";
 
 const FINGERPRINT_DOMAIN = "usage-monitor.provider-key-identity.v1";
 
@@ -132,9 +132,20 @@ export function resolveProviderKeyAttribution(
   identities: readonly AttributionIdentity[],
   bindings: readonly AttributionBinding[]
 ): AttributionResolution {
-  const providerIdentities = identities.filter((identity) => {
-    return canonicalProviderKey(identity.providerName) === canonicalProviderKey(observation.providerName);
-  });
+  // Exact configured provider names outrank aliases (same rule as resolveProviderIdentity).
+  // A custom `gemini` row must not pull identities from the built-in `google-ai` family.
+  const exactName = normalizedProviderName(observation.providerName);
+  const exactProviderIdentities = identities.filter(
+    (identity) => normalizedProviderName(identity.providerName) === exactName
+  );
+  const providerIdentities =
+    exactProviderIdentities.length > 0
+      ? exactProviderIdentities
+      : identities.filter(
+          (identity) =>
+            canonicalProviderKey(identity.providerName) ===
+            canonicalProviderKey(observation.providerName)
+        );
   const isNotPastRetirement = (identity: AttributionIdentity) =>
     identity.status === "active" ||
     (identity.retiredAt != null &&

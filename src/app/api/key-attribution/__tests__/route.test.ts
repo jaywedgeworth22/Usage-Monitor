@@ -340,6 +340,54 @@ describe("provider key attribution API", () => {
     expect(body.coverage.reasons.no_effective_binding).toEqual({ costUsd: 1, eventCount: 1 });
   });
 
+  it("clamps future-dated bindings when retiring an identity so replacements do not overlap", async () => {
+    const provider = await prisma.provider.create({
+      data: { name: "openai", displayName: "OpenAI", type: "builtin" },
+    });
+    const effectiveFrom = new Date("2026-07-01T00:00:00.000Z");
+    const scheduledEnd = new Date("2026-08-01T00:00:00.000Z");
+    const retiredAt = new Date("2026-07-15T00:00:00.000Z");
+    const retiredIdentity = await prisma.providerKeyIdentity.create({
+      data: {
+        providerId: provider.id,
+        alias: "Soon retired",
+        createdAt: effectiveFrom,
+      },
+    });
+    const replacementIdentity = await prisma.providerKeyIdentity.create({
+      data: { providerId: provider.id, alias: "Replacement" },
+    });
+    await prisma.providerKeyBinding.create({
+      data: {
+        identityId: retiredIdentity.id,
+        producerId: "congress-trade",
+        producerKeyRef: "openai-primary",
+        effectiveFrom,
+        effectiveTo: scheduledEnd,
+      },
+    });
+
+    expect((await PATCH(request("PATCH", {
+      action: "retire_identity",
+      identityId: retiredIdentity.id,
+      effectiveTo: retiredAt.toISOString(),
+    }))).status).toBe(200);
+
+    const clamped = await prisma.providerKeyBinding.findFirstOrThrow({
+      where: { identityId: retiredIdentity.id },
+    });
+    expect(clamped.effectiveTo).toEqual(retiredAt);
+
+    const createResponse = await POST(request("POST", {
+      action: "create_binding",
+      identityId: replacementIdentity.id,
+      producerId: "congress-trade",
+      producerKeyRef: "openai-primary",
+      effectiveFrom: retiredAt.toISOString(),
+    }));
+    expect(createResponse.status).toBe(201);
+  });
+
   it("rejects a non-atomic overlap and atomically reassigns only the same producer reference", async () => {
     const provider = await prisma.provider.create({
       data: { name: "openai", displayName: "OpenAI", type: "builtin" },

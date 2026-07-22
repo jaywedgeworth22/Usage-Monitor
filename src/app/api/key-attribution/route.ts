@@ -548,8 +548,13 @@ export async function PATCH(request: NextRequest) {
         if (effectiveTo.getTime() < identity.createdAt.getTime()) {
           throw new Error("invalid_identity_end");
         }
+        // Close open bindings and clamp any still-effective future-dated ends to
+        // retirement so later create_binding overlap checks do not see stale rows.
         const openBindings = await tx.providerKeyBinding.findMany({
-          where: { identityId, effectiveTo: null },
+          where: {
+            identityId,
+            OR: [{ effectiveTo: null }, { effectiveTo: { gt: effectiveTo } }],
+          },
           select: { id: true, effectiveFrom: true },
         });
         for (const binding of openBindings) {
