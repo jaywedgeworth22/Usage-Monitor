@@ -1,10 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { isClaudeCodeAnalyticsTelemetry } from "@/lib/external-usage-events";
 import { isReceiptCashEvent } from "@/lib/receipt-cash";
-import { canonicalProviderKey } from "@/lib/provider-identity";
+import { resolveProviderIdentity } from "@/lib/provider-identity";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-/** Bound memory on the hot budget path (4 scalar fields only). */
+/** Bound memory on the hot budget path (scalar fields only). */
 const MAX_EVENT_ROWS = 50_000;
 const STATUS_METRIC_TYPES = ["quota_sync", "credit_balance"] as const;
 const SUBSCRIPTION_METRIC_TYPE = "subscription";
@@ -13,18 +13,27 @@ function utcDayIndex(date: Date, monthStart: Date): number {
   return Math.floor((date.getTime() - monthStart.getTime()) / MS_PER_DAY);
 }
 
+export type DailySeriesProviderIdentity = {
+  id: string;
+  name: string;
+  identityPriority?: number;
+};
+
 /**
  * Wave J / E11: month-to-date *variable usage* daily series keyed by
- * canonical provider name (lowercase). Excludes subscription charges,
- * prepaid receipt cash, Claude Code API-equivalent estimates, and status
- * metrics — matching the cash-spend basis used by budget-status.
+ * **provider id**, using the same `resolveProviderIdentity` ownership as
+ * budget-status pushed-cost attribution (exact name before alias).
+ *
+ * Excludes subscription charges, prepaid receipt cash, Claude Code
+ * API-equivalent estimates, and status metrics.
  *
  * Returns dense arrays from day 1 of the UTC month through `now`'s UTC day
  * (missing days are 0) so `forecastMonthlyUsageFromSeries` can fit a trend.
  */
-export async function loadMtdDailyVariableUsageByProviderName(
+export async function loadMtdDailyVariableUsageByProviderId(
   monthStart: Date,
   now: Date,
+  providers: readonly DailySeriesProviderIdentity[],
   options?: { maxRows?: number }
 ): Promise<Map<string, number[]>> {
   const dayCount = Math.max(1, utcDayIndex(now, monthStart) + 1);
@@ -32,6 +41,7 @@ export async function loadMtdDailyVariableUsageByProviderName(
     Math.max(options?.maxRows ?? MAX_EVENT_ROWS, 1_000),
     100_000
   );
+  if (providers.length === 0) return new Map();
 
   const rows = await prisma.externalUsageEvent.findMany({
     where: {
@@ -53,7 +63,13 @@ export async function loadMtdDailyVariableUsageByProviderName(
     take: maxRows,
   });
 
-  const byProvider = new Map<string, number[]>();
+  const identityCandidates = providers.map((provider) => ({
+    id: provider.id,
+    name: provider.name,
+    identityPriority: provider.identityPriority ?? 0,
+  }));
+
+  const byProviderId = new Map<string, number[]>();
 
   for (const row of rows) {
     if (row.costUsd == null || !(row.costUsd > 0)) continue;
@@ -71,19 +87,21 @@ export async function loadMtdDailyVariableUsageByProviderName(
       continue;
     }
 
+    const owner = resolveProviderIdentity(row.provider, identityCandidates);
+    if (!owner) continue;
+
     const day = utcDayIndex(row.occurredAt, monthStart);
     if (day < 0 || day >= dayCount) continue;
 
-    const key = canonicalProviderKey(row.provider) || row.provider.toLowerCase();
-    let series = byProvider.get(key);
+    let series = byProviderId.get(owner.id);
     if (!series) {
       series = Array.from({ length: dayCount }, () => 0);
-      byProvider.set(key, series);
+      byProviderId.set(owner.id, series);
     }
     series[day] = (series[day] ?? 0) + row.costUsd;
   }
 
-  return byProvider;
+  return byProviderId;
 }
 
 /**

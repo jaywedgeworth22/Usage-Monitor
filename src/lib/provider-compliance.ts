@@ -227,29 +227,25 @@ export async function getProviderComplianceSummariesBatch(
 
   const { periodStart, periodEnd } = monthBounds(now);
   const providerIds = providers.map((p) => p.id);
-  // ExternalUsageEvent.provider is a free-text name; map name → provider rows
-  // (multiple rows may share a canonical name).
-  const nameToProviders = new Map<string, typeof providers[number][]>();
+  // ExternalUsageEvent.provider is free-text; SQLite string compare is
+  // case-sensitive. Query with exact stored provider names, then fan out in
+  // JS with a case-insensitive secondary map for any casing drift.
+  const exactNames = [
+    ...new Set(providers.map((p) => p.name).filter((n) => n.trim().length > 0)),
+  ];
+  const nameToProviders = new Map<string, (typeof providers)[number][]>();
   for (const provider of providers) {
     const key = provider.name.trim().toLowerCase();
     const list = nameToProviders.get(key) ?? [];
     list.push(provider);
     nameToProviders.set(key, list);
   }
-  const names = [...nameToProviders.keys()];
-  // SQLite string comparisons are case-sensitive. Include both the
-  // canonicalized keys and the stored provider names so events recorded with
-  // custom capitalization remain visible to the in-memory case-insensitive
-  // fan-out below.
-  const providerNamesForQuery = [
-    ...new Set([...names, ...providers.map((provider) => provider.name.trim())]),
-  ];
 
   const [statusGroups, reconciliations] = await Promise.all([
     prisma.externalUsageEvent.groupBy({
       by: ["provider", "verificationStatus"],
       where: {
-        provider: { in: providerNamesForQuery },
+        provider: { in: exactNames },
         providerRequestId: { not: null },
         occurredAt: { gte: periodStart, lt: periodEnd },
       },
@@ -279,7 +275,12 @@ export async function getProviderComplianceSummariesBatch(
   }
 
   for (const group of statusGroups) {
-    const matched = nameToProviders.get(group.provider.trim().toLowerCase()) ?? [];
+    // Prefer exact-name match first, then case-insensitive fan-out.
+    const exact = providers.filter((p) => p.name === group.provider);
+    const matched =
+      exact.length > 0
+        ? exact
+        : (nameToProviders.get(group.provider.trim().toLowerCase()) ?? []);
     // When multiple provider rows share a name, attribute the event counts to
     // every row (same as prior per-provider name-keyed queries). Reconciliation
     // rows remain id-scoped and disambiguate money-level state.

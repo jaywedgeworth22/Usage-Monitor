@@ -20,7 +20,7 @@ import { getExternalEventRawCutoff } from "@/lib/data-retention";
 import { calculateEomForecast, calculateEomForecastFromSeries } from "@/lib/forecasting";
 import { resolveAnomalyConfig, type AnomalyResult } from "@/lib/anomaly-detection";
 import { loadSpendAnomaliesByProviderId } from "@/lib/anomaly-loader";
-import { loadMtdDailyVariableUsageByProviderName } from "@/lib/daily-usage-series";
+import { loadMtdDailyVariableUsageByProviderId } from "@/lib/daily-usage-series";
 import { advancePeriod, isSubscriptionInterval } from "@/lib/subscriptions";
 import {
   canLinkSubscriptionToExternalBilling,
@@ -208,7 +208,6 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
     providers,
     pushedByProvider,
     receiptCashByProviderId,
-    dailyUsageByProviderName,
     latestCostTimes,
     materializedSubscriptionEvents,
   ] = await Promise.all([
@@ -334,8 +333,6 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
     }),
     sumMonthToDateExternalCostByProvider(monthStart, rawCutoff),
     sumMonthToDateReceiptCashByProviderId(monthStart, rawCutoff, now),
-    // Wave J / E11: daily variable-usage series for non-linear EOM forecast.
-    loadMtdDailyVariableUsageByProviderName(monthStart, now),
     prisma.usageSnapshot.groupBy({
       by: ["providerId"],
       where: {
@@ -547,6 +544,13 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       (provider.plan?.monthlyBudgetUsd != null ? 4 : 0) +
       (provider.plan ? 2 : 0),
   }));
+  // Wave J / E11: daily variable-usage series keyed by resolved provider id
+  // (same ownership as pushed-cost attribution).
+  const dailyUsageByProviderId = await loadMtdDailyVariableUsageByProviderId(
+    monthStart,
+    now,
+    providerIdentityCandidates
+  );
   const pushedByProviderId = new Map<string, ProviderPushedCost>();
   for (const [producerName, pushed] of pushedByProvider) {
     const owner = resolveProviderIdentity(producerName, providerIdentityCandidates);
@@ -914,29 +918,28 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
     // variable projection instead of annualizing/month-elapsed extrapolating
     // that deposit. Once observed usage exceeds receipt cash, resume the
     // ordinary usage-rate forecast with the receipt as a lower bound.
-    // Wave J / E11: prefer recency-weighted series projection when we have
-    // daily push samples; otherwise fall back to the linear MTD rate.
-    const pushDailySeries =
-      dailyUsageByProviderName.get(canonicalProviderKey(p.name)) ??
-      dailyUsageByProviderName.get(p.name.toLowerCase()) ??
-      null;
+    // Wave J / E11: prefer recency-weighted series when this provider owns
+    // push samples; always floor by observedVariableUsageUsd so a small push
+    // series cannot under-project against a larger poll snapshot (Codex P2).
+    const pushDailySeries = dailyUsageByProviderId.get(p.id) ?? null;
+    const linearProjectedVariable = calculateEomForecast(
+      observedVariableUsageUsd,
+      0,
+      now
+    );
     const seriesProjectedVariable =
       pushDailySeries && pushDailySeries.some((v) => v > 0)
-        ? calculateEomForecastFromSeries(pushDailySeries, 0, now, {
-            usageSoFarFallback: observedVariableUsageUsd,
-          })
-        : calculateEomForecast(observedVariableUsageUsd, 0, now);
-    // The daily push series is one channel, not necessarily the selected
-    // max() channel above. A smaller push-only series must never project below
-    // authoritative poll spend already observed for this provider.
-    const flooredSeriesProjection = Math.max(
-      observedVariableUsageUsd,
-      seriesProjectedVariable
-    );
+        ? Math.max(
+            observedVariableUsageUsd,
+            calculateEomForecastFromSeries(pushDailySeries, 0, now, {
+              usageSoFarFallback: observedVariableUsageUsd,
+            })
+          )
+        : linearProjectedVariable;
     const projectedVariableUsageUsd =
       receiptCash.paidUsd >= observedVariableUsageUsd
         ? receiptCash.paidUsd
-        : Math.max(receiptCash.paidUsd, flooredSeriesProjection);
+        : Math.max(receiptCash.paidUsd, seriesProjectedVariable);
     const monthlyBudgetUsd = plan?.monthlyBudgetUsd ?? null;
 
     // Reuse the shared alert logic for budget alerts by feeding the combined usage cost as the
