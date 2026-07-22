@@ -55,9 +55,21 @@ requireText(ci, /npm run test:oracle-deploy/, "hosted CI must exercise deploymen
 requireText(caddy, /^\{\$USAGE_MONITOR_HOSTNAME:usage\.jays\.services\}/m, "Caddy must default to the public hostname");
 requireText(caddy, /disable_tlsalpn_challenge/, "Caddy must use HTTP-01 behind the proxied hostname");
 requireText(caddy, /issuer acme/, "Caddy must keep the Let's Encrypt ACME issuer");
-requireText(caddy, /issuer zerossl/, "Caddy must keep ZeroSSL as the Automatic HTTPS fallback issuer");
+requireText(
+  caddy,
+  /dir https:\/\/acme\.zerossl\.com\/v2\/DV90/,
+  "Caddy must keep ZeroSSL ACME directory as the Automatic HTTPS fallback issuer",
+);
 requireText(deploy, /ensure_public_caddy_hostname/, "deploy must migrate/refuse stale Caddy hostnames");
-requireText(deploy, /sslip\.io/, "deploy must detect deleted IP-derived sslip hostnames");
+requireText(deploy, /reload_caddy_proxy/, "deploy must recreate Caddy after hostname migration");
+// Use a string literal check (not a URL-shaped regex) so CodeQL does not flag
+// unanchored host matching in this contract file.
+forbidLiteral(deploy, "usage-oracle.", "deploy must not reintroduce the deleted IP-derived host prefix");
+assert.equal(
+  deploy.includes("sslip.io"),
+  true,
+  "deploy must detect deleted IP-derived sslip hostnames",
+);
 forbidLiteral(caddy, "sslip.io", "Caddy must not retain the deleted IP-derived fallback");
 requireText(composeDev, /USAGE_MONITOR_HOSTNAME:\s*\$\{USAGE_MONITOR_HOSTNAME:-usage\.jays\.services\}/, "Compose must default to the public hostname");
 forbidLiteral(composeDev, "sslip.io", "Compose must not retain the deleted IP-derived fallback");

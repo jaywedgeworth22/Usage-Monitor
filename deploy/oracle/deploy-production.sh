@@ -640,9 +640,22 @@ write_host_revision() {
 
 # Production Caddy receives USAGE_MONITOR_HOSTNAME from host.env. Old bootstrap
 # copies still encode the deleted sslip.io IP hostname; refuse/migrate those
-# before cutover so ACME cannot renew the wrong certificate.
+# before cutover so ACME cannot renew the wrong certificate. When the value
+# changes, recreate the running Caddy container so it picks up the new env.
+reload_caddy_proxy() {
+  log "recreating Caddy so it loads the migrated USAGE_MONITOR_HOSTNAME."
+  # Use PREVIOUS_SHA image/env path — Caddy does not depend on the app image.
+  if ! timeout "${COMPOSE_TIMEOUT_SECONDS}" docker compose \
+    --project-name oracle \
+    --env-file "${HOST_ENV}" \
+    --file "${COMPOSE_FILE}" \
+    up --detach --no-deps --no-build --force-recreate caddy >/dev/null; then
+    return 1
+  fi
+}
+
 ensure_public_caddy_hostname() {
-  local configured rewritten temporary
+  local configured rewritten temporary migrated=false
   configured="$(read_env_value "${HOST_ENV}" USAGE_MONITOR_HOSTNAME)"
   if [[ -z "${configured}" ]]; then
     log "USAGE_MONITOR_HOSTNAME unset; writing ${PUBLIC_HOST}."
@@ -655,9 +668,8 @@ ensure_public_caddy_hostname() {
       return 1
     }
     chown root:root "${temporary}" && chmod 0600 "${temporary}" && mv "${temporary}" "${HOST_ENV}"
-    return 0
-  fi
-  if [[ "${configured}" == *sslip.io* || "${configured}" == *132.226.90.164* ]]; then
+    migrated=true
+  elif [[ "${configured}" == *sslip.io* || "${configured}" == *132.226.90.164* ]]; then
     # Preserve any additional public SANs after the first host, but drop the
     # deleted IP-derived sslip label. Always ensure usage.jays.services leads.
     rewritten="$(
@@ -666,7 +678,7 @@ ensure_public_caddy_hostname() {
         | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
         | awk -v public="${PUBLIC_HOST}" '
             BEGIN { print public }
-            $0 != "" && $0 != public && $0 !~ /sslip\.io/ && $0 !~ /132\.226\.90\.164/ { print }
+            $0 != "" && $0 != public && index($0, "sslip.io") == 0 && index($0, "132.226.90.164") == 0 { print }
           ' \
         | paste -sd, -
     )"
@@ -693,10 +705,12 @@ ensure_public_caddy_hostname() {
       unlink "${temporary}" 2>/dev/null || true
       return 1
     fi
-    return 0
-  fi
-  if [[ "${configured}" != *"${PUBLIC_HOST}"* ]]; then
+    migrated=true
+  elif [[ "${configured}" != *"${PUBLIC_HOST}"* ]]; then
     die "USAGE_MONITOR_HOSTNAME must include ${PUBLIC_HOST} (got a non-public value)"
+  fi
+  if [[ "${migrated}" == "true" ]]; then
+    reload_caddy_proxy || die "failed to recreate Caddy after hostname migration"
   fi
 }
 

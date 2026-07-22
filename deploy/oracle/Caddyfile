@@ -4,13 +4,16 @@
 
   # Cloudflare terminates public TLS for the proxied hostname, so the origin
   # must use the ACME HTTP-01 challenge instead of TLS-ALPN-01. Keep both of
-  # Caddy's default Automatic HTTPS issuers so renewal can fall back from
-  # Let's Encrypt to ZeroSSL when one CA is rate-limited or unavailable.
+  # Caddy's Automatic HTTPS ACME issuers (Let's Encrypt default directory +
+  # ZeroSSL ACME directory) so renewal can fall back when one CA is
+  # rate-limited. Use two `issuer acme` blocks — not the proprietary
+  # `issuer zerossl` API, which requires ZeroSSL EAB credentials.
   tls {
     issuer acme {
       disable_tlsalpn_challenge
     }
-    issuer zerossl {
+    issuer acme {
+      dir https://acme.zerossl.com/v2/DV90
       disable_tlsalpn_challenge
     }
   }
