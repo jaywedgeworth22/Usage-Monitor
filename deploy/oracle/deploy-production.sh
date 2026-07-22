@@ -479,7 +479,9 @@ capture_quiescent_backup_watermark() {
 
 acceptance_restore_pids() {
   local process_rows
-  if ! process_rows="$(timeout 30 docker top "${APP_CONTAINER}" -eo pid,args)"; then
+  # Explicit `ww` is required: procps otherwise permits redirected `args`
+  # output to truncate before the long scratch pathname we match below.
+  if ! process_rows="$(timeout 30 docker top "${APP_CONTAINER}" -eo pid,args ww)"; then
     return 2
   fi
   awk -v scratch="${RESTORE_SCRATCH}" '

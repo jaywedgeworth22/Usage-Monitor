@@ -52,8 +52,8 @@ requireText(workflow, /head_branch == 'main'/, "workflow must reject non-main ru
 requireText(workflow, /workflow_run\.conclusion == 'success'/, "workflow must require successful CI");
 requireText(workflow, /\.revision == \$revision/, "workflow must verify the exact production revision");
 requireText(workflow, /cancel-in-progress:\s*true/, "stale receipt observers should be cancelled");
-requireText(workflow, /timeout-minutes:\s*220/, "observer job must outlast the host transaction ceiling");
-requireText(workflow, /seq 1 1260/, "observer must cover the 210-minute host transaction ceiling");
+requireText(workflow, /timeout-minutes:\s*250/, "observer job must outlast the host transaction ceiling");
+requireText(workflow, /seq 1 1440/, "observer must cover the 240-minute host transaction ceiling");
 requireText(workflow, /ORACLE_ORIGIN_IPV4:\s*"141\.148\.182\.224"/, "observer must pin the reserved Oracle origin");
 requireText(workflow, /--resolve "usage\.jays\.services:443:\$\{ORACLE_ORIGIN_IPV4\}"/, "observer must bypass Cloudflare bot challenges without weakening TLS");
 forbidText(workflow, /secrets\./, "the observer workflow must not hold a production secret");
@@ -139,6 +139,7 @@ for (const [pattern, message] of [
   [/timeout --signal=TERM --kill-after=30s "\$\{GARAGE_INTEGRITY_TIMEOUT_SECONDS\}"/, "full Garage integrity timeout enforcement"],
   [/timeout --signal=TERM --kill-after=30s "\$\{GARAGE_FOREIGN_KEY_TIMEOUT_SECONDS\}"/, "Garage foreign-key timeout enforcement"],
   [/require_no_acceptance_restore_process/, "restore-process absence before cleanup"],
+  [/docker top "\$\{APP_CONTAINER\}" -eo pid,args ww/, "untruncated restore-process inspection"],
   [/refusing to unlink Garage acceptance scratch/, "orphan-safe scratch retention"],
   [/name != '_deploy_heartbeat'/, "quoted exclusion for the unmanaged deployment heartbeat object"],
   [/verify_render_retirement/, "durable Render retirement proof"],
@@ -177,7 +178,7 @@ requireText(poller, /docker update --restart=no/, "the poller must retrofit moun
 requireText(poller, /flock -w 10 8/, "recovery must share the deployment transaction lock");
 requireText(poller, /flock -u 8/, "the poller must release its recovery lock before the child transaction");
 requireText(deployService, /SuccessExitStatus=75/, "pending checks must not fail systemd");
-requireText(deployService, /TimeoutStartSec=210min/, "systemd must bound an unexpectedly wedged transaction");
+requireText(deployService, /TimeoutStartSec=240min/, "systemd must bound an unexpectedly wedged transaction");
 requireText(deployService, /TimeoutStopSec=45min/, "systemd must allow bounded signal rollback to finish");
 const declaredSerialTransactionSeconds =
   300 + // bounded BuildKit cleanup
@@ -185,9 +186,9 @@ const declaredSerialTransactionSeconds =
   330 + // Garage LTX listing, dry-run, and authenticated validation
   1080 + // cold mirror clone, fetch, and worktree creation
   2940 + // image build, startup preflight, and Litestream presence
-  300 + // stopped-writer offline backup
+  600 + // pre-migration and stopped-writer SQLite backups
   900 + // target scratch migration
-  300 + // exact readiness and fresh scheduler tick
+  600 + // exact readiness and fresh scheduler tick
   300 + // post-cutover Garage advancement
   960 + // in-container restore plus Docker-client margin
   1800 + // authoritative full SQLite integrity
@@ -195,7 +196,7 @@ const declaredSerialTransactionSeconds =
   300; // public samples and bounded metadata checks
 const rollbackContingencySeconds = 30 * 60;
 assert.ok(
-  210 * 60 >= declaredSerialTransactionSeconds + rollbackContingencySeconds,
+  240 * 60 >= declaredSerialTransactionSeconds + rollbackContingencySeconds,
   "systemd start ceiling must exceed declared serial transaction budgets plus contingency",
 );
 requireText(timer, /OnUnitInactiveSec=1min/, "timer must detect merged main promptly");
@@ -373,9 +374,15 @@ docker() {
   printf 'docker %s\\n' "$*" >> "$COMMAND_LOG_VALUE"
   case "$1" in
     top)
+      local long_process_row
       printf 'PID COMMAND\\n'
       if [[ -f "$RESTORE_MARKER_VALUE" && "$ORPHAN_AFTER_RESTORE_VALUE" == true ]]; then
-        printf '4242 /usr/bin/timeout /app/bin/litestream restore -o %s /data/prod.db\\n' "$RESTORE_SCRATCH"
+        long_process_row="4242 /usr/bin/timeout --signal=TERM --kill-after=30s 900 /app/bin/litestream restore -config /app/litestream.yml -integrity-check quick -o $RESTORE_SCRATCH /data/prod.db"
+        if [[ " $* " == *" ww "* ]]; then
+          printf '%s\\n' "$long_process_row"
+        else
+          printf '%s\\n' "\${long_process_row:0:80}"
+        fi
       fi
       ;;
     exec)
@@ -503,6 +510,7 @@ try {
   const successfulRestore = runRestoreCase();
   assert.equal(successfulRestore.result.status, 0, successfulRestore.result.stderr);
   assert.match(successfulRestore.commands, /docker exec oracle-app-1 \/usr\/bin\/timeout --signal=TERM --kill-after=30s 900 \/app\/bin\/litestream restore/);
+  assert.match(successfulRestore.commands, /docker top oracle-app-1 -eo pid,args ww/);
   assert.match(successfulRestore.commands, /-integrity-check quick/);
   assert.doesNotMatch(successfulRestore.commands, /-integrity-check full/);
   assert.equal((successfulRestore.commands.match(/PRAGMA integrity_check/g) ?? []).length, 1);

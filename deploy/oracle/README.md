@@ -108,7 +108,7 @@ integrity scan. This keeps acceptance fail-closed for a growing database
 without duplicating the same full scan inside Litestream and SQLite. Both the
 in-container restore process and the Docker client have ordered TERM/KILL
 bounds; scratch cleanup first proves no matching restore remains. The systemd
-transaction ceiling is three and a half hours so it exceeds the declared serial step
+transaction ceiling is four hours so it exceeds the declared serial step
 budgets, while its separate stop grace still reserves time for rollback.
 
 The previous full-SHA image and up to five verified offline SQLite snapshots
