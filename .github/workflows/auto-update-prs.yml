@@ -33,7 +33,7 @@ jobs:
 
           pending_prs="$(mktemp)"
           trap 'rm -f "$pending_prs"' EXIT
-          gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
+          gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open --limit 1000 \
             --json number,autoMergeRequest,labels,mergeStateStatus \
             --jq '.[]
               | select(.autoMergeRequest != null)
