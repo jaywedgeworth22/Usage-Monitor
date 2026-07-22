@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { config, isPublicPath } from "@/middleware";
+import { buildContentSecurityPolicy, config, isPublicPath } from "@/middleware";
 
 // The session-cookie middleware runs on almost all paths now to enforce CSP nonces,
 // but it uses isPublicPath internally to determine if the route should be session-gated.
@@ -53,6 +53,21 @@ describe("middleware matcher — /api/budget-status exclusion (regression for th
     ]) {
       expect(isSessionGated(p)).toBe(true);
     }
+  });
+});
+
+describe("CSP build (blank-page regression)", () => {
+  it("does not use strict-dynamic so same-origin Next chunks can load without per-tag nonces", () => {
+    const csp = buildContentSecurityPolicy("testnonce", true);
+    expect(csp).toContain("script-src 'self' 'nonce-testnonce'");
+    expect(csp).not.toContain("strict-dynamic");
+    expect(csp).toContain("style-src 'self' 'unsafe-inline'");
+    expect(csp).toContain("upgrade-insecure-requests");
+  });
+
+  it("allows unsafe-eval only outside production (Next dev)", () => {
+    expect(buildContentSecurityPolicy("n", false)).toContain("'unsafe-eval'");
+    expect(buildContentSecurityPolicy("n", true)).not.toContain("'unsafe-eval'");
   });
 });
 
