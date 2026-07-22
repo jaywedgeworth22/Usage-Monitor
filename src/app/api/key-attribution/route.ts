@@ -208,6 +208,8 @@ async function loadCoverage(
     identityUnattributedCostUsd: 0,
     projectAttributedCostUsd: 0,
     projectUnattributedCostUsd: 0,
+    projectAuthorityConflictCostUsd: 0,
+    projectAuthorityConflictEventCount: 0,
     totalEventCount: 0,
     identityMatchedEventCount: 0,
     identityUnattributedEventCount: 0,
@@ -365,7 +367,19 @@ async function loadCoverage(
         identityTotal.costUsd += costUsd;
         identityTotal.eventCount += eventCount;
         totals.byIdentity[resolution.identityId] = identityTotal;
-        if (row.projectId || resolution.projectId || resolution.projectName) {
+        const bindingHasProject = Boolean(resolution.projectId || resolution.projectName);
+        const projectAuthorityConflict = Boolean(
+          row.projectId &&
+          bindingHasProject &&
+          (resolution.projectId == null || row.projectId !== resolution.projectId)
+        );
+        if (projectAuthorityConflict) {
+          // Identity evidence is still valid, but two explicit project authorities
+          // disagree. Keep project coverage fail-closed rather than choosing one.
+          totals.projectUnattributedCostUsd += costUsd;
+          totals.projectAuthorityConflictCostUsd += costUsd;
+          totals.projectAuthorityConflictEventCount += eventCount;
+        } else if (row.projectId || bindingHasProject) {
           totals.projectAttributedCostUsd += costUsd;
         }
         else totals.projectUnattributedCostUsd += costUsd;
@@ -658,16 +672,19 @@ export async function POST(request: NextRequest) {
           existing.providerId,
           providerReportedKeyId
         );
+        // Reject a duplicate logical identity under any still-accepted key,
+        // including the null and already-current paths. Checking only the new
+        // digest lets a sibling retain the old digest for the same raw ID.
+        const collision = await tx.providerKeyIdentity.findFirst({
+          where: {
+            providerId: existing.providerId,
+            providerReportedKeyIdFingerprint: { in: candidates },
+            id: { not: identityId },
+          },
+          select: { id: true },
+        });
+        if (collision) throw new Error("provider_key_identity_exists");
         if (existing.providerReportedKeyIdFingerprint == null) {
-          const collision = await tx.providerKeyIdentity.findFirst({
-            where: {
-              providerId: existing.providerId,
-              providerReportedKeyIdFingerprint: currentFingerprint,
-              id: { not: identityId },
-            },
-            select: { id: true },
-          });
-          if (collision) throw new Error("provider_key_identity_exists");
           return tx.providerKeyIdentity.update({
             where: { id: identityId },
             data: { providerReportedKeyIdFingerprint: currentFingerprint },
@@ -683,15 +700,6 @@ export async function POST(request: NextRequest) {
         if (existing.providerReportedKeyIdFingerprint === currentFingerprint) {
           return existing;
         }
-        const collision = await tx.providerKeyIdentity.findFirst({
-          where: {
-            providerId: existing.providerId,
-            providerReportedKeyIdFingerprint: currentFingerprint,
-            id: { not: identityId },
-          },
-          select: { id: true },
-        });
-        if (collision) throw new Error("provider_key_identity_exists");
         return tx.providerKeyIdentity.update({
           where: { id: identityId },
           data: { providerReportedKeyIdFingerprint: currentFingerprint },
@@ -801,9 +809,9 @@ export async function PATCH(request: NextRequest) {
         }
         // Close open bindings and clamp any still-effective future-dated ends to
         // retirement so later create_binding overlap checks do not see stale rows.
-        // Bindings scheduled to start at/after retirement never matched events —
-        // delete them instead of writing a zero-length future row that still
-        // collides with open-ended replacements (effectiveTo > replacement start).
+        // Bindings scheduled to start at/after retirement never matched events.
+        // Preserve them as zero-length canceled history; overlap checks explicitly
+        // ignore empty intervals so replacements remain possible.
         const openBindings = await tx.providerKeyBinding.findMany({
           where: {
             identityId,
@@ -812,13 +820,14 @@ export async function PATCH(request: NextRequest) {
           select: { id: true, effectiveFrom: true },
         });
         for (const binding of openBindings) {
-          if (binding.effectiveFrom.getTime() >= effectiveTo.getTime()) {
-            await tx.providerKeyBinding.delete({ where: { id: binding.id } });
-            continue;
-          }
           await tx.providerKeyBinding.update({
             where: { id: binding.id },
-            data: { effectiveTo },
+            data: {
+              effectiveTo:
+                binding.effectiveFrom.getTime() < effectiveTo.getTime()
+                  ? effectiveTo
+                  : binding.effectiveFrom,
+            },
           });
         }
         await tx.providerKeyIdentity.update({
