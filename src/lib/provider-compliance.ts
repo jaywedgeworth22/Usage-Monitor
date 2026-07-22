@@ -237,12 +237,19 @@ export async function getProviderComplianceSummariesBatch(
     nameToProviders.set(key, list);
   }
   const names = [...nameToProviders.keys()];
+  // SQLite string comparisons are case-sensitive. Include both the
+  // canonicalized keys and the stored provider names so events recorded with
+  // custom capitalization remain visible to the in-memory case-insensitive
+  // fan-out below.
+  const providerNamesForQuery = [
+    ...new Set([...names, ...providers.map((provider) => provider.name.trim())]),
+  ];
 
   const [statusGroups, reconciliations] = await Promise.all([
     prisma.externalUsageEvent.groupBy({
       by: ["provider", "verificationStatus"],
       where: {
-        provider: { in: names },
+        provider: { in: providerNamesForQuery },
         providerRequestId: { not: null },
         occurredAt: { gte: periodStart, lt: periodEnd },
       },

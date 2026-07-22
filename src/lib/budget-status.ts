@@ -926,10 +926,17 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
             usageSoFarFallback: observedVariableUsageUsd,
           })
         : calculateEomForecast(observedVariableUsageUsd, 0, now);
+    // The daily push series is one channel, not necessarily the selected
+    // max() channel above. A smaller push-only series must never project below
+    // authoritative poll spend already observed for this provider.
+    const flooredSeriesProjection = Math.max(
+      observedVariableUsageUsd,
+      seriesProjectedVariable
+    );
     const projectedVariableUsageUsd =
       receiptCash.paidUsd >= observedVariableUsageUsd
         ? receiptCash.paidUsd
-        : Math.max(receiptCash.paidUsd, seriesProjectedVariable);
+        : Math.max(receiptCash.paidUsd, flooredSeriesProjection);
     const monthlyBudgetUsd = plan?.monthlyBudgetUsd ?? null;
 
     // Reuse the shared alert logic for budget alerts by feeding the combined usage cost as the
