@@ -33,11 +33,11 @@ import {
 } from "@/lib/managed-provider-credential";
 import type { CostCoverageCaveat } from "@/lib/adapters/helpers";
 import {
-import { hasValidDashboardSession } from "@/lib/auth";
   authoritativeProviderBillingCredential,
   hashProviderBillingAccountId,
   projectProviderBillingAccountMatches,
 } from "@/lib/provider-billing-account";
+import { hasValidDashboardSession } from "@/lib/auth";
 
 function decryptKey(encryptedKey: string | null): string | null {
   if (!encryptedKey) return null;
