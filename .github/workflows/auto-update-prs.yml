@@ -1,22 +1,54 @@
-name: Auto Update PRs
+name: Auto-update eligible PRs
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+# The default token is read-only. GitHub CLI uses the separately provisioned
+# PR_UPDATE_TOKEN, so branch writes emit normal events and rerun required CI.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: auto-update-eligible-prs
+  cancel-in-progress: false
 
 jobs:
   autoupdate:
+    # Keep the workflow inert until an owner provisions a fine-grained token (or
+    # GitHub App token) with pull-request and contents write access.
+    if: ${{ vars.PR_UPDATE_PRS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PR_UPDATE_TOKEN }}
     steps:
-      - name: Automatically update PRs
-        uses: chinthakagodawita/autoupdate@0707656cd062a3b0cf8fa9b2cda1d1404d74437e # v1.7.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          merge_msg: "chore: auto-update branch with main"
-          pr_filter: "auto_merge"
-          exclude_labels: "do-not-update"
-          retry_interval: "2"
-          retry_count: "3"
-          update_limit: "5"
+      - name: Update auto-merge PR branches that are behind main
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+
+          while IFS= read -r pr; do
+            echo "Updating PR #$pr"
+            for attempt in 1 2 3; do
+              if gh pr update-branch "$pr" --repo "$GITHUB_REPOSITORY"; then
+                break
+              fi
+              if [ "$attempt" = 3 ]; then
+                exit 1
+              fi
+              sleep 2
+            done
+          done < <(
+            gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
+              --json number,autoMergeRequest,labels,mergeStateStatus \
+              --jq '.[]
+                | select(.autoMergeRequest != null)
+                | select(.mergeStateStatus == "BEHIND")
+                | select(any(.labels[]; .name == "do-not-update") | not)
+                | .number' \
+              | head -n 5
+          )
