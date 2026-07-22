@@ -56,7 +56,7 @@ function nextRequest(
   });
 }
 
-function v2Request(token = USAGE_TOKEN): NextRequest {
+function v2Request(token = USAGE_TOKEN, includeVersionHeader = true): NextRequest {
   return nextRequest(
     {
       schemaVersion: 2,
@@ -73,7 +73,7 @@ function v2Request(token = USAGE_TOKEN): NextRequest {
     },
     token,
     "https://usage.jays.services/api/ingest/usage",
-    2
+    includeVersionHeader ? 2 : undefined
   );
 }
 
@@ -197,6 +197,40 @@ describe("POST /api/ingest/usage admission", () => {
         }),
       }),
     ]);
+  });
+
+  it("routes a v2 body through the shared schema without a custom version header", async () => {
+    const response = await POST(v2Request(USAGE_TOKEN, false));
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      ok: true,
+      schemaVersion: 2,
+      received: 1,
+      persisted: 1,
+    }));
+    expect(externalUsageMocks.persist).toHaveBeenCalledWith([
+      expect.objectContaining({
+        sourceApp: "socratic-trade",
+        idempotencyKey: expect.stringMatching(/^[0-9a-f]{64}$/),
+      }),
+    ]);
+  });
+
+  it("returns the typed v2 error shape for a headerless invalid v2 body", async () => {
+    const response = await POST(nextRequest(
+      { schemaVersion: 2, producerId: "socratic-trade", events: [{}] },
+      USAGE_TOKEN
+    ));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      ok: false,
+      schemaVersion: 2,
+      error: expect.objectContaining({
+        code: "invalid_request",
+        retryable: false,
+      }),
+    }));
+    expect(externalUsageMocks.persist).not.toHaveBeenCalled();
   });
 
   it("returns the typed error/backoff contract to v2 clients", async () => {

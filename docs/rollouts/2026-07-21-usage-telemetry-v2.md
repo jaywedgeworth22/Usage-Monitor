@@ -28,6 +28,15 @@ legacy replay adapter. There is no dual-write path.
 - Full repository verification and production revision receipt are release gates, not
   implied by merge.
 
+## Review remediation (2026-07-22)
+
+- Replaced the GitHub shorthand with an explicit HTTPS dependency and HTTPS
+  lockfile resolution; a clean `npm ci` with SSH disabled builds and imports the
+  exact `v2.0.0` tag as CJS and ESM.
+- The route now recognizes `schemaVersion: 2` from the decoded body, so the
+  custom version header is advisory rather than required. Headerless valid v2
+  batches and typed validation failures are regression-tested.
+
 ## Rollback
 
 Revert the receiver commit while keeping the v1 replay parser. Producers must not be
