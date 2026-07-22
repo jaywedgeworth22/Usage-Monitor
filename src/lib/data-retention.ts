@@ -726,30 +726,58 @@ async function pruneExternalUsageEvents(
 }
 
 /**
+ * Process-local resume watermark so successive maintenance ticks finish a
+ * multi-window rehash instead of re-scanning the first N rows forever.
+ * Cleared when a pass reaches the end of the table.
+ */
+let externalRollupRehashResumeAfterId: string | undefined;
+
+/** Test-only: reset the rehash resume cursor between cases. */
+export function __resetExternalRollupRehashResumeForTests(): void {
+  externalRollupRehashResumeAfterId = undefined;
+}
+
+/**
  * Wave E / E6: rewrite daily rollup groupKeys that predate projectId (or any
  * later dimension) in the hash formula. Merges into an existing canonical row
- * when the new key collides. Bounded per call so maintenance stays light.
+ * when the new key collides. Bounded per call so maintenance stays light;
+ * resumes from the last fully scanned id on the next tick.
+ *
+ * Pagination uses `id > afterId` (not Prisma cursor+skip) so deleting a page's
+ * last row during merge cannot truncate the remainder of the table.
  */
 export async function rehashStaleExternalUsageEventDailyRollupGroupKeys(options?: {
   batchSize?: number;
   maxBatches?: number;
+  /** Override resume (tests). */
+  afterId?: string | null;
 }): Promise<{ scanned: number; rewritten: number; merged: number }> {
   const batchSize = Math.min(Math.max(options?.batchSize ?? DEFAULT_BATCH_SIZE, 50), 2_000);
-  const maxBatches = Math.min(Math.max(options?.maxBatches ?? 20, 1), 200);
+  const maxBatches = Math.min(Math.max(options?.maxBatches ?? 40, 1), 400);
   let scanned = 0;
   let rewritten = 0;
   let merged = 0;
-  let cursorId: string | undefined;
+  let afterId =
+    options?.afterId === null
+      ? undefined
+      : options?.afterId ?? externalRollupRehashResumeAfterId;
 
   for (let batch = 0; batch < maxBatches; batch++) {
     const rows =
       (await prisma.externalUsageEventDailyRollup.findMany({
         take: batchSize,
         orderBy: { id: "asc" },
-        ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+        ...(afterId ? { where: { id: { gt: afterId } } } : {}),
       })) ?? [];
-    if (!Array.isArray(rows) || rows.length === 0) break;
-    cursorId = rows[rows.length - 1]!.id;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      // Full table covered; next maintenance tick restarts from the head.
+      externalRollupRehashResumeAfterId = undefined;
+      break;
+    }
+    // Advance past this page *before* mutations so a deleted last-row cannot
+    // collapse subsequent pagination (Codex P2 on PR #748).
+    afterId = rows[rows.length - 1]!.id;
+    externalRollupRehashResumeAfterId = afterId;
 
     for (const row of rows) {
       scanned += 1;

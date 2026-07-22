@@ -36,6 +36,10 @@ describe("external daily rollup groupKey rehash (Wave E / E6)", () => {
 
   beforeEach(async () => {
     await prisma.externalUsageEventDailyRollup.deleteMany();
+    const { __resetExternalRollupRehashResumeForTests } = await import(
+      "../data-retention"
+    );
+    __resetExternalRollupRehashResumeForTests();
   });
 
   function baseDims(projectId: string | null) {
@@ -139,6 +143,88 @@ describe("external daily rollup groupKey rehash (Wave E / E6)", () => {
     expect(rows[0]!.groupKey).toBe(correctKey);
     expect(rows[0]!.eventCount).toBe(3);
     expect(rows[0]!.totalCostUsd).toBe(14);
+  });
+
+  it("resumes past a deleted page-end cursor and across maintenance ticks", async () => {
+    const dims = baseDims(null);
+    const correctKey = computeExternalRollupGroupKey(dims);
+
+    // Three stale rows with ordered ids so batchSize=1 pages through them.
+    // First page's only row merges away (deleted); scan must still reach #3.
+    await prisma.externalUsageEventDailyRollup.create({
+      data: {
+        id: "a-canonical",
+        day,
+        groupKey: correctKey,
+        ...dims,
+        eventCount: 1,
+        pricedEventCount: 1,
+        unpricedEventCount: 0,
+        unclassifiedCostEventCount: 0,
+        totalCostUsd: 1,
+        totalRequests: 1,
+        totalQuantity: 0,
+        totalCredits: 0,
+        latestOccurredAt: day,
+      },
+    });
+    await prisma.externalUsageEventDailyRollup.create({
+      data: {
+        id: "b-stale-merge",
+        day,
+        groupKey: "stale-b",
+        ...dims,
+        eventCount: 1,
+        pricedEventCount: 1,
+        unpricedEventCount: 0,
+        unclassifiedCostEventCount: 0,
+        totalCostUsd: 2,
+        totalRequests: 1,
+        totalQuantity: 0,
+        totalCredits: 0,
+        latestOccurredAt: day,
+      },
+    });
+    await prisma.externalUsageEventDailyRollup.create({
+      data: {
+        id: "c-stale-rewrite",
+        day: new Date("2026-06-02T00:00:00.000Z"),
+        groupKey: "stale-c",
+        ...dims,
+        eventCount: 1,
+        pricedEventCount: 1,
+        unpricedEventCount: 0,
+        unclassifiedCostEventCount: 0,
+        totalCostUsd: 3,
+        totalRequests: 1,
+        totalQuantity: 0,
+        totalCredits: 0,
+        latestOccurredAt: day,
+      },
+    });
+
+    // Tick 1: only one batch — processes a-canonical (ok) then stops at resume.
+    await rehashStaleExternalUsageEventDailyRollupGroupKeys({
+      batchSize: 1,
+      maxBatches: 1,
+      afterId: null,
+    });
+    // Tick 2-3: resume must reach b (merge/delete) and c (rewrite).
+    await rehashStaleExternalUsageEventDailyRollupGroupKeys({
+      batchSize: 1,
+      maxBatches: 1,
+    });
+    await rehashStaleExternalUsageEventDailyRollupGroupKeys({
+      batchSize: 1,
+      maxBatches: 2,
+    });
+
+    const rows = await prisma.externalUsageEventDailyRollup.findMany({
+      orderBy: { id: "asc" },
+    });
+    expect(rows.map((r) => r.id).sort()).toEqual(["a-canonical", "c-stale-rewrite"]);
+    expect(rows.find((r) => r.id === "a-canonical")!.totalCostUsd).toBe(3);
+    expect(rows.find((r) => r.id === "c-stale-rewrite")!.groupKey).toBe(correctKey);
   });
 
   it("preserves pre-coverage eventCount as unclassified when merging legacy rollups", async () => {
