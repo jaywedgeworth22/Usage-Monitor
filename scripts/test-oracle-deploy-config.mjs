@@ -31,6 +31,10 @@ function forbidText(body, pattern, message) {
   assert.doesNotMatch(body, pattern, message);
 }
 
+function forbidLiteral(body, text, message) {
+  assert.equal(body.includes(text), false, message);
+}
+
 // GitHub observes an exact, already-green main CI run. It holds no production
 // credential because Oracle pulls the public protected revision itself.
 requireText(workflow, /workflow_run:/, "deploy receipt must follow CI");
@@ -50,11 +54,11 @@ requireText(ci, /npm run test:oracle-deploy/, "hosted CI must exercise deploymen
 // so Caddy must leave HTTP-01 enabled and disable TLS-ALPN-01.
 requireText(caddy, /^\{\$USAGE_MONITOR_HOSTNAME:usage\.jays\.services\}/m, "Caddy must default to the public hostname");
 requireText(caddy, /disable_tlsalpn_challenge/, "Caddy must use HTTP-01 behind the proxied hostname");
-forbidText(caddy, /sslip\.io/, "Caddy must not retain the deleted IP-derived fallback");
+forbidLiteral(caddy, "sslip.io", "Caddy must not retain the deleted IP-derived fallback");
 requireText(composeDev, /USAGE_MONITOR_HOSTNAME:\s*\$\{USAGE_MONITOR_HOSTNAME:-usage\.jays\.services\}/, "Compose must default to the public hostname");
-forbidText(composeDev, /sslip\.io/, "Compose must not retain the deleted IP-derived fallback");
+forbidLiteral(composeDev, "sslip.io", "Compose must not retain the deleted IP-derived fallback");
 requireText(oracleReadme, /USAGE_MONITOR_HOSTNAME=usage\.jays\.services/, "Oracle docs must name the public hostname");
-forbidText(oracleReadme, /sslip\.io/, "Oracle docs must not retain the deleted IP-derived fallback");
+forbidLiteral(oracleReadme, "sslip.io", "Oracle docs must not retain the deleted IP-derived fallback");
 
 // The root-owned production Compose policy must never build or accept new host
 // mounts from a fetched revision.
