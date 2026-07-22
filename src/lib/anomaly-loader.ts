@@ -47,7 +47,12 @@ interface DayPeak {
  */
 export async function loadSpendAnomaliesByProviderId(
   now: Date = new Date(),
-  config: AnomalyConfig = resolveAnomalyConfig()
+  config: AnomalyConfig = resolveAnomalyConfig(),
+  /**
+   * Optional already-loaded providers so budget-status does not pay a second
+   * `provider.findMany` (cache-dedupe asserts a single call per compute).
+   */
+  knownProviders?: readonly { id: string; name: string }[]
 ): Promise<Map<string, AnomalyResult[]>> {
   const results = new Map<string, AnomalyResult[]>();
   if (!config.enabled) return results;
@@ -58,7 +63,7 @@ export async function loadSpendAnomaliesByProviderId(
 
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-  const [rows, providers, pushDailyByName] = await Promise.all([
+  const [rows, resolvedProviders, pushDailyByName] = await Promise.all([
     prisma.usageSnapshot.findMany({
       where: { fetchedAt: { gte: windowStart, lte: now } },
       orderBy: { fetchedAt: "desc" },
@@ -70,16 +75,18 @@ export async function loadSpendAnomaliesByProviderId(
         totalRequests: true,
       },
     }) as Promise<SnapshotScalarRow[]>,
-    prisma.provider.findMany({
-      select: { id: true, name: true },
-    }),
+    knownProviders
+      ? Promise.resolve([...knownProviders])
+      : prisma.provider.findMany({
+          select: { id: true, name: true },
+        }),
     // Wave J / E11: push-primary providers have no useful snapshot series —
     // load MTD variable daily costs from ExternalUsageEvent as a second channel.
     loadMtdDailyVariableUsageByProviderName(monthStart, now),
   ]);
 
   const providerIdByCanonicalName = new Map<string, string[]>();
-  for (const provider of providers) {
+  for (const provider of resolvedProviders) {
     const key = canonicalProviderKey(provider.name) || provider.name.toLowerCase();
     const list = providerIdByCanonicalName.get(key) ?? [];
     list.push(provider.id);
