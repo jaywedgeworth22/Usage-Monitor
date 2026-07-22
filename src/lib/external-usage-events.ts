@@ -827,7 +827,14 @@ async function withExclusiveExternalUsageCostAggregation<T>(
 }
 
 function mtdScanKey(monthStart: Date, rawCutoff: Date): string {
-  return `${monthStart.toISOString()}|${rawCutoff.toISOString()}`;
+  // rawCutoff for the live month is clamped to monthStart (see
+  // getExternalEventRawCutoff), so the effective scan window is the month
+  // start plus "use rollups for days older than rawCutoff". Key by the two
+  // UTC day starts only — not wall-clock ms on rawCutoff — so sequential
+  // default-`now` provider/project dashboard calls share one memo entry.
+  const monthKey = monthStart.toISOString().slice(0, 10);
+  const rawDay = rawCutoff.toISOString().slice(0, 10);
+  return `${monthKey}|${rawDay}`;
 }
 
 function emptyProviderPushedCost(): ProviderPushedCost {

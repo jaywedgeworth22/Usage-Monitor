@@ -190,11 +190,16 @@ export async function stripStaleSnapshotRawData(
   let scanned = 0;
   let stripped = 0;
   while (true) {
+    // Only strip rawData from non-cash diagnostic snapshots early. Rows that
+    // still carry totalCost keep rawData until full snapshot retention so
+    // Mistral spend-limit quarantine (and similar provenance readers) can
+    // finish multi-pass drains without losing identification evidence.
     const batch = await withInternalUsageWriteAdmission(() =>
       prisma.usageSnapshot.findMany({
         where: {
           fetchedAt: { lt: cutoff },
           rawData: { not: Prisma.DbNull },
+          totalCost: null,
         },
         select: { id: true },
         orderBy: { fetchedAt: "asc" },

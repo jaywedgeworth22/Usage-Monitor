@@ -110,7 +110,7 @@ describe("project attribution (integration)", () => {
     // Under vitest, mutator session re-check is skipped so handlers can be unit
     // tested without minting cookies. Force-enforce by clearing VITEST.
     const prevVitest = process.env.VITEST;
-    delete process.env.VITEST;
+    process.env.VITEST = "false";
     try {
       const res = await createProject(
         new NextRequest("http://localhost/api/projects", {
