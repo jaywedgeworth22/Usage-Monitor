@@ -32,6 +32,8 @@ interface Coverage {
   identityUnattributedCostUsd: number;
   projectAttributedCostUsd: number;
   projectUnattributedCostUsd: number;
+  projectAuthorityConflictCostUsd: number;
+  projectAuthorityConflictEventCount: number;
   totalEventCount: number;
   identityMatchedEventCount: number;
   identityUnattributedEventCount: number;
@@ -245,6 +247,7 @@ export default function KeyAttributionPanel() {
               <Metric label="Unattributed" value={money.format(data.coverage.identityUnattributedCostUsd)} warning={data.coverage.identityUnattributedCostUsd !== 0} />
             </div>
             <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">{data.coverage.note} {data.coverage.unclassifiedCostEventCount} cost record(s) are currently unclassified; {data.coverage.excludedNonKeyScopeEventCount} non-key record(s) are excluded from key counts.</p>
+            {data.coverage.projectAuthorityConflictEventCount > 0 ? <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"><strong>Project authority conflict:</strong> {data.coverage.projectAuthorityConflictEventCount} record(s) totaling {money.format(data.coverage.projectAuthorityConflictCostUsd)} have different event and binding projects. Identity attribution is retained, but project coverage stays unattributed until corrected.</p> : null}
           </section>
 
           <div className="grid gap-6 lg:grid-cols-2">
