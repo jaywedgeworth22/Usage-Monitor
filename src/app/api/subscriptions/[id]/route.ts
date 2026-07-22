@@ -1,5 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { hasValidDashboardSession } from "@/lib/auth";
+
+/** Accept NextRequest in prod and plain Request in unit tests. */
+function sessionRequest(request: Request): {
+  cookies: { get: (name: string) => { value: string } | undefined };
+} {
+  const candidate = request as Request & {
+    cookies?: { get: (name: string) => { value: string } | undefined };
+  };
+  if (candidate.cookies?.get) {
+    return { cookies: candidate.cookies };
+  }
+  return { cookies: { get: () => undefined } };
+}
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseSubscriptionUpdateInput } from "@/lib/subscription-input";
@@ -24,10 +37,10 @@ function sameCalendarDay(a: Date, b: Date): boolean {
 }
 
 export async function PUT(
-  request: NextRequest,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!hasValidDashboardSession(request)) {
+  if (!hasValidDashboardSession(sessionRequest(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -496,10 +509,10 @@ export async function PUT(
 }
 
 export async function DELETE(
-  request: NextRequest,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!hasValidDashboardSession(request)) {
+  if (!hasValidDashboardSession(sessionRequest(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
