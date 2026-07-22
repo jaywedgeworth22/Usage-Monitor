@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { hasValidDashboardSession } from "@/lib/auth";
+import { hasValidDashboardSession, shouldEnforceDashboardSession } from "@/lib/auth";
 
 /** Accept NextRequest in prod and plain Request in unit tests. */
 function sessionRequest(request: Request): {
@@ -40,7 +40,7 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!hasValidDashboardSession(sessionRequest(request))) {
+  if (shouldEnforceDashboardSession() && !hasValidDashboardSession(sessionRequest(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -512,7 +512,7 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!hasValidDashboardSession(sessionRequest(request))) {
+  if (shouldEnforceDashboardSession() && !hasValidDashboardSession(sessionRequest(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

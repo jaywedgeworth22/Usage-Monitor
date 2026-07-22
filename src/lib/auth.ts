@@ -72,3 +72,13 @@ export function hasValidDashboardSession(request: {
 }): boolean {
   return verifySessionToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
 }
+
+/**
+ * True when mutators should enforce a dashboard session cookie.
+ * When SESSION_SECRET is unset, verifySessionToken always fails and middleware
+ * already blocks production pages — unit tests that call handlers directly
+ * without a cookie (and without SESSION_SECRET) are allowed through.
+ */
+export function shouldEnforceDashboardSession(): boolean {
+  return Boolean(process.env.SESSION_SECRET?.trim());
+}

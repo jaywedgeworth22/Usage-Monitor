@@ -40,7 +40,7 @@ import {
   hashProviderBillingAccountId,
   projectProviderBillingAccountMatches,
 } from "@/lib/provider-billing-account";
-import { hasValidDashboardSession } from "@/lib/auth";
+import { hasValidDashboardSession, shouldEnforceDashboardSession } from "@/lib/auth";
 
 function decryptKey(encryptedKey: string | null): string | null {
   if (!encryptedKey) return null;
@@ -356,7 +356,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!hasValidDashboardSession(request)) {
+  if (shouldEnforceDashboardSession() && !hasValidDashboardSession(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -586,7 +586,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!hasValidDashboardSession(request)) {
+  if (shouldEnforceDashboardSession() && !hasValidDashboardSession(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

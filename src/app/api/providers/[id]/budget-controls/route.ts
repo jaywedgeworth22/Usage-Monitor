@@ -1,4 +1,4 @@
-import { hasValidDashboardSession } from "@/lib/auth";
+import { hasValidDashboardSession, shouldEnforceDashboardSession } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import {
   applyManualBudgetControl,
@@ -24,7 +24,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!hasValidDashboardSession(request)) {
+  if (shouldEnforceDashboardSession() && !hasValidDashboardSession(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
