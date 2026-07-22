@@ -187,6 +187,19 @@ describe("receipt inbox email worker", () => {
     await handleEmail(wrongRecipient, env);
     expect(wrongRecipient.rejected).toBe("Unknown receipt mailbox");
 
+    let apexRawRead = false;
+    const apex = receiptMessage("x", { to: "receipts-secret-123@jays.services" });
+    Object.defineProperty(apex, "raw", {
+      get() { apexRawRead = true; return stream(new Uint8Array([1])); },
+    });
+    await handleEmail(apex, {
+      ...env,
+      RECEIPT_INBOX_ADDRESS: "receipts-secret-123@jays.services",
+    });
+    expect(apex.rejected).toBe("Unknown receipt mailbox");
+    expect(apex.forwardedTo).toBeUndefined();
+    expect(apexRawRead).toBe(false);
+
     const noRetention = receiptMessage("x");
     await handleEmail(noRetention, { ...env, RECEIPT_INBOX_RETENTION_ACK: "" });
     expect(noRetention.rejected).toContain("retention");
