@@ -34,6 +34,12 @@ Oracle polls GitHub once per minute and deploys only when all of these are true:
    the official GitHub Actions app;
 5. the current Oracle database, sole scheduler, Garage v3 replica, separate
    `/data` block volume, disk headroom, and public readiness all pass preflight;
+   before the disk check, the transaction removes only unreferenced
+   `usage-monitor:<40-hex revision>` images while preserving the running and
+   target revisions, both revisions in the last deployment receipt, and every
+   image still referenced by a container. It then prunes only unused BuildKit
+   cache with explicit 8 GB maximum, 12 GB free-space target, and 4 GB retained
+   cache floor; it never runs an unbounded Docker or build-cache prune;
 6. the root-owned Render retirement proof records a user-suspended service,
    disabled auto-deploy, and `USAGE_SCHEDULER_ENABLED=false`, while the former
    public health endpoint remains unavailable. Oracle also verifies those
