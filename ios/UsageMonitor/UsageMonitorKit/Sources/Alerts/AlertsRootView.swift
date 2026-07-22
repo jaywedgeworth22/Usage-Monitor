@@ -148,7 +148,7 @@ public struct AlertsRootView: View {
                     }
                     .buttonStyle(.plain)
                     .simultaneousGesture(TapGesture().onEnded {
-                        AlertsHaptics.selection()
+                        Haptics.selection()
                     })
                 }
             }
@@ -203,9 +203,9 @@ public struct AlertsRootView: View {
         await store.refresh()
         reconcile()
         if store.lastError == nil {
-            AlertsHaptics.notify(.success)
+            Haptics.notify(.success)
         } else {
-            AlertsHaptics.notify(.warning)
+            Haptics.notify(.warning)
         }
     }
 
@@ -223,7 +223,7 @@ public struct AlertsRootView: View {
         } else {
             withAnimation(.easeInOut(duration: 0.2)) { model.filter = filter }
         }
-        AlertsHaptics.impact(.light)
+        Haptics.impact(.light)
     }
 
     private var currentAccountScopeID: String? {

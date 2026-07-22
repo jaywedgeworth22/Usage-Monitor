@@ -129,7 +129,11 @@ public struct DashboardRootView: View {
     @MainActor
     private func refresh() async {
         await store.refresh()
-        DashboardHaptics.play(success: store.lastError == nil)
+        if store.lastError == nil {
+            Haptics.success()
+        } else {
+            Haptics.warning()
+        }
     }
 }
 
@@ -187,19 +191,6 @@ private struct LastUpdatedFooter: View {
         .frame(maxWidth: .infinity)
         .padding(.top, Theme.Spacing.xs)
         .accessibilityElement(children: .combine)
-    }
-}
-
-// MARK: - Haptics
-
-/// Light success/warning feedback on refresh. No-ops off UIKit platforms.
-enum DashboardHaptics {
-    @MainActor
-    static func play(success: Bool) {
-        #if canImport(UIKit)
-        let generator = UINotificationFeedbackGenerator()
-        generator.notificationOccurred(success ? .success : .warning)
-        #endif
     }
 }
 

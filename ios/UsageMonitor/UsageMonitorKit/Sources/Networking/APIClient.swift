@@ -89,6 +89,29 @@ public actor APIClient {
         try await get("/api/budget-status", authorization: .read, requireBearer: true)
     }
 
+    /// `POST /api/devices` — register this device for push notifications.
+    /// Returns `true` on success, `false` when the endpoint is not yet
+    /// deployed (404).
+    public func registerDeviceToken(_ token: String) async -> Bool {
+        struct DeviceRegistration: Encodable {
+            let token: String
+            let platform: String
+        }
+        do {
+            _ = try await send(
+                "/api/devices",
+                method: .post,
+                authorization: .read,
+                body: DeviceRegistration(token: token, platform: "ios")
+            )
+            return true
+        } catch let APIError.serverError(statusCode, _) where statusCode == 404 {
+            return false
+        } catch {
+            return false
+        }
+    }
+
     // MARK: - Dashboard session
 
     /// Establish the HttpOnly dashboard session. `password` is encoded directly

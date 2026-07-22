@@ -39,7 +39,7 @@ public struct ProjectBudgetsRootView: View {
                 onRetry: { Task { await store.load() } },
                 onConnect: { env?.selectTab?(.settings) },
                 onSelect: { detailID = $0.id },
-                onAdd: { /* mutations disabled until server write path exists */ }
+                onAdd: nil
             )
             .navigationTitle(AppTab.projects.title)
             .navigationBarTitleDisplayMode(.large)
@@ -83,7 +83,7 @@ struct ProjectBudgetsContentView: View {
     /// in previews.
     var onConnect: (() -> Void)? = nil
     let onSelect: (ProjectBudgetPresentation) -> Void
-    let onAdd: () -> Void
+    var onAdd: (() -> Void)? = nil
 
     var body: some View {
         switch phase {
@@ -117,13 +117,15 @@ struct ProjectBudgetsContentView: View {
     }
 
     private var emptyState: some View {
-        EmptyState(
-            systemImage: "folder.badge.plus",
-            title: "No project budgets yet",
-            message: "Track spend per project. Add your first project to set a monthly budget and watch it against actual usage.",
-            actionTitle: "Add a project",
-            action: onAdd
-        )
+        VStack(spacing: Theme.Spacing.md) {
+            EmptyState(
+                systemImage: "folder.badge.plus",
+                title: "No project budgets yet",
+                message: "Track spend per project. Projects are managed on the web dashboard — visit usage.jays.services to create and edit them.",
+                actionTitle: nil,
+                action: nil
+            )
+        }
         .frame(maxHeight: .infinity)
         .dsScreenBackground()
     }
@@ -323,7 +325,7 @@ struct ProjectBudgetCard: View {
             phase: .loaded(ProjectBudgetStatus.sampleList.map(ProjectBudgetPresentation.init)),
             rollup: ProjectBudgetsRollup(projects: ProjectBudgetStatus.sampleList),
             lastError: nil,
-            onRefresh: {}, onRetry: {}, onSelect: { _ in }, onAdd: {}
+            onRefresh: {}, onRetry: {}, onSelect: { _ in }
         )
         .navigationTitle("Projects")
     }
@@ -335,7 +337,7 @@ struct ProjectBudgetCard: View {
             phase: .loaded(ProjectBudgetStatus.sampleList.map(ProjectBudgetPresentation.init)),
             rollup: ProjectBudgetsRollup(projects: ProjectBudgetStatus.sampleList),
             lastError: .offline,
-            onRefresh: {}, onRetry: {}, onSelect: { _ in }, onAdd: {}
+            onRefresh: {}, onRetry: {}, onSelect: { _ in }
         )
         .navigationTitle("Projects")
     }
@@ -348,7 +350,7 @@ struct ProjectBudgetCard: View {
             phase: .empty,
             rollup: ProjectBudgetsRollup(projects: []),
             lastError: nil,
-            onRefresh: {}, onRetry: {}, onSelect: { _ in }, onAdd: {}
+            onRefresh: {}, onRetry: {}, onSelect: { _ in }
         )
         .navigationTitle("Projects")
     }

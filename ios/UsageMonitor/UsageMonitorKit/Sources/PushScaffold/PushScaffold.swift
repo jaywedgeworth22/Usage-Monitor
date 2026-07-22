@@ -95,6 +95,33 @@ public enum PushScaffold {
         }
     }
 
+    // MARK: Device enrollment (client-side scaffolding)
+
+    /// UserDefaults key for tracking whether this device token has been
+    /// enrolled with the backend. Cleared on token change so re-enrollment
+    /// fires once.
+    private static let enrollmentDefaultsKey = "push.deviceEnrolled"
+
+    /// Whether the device token has been successfully enrolled.
+    public static var isDeviceEnrolled: Bool {
+        UserDefaults.standard.bool(forKey: enrollmentDefaultsKey)
+    }
+
+    /// Send the stored APNs device token to the server for enrollment. Safe
+    /// to call on every launch — it no-ops if already enrolled for this token.
+    /// Handles 404 (endpoint not yet deployed) gracefully.
+    @MainActor
+    public static func enrollDeviceToken(client: APIClient) async {
+        guard !isDeviceEnrolled else { return }
+        guard let token = PushRouter.shared.deviceTokenHex, !token.isEmpty else { return }
+
+        let enrolled = await client.registerDeviceToken(token)
+        if enrolled {
+            UserDefaults.standard.set(true, forKey: enrollmentDefaultsKey)
+        }
+        // 404 is not a failure — the endpoint simply isn't deployed yet.
+    }
+
     /// Pure, testable APNs-token → lowercase hex-string encoding (the format
     /// APNs enrollment APIs expect).
     public static func deviceTokenHexString(from token: Data) -> String {

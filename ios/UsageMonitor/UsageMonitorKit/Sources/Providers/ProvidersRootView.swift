@@ -120,7 +120,7 @@ public struct ProvidersRootView: View {
                 StatusFilterBar(
                     selection: $model.filter,
                     counts: filterCounts,
-                    onChange: { ProviderHaptics.selection() }
+                    onChange: { Haptics.selection() }
                 )
                 .listRowInsets(EdgeInsets())
             }
@@ -145,7 +145,7 @@ public struct ProvidersRootView: View {
                             )
                         }
                         .simultaneousGesture(TapGesture().onEnded {
-                            ProviderHaptics.tap()
+                            Haptics.tap()
                         })
                     }
                 } header: {
@@ -228,7 +228,7 @@ public struct ProvidersRootView: View {
             actionTitle: "Clear filters"
         ) {
             withAnimation { model.reset() }
-            ProviderHaptics.selection()
+            Haptics.selection()
         }
         .padding(.vertical, Theme.Spacing.xl)
     }
@@ -259,7 +259,7 @@ public struct ProvidersRootView: View {
             } label: {
                 Label("Sort", systemImage: "arrow.up.arrow.down")
             }
-            .onChange(of: model.sort) { _, _ in ProviderHaptics.selection() }
+            .onChange(of: model.sort) { _, _ in Haptics.selection() }
             .accessibilityLabel("Sort providers")
         }
     }
