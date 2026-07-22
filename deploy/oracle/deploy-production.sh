@@ -155,8 +155,10 @@ prune_bounded_build_cache() {
   # next image export. A cleanup failure is non-destructive; the ordinary disk
   # preflight still fails closed before any writer mutation.
   log "applying bounded unused BuildKit cache retention."
+  # buildx prune supports --max-used-space/--min-free-space/--reserved-space;
+  # plain `docker builder prune` does not (unknown-flag on standard Docker).
   if ! timeout --signal=TERM --kill-after=30s 300 \
-    docker builder prune \
+    docker buildx prune \
       --max-used-space="${MAX_BUILD_CACHE}" \
       --min-free-space="${MIN_BUILD_CACHE_FREE}" \
       --reserved-space="${RESERVED_BUILD_CACHE}" \
