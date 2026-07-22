@@ -6,6 +6,7 @@ import Alerts
 import ProjectBudgets
 import Settings
 import AppLock
+import Networking
 import OfflineCache
 import PushScaffold
 #if canImport(UIKit)
@@ -60,6 +61,9 @@ struct UsageMonitorApp: App {
                 pushRouter.consume()
             }
             .task {
+                await AlertNotifier.activateAccountScope(
+                    AlertNotifier.currentAccountScopeID(hostOverride: environment.settings.baseHost)
+                )
                 // Notification permission is NOT requested cold on first launch —
                 // that context-free prompt (before the user has connected anything
                 // or seen a single alert) is the classic anti-pattern that trains
@@ -76,6 +80,11 @@ struct UsageMonitorApp: App {
             }
         }
         .onChange(of: scenePhase) { _, phase in
+            Task {
+                await AlertNotifier.activateAccountScope(
+                    AlertNotifier.currentAccountScopeID(hostOverride: environment.settings.baseHost)
+                )
+            }
             // Queue the next background budget refresh when leaving foreground.
             if phase == .background {
                 BackgroundRefreshManager.shared.schedule()
