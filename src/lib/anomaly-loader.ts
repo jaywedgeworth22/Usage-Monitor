@@ -6,8 +6,7 @@ import {
   detectSeriesAnomaly,
   resolveAnomalyConfig,
 } from "@/lib/anomaly-detection";
-import { loadMtdDailyVariableUsageByProviderName } from "@/lib/daily-usage-series";
-import { canonicalProviderKey } from "@/lib/provider-identity";
+import { loadMtdDailyVariableUsageByProviderId } from "@/lib/daily-usage-series";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // Hard cap on scanned scalar rows; keeps this memory-light on the hot budget
@@ -63,7 +62,13 @@ export async function loadSpendAnomaliesByProviderId(
 
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-  const [rows, resolvedProviders, pushDailyByName] = await Promise.all([
+  const resolvedProviders = knownProviders
+    ? [...knownProviders]
+    : await prisma.provider.findMany({
+        select: { id: true, name: true },
+      });
+
+  const [rows, pushDailyByProviderId] = await Promise.all([
     prisma.usageSnapshot.findMany({
       where: { fetchedAt: { gte: windowStart, lte: now } },
       orderBy: { fetchedAt: "desc" },
@@ -75,23 +80,10 @@ export async function loadSpendAnomaliesByProviderId(
         totalRequests: true,
       },
     }) as Promise<SnapshotScalarRow[]>,
-    knownProviders
-      ? Promise.resolve([...knownProviders])
-      : prisma.provider.findMany({
-          select: { id: true, name: true },
-        }),
     // Wave J / E11: push-primary providers have no useful snapshot series —
     // load MTD variable daily costs from ExternalUsageEvent as a second channel.
-    loadMtdDailyVariableUsageByProviderName(monthStart, now),
+    loadMtdDailyVariableUsageByProviderId(monthStart, now, resolvedProviders),
   ]);
-
-  const providerIdByCanonicalName = new Map<string, string[]>();
-  for (const provider of resolvedProviders) {
-    const key = canonicalProviderKey(provider.name) || provider.name.toLowerCase();
-    const list = providerIdByCanonicalName.get(key) ?? [];
-    list.push(provider.id);
-    providerIdByCanonicalName.set(key, list);
-  }
 
   const byProvider = new Map<string, Map<string, DayPeak>>();
   for (const row of rows) {
@@ -142,22 +134,22 @@ export async function loadSpendAnomaliesByProviderId(
 
   // Push channel: attach cost anomalies for providers that only (or also)
   // report via ExternalUsageEvent. Skip when snapshot already produced a cost
-  // anomaly for that provider id so we do not double-notify.
-  for (const [nameKey, daily] of pushDailyByName) {
-    if (daily.filter((v) => v > 0).length < 2) continue;
+  // anomaly for that provider id so we do not double-notify. Do not prefilter
+  // on "two positive days" — zero-baseline first-spike is a valid detector path.
+  for (const [providerId, daily] of pushDailyByProviderId) {
+    if (daily.length < 2) continue;
     const series = daily.map((value, i) => ({
-      day: new Date(monthStart.getTime() + i * MS_PER_DAY).toISOString().slice(0, 10),
+      day: new Date(monthStart.getTime() + i * MS_PER_DAY)
+        .toISOString()
+        .slice(0, 10),
       value,
     }));
     const anomaly = detectSeriesAnomaly(series, "cost", config);
     if (!anomaly) continue;
-    const ids = providerIdByCanonicalName.get(nameKey) ?? [];
-    for (const providerId of ids) {
-      const existing = results.get(providerId) ?? [];
-      if (existing.some((a) => a.metric === "cost")) continue;
-      existing.push({ ...anomaly, providerId });
-      results.set(providerId, existing);
-    }
+    const existing = results.get(providerId) ?? [];
+    if (existing.some((a) => a.metric === "cost")) continue;
+    existing.push({ ...anomaly, providerId });
+    results.set(providerId, existing);
   }
 
   return results;
