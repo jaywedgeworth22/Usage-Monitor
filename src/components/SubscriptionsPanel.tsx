@@ -184,7 +184,7 @@ export default function SubscriptionsPanel({
                     type="button"
                     aria-label={`Edit ${sub.name}`}
                     onClick={() => onEdit(sub)}
-                    className="rounded-md bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                    className="inline-flex min-h-11 items-center rounded-md bg-gray-50 px-3 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
                   >
                     Edit
                   </button>
@@ -195,7 +195,7 @@ export default function SubscriptionsPanel({
                         aria-label={`Confirm deletion of ${sub.name}`}
                         onClick={() => onDelete(sub.id)}
                         disabled={actionLoading === sub.id}
-                        className="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors disabled:opacity-50"
+                        className="inline-flex min-h-11 items-center rounded-md bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
                       >
                         Confirm
                       </button>
@@ -203,7 +203,7 @@ export default function SubscriptionsPanel({
                         type="button"
                         aria-label={`Cancel deletion of ${sub.name}`}
                         onClick={() => setDeleteConfirm(null)}
-                        className="px-2 py-1.5 text-xs text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                        className="inline-flex min-h-11 items-center px-2 text-xs text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
                       >
                         Cancel
                       </button>
@@ -213,7 +213,7 @@ export default function SubscriptionsPanel({
                       type="button"
                       aria-label={`Delete ${sub.name}`}
                       onClick={() => setDeleteConfirm(sub.id)}
-                      className="rounded-md bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 dark:bg-red-950/60 dark:text-red-300 dark:hover:bg-red-900/60"
+                      className="inline-flex min-h-11 items-center rounded-md bg-red-50 px-3 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 dark:bg-red-950/60 dark:text-red-300 dark:hover:bg-red-900/60"
                     >
                       Delete
                     </button>

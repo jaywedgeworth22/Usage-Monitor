@@ -329,7 +329,7 @@ export default function ProviderTable({
             {hasAnyCredits && (
               <SortHeader {...sortHeaderProps} field="credits" label="Credits" align="right" />
             )}
-            <SortHeader {...sortHeaderProps} field="lastFetched" label="Last fetched" className="hidden xl:table-cell" />
+            <SortHeader {...sortHeaderProps} field="lastFetched" label="Last fetched" />
             <th className="px-6 py-3 text-right font-medium text-gray-500 dark:text-gray-400">
               Actions
             </th>
@@ -660,7 +660,7 @@ export default function ProviderTable({
                       : "--"}
                   </td>
                 )}
-                <td data-label="Last fetched" className="px-6 py-4 hidden xl:table-cell">
+                <td data-label="Last fetched" className="px-6 py-4">
                   {fetchedDate ? (
                     <div className="flex flex-col">
                       <span className="text-sm text-gray-900 dark:text-gray-100">
@@ -682,7 +682,7 @@ export default function ProviderTable({
                         aria-label={`Fetch ${provider.displayName} now`}
                         onClick={() => onFetchNow(provider.id)}
                         disabled={actionLoading === provider.id}
-                        className="rounded-md bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-100 disabled:opacity-50 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900/60"
+                        className="inline-flex min-h-11 items-center rounded-md bg-blue-50 px-3 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-100 disabled:opacity-50 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900/60"
                       >
                         {actionLoading === provider.id
                           ? "..."
@@ -695,7 +695,7 @@ export default function ProviderTable({
                       type="button"
                       aria-label={`Edit ${provider.displayName}`}
                       onClick={() => onEdit(provider)}
-                      className="rounded-md bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                      className="inline-flex min-h-11 items-center rounded-md bg-gray-50 px-3 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
                     >
                       Edit
                     </button>
@@ -706,7 +706,7 @@ export default function ProviderTable({
                           aria-label={`Confirm deletion of ${provider.displayName}`}
                           onClick={() => onDelete(provider.id)}
                           disabled={actionLoading === provider.id}
-                          className="px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors disabled:opacity-50"
+                          className="inline-flex min-h-11 items-center rounded-md bg-red-600 px-3 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
                         >
                           Confirm
                         </button>
@@ -714,7 +714,7 @@ export default function ProviderTable({
                           type="button"
                           aria-label={`Cancel deletion of ${provider.displayName}`}
                           onClick={() => onDeleteConfirmCancel()}
-                          className="px-2 py-1.5 text-xs text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                          className="inline-flex min-h-11 items-center px-2 text-xs text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
                         >
                           Cancel
                         </button>
@@ -724,7 +724,7 @@ export default function ProviderTable({
                         type="button"
                         aria-label={`Delete ${provider.displayName}`}
                         onClick={() => onDeleteConfirmStart(provider.id)}
-                        className="rounded-md bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 dark:bg-red-950/60 dark:text-red-300 dark:hover:bg-red-900/60"
+                        className="inline-flex min-h-11 items-center rounded-md bg-red-50 px-3 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 dark:bg-red-950/60 dark:text-red-300 dark:hover:bg-red-900/60"
                       >
                         Delete
                       </button>
