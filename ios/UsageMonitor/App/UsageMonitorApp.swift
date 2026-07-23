@@ -166,6 +166,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         PushScaffold.setAPNsDeviceToken(deviceToken)
+        // Enroll the token with the backend (gracefully handles 404 until the
+        // endpoint ships).
+        let host = UserDefaults.standard.string(forKey: "settings.baseHost") ?? ""
+        let configuration = APIConfiguration.fromUserInput(host) ?? .production
+        let client = APIClient(configuration: configuration, tokenStore: KeychainTokenStore())
+        Task { await PushScaffold.enrollDeviceToken(client: client) }
     }
 
     func application(

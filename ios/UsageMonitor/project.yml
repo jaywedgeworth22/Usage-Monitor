@@ -20,6 +20,14 @@ options:
   createIntermediateGroups: true
   groupSortPosition: top
   generateEmptyDirectories: true
+  # LastUpgradeCheck / Project document tooling version (Xcode File Inspector).
+  # Host fleet is on Xcode 26+; without this, XcodeGen defaults to 1430 (Xcode 14.3).
+  xcodeVersion: "26.0"
+  # XcodeGen's highest named projectFormat is still xcode16_3 (objectVersion 77),
+  # which makes the Project Format popup say "Xcode 16.0-compatible". After generate,
+  # bump objectVersion to the native format used by Xcode 26/27 projects in this repo
+  # (see safari-extension, objectVersion 110) so the document format is not stuck on 16.
+  postGenCommand: "python3 -c \"from pathlib import Path; p=Path('UsageMonitor.xcodeproj/project.pbxproj'); t=p.read_text(); t=t.replace('objectVersion = 77;', 'objectVersion = 110;', 1).replace('preferredProjectObjectVersion = 77;', 'preferredProjectObjectVersion = 110;', 1); p.write_text(t)\""
 
 packages:
   UsageMonitorKit:

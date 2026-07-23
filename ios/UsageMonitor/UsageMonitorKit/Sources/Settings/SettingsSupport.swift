@@ -5,34 +5,11 @@ import UIKit
 #endif
 
 // ---------------------------------------------------------------------------
-// Small, dependency-light helpers for the Settings lane: haptics, biometry
-// detection (for an accurately-labelled app-lock toggle), and app version info
-// for the About section. Kept internal — these never leak out of the module.
+// Small, dependency-light helpers for the Settings lane: biometry detection
+// (for an accurately-labelled app-lock toggle) and app version info for the
+// About section. Haptics are centralized in DesignSystem — import and use
+// `DesignSystem.Haptics` instead.
 // ---------------------------------------------------------------------------
-
-/// Thin wrapper over `UINotificationFeedbackGenerator` / `UISelectionFeedback`
-/// so key Settings actions (connect, save, remove, toggle) feel tactile and
-/// native. No-ops on platforms without UIKit.
-@MainActor
-enum Haptics {
-    static func success() { notify(.success) }
-    static func warning() { notify(.warning) }
-    static func error() { notify(.error) }
-
-    static func selection() {
-        #if canImport(UIKit)
-        UISelectionFeedbackGenerator().selectionChanged()
-        #endif
-    }
-
-    #if canImport(UIKit)
-    private static func notify(_ type: UINotificationFeedbackGenerator.FeedbackType) {
-        UINotificationFeedbackGenerator().notificationOccurred(type)
-    }
-    #else
-    private static func notify(_ type: Int) {}
-    #endif
-}
 
 /// What biometric hardware (if any) this device has, so the app-lock row can
 /// say "Require Face ID" / "Require Touch ID" instead of a generic label.

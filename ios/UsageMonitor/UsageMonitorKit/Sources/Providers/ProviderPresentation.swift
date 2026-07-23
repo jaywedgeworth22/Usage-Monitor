@@ -157,21 +157,4 @@ enum KeyMask {
 
 // MARK: - Haptics
 
-/// Thin wrapper over UIKit feedback generators so the feature can add tasteful
-/// haptics on key interactions. UIKit types are kept out of the signatures so
-/// the module still compiles on non-UIKit platforms (where these are no-ops).
-enum ProviderHaptics {
-    /// A light selection tick — for changing filters/sort.
-    static func selection() {
-        #if canImport(UIKit)
-        UISelectionFeedbackGenerator().selectionChanged()
-        #endif
-    }
-
-    /// A light impact — for confirming a row tap / navigation.
-    static func tap() {
-        #if canImport(UIKit)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        #endif
-    }
-}
+/// Markers and helpers for the provider list. Moved to DesignSystem Haptics.
