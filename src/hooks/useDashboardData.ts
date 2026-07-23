@@ -27,8 +27,7 @@ const AUTO_REFRESH_INTERVAL_MS = 60_000;
 const FOCUS_REFRESH_THROTTLE_MS = 15_000;
 
 export function useDashboardData() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [providers, setProviders] = useState<any[]>([]);
+  const [providers, setProviders] = useState<unknown[]>([]);
   const [usageSummary, setUsageSummary] = useState<ExternalUsageSummary | null>(null);
   const [projects, setProjects] = useState<ProjectBudgetStatus[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRow[]>([]);
@@ -74,7 +73,7 @@ export function useDashboardData() {
 
     try {
       const [providersResult, subscriptionsResult] = await Promise.allSettled([
-        fetchJson<any[]>("/api/providers?view=dashboard", "providers"),
+        fetchJson<unknown[]>("/api/providers?view=dashboard", "providers"),
         fetchJson<SubscriptionRow[]>("/api/subscriptions", "paid services"),
       ]);
 

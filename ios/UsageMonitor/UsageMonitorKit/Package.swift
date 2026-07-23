@@ -27,7 +27,7 @@ let package = Package(
     name: "UsageMonitorKit",
     defaultLocalization: "en",
     platforms: [
-        .iOS("18.0")
+        .iOS("16.0")
     ],
     products: [
         .library(name: "Models", targets: ["Models"]),

@@ -4,6 +4,7 @@ import UserNotifications
 import UIKit
 #endif
 import Models
+import Networking
 
 /// Public entry point for the **PushScaffold** lane: the client-side plumbing
 /// for `UserNotifications` + APNs so budget/alert notifications can be

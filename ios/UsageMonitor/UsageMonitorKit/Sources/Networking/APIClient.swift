@@ -89,6 +89,8 @@ public actor APIClient {
         try await get("/api/budget-status", authorization: .read, requireBearer: true)
     }
 
+    private struct EmptyResponse: Decodable {}
+
     /// `POST /api/devices` — register this device for push notifications.
     /// Returns `true` on success, `false` when the endpoint is not yet
     /// deployed (404).
@@ -98,14 +100,14 @@ public actor APIClient {
             let platform: String
         }
         do {
-            _ = try await send(
+            let _: EmptyResponse = try await send(
                 "/api/devices",
                 method: .post,
                 authorization: .read,
                 body: DeviceRegistration(token: token, platform: "ios")
             )
             return true
-        } catch let APIError.serverError(statusCode, _) where statusCode == 404 {
+        } catch APIError.httpStatus(404) {
             return false
         } catch {
             return false
