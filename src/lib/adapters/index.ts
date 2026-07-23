@@ -4,7 +4,7 @@ import {
   providerConfigForServer,
   splitProviderConfig,
 } from "@/lib/provider-secret-config";
-import { configurationError, unsupportedError } from "./helpers";
+import { configurationError, unsupportedError, blindProviderResult } from "./helpers";
 import type { AdapterInvocationContext } from "./helpers";
 import type { Provider } from "@prisma/client";
 import type { BuiltInProviderName } from "@/lib/provider-definitions";
@@ -44,9 +44,7 @@ async function loadAdapters() {
     import("./fintech_studios"),
     import("./massive"),
     import("./fred"),
-    import("./quiver"),
     import("./unusualwhales"),
-    import("./voyage"),
     import("./sentry"),
     import("./langfuse"),
     import("./twilio"),
@@ -66,9 +64,7 @@ async function loadAdapters() {
     openai, anthropic, googleAi, pinecone, cloudflare, custom,
     deepseek, xai, mistral, openrouter, llamaindex,
     fmp, finnhub, alphavantage, marketstack, tiingo, twelvedata, fintech_studios, massive, fred,
-    quiver,
     unusualwhales,
-    voyage,
     sentry, langfuse,
     twilio, resend, pushover,
     apify,
@@ -94,7 +90,11 @@ async function loadAdapters() {
     github: github.fetchUsage,
     render: render.fetchUsage,
     pinecone: pinecone.fetchUsage,
-    voyage: voyage.fetchUsage,
+    voyage: async () =>
+      blindProviderResult(
+        "voyage",
+        "No documented non-billable usage or billing API exists; no inference probe was sent."
+      ),
     fmp: fmp.fetchUsage,
     finnhub: finnhub.fetchUsage,
     alphavantage: alphavantage.fetchUsage,
@@ -104,7 +104,11 @@ async function loadAdapters() {
     "fintech-studios": fintech_studios.fetchUsage,
     massive: massive.fetchUsage,
     fred: fred.fetchUsage,
-    "quiver-quant": quiver.fetchUsage,
+    "quiver-quant": async () =>
+      blindProviderResult(
+        "quiver-quant",
+        "Quiver Quantitative does not expose a billing or usage quota API endpoint. Usage tracked via dashboard."
+      ),
     "unusual-whales": unusualwhales.fetchUsage,
     sentry: sentry.fetchUsage,
     langfuse: langfuse.fetchUsage,
