@@ -38,7 +38,10 @@ struct UsageMonitorApp: App {
         // The shared BudgetStore transparently persists every successful
         // response to disk (offline-first) and to the widget app group.
         _environment = State(
-            initialValue: AppEnvironment(snapshotSink: OfflineCacheSnapshotSink())
+            initialValue: AppEnvironment(
+                tokenStore: AccountChangeNotifyingTokenStore(),
+                snapshotSink: OfflineCacheSnapshotSink()
+            )
         )
     }
 
@@ -61,6 +64,9 @@ struct UsageMonitorApp: App {
                 pushRouter.consume()
             }
             .task {
+                await AlertNotifier.activateAccountScope(
+                    AlertNotifier.currentAccountScopeID(hostOverride: environment.settings.baseHost)
+                )
                 // Permission is requested only from the contextual Settings
                 // control. On later launches, silently restore APNs registration
                 // only when the user opted in and authorization already exists.
@@ -69,13 +75,32 @@ struct UsageMonitorApp: App {
                 guard status == .authorized || status == .provisional else { return }
                 PushScaffold.registerForRemoteNotifications()
             }
+            .task {
+                for await _ in NotificationCenter.default.notifications(
+                    named: .usageMonitorAccountDidChange
+                ) {
+                    await activateCurrentAccountScope()
+                }
+            }
+            .onChange(of: environment.settings.baseHost) { _, _ in
+                Task { await activateCurrentAccountScope() }
+            }
         }
         .onChange(of: scenePhase) { _, phase in
+            Task {
+                await activateCurrentAccountScope()
+            }
             // Queue the next background budget refresh when leaving foreground.
             if phase == .background {
                 BackgroundRefreshManager.shared.schedule()
             }
         }
+    }
+
+    private func activateCurrentAccountScope() async {
+        await AlertNotifier.activateAccountScope(
+            AlertNotifier.currentAccountScopeID(hostOverride: environment.settings.baseHost)
+        )
     }
 
     /// Map a widget/app deep-link URL (`usagemonitor://dashboard`) to a tab.
@@ -141,6 +166,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         PushScaffold.setAPNsDeviceToken(deviceToken)
+        // Enroll the token with the backend (gracefully handles 404 until the
+        // endpoint ships).
+        let host = UserDefaults.standard.string(forKey: "settings.baseHost") ?? ""
+        let configuration = APIConfiguration.fromUserInput(host) ?? .production
+        let client = APIClient(configuration: configuration, tokenStore: KeychainTokenStore())
+        Task { await PushScaffold.enrollDeviceToken(client: client) }
     }
 
     func application(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { config, isPublicPath } from "@/middleware";
+import { buildContentSecurityPolicy, config, isPublicPath } from "@/middleware";
 
 // The session-cookie middleware runs on almost all paths now to enforce CSP nonces,
 // but it uses isPublicPath internally to determine if the route should be session-gated.
@@ -56,6 +56,21 @@ describe("middleware matcher — /api/budget-status exclusion (regression for th
   });
 });
 
+describe("CSP build (blank-page regression)", () => {
+  it("does not use strict-dynamic so same-origin Next chunks can load without per-tag nonces", () => {
+    const csp = buildContentSecurityPolicy("testnonce", true);
+    expect(csp).toContain("script-src 'self' 'nonce-testnonce'");
+    expect(csp).not.toContain("strict-dynamic");
+    expect(csp).toContain("style-src 'self' 'unsafe-inline'");
+    expect(csp).toContain("upgrade-insecure-requests");
+  });
+
+  it("allows unsafe-eval only outside production (Next dev)", () => {
+    expect(buildContentSecurityPolicy("n", false)).toContain("'unsafe-eval'");
+    expect(buildContentSecurityPolicy("n", true)).not.toContain("'unsafe-eval'");
+  });
+});
+
 describe("middleware matcher — /api/subscriptions collection-only exclusion (subscription->knob linkage phase 1)", () => {
   it("does NOT session-gate the exact collection path, so the route's own auth (session cookie OR token) governs", () => {
     expect(isSessionGated("/api/subscriptions")).toBe(false);
@@ -74,5 +89,24 @@ describe("middleware matcher — /api/subscriptions collection-only exclusion (s
   it("still session-gates prefix-collision paths (anchoring holds)", () => {
     expect(isSessionGated("/api/subscriptions-foo")).toBe(true);
     expect(isSessionGated("/api/subscriptionsfoo")).toBe(true);
+  });
+});
+
+describe("middleware public install assets", () => {
+  it("serves the PWA shell without a dashboard session", () => {
+    for (const path of [
+      "/manifest.webmanifest",
+      "/sw.js",
+      "/pwa-icon/192",
+      "/pwa-icon/512",
+    ]) {
+      expect(isSessionGated(path)).toBe(false);
+    }
+  });
+
+  it("does not make similarly prefixed paths public", () => {
+    expect(isSessionGated("/manifest.webmanifest.backup")).toBe(true);
+    expect(isSessionGated("/sw.js.map")).toBe(true);
+    expect(isSessionGated("/pwa-icons/192")).toBe(true);
   });
 });

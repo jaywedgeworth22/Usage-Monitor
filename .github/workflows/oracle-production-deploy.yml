@@ -32,13 +32,18 @@ jobs:
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
-    timeout-minutes: 130
+    timeout-minutes: 250
     environment:
       name: oracle-production
       url: https://usage.jays.services
     env:
       TARGET_SHA: ${{ github.event.workflow_run.head_sha || inputs.revision || github.sha }}
       GH_TOKEN: ${{ github.token }}
+      # Cloudflare's automated-traffic protection returns 403 to GitHub-hosted
+      # runners. The host transaction separately verifies the public proxied
+      # URL; this independent observer pins the reserved Oracle origin while
+      # retaining the production hostname for SNI and certificate validation.
+      ORACLE_ORIGIN_IPV4: "141.148.182.224"
     steps:
       - name: Validate exact main revision
         shell: bash
@@ -73,7 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           ready_url='https://usage.jays.services/api/ready?strict=1'
-          for attempt in $(seq 1 720); do
+          for attempt in $(seq 1 1440); do
             if (( attempt % 6 == 0 )); then
               main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
               if [[ "$main_sha" != "$TARGET_SHA" ]]; then
@@ -85,7 +90,9 @@ jobs:
               fi
             fi
 
-            if body=$(curl -fsS --max-time 15 "$ready_url" 2>/dev/null) &&
+            if body=$(curl -fsS --max-time 15 \
+              --resolve "usage.jays.services:443:${ORACLE_ORIGIN_IPV4}" \
+              "$ready_url" 2>/dev/null) &&
               jq -e --arg revision "$TARGET_SHA" '
                 .status == "ready" and
                 .revision == $revision and
@@ -107,11 +114,12 @@ jobs:
                 echo '- Database: healthy'
                 echo '- Garage backup: required and active'
                 echo '- Scheduler: required with a successful tick'
-                echo '- Public TLS/readiness: healthy'
+                echo '- Oracle origin TLS/readiness: healthy'
+                echo '- Public proxied readiness: verified separately by the host transaction and UptimeRobot'
               } >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             sleep 10
           done
-          echo "::error::Oracle production did not reach exact revision $TARGET_SHA within 120 minutes."
+          echo "::error::Oracle production did not reach exact revision $TARGET_SHA within 240 minutes."
           exit 1

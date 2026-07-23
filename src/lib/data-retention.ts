@@ -110,9 +110,14 @@ export interface DataRetentionResult {
   tombstoneRetentionDays: number;
   usageSnapshots: DataRetentionTableResult;
   externalUsageEvents: DataRetentionTableResult & { tombstonesWritten: number };
+  /** Tombstones are retained permanently; this is the live table size (Wave K / E14). */
+  tombstoneCount: number;
   tombstonesPruned: number;
   compacted: boolean;
   compactionError?: string;
+  /** True when ANALYZE ran after prune to refresh planner stats (no exclusive rewrite). */
+  analyzed: boolean;
+  analyzeError?: string;
 }
 
 export interface ScheduledRetentionSkipped {
@@ -264,6 +269,17 @@ export function isAutomaticVacuumEnabled(
   );
 }
 
+/**
+ * Wave K / E14: ANALYZE updates SQLite planner stats without the exclusive
+ * full-file rewrite of VACUUM. Default-on after prune; operators can disable
+ * with DATA_RETENTION_DISABLE_ANALYZE=true.
+ */
+export function isAutomaticAnalyzeEnabled(
+  env: Readonly<Record<string, string | undefined>> = process.env
+): boolean {
+  return !enabledFlag(env.DATA_RETENTION_DISABLE_ANALYZE);
+}
+
 function groupHash(parts: Array<string | null>): string {
   return crypto
     .createHash("sha256")
@@ -342,7 +358,30 @@ function mergeSnapshotRollup(
   };
 }
 
-function externalGroupKey(row: ExternalUsageEventRow): string {
+/** Dimensions that form the daily rollup groupKey (Wave E / E6 rehash). */
+export type ExternalRollupGroupDimensions = {
+  sourceApp: string;
+  environment: string | null;
+  provider: string;
+  service: string | null;
+  label: string | null;
+  keyRef: string | null;
+  billingMode: string;
+  metricType: string;
+  unit: string | null;
+  limitWindow: string | null;
+  tier: string | null;
+  confidence: string;
+  projectId: string | null;
+};
+
+/**
+ * Canonical groupKey for external daily rollups. Export so Project-create
+ * rehash and maintenance can rewrite pre-projectId hashes (Wave E / E6).
+ */
+export function computeExternalRollupGroupKey(
+  row: ExternalRollupGroupDimensions
+): string {
   return groupHash([
     row.sourceApp,
     row.environment,
@@ -357,11 +396,14 @@ function externalGroupKey(row: ExternalUsageEventRow): string {
     row.tier,
     row.confidence,
     // projectId joins the rollup identity so per-project cost never merges
-    // across projects. NOTE: appending a dimension changes every group's hash,
-    // so rollup rows written before this shipped won't merge with new ones — a
-    // one-time reindex, acceptable because per-project attribution is new.
+    // across projects. Rows written before this dimension was added keep a
+    // stale groupKey until rehashStaleExternalUsageEventDailyRollupGroupKeys.
     row.projectId,
   ]);
+}
+
+function externalGroupKey(row: ExternalUsageEventRow): string {
+  return computeExternalRollupGroupKey(row);
 }
 
 function applyExternalRow(group: ExternalRollupValues, row: ExternalUsageEventRow): void {
@@ -448,7 +490,16 @@ function mergeExternalRollup(
   const existingUnclassified = existingHasCoverageCounts
     ? existing.unclassifiedCostEventCount ?? 0
     : existing.eventCount;
-  
+  // Same for incoming: rehash can merge two pre-coverage rollups, so a null
+  // incoming unclassified counter must not drop eventCount from the total.
+  const incomingHasCoverageCounts =
+    incoming.pricedEventCount != null ||
+    incoming.unpricedEventCount != null ||
+    incoming.unclassifiedCostEventCount != null;
+  const incomingUnclassified = incomingHasCoverageCounts
+    ? incoming.unclassifiedCostEventCount ?? 0
+    : incoming.eventCount;
+
   return {
     ...incoming,
     eventCount: existing.eventCount + incoming.eventCount,
@@ -458,8 +509,7 @@ function mergeExternalRollup(
       (existing.unpricedEventCount ?? 0) + (incoming.unpricedEventCount ?? 0),
     // A pre-migration rollup has null counters. Preserve every event in that
     // row as unclassified while still recording exact coverage for new rows.
-    unclassifiedCostEventCount:
-      existingUnclassified + (incoming.unclassifiedCostEventCount ?? 0),
+    unclassifiedCostEventCount: existingUnclassified + incomingUnclassified,
     totalCostUsd: isStatus ? (incomingIsLatest ? incoming.totalCostUsd : existing.totalCostUsd) : existing.totalCostUsd + incoming.totalCostUsd,
     totalRequests: isStatus ? (incomingIsLatest ? incoming.totalRequests : existing.totalRequests) : existing.totalRequests + incoming.totalRequests,
     totalQuantity: isStatus ? (incomingIsLatest ? incoming.totalQuantity : existing.totalQuantity) : existing.totalQuantity + incoming.totalQuantity,
@@ -691,6 +741,175 @@ async function pruneExternalUsageEvents(
   return result;
 }
 
+/**
+ * Process-local resume watermark so successive maintenance ticks finish a
+ * multi-window rehash instead of re-scanning the first N rows forever.
+ * Cleared when a pass reaches the end of the table.
+ */
+let externalRollupRehashResumeAfterId: string | undefined;
+
+/** Test-only: reset the rehash resume cursor between cases. */
+export function __resetExternalRollupRehashResumeForTests(): void {
+  externalRollupRehashResumeAfterId = undefined;
+}
+
+/**
+ * Wave E / E6: rewrite daily rollup groupKeys that predate projectId (or any
+ * later dimension) in the hash formula. Merges into an existing canonical row
+ * when the new key collides. Bounded per call so maintenance stays light;
+ * resumes from the last fully scanned id on the next tick.
+ *
+ * Pagination uses `id > afterId` (not Prisma cursor+skip) so deleting a page's
+ * last row during merge cannot truncate the remainder of the table.
+ */
+export async function rehashStaleExternalUsageEventDailyRollupGroupKeys(options?: {
+  batchSize?: number;
+  maxBatches?: number;
+  /** Override resume (tests). */
+  afterId?: string | null;
+}): Promise<{ scanned: number; rewritten: number; merged: number }> {
+  const batchSize = Math.min(Math.max(options?.batchSize ?? DEFAULT_BATCH_SIZE, 50), 2_000);
+  const maxBatches = Math.min(Math.max(options?.maxBatches ?? 40, 1), 400);
+  let scanned = 0;
+  let rewritten = 0;
+  let merged = 0;
+  let afterId =
+    options?.afterId === null
+      ? undefined
+      : options?.afterId ?? externalRollupRehashResumeAfterId;
+
+  for (let batch = 0; batch < maxBatches; batch++) {
+    const rows =
+      (await prisma.externalUsageEventDailyRollup.findMany({
+        take: batchSize,
+        orderBy: { id: "asc" },
+        ...(afterId ? { where: { id: { gt: afterId } } } : {}),
+      })) ?? [];
+    if (!Array.isArray(rows) || rows.length === 0) {
+      // Full table covered; next maintenance tick restarts from the head.
+      externalRollupRehashResumeAfterId = undefined;
+      break;
+    }
+    // Advance past this page *before* mutations so a deleted last-row cannot
+    // collapse subsequent pagination (Codex P2 on PR #748).
+    afterId = rows[rows.length - 1]!.id;
+    externalRollupRehashResumeAfterId = afterId;
+
+    for (const row of rows) {
+      scanned += 1;
+      const expectedKey = computeExternalRollupGroupKey(row);
+      if (expectedKey === row.groupKey) continue;
+
+      await withInternalUsageWriteAdmission(() =>
+        prisma.$transaction(async (tx) => {
+          const current = await tx.externalUsageEventDailyRollup.findUnique({
+            where: { id: row.id },
+          });
+          if (!current) return;
+          const nextKey = computeExternalRollupGroupKey(current);
+          if (nextKey === current.groupKey) return;
+
+          const target = await tx.externalUsageEventDailyRollup.findUnique({
+            where: {
+              day_groupKey: { day: current.day, groupKey: nextKey },
+            },
+          });
+
+          if (!target) {
+            await tx.externalUsageEventDailyRollup.update({
+              where: { id: current.id },
+              data: { groupKey: nextKey },
+            });
+            rewritten += 1;
+            return;
+          }
+          if (target.id === current.id) return;
+
+          const mergedRow = mergeExternalRollup(
+            {
+              day: target.day,
+              groupKey: target.groupKey,
+              sourceApp: target.sourceApp,
+              environment: target.environment,
+              provider: target.provider,
+              service: target.service,
+              label: target.label,
+              keyRef: target.keyRef,
+              billingMode: target.billingMode,
+              metricType: target.metricType,
+              unit: target.unit,
+              limitWindow: target.limitWindow,
+              tier: target.tier,
+              confidence: target.confidence,
+              projectId: target.projectId,
+              eventCount: target.eventCount,
+              pricedEventCount: target.pricedEventCount,
+              unpricedEventCount: target.unpricedEventCount,
+              unclassifiedCostEventCount: target.unclassifiedCostEventCount,
+              totalCostUsd: target.totalCostUsd,
+              totalRequests: target.totalRequests,
+              totalQuantity: target.totalQuantity,
+              totalCredits: target.totalCredits,
+              maxLimit: target.maxLimit,
+              latestOccurredAt: target.latestOccurredAt,
+            },
+            {
+              day: current.day,
+              groupKey: nextKey,
+              sourceApp: current.sourceApp,
+              environment: current.environment,
+              provider: current.provider,
+              service: current.service,
+              label: current.label,
+              keyRef: current.keyRef,
+              billingMode: current.billingMode,
+              metricType: current.metricType,
+              unit: current.unit,
+              limitWindow: current.limitWindow,
+              tier: current.tier,
+              confidence: current.confidence,
+              projectId: current.projectId,
+              eventCount: current.eventCount,
+              pricedEventCount: current.pricedEventCount,
+              unpricedEventCount: current.unpricedEventCount,
+              unclassifiedCostEventCount: current.unclassifiedCostEventCount,
+              totalCostUsd: current.totalCostUsd,
+              totalRequests: current.totalRequests,
+              totalQuantity: current.totalQuantity,
+              totalCredits: current.totalCredits,
+              maxLimit: current.maxLimit,
+              latestOccurredAt: current.latestOccurredAt,
+            }
+          );
+
+          await tx.externalUsageEventDailyRollup.update({
+            where: { id: target.id },
+            data: {
+              eventCount: mergedRow.eventCount,
+              pricedEventCount: mergedRow.pricedEventCount,
+              unpricedEventCount: mergedRow.unpricedEventCount,
+              unclassifiedCostEventCount: mergedRow.unclassifiedCostEventCount,
+              totalCostUsd: mergedRow.totalCostUsd,
+              totalRequests: mergedRow.totalRequests,
+              totalQuantity: mergedRow.totalQuantity,
+              totalCredits: mergedRow.totalCredits,
+              maxLimit: mergedRow.maxLimit,
+              latestOccurredAt: mergedRow.latestOccurredAt,
+            },
+          });
+          await tx.externalUsageEventDailyRollup.delete({
+            where: { id: current.id },
+          });
+          rewritten += 1;
+          merged += 1;
+        })
+      );
+    }
+  }
+
+  return { scanned, rewritten, merged };
+}
+
 export async function runDataRetentionMaintenance(now = new Date()): Promise<DataRetentionResult> {
   const startedAt = new Date();
   const snapshotRetentionDays = readPositiveIntEnv(
@@ -706,6 +925,10 @@ export async function runDataRetentionMaintenance(now = new Date()): Promise<Dat
     DEFAULT_TOMBSTONE_RETENTION_DAYS
   );
   const batchSize = readPositiveIntEnv(["DATA_RETENTION_BATCH_SIZE"], DEFAULT_BATCH_SIZE, 100, 10_000);
+
+  // E6: rewrite stale groupKeys (pre-projectId hash formula) before prune so
+  // new rollups merge with corrected historical buckets.
+  await rehashStaleExternalUsageEventDailyRollupGroupKeys({ batchSize });
 
   const usageSnapshots = await pruneUsageSnapshots(
     getSnapshotRawCutoff(now),
@@ -724,7 +947,10 @@ export async function runDataRetentionMaintenance(now = new Date()): Promise<Dat
   // consumed. Expiring one permits an arbitrarily late producer retry to be
   // inserted as a raw row and counted a second time. Keep them permanently;
   // the legacy retention setting remains in the result for API compatibility.
+  // Wave K / E14: surface growth via count so operators can size disks without
+  // silently expiring idempotency proof.
   const tombstonesPruned = 0;
+  const tombstoneCount = await prisma.externalUsageEventTombstone.count();
 
   // OtlpMetricState is intentionally not age-pruned either. OTLP cumulative
   // sums have no end-of-series signal; an exporter can resume an old series,
@@ -733,6 +959,19 @@ export async function runDataRetentionMaintenance(now = new Date()): Promise<Dat
   const prunedRows = usageSnapshots.pruned + externalUsageEvents.pruned;
   let compacted = false;
   let compactionError: string | undefined;
+  let analyzed = false;
+  let analyzeError: string | undefined;
+  if (prunedRows > 0 && isAutomaticAnalyzeEnabled()) {
+    try {
+      await withInternalUsageWriteAdmission(async () => {
+        await prisma.$executeRawUnsafe("ANALYZE");
+      });
+      analyzed = true;
+    } catch (error) {
+      analyzeError =
+        error instanceof Error ? error.message : "SQLite ANALYZE failed";
+    }
+  }
   if (prunedRows > 0 && isAutomaticVacuumEnabled()) {
     try {
       await withInternalUsageWriteAdmission(async () => {
@@ -753,9 +992,12 @@ export async function runDataRetentionMaintenance(now = new Date()): Promise<Dat
     tombstoneRetentionDays,
     usageSnapshots,
     externalUsageEvents,
+    tombstoneCount,
     tombstonesPruned,
     compacted,
     compactionError,
+    analyzed,
+    analyzeError,
   };
 }
 

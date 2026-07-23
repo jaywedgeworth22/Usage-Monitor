@@ -38,6 +38,13 @@ readonly COMPOSE_TIMEOUT_SECONDS=300
 readonly MIN_ROOT_FREE_BYTES=$((8 * 1024 * 1024 * 1024))
 readonly MIN_DATA_FREE_BYTES=$((5 * 1024 * 1024 * 1024))
 readonly MAX_BACKUPS=5
+readonly MAX_BUILD_CACHE="8GB"
+readonly MIN_BUILD_CACHE_FREE="12GB"
+readonly RESERVED_BUILD_CACHE="4GB"
+readonly GARAGE_RESTORE_TIMEOUT_SECONDS=900
+readonly GARAGE_RESTORE_CLIENT_TIMEOUT_SECONDS=960
+readonly GARAGE_INTEGRITY_TIMEOUT_SECONDS=1800
+readonly GARAGE_FOREIGN_KEY_TIMEOUT_SECONDS=600
 
 TARGET_SHA="${1:-}"
 PREVIOUS_SHA=""
@@ -97,6 +104,71 @@ free_bytes() {
   local available block_size
   read -r available block_size < <(stat -f -c '%a %S' "${path}")
   printf '%s\n' "$((available * block_size))"
+}
+
+prune_unreferenced_application_images() {
+  local image_rows receipt_active="" receipt_previous="" repository tag referenced_containers
+
+  # Preserve both revisions named by the last committed receipt when it is
+  # available. PREVIOUS_SHA and TARGET_SHA are always protected independently,
+  # so a missing receipt cannot remove the running or candidate image.
+  if [[ -e "${RECEIPT_FILE}" || -L "${RECEIPT_FILE}" ]]; then
+    require_secure_root_file "${RECEIPT_FILE}" 600
+    if ! receipt_active="$(jq -er '.activeRevision | select(type == "string")' "${RECEIPT_FILE}")" || \
+      ! receipt_previous="$(jq -er '.previousRevision | select(type == "string")' "${RECEIPT_FILE}")"; then
+      die "deployment receipt is malformed; refusing image cleanup"
+    fi
+    if [[ ! "${receipt_active}" =~ ^[0-9a-f]{40}$ || \
+      ! "${receipt_previous}" =~ ^[0-9a-f]{40}$ ]]; then
+      die "deployment receipt contains an invalid revision; refusing image cleanup"
+    fi
+  fi
+
+  if ! image_rows="$(timeout 30 docker image ls --format '{{.Repository}} {{.Tag}}')"; then
+    die "could not enumerate local images for targeted cleanup"
+  fi
+
+  while read -r repository tag; do
+    [[ "${repository}" == "${APP_IMAGE_REPOSITORY}" ]] || continue
+    [[ "${tag}" =~ ^[0-9a-f]{40}$ ]] || continue
+    case "${tag}" in
+      "${PREVIOUS_SHA}"|"${TARGET_SHA}"|"${receipt_active}"|"${receipt_previous}")
+        continue
+        ;;
+    esac
+
+    if ! referenced_containers="$(timeout 30 docker ps -aq --filter "ancestor=${repository}:${tag}")"; then
+      die "could not verify container references for ${repository}:${tag}"
+    fi
+    if [[ -n "${referenced_containers}" ]]; then
+      log "preserving ${repository}:${tag}; a container still references it."
+      continue
+    fi
+
+    log "removing unreferenced application image ${repository}:${tag}."
+    if ! timeout --signal=TERM --kill-after=30s 180 \
+      docker image rm "${repository}:${tag}" >/dev/null; then
+      log "targeted removal of ${repository}:${tag} failed; disk preflight will decide whether deployment can continue."
+    fi
+  done <<<"${image_rows}"
+}
+
+prune_bounded_build_cache() {
+  # BuildKit cache is disposable, but pruning remains explicitly bounded. Keep
+  # a warm-cache floor, cap total cache, and target enough root headroom for the
+  # next image export. A cleanup failure is non-destructive; the ordinary disk
+  # preflight still fails closed before any writer mutation.
+  log "applying bounded unused BuildKit cache retention."
+  # buildx prune supports --max-used-space/--min-free-space/--reserved-space;
+  # plain `docker builder prune` does not (unknown-flag on standard Docker).
+  if ! timeout --signal=TERM --kill-after=30s 300 \
+    docker buildx prune \
+      --max-used-space="${MAX_BUILD_CACHE}" \
+      --min-free-space="${MIN_BUILD_CACHE_FREE}" \
+      --reserved-space="${RESERVED_BUILD_CACHE}" \
+      --force >/dev/null; then
+    log "bounded BuildKit cache cleanup failed; disk preflight will decide whether deployment can continue."
+  fi
 }
 
 compose_for_revision() {
@@ -279,8 +351,13 @@ verify_backup_path() {
   dry_run_path="${DATA_DIR}/.deploy-garage-dry-run.db"
   unlink "${dry_run_path}" 2>/dev/null || true
 
+  # Freshness + max TXID prefer level-0 tip listing. Full `-level all` lists
+  # thousands of compacted objects over the S3 link and has timed out the
+  # deploy gate (false "no parseable LTX") under Coolify load even when Garage
+  # was healthy. When L0 is empty after compaction/quiet periods, fall back
+  # through higher levels without ever listing all compacted history.
   if ! read_backup_state; then
-    die "Garage returned no parseable LTX objects"
+    die "Garage returned no parseable LTX objects at levels 0-5 (list timeout, empty tip, or parse failure)"
     return 1
   fi
   if ! latest_epoch="$(date -u -d "${LAST_BACKUP_CREATED}" +%s)"; then
@@ -310,20 +387,21 @@ verify_backup_path() {
   log "Garage LTX freshness and authenticated restore dry-run passed."
 }
 
-read_backup_state() {
-  local listing
-  if ! listing="$(timeout 120 docker exec "${APP_CONTAINER}" \
-    /app/bin/litestream ltx -config /app/litestream.yml -level all /data/prod.db)"; then
-    return 1
-  fi
-  set_backup_state_from_listing "${listing}"
+# Prefer L0 tip (fast, small). Fall back L1..L5 when L0 is pruned during quiet
+# periods (Litestream's default L0 retention is brief; scheduler ticks every
+# 15m). Never use `-level all` — that listing timed out under Coolify load and
+# falsely blocked deploys. Authenticity remains covered by restore dry-run.
+list_garage_ltx_level() {
+  local level="$1"
+  timeout 60 docker exec "${APP_CONTAINER}" \
+    /app/bin/litestream ltx -config /app/litestream.yml -level "${level}" /data/prod.db
 }
 
-read_backup_state_offline() {
+list_garage_ltx_level_offline() {
   local revision="$1"
+  local level="$2"
   local image="${APP_IMAGE_REPOSITORY}:${revision}"
-  local listing
-  if ! listing="$(timeout --signal=TERM --kill-after=30s 180 \
+  timeout --signal=TERM --kill-after=15s 90 \
     docker run --rm --pull=never --read-only \
       --network "${APP_NETWORK}" \
       --env-file "${RUNTIME_ENV}" \
@@ -334,10 +412,29 @@ read_backup_state_offline() {
       -v "${DATA_DIR}:/data:ro" \
       --entrypoint /app/bin/litestream \
       "${image}" \
-      ltx -config /app/litestream.yml -level all /data/prod.db)"; then
-    return 1
-  fi
-  set_backup_state_from_listing "${listing}"
+      ltx -config /app/litestream.yml -level "${level}" /data/prod.db
+}
+
+read_backup_state_from_levels() {
+  local list_fn="$1"
+  shift
+  local listing level
+  for level in 0 1 2 3 4 5; do
+    if listing="$("${list_fn}" "$@" "${level}")" && \
+      set_backup_state_from_listing "${listing}"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+read_backup_state() {
+  read_backup_state_from_levels list_garage_ltx_level
+}
+
+read_backup_state_offline() {
+  local revision="$1"
+  read_backup_state_from_levels list_garage_ltx_level_offline "${revision}"
 }
 
 set_backup_state_from_listing() {
@@ -380,8 +477,35 @@ capture_quiescent_backup_watermark() {
   die "Garage did not reach a stable post-stop watermark within one minute"
 }
 
+acceptance_restore_pids() {
+  local process_rows
+  # Explicit `ww` is required: procps otherwise permits redirected `args`
+  # output to truncate before the long scratch pathname we match below.
+  if ! process_rows="$(timeout 30 docker top "${APP_CONTAINER}" -eo pid,args ww)"; then
+    return 2
+  fi
+  awk -v scratch="${RESTORE_SCRATCH}" '
+    NR > 1 &&
+      index($0, "/app/bin/litestream restore") > 0 &&
+      index($0, scratch) > 0 { print $1 }
+  ' <<<"${process_rows}"
+}
+
+require_no_acceptance_restore_process() {
+  local pids
+  if ! pids="$(acceptance_restore_pids)"; then
+    die "could not verify that the Garage acceptance restore process exited"
+  fi
+  [[ -z "${pids}" ]] || \
+    die "Garage acceptance restore process still runs as host PID(s): ${pids//$'\n'/,}"
+}
+
 cleanup_restore_scratch() {
   if [[ -n "${RESTORE_SCRATCH}" ]]; then
+    if ! require_no_acceptance_restore_process; then
+      log "refusing to unlink Garage acceptance scratch while restore-process state is unsafe."
+      return 1
+    fi
     unlink "${RESTORE_SCRATCH}" 2>/dev/null || true
     unlink "${RESTORE_SCRATCH}-wal" 2>/dev/null || true
     unlink "${RESTORE_SCRATCH}-shm" 2>/dev/null || true
@@ -390,21 +514,47 @@ cleanup_restore_scratch() {
 }
 
 verify_backup_restore() {
-  local live_schema restored_schema
+  local foreign_key_result integrity_result live_schema restore_status=0 restored_schema
   RESTORE_SCRATCH="${DATA_DIR}/.deploy-garage-acceptance-${TARGET_SHA}.$$.db"
   cleanup_restore_scratch
   RESTORE_SCRATCH="${DATA_DIR}/.deploy-garage-acceptance-${TARGET_SHA}.$$.db"
 
-  timeout 600 docker exec "${APP_CONTAINER}" \
+  # Restoring the current production database takes a few minutes. Let
+  # Litestream perform its quick structural check, then run exactly one full
+  # SQLite integrity scan below. Running both Litestream's full check and an
+  # explicit PRAGMA integrity_check duplicated the expensive scan and caused a
+  # healthy 592 MiB restore to hit the old ten-minute process timeout.
+  # The inner timeout owns the in-container process lifetime. The slightly
+  # longer outer timeout only bounds a wedged Docker client; it must not fire
+  # before the inner timeout has sent TERM and then KILL. Process inspection
+  # below proves that rollback/cleanup cannot unlink a file still being written.
+  timeout --signal=TERM --kill-after=30s "${GARAGE_RESTORE_CLIENT_TIMEOUT_SECONDS}" \
+    docker exec "${APP_CONTAINER}" \
+    /usr/bin/timeout --signal=TERM --kill-after=30s "${GARAGE_RESTORE_TIMEOUT_SECONDS}" \
     /app/bin/litestream restore \
       -config /app/litestream.yml \
-      -integrity-check full \
+      -integrity-check quick \
       -o "${RESTORE_SCRATCH}" \
-      /data/prod.db >/dev/null
+      /data/prod.db >/dev/null || restore_status=$?
+  require_no_acceptance_restore_process
+  (( restore_status == 0 )) || \
+    die "Garage acceptance restore did not complete (exit ${restore_status})"
   [[ -s "${RESTORE_SCRATCH}" ]] || die "Garage acceptance restore did not create a database"
-  [[ "$(sqlite3 -readonly "${RESTORE_SCRATCH}" 'PRAGMA integrity_check;')" == "ok" ]] || \
+  if ! integrity_result="$(
+    timeout --signal=TERM --kill-after=30s "${GARAGE_INTEGRITY_TIMEOUT_SECONDS}" \
+      sqlite3 -readonly "${RESTORE_SCRATCH}" 'PRAGMA integrity_check;'
+  )"; then
+    die "Garage acceptance restore SQLite integrity check did not complete"
+  fi
+  [[ "${integrity_result}" == "ok" ]] || \
     die "Garage acceptance restore failed SQLite integrity"
-  [[ -z "$(sqlite3 -readonly "${RESTORE_SCRATCH}" 'PRAGMA foreign_key_check;')" ]] || \
+  if ! foreign_key_result="$(
+    timeout --signal=TERM --kill-after=30s "${GARAGE_FOREIGN_KEY_TIMEOUT_SECONDS}" \
+      sqlite3 -readonly "${RESTORE_SCRATCH}" 'PRAGMA foreign_key_check;'
+  )"; then
+    die "Garage acceptance restore SQLite foreign-key check did not complete"
+  fi
+  [[ -z "${foreign_key_result}" ]] || \
     die "Garage acceptance restore failed SQLite foreign-key validation"
 
   live_schema="$(sqlite3 -readonly "${DB_PATH}" \
@@ -883,6 +1033,8 @@ if (( eligibility_status != 0 )); then
   exit "${eligibility_status}"
 fi
 
+prune_unreferenced_application_images
+prune_bounded_build_cache
 preflight_current_production
 
 if [[ "${PREVIOUS_SHA}" == "${TARGET_SHA}" ]]; then

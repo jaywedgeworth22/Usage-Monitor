@@ -3,6 +3,7 @@ import AppCore
 import DesignSystem
 import Models
 import Networking
+import PushScaffold
 
 /// The **Alerts** feature root (contract-mandated public entry point).
 ///
@@ -38,7 +39,14 @@ public struct AlertsRootView: View {
                 .navigationDestination(for: ProviderAlertItem.self) { item in
                     ProviderAlertDetailView(providerId: item.provider.id, fallback: item.provider)
                 }
-                .task { await initialLoad() }
+                .task {
+                    model.useAccountScope(currentAccountScopeID)
+                    await initialLoad()
+                }
+                .onChange(of: store.lastUpdated) { _, _ in
+                    model.useAccountScope(currentAccountScopeID)
+                    reconcile()
+                }
         }
     }
 
@@ -140,7 +148,7 @@ public struct AlertsRootView: View {
                     }
                     .buttonStyle(.plain)
                     .simultaneousGesture(TapGesture().onEnded {
-                        AlertsHaptics.selection()
+                        Haptics.selection()
                     })
                 }
             }
@@ -195,9 +203,9 @@ public struct AlertsRootView: View {
         await store.refresh()
         reconcile()
         if store.lastError == nil {
-            AlertsHaptics.notify(.success)
+            Haptics.notify(.success)
         } else {
-            AlertsHaptics.notify(.warning)
+            Haptics.notify(.warning)
         }
     }
 
@@ -215,7 +223,11 @@ public struct AlertsRootView: View {
         } else {
             withAnimation(.easeInOut(duration: 0.2)) { model.filter = filter }
         }
-        AlertsHaptics.impact(.light)
+        Haptics.impact(.light)
+    }
+
+    private var currentAccountScopeID: String? {
+        AlertNotifier.currentAccountScopeID(hostOverride: env?.settings.baseHost)
     }
 
     // MARK: - Helpers

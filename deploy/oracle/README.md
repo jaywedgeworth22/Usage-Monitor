@@ -34,6 +34,12 @@ Oracle polls GitHub once per minute and deploys only when all of these are true:
    the official GitHub Actions app;
 5. the current Oracle database, sole scheduler, Garage v3 replica, separate
    `/data` block volume, disk headroom, and public readiness all pass preflight;
+   before the disk check, the transaction removes only unreferenced
+   `usage-monitor:<40-hex revision>` images while preserving the running and
+   target revisions, both revisions in the last deployment receipt, and every
+   image still referenced by a container. It then prunes only unused BuildKit
+   cache with explicit 8 GB maximum, 12 GB free-space target, and 4 GB retained
+   cache floor; it never runs an unbounded Docker or build-cache prune;
 6. the root-owned Render retirement proof records a user-suspended service,
    disabled auto-deploy, and `USAGE_SCHEDULER_ENABLED=false`, while the former
    public health endpoint remains unavailable. Oracle also verifies those
@@ -41,8 +47,13 @@ Oracle polls GitHub once per minute and deploys only when all of these are true:
 
 This pull model intentionally stores no production SSH key or cloud credential
 in GitHub. `.github/workflows/oracle-production-deploy.yml` is an independent
-public receipt: after exact-main CI succeeds, it waits for production to report
-that exact revision and fails visibly if the deployment does not arrive.
+receipt: after exact-main CI succeeds, it uses `curl --resolve` with the pinned
+reserved Oracle IP while retaining `usage.jays.services` for SNI/certificate
+validation, waits for production to report that exact revision, and fails
+visibly if the deployment does not arrive. This direct-origin path avoids
+Cloudflare's HTTP 403 challenge for GitHub-hosted runner IPs. The root deploy
+transaction still samples the Cloudflare-proxied public URL, and UptimeRobot
+independently monitors both public health and strict readiness.
 
 The root-owned installation is separate from every fetched release:
 
@@ -91,7 +102,14 @@ requires exact-revision strict readiness, a fresh scheduler tick, three public
 readiness samples, Garage TXID advancement beyond a stable watermark captured
 only after the previous writer has fully stopped,
 and a full authenticated Garage restore whose SQLite integrity, foreign keys,
-and schema match production.
+and schema match production. The restore gets a bounded 15-minute transfer and
+quick-check window, followed by exactly one bounded 30-minute full SQLite
+integrity scan. This keeps acceptance fail-closed for a growing database
+without duplicating the same full scan inside Litestream and SQLite. Both the
+in-container restore process and the Docker client have ordered TERM/KILL
+bounds; scratch cleanup first proves no matching restore remains. The systemd
+transaction ceiling is four hours so it exceeds the declared serial step
+budgets, while its separate stop grace still reserves time for rollback.
 
 The previous full-SHA image and up to five verified offline SQLite snapshots
 are retained. Automatic rollback changes code/image only and never replaces
