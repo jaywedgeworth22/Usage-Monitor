@@ -176,5 +176,41 @@ class OrphanReconciliationTests(unittest.TestCase):
         self.assertIn("test budget exhausted", stats["partial"])
 
 
+class BodyIdempotencyTests(unittest.TestCase):
+    def test_build_body_source_link_is_stable_across_refs(self) -> None:
+        item = sync.BoardItem("planned", "Stable row")
+        a = sync.build_body(item, "o/r", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        b = sync.build_body(item, "o/r", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        self.assertEqual(a, b)
+        self.assertIn(f"/blob/{sync.BOARD_SOURCE_REF}/{sync.BOARD_PATH}", a)
+        self.assertNotIn("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", a)
+
+    def test_unchanged_rows_make_zero_updates_across_refs(self) -> None:
+        item = sync.BoardItem("in-progress", "Unchanged board row")
+        existing = current_issue(item, 7)
+        # Body was previously built with an arbitrary SHA; rebuild with another.
+        existing["body"] = sync.build_body(item, "o/r", "oldsha")
+        client = FakeClient([existing])
+        stats = sync.reconcile([item], client, "o/r", "brand-new-sha", None)
+        self.assertEqual(client.updates, [])
+        self.assertEqual(stats["unchanged"], 1)
+        self.assertEqual(stats["updated"], 0)
+
+
+class LinkPaginationTests(unittest.TestCase):
+    def test_next_link_url_parses_rel_next(self) -> None:
+        headers = {
+            "Link": '<https://api.github.com/repos/o/r/issues?after=abc&page=2>; rel="next", '
+            '<https://api.github.com/repos/o/r/issues?after=xyz&page=1>; rel="prev"',
+        }
+        self.assertEqual(
+            sync._next_link_url(headers),
+            "https://api.github.com/repos/o/r/issues?after=abc&page=2",
+        )
+
+    def test_next_link_url_absent(self) -> None:
+        self.assertIsNone(sync._next_link_url({"Content-Type": "application/json"}))
+
+
 if __name__ == "__main__":
     unittest.main()
