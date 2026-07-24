@@ -543,6 +543,14 @@ function SettingsPageContent() {
                   <p className="text-xs opacity-90">Dashboard-only subscriptions stay explicit instead of being inferred from API traffic, balances, or portfolio assets.</p>
                 </div>
               </div>
+              <p className="mt-4 text-xs text-blue-800 dark:text-blue-200">
+                <span className="font-medium text-blue-900 dark:text-blue-100">Plan price vs subscription:</span>{" "}
+                model a recurring fee as either the provider&apos;s fixed plan price
+                <span className="whitespace-nowrap"> (ProviderPlan.fixedMonthlyCostUsd)</span> or a
+                Subscription row that materializes charges — not both, or month-to-date spend
+                double-counts. Project budgets attribute residual provider spend by allocation
+                percentage only after direct project-tagged events are applied.
+              </p>
             </div>
             <ProviderTable
               providers={providers}
