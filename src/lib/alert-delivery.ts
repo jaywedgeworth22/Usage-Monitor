@@ -655,7 +655,7 @@ async function sendToChannelOnce(
       {
         from: channel.from,
         to: channel.to,
-        subject: `[${alert.severity.toUpperCase()}] Alert for ${provider.displayName || provider.name}`,
+        subject: `[Usage Monitor] [${alert.severity.toUpperCase()}] Alert for ${provider.displayName || provider.name}`,
         html: `
           <h2>Usage Monitor Alert</h2>
           <p><strong>Provider:</strong> ${provider.displayName || provider.name}</p>
