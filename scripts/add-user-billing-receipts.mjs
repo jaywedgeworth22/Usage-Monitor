@@ -3,24 +3,14 @@
  * Import/seed user billing receipts, lifetime app purchases, and subscription updates.
  *
  * Updates & Additions:
- *   1. Unusual Whales: Weekly cost ($50/wk), canceled/expires July 30, 2026 (autoRenew: false)
- *   2. GitHub: $4.00/mo subscription
- *   3. Massive & FMP: Status "considering" (not renewed, autoRenew: false)
- *   4. Lifetime One-Time App/License Purchases:
- *      - Pushover License ($5.35, 2026-07-23)
- *      - Devly ($4.99, 2026-07-10)
- *      - OpenMark ($9.99, 2026-07-10)
- *      - App Explorer ($0.99, 2026-07-10)
- *      - KeyNest Pro ($1.99, 2026-07-10)
- *      - Parall ($10.71, 2026-07-05)
- *   5. Apple In-App Purchase Receipts & Tier Proration Refunds:
- *      - Claude Pro Monthly (Jun 13: +$21.45, Jun 16 refund: -$18.59)
- *      - HTML Pro (Jun 14: +$3.99)
- *      - Claude Max 5x (Jun 16: +$134.34, Jun 20 refund: -$116.17)
- *      - SuperGrok (Jun 18: +$32.18)
- *      - ChatGPT Pro 5x (Jun 18: +$107.25, Jun 22 refund: -$92.95)
- *      - Claude Max 20x (Jun 20: +$268.11)
- *      - ChatGPT Pro 20x (Jun 22: +$214.50)
+ *   1. Pushover Mac License ($4.99, 2026-07-20 via Stripe) - second 1-time license (Mac vs iPhone)
+ *   2. SuperGrok Heavy ($99.00, 2026-07-20 via Stripe) - 3-month promo at $99/mo, autoRenew: false
+ *   3. Pushover iPhone License ($5.35, 2026-07-23)
+ *   4. Lifetime App Purchases (Devly, OpenMark, App Explorer, KeyNest Pro, Parall)
+ *   5. Unusual Whales: Weekly cost ($50/wk), canceled/expires July 30, 2026 (autoRenew: false)
+ *   6. GitHub: $4.00/mo subscription
+ *   7. Massive & FMP: Status "considering" (not renewed, autoRenew: false)
+ *   8. Apple In-App Purchase Receipts & Tier Proration Refunds (Claude Pro/Max, ChatGPT Pro, SuperGrok, HTML Pro)
  *
  * Usage:
  *   node scripts/add-user-billing-receipts.mjs
@@ -51,8 +41,18 @@ const EVENTS = [
     metricType: "one_time_license",
     amountUsd: 5.35,
     occurredAt: new Date(Date.UTC(2026, 6, 23, 12, 0, 0)),
-    label: "Pushover License ($5.35 lifetime purchase)",
-    externalId: "app-pushover-license-20260723",
+    label: "Pushover iPhone License ($5.35 lifetime purchase)",
+    externalId: "app-pushover-iphone-license-20260723",
+  },
+  {
+    providerName: "pushover",
+    providerDisplayName: "Pushover",
+    category: "App License",
+    metricType: "one_time_license",
+    amountUsd: 4.99,
+    occurredAt: new Date(Date.UTC(2026, 6, 20, 12, 0, 0)), // Monday July 20, 2026
+    label: "Pushover Mac License ($4.99 lifetime purchase)",
+    externalId: "app-pushover-mac-license-20260720",
   },
   {
     providerName: "devly",
@@ -103,6 +103,18 @@ const EVENTS = [
     occurredAt: new Date(Date.UTC(2026, 6, 5, 12, 0, 0)),
     label: "Parall App ($10.71 purchase w/ tax)",
     externalId: "app-parall-20260705",
+  },
+
+  // --- Grok / xAI SuperGrok Heavy ---
+  {
+    providerName: "xai",
+    providerDisplayName: "xAI / Grok",
+    category: "AI / LLM",
+    metricType: "subscription",
+    amountUsd: 99.00,
+    occurredAt: new Date(Date.UTC(2026, 6, 20, 12, 0, 0)), // Monday July 20, 2026
+    label: "SuperGrok Heavy ($99.00 promo month 1 of 3)",
+    externalId: "receipt-grok-heavy-20260720-99",
   },
 
   // --- Prior Screenshots ---
@@ -213,7 +225,7 @@ const EVENTS = [
     providerDisplayName: "Anthropic",
     category: "AI / LLM",
     metricType: "subscription",
-    amountUsd: 134.34, // $124.99 + prorated tax
+    amountUsd: 134.34,
     occurredAt: new Date(Date.UTC(2026, 5, 16, 17, 18, 0)),
     label: "Claude Max 5x Monthly (Apple receipt MNDF4VLSNX)",
     externalId: "apple-receipt-2026-06-16-claude-max-5x",
@@ -233,7 +245,7 @@ const EVENTS = [
     providerDisplayName: "xAI / Grok",
     category: "AI / LLM",
     metricType: "subscription",
-    amountUsd: 32.18, // $30.00 + tax
+    amountUsd: 32.18,
     occurredAt: new Date(Date.UTC(2026, 5, 18, 10, 43, 0)),
     label: "SuperGrok Subscription Resubscribed (Apple receipt MNDF570KM5)",
     externalId: "apple-receipt-2026-06-18-supergrok",
@@ -243,7 +255,7 @@ const EVENTS = [
     providerDisplayName: "OpenAI",
     category: "AI / LLM",
     metricType: "subscription",
-    amountUsd: 107.25, // $100.00 + tax
+    amountUsd: 107.25,
     occurredAt: new Date(Date.UTC(2026, 5, 18, 18, 55, 0)),
     label: "ChatGPT Pro 5x Subscription Resubscribed (Apple receipt MNDF570KM5)",
     externalId: "apple-receipt-2026-06-18-chatgpt-pro-5x",
@@ -263,7 +275,7 @@ const EVENTS = [
     providerDisplayName: "Anthropic",
     category: "AI / LLM",
     metricType: "subscription",
-    amountUsd: 268.11, // $249.99 + tax
+    amountUsd: 268.11,
     occurredAt: new Date(Date.UTC(2026, 5, 20, 12, 0, 0)),
     label: "Claude Max 20x Monthly Subscription",
     externalId: "apple-receipt-2026-06-20-claude-max-20x",
@@ -273,7 +285,7 @@ const EVENTS = [
     providerDisplayName: "OpenAI",
     category: "AI / LLM",
     metricType: "subscription",
-    amountUsd: 214.50, // $200.00 + tax
+    amountUsd: 214.50,
     occurredAt: new Date(Date.UTC(2026, 5, 22, 12, 0, 0)),
     label: "ChatGPT Pro 20x Monthly Subscription",
     externalId: "apple-receipt-2026-06-22-chatgpt-pro-20x",
@@ -283,7 +295,6 @@ const EVENTS = [
 async function main() {
   const allProviders = await prisma.provider.findMany();
 
-  // Helper to ensure provider exists
   async function ensureProvider(name, displayName, category) {
     let p = allProviders.find(
       (item) =>
@@ -343,7 +354,44 @@ async function main() {
     }
   }
 
-  // --- 2. Update Subscription Rows according to user directives ---
+  // --- 2. Update Subscription Rows ---
+
+  // SuperGrok Heavy: $99/mo (3-month promo), autoRenew: false per owner preference
+  const xaiProvider = await ensureProvider("xai", "xAI / Grok", "AI / LLM");
+  const existingGrokSub = await prisma.subscription.findFirst({
+    where: { providerId: xaiProvider.id, name: { contains: "SuperGrok Heavy" } },
+  });
+  if (existingGrokSub) {
+    log(`Updating SuperGrok Heavy subscription...`);
+    await prisma.subscription.update({
+      where: { id: existingGrokSub.id },
+      data: {
+        costUsd: 99.00,
+        autoRenew: false,
+        status: "active",
+        notes: "SuperGrok Heavy 3-month promo at $99/mo (reverts to $299/mo; marked autoRenew: false per owner preference).",
+      },
+    });
+  } else {
+    log(`Creating SuperGrok Heavy subscription ($99.00/mo)...`);
+    await prisma.subscription.create({
+      data: {
+        providerId: xaiProvider.id,
+        name: "SuperGrok Heavy",
+        costUsd: 99.00,
+        currency: "USD",
+        interval: "monthly",
+        intervalCount: 1,
+        startDate: new Date(Date.UTC(2026, 6, 20)),
+        currentPeriodStart: new Date(Date.UTC(2026, 6, 20)),
+        nextRenewalAt: new Date(Date.UTC(2026, 7, 20)),
+        autoRenew: false,
+        status: "active",
+        notes: "SuperGrok Heavy 3-month promo at $99/mo (reverts to $299/mo; marked autoRenew: false per owner preference).",
+        knobEnv: {},
+      },
+    });
+  }
 
   // Unusual Whales: Weekly cost ($50/wk), expires July 30, 2026, canceled (autoRenew: false)
   const uwProvider = await ensureProvider("unusual-whales", "Unusual Whales", "Financial Data");
@@ -358,7 +406,7 @@ async function main() {
         interval: "weekly",
         intervalCount: 1,
         costUsd: 50.00,
-        nextRenewalAt: new Date(Date.UTC(2026, 6, 30)), // July 30, 2026
+        nextRenewalAt: new Date(Date.UTC(2026, 6, 30)),
         autoRenew: false,
         status: "canceled",
         notes: "Unusual Whales weekly subscription. Expires July 30, 2026; will not renew.",
