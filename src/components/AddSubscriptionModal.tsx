@@ -39,6 +39,7 @@ export interface SubscriptionFormValue {
   startDate: string;
   autoRenew: boolean;
   status: string;
+  canceledAt?: string | null;
   effectiveStatus?: string;
   notes: string | null;
   externalBillingSource?: string | null;
@@ -90,6 +91,7 @@ export default function AddSubscriptionModal({
   const [startDate, setStartDate] = useState(todayIso());
   const [autoRenew, setAutoRenew] = useState(true);
   const [status, setStatus] = useState("considering");
+  const [canceledAt, setCanceledAt] = useState(todayIso());
   const [notes, setNotes] = useState("");
   const [activationDateReset, setActivationDateReset] = useState(false);
   const [externalBillingKey, setExternalBillingKey] = useState("");
@@ -110,6 +112,7 @@ export default function AddSubscriptionModal({
     setStartDate(editSubscription?.startDate ? editSubscription.startDate.slice(0, 10) : todayIso());
     setAutoRenew(editSubscription?.autoRenew ?? true);
     setStatus(editSubscription?.status || "considering");
+    setCanceledAt(editSubscription?.canceledAt ? editSubscription.canceledAt.slice(0, 10) : todayIso());
     setNotes(editSubscription?.notes || "");
     setExternalBillingKey(
       editSubscription?.externalBillingSource && editSubscription.externalBillingId
@@ -158,6 +161,7 @@ export default function AddSubscriptionModal({
         startDate,
         autoRenew,
         status,
+        canceledAt: status === "canceled" ? canceledAt : null,
         notes: notes.trim() || null,
         externalBillingSource,
         externalBillingId,
@@ -510,6 +514,24 @@ export default function AddSubscriptionModal({
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{selectedStatus?.help}</p>
               </div>
             </div>
+
+            {status === "canceled" && (
+              <div className="mt-3">
+                <label htmlFor="subscription-canceled-date" className={labelClass}>
+                  Effective Canceled Date
+                </label>
+                <input
+                  id="subscription-canceled-date"
+                  type="date"
+                  value={canceledAt}
+                  onChange={(e) => setCanceledAt(e.target.value)}
+                  className={inputClass}
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Specify the date this subscription was canceled to prevent synthetic charges after that day.
+                </p>
+              </div>
+            )}
 
             {canResumeExistingTerm && (
               <fieldset className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
