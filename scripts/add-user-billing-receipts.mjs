@@ -356,7 +356,7 @@ async function main() {
 
   // --- 2. Update Subscription Rows ---
 
-  // SuperGrok Heavy: $99/mo (3-month promo), autoRenew: false per owner preference
+  // SuperGrok Heavy: $99/mo for 3-month promo (renews twice at $99, then $299/mo starting Oct 20)
   const xaiProvider = await ensureProvider("xai", "xAI / Grok", "AI / LLM");
   const existingGrokSub = await prisma.subscription.findFirst({
     where: { providerId: xaiProvider.id, name: { contains: "SuperGrok Heavy" } },
@@ -367,9 +367,9 @@ async function main() {
       where: { id: existingGrokSub.id },
       data: {
         costUsd: 99.00,
-        autoRenew: false,
+        autoRenew: true,
         status: "active",
-        notes: "SuperGrok Heavy 3-month promo at $99/mo (reverts to $299/mo; marked autoRenew: false per owner preference).",
+        notes: "SuperGrok Heavy 3-month promo at $99/mo (Jul 20, Aug 20, Sep 20), then $299/mo starting Oct 20.",
       },
     });
   } else {
@@ -385,9 +385,9 @@ async function main() {
         startDate: new Date(Date.UTC(2026, 6, 20)),
         currentPeriodStart: new Date(Date.UTC(2026, 6, 20)),
         nextRenewalAt: new Date(Date.UTC(2026, 7, 20)),
-        autoRenew: false,
+        autoRenew: true,
         status: "active",
-        notes: "SuperGrok Heavy 3-month promo at $99/mo (reverts to $299/mo; marked autoRenew: false per owner preference).",
+        notes: "SuperGrok Heavy 3-month promo at $99/mo (Jul 20, Aug 20, Sep 20), then $299/mo starting Oct 20.",
         knobEnv: {},
       },
     });

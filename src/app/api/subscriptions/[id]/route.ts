@@ -330,8 +330,10 @@ export async function PUT(
   }
   if (update.status !== undefined) {
     data.status = update.status;
-    // Stamp/clear the cancellation time so the UI and any future reporting can
-    // tell when a subscription stopped generating charges.
+  }
+  if (update.canceledAt !== undefined) {
+    data.canceledAt = update.canceledAt;
+  } else if (update.status !== undefined) {
     data.canceledAt = update.status === "canceled" ? new Date() : null;
   }
   if (update.knobEnv !== undefined) {
