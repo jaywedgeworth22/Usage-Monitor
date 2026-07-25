@@ -32,7 +32,6 @@ describe("Deno Deploy Adapter", () => {
     );
 
     const result = await fetchUsage("ddp_test_token");
-    expect(result.account?.accountName).toBe("Congress Trade");
-    expect(result.externalBilling?.externalId).toBe("usr_123");
+    expect(result.externalBilling?.records[0].externalId).toBe("usr_123");
   });
 });

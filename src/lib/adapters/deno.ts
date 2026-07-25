@@ -45,16 +45,18 @@ export async function fetchUsage(
       totalRequests: null,
       credits: null,
       rawData: res.data,
-      account: {
-        accountName: user.name || user.email || "Deno Deploy",
-      },
       externalBilling: {
         source: "deno-deploy",
-        externalId: user.id || "user",
-        kind: "organization",
-        planName: "Deno Deploy Plan",
-        status: "active",
-        syncedAt: new Date().toISOString(),
+        authoritative: true,
+        records: [
+          {
+            externalId: user.id || "user",
+            kind: "organization",
+            planName: "Deno Deploy Plan",
+            status: "active",
+            syncedAt: new Date().toISOString(),
+          },
+        ],
       },
     };
   } catch {
