@@ -18,6 +18,7 @@
     "db:studio": "prisma studio",
     "repair:claude-cost": "node scripts/repair-claude-cumulative-cost.mjs",
     "repair:anthropic-funding": "node scripts/repair-anthropic-funding.mjs",
+    "add:cursor-subscription": "node scripts/add-cursor-subscription.mjs",
     "import:billing-receipts": "node scripts/import-private-billing-receipts.mjs",
     "receipt-inbox:verify-lifecycle": "node scripts/verify-receipt-inbox-lifecycle.mjs",
     "receipt-inbox:deploy-auditor": "npm run receipt-inbox:verify-lifecycle && wrangler deploy --config workers/receipt-lifecycle-auditor/wrangler.jsonc",
