@@ -51,10 +51,9 @@ export async function fetchUsage(
         records: [
           {
             externalId: user.id || "user",
-            kind: "organization",
+            kind: "account",
             planName: "Deno Deploy Plan",
             status: "active",
-            syncedAt: new Date().toISOString(),
           },
         ],
       },
