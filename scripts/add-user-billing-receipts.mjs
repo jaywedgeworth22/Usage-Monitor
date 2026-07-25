@@ -286,9 +286,19 @@ const EVENTS = [
     category: "AI / LLM",
     metricType: "subscription",
     amountUsd: 214.50,
-    occurredAt: new Date(Date.UTC(2026, 5, 22, 12, 0, 0)),
+    occurredAt: new Date(Date.UTC(2026, 6, 17, 12, 0, 0)),
     label: "ChatGPT Pro 20x Monthly Subscription",
-    externalId: "apple-receipt-2026-06-22-chatgpt-pro-20x",
+    externalId: "apple-receipt-2026-07-17-chatgpt-pro-20x",
+  },
+  {
+    providerName: "twilio",
+    providerDisplayName: "Twilio",
+    category: "Telephony & SMS",
+    metricType: "one_time_fee",
+    amountUsd: 15.00,
+    occurredAt: new Date(Date.UTC(2026, 5, 1, 12, 0, 0)),
+    label: "Twilio A2P 10DLC One-Time Brand Registration Fee ($15.00)",
+    externalId: "twilio-a2p-registration-fee-one-time-15",
   },
 ];
 
@@ -485,29 +495,31 @@ async function main() {
     });
   }
 
-  // Twilio: Recurring monthly cost for international phone number & A2P 10DLC registration
+  // Twilio: Recurring monthly cost ($18.00/mo) for phone numbers ($16.50) + A2P monthly fee ($1.50)
+  // plus one-time $15.00 A2P brand registration fee (handled in EVENTS array)
   const twilioProvider = await ensureProvider("twilio", "Twilio", "Telephony & SMS");
   const existingTwilioSub = await prisma.subscription.findFirst({
     where: { providerId: twilioProvider.id },
   });
   if (existingTwilioSub) {
-    log(`Updating Twilio subscription ($32.82/mo)...`);
+    log(`Updating Twilio subscription to $18.00/mo ($16.50 numbers + $1.50 A2P campaign)...`);
     await prisma.subscription.update({
       where: { id: existingTwilioSub.id },
       data: {
-        costUsd: 32.82,
+        name: "Twilio Phone Numbers & A2P Campaign",
+        costUsd: 18.00,
         interval: "monthly",
         status: "active",
-        notes: "Twilio monthly international number rental and A2P 10DLC registration fees.",
+        notes: "Twilio $18.00/mo recurring ($16.50 phone numbers + $1.50/mo A2P campaign fee). Initial $15 A2P brand registration was a one-time fee.",
       },
     });
   } else {
-    log(`Creating Twilio subscription ($32.82/mo)...`);
+    log(`Creating Twilio subscription ($18.00/mo)...`);
     await prisma.subscription.create({
       data: {
         providerId: twilioProvider.id,
-        name: "Twilio Phone & A2P Registration",
-        costUsd: 32.82,
+        name: "Twilio Phone Numbers & A2P Campaign",
+        costUsd: 18.00,
         currency: "USD",
         interval: "monthly",
         intervalCount: 1,
@@ -516,7 +528,7 @@ async function main() {
         nextRenewalAt: new Date(Date.UTC(2026, 7, 1)),
         autoRenew: true,
         status: "active",
-        notes: "Twilio monthly international number rental and A2P 10DLC registration fees.",
+        notes: "Twilio $18.00/mo recurring ($16.50 phone numbers + $1.50/mo A2P campaign fee). Initial $15 A2P brand registration was a one-time fee.",
         knobEnv: {},
       },
     });
