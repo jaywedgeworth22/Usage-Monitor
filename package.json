@@ -66,7 +66,7 @@
     "eslint": "^8.57.1",
     "eslint-config-next": "^15.5.19",
     "pg": "^8.22.0",
-    "postcss": "^8.5.10",
+    "postcss": "^8.5.18",
     "prisma": "^6.0.0",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",
@@ -74,7 +74,8 @@
     "wrangler": "4.112.0"
   },
   "overrides": {
-    "postcss": "^8.5.10",
+    "minimatch": "^10.0.3",
+    "postcss": "^8.5.18",
     "sharp": "0.35.3"
   }
 }
