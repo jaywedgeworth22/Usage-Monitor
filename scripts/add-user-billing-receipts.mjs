@@ -484,6 +484,43 @@ async function main() {
       },
     });
   }
+
+  // Twilio: Recurring monthly cost for international phone number & A2P 10DLC registration
+  const twilioProvider = await ensureProvider("twilio", "Twilio", "Telephony & SMS");
+  const existingTwilioSub = await prisma.subscription.findFirst({
+    where: { providerId: twilioProvider.id },
+  });
+  if (existingTwilioSub) {
+    log(`Updating Twilio subscription ($32.82/mo)...`);
+    await prisma.subscription.update({
+      where: { id: existingTwilioSub.id },
+      data: {
+        costUsd: 32.82,
+        interval: "monthly",
+        status: "active",
+        notes: "Twilio monthly international number rental and A2P 10DLC registration fees.",
+      },
+    });
+  } else {
+    log(`Creating Twilio subscription ($32.82/mo)...`);
+    await prisma.subscription.create({
+      data: {
+        providerId: twilioProvider.id,
+        name: "Twilio Phone & A2P Registration",
+        costUsd: 32.82,
+        currency: "USD",
+        interval: "monthly",
+        intervalCount: 1,
+        startDate: new Date(Date.UTC(2026, 5, 1)),
+        currentPeriodStart: new Date(Date.UTC(2026, 6, 1)),
+        nextRenewalAt: new Date(Date.UTC(2026, 7, 1)),
+        autoRenew: true,
+        status: "active",
+        notes: "Twilio monthly international number rental and A2P 10DLC registration fees.",
+        knobEnv: {},
+      },
+    });
+  }
 }
 
 main()
