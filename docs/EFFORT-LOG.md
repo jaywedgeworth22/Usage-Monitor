@@ -1084,13 +1084,14 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
 
 ## In Progress
 
-(none)
+- **[CURSOR] Blank dashboard skeleton on mobile+desktop (2026-07-27) — IN PROGRESS.** Owner report from mobile: Usage Monitor shell paints (header) but content stays empty gray skeleton on mobile and desktop. Live probe: Oracle origin healthy at `8d4003e` (`/api/health`+`/api/ready` ok, scheduler ticking); public DNS is **orange-clouded** (CF anycast) with **managed challenge** on HTML/API (static chunks 200). Code path: `shouldShowDashboardSkeleton` (`loading && providers.length===0`) — #814's stale-generation `finally` skipped `isFetchingRef=false`, so after tab freeze/abort every later fetch coalesced into a no-op → perpetual skeleton; bfcache recovery only ran when `event.persisted`. Fix on `cursor/fix-blank-dashboard-5973`: always release coalesce lock; feature-detect `AbortSignal.any`; visibility/pageshow stuck recovery; 35s watchdog → Retry UI; clearer HTML/403 challenge errors. Ops follow-up: CF Bot Fight / Under Attack may still delay API XHR for some clients — grey-cloud or skip rules for `/api/*` if challenges persist after deploy.
 
 ## Planned / Reserved
 
 (none)
 
 ## Changelog of this log
+- 2026-07-27 — CURSOR: blank dashboard skeleton claim on `cursor/fix-blank-dashboard-5973` (isFetching coalesce deadlock after #814 + CF managed challenge on public DNS).
 - 2026-07-27 — CURSOR: merged #814 + Oracle deploy success `e6333d6` (run 30298779926); open PRs → 0.
 - 2026-07-27 — CURSOR: dashboard flash→stuck-skeleton fix on `cursor/dashboard-flash-disappear-c527` (keep content once providers painted; coalesce/abort/bfcache recovery; merged main #816 timeout UX).
 - 2026-07-27 — CURSOR: complete Planned sweep on `cursor/complete-planned-2474` — D7/B7/E19/Infisical discovery + mass closeout of shipped/parked/cross-repo/owner-blocked rows (issues sync).

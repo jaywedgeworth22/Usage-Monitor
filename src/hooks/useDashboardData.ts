@@ -14,6 +14,9 @@ export interface ProjectBudgetResponse {
   };
 }
 
+/** Must exceed the per-request AbortSignal.timeout (30s) so normal timeouts win first. */
+export const DASHBOARD_LOAD_WATCHDOG_MS = 35_000;
+
 /**
  * Full-page skeleton only before the first fetch settles *and* we have nothing
  * to show. Once providers are on screen, later loading/refresh flags must not
@@ -26,27 +29,67 @@ export function shouldShowDashboardSkeleton(opts: {
   return opts.loading && opts.providerCount === 0;
 }
 
+/**
+ * Compose a timeout signal with an optional external (unmount) signal.
+ * Feature-detect AbortSignal.any — older WebKit throws if called bare, and a
+ * sync throw *outside* fetchJson's try used to reject before the route timeout
+ * path could run.
+ */
+export function combineAbortSignals(
+  timeout: AbortSignal,
+  external?: AbortSignal | null
+): AbortSignal {
+  if (external == null) return timeout;
+  if (typeof AbortSignal.any !== "function") return timeout;
+  try {
+    return AbortSignal.any([timeout, external]);
+  } catch {
+    return timeout;
+  }
+}
+
 async function fetchJson<T>(url: string, label: string, signal?: AbortSignal): Promise<T> {
   // 30s matches main (#816); compose with unmount abort so remounts cannot
   // inherit a stuck in-flight request.
-  const timeout = AbortSignal.timeout(30_000);
-  const combined =
-    signal != null ? AbortSignal.any([timeout, signal]) : timeout;
   try {
-    const response = await fetch(url, { cache: "no-store", signal: combined });
+    const timeout =
+      typeof AbortSignal.timeout === "function"
+        ? AbortSignal.timeout(30_000)
+        : undefined;
+    const combined =
+      timeout != null ? combineAbortSignals(timeout, signal) : signal;
+    const response = await fetch(url, {
+      cache: "no-store",
+      ...(combined != null ? { signal: combined } : {}),
+    });
     if (response.status === 401 && typeof window !== "undefined" && window.location.pathname !== "/login") {
       window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
       throw new Error("Session expired. Redirecting to login...");
     }
     if (!response.ok) {
+      const contentType = response.headers.get("content-type") || "";
+      // Cloudflare managed challenges return HTML 403; surface a clear retry
+      // instead of a generic parse/empty-body failure.
+      if (contentType.includes("text/html")) {
+        throw new Error(
+          `Failed to fetch ${label} (HTTP ${response.status}). A network challenge may be blocking API requests — tap Retry, or reload the page.`
+        );
+      }
       const body = await response.json().catch(() => ({}));
-      throw new Error(body.error || `Failed to fetch ${label}`);
+      throw new Error(
+        (body as { error?: string }).error || `Failed to fetch ${label}`
+      );
     }
     return (await response.json()) as T;
   } catch (err: unknown) {
     const name = err instanceof Error ? err.name : "";
     const message = err instanceof Error ? err.message : String(err ?? "");
-    if (name === "AbortError" || message.toLowerCase().includes("aborted")) {
+    if (
+      name === "AbortError" ||
+      name === "TimeoutError" ||
+      message.toLowerCase().includes("aborted") ||
+      message.toLowerCase().includes("timed out")
+    ) {
       throw new Error(`Connection timed out loading ${label}. Please click Retry.`);
     }
     throw err;
@@ -145,11 +188,18 @@ export function useDashboardData() {
         lastSuccessAtRef.current = Date.now();
       }
     } finally {
-      if (generation === fetchGenerationRef.current) {
+      const isCurrent = generation === fetchGenerationRef.current;
+
+      // ALWAYS release the coalesce lock — even for stale generations. Skipping
+      // this after a freeze/abort (no React cleanup) left isFetchingRef=true
+      // forever so every later fetchProviders() coalesced and returned, which
+      // is the perpetual-skeleton deadlock after #814.
+      isFetchingRef.current = false;
+
+      if (isCurrent) {
         loadedOnce.current = true;
         setLoading(false);
         setRefreshing(false);
-        isFetchingRef.current = false;
 
         const needForeground = pendingForegroundRef.current;
         const needBackground = pendingBackgroundRef.current;
@@ -224,19 +274,50 @@ export function useDashboardData() {
     };
   }, [fetchProviders]);
 
-  // bfcache restore can freeze the page mid-fetch with isFetching=true and
-  // never re-run mount effects — reset the guard and refetch.
+  // Recover after bfcache restore, tab freeze, or visibility resume when the
+  // skeleton is still up. The previous pageshow handler only ran when
+  // event.persisted — mobile Safari often resumes without that flag while
+  // leaving isFetchingRef stuck true (coalesce deadlock → blank forever).
   useEffect(() => {
-    const onPageShow = (event: PageTransitionEvent) => {
-      if (!event.persisted) return;
+    const recoverIfStuck = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      // Healthy dashboards: leave in-flight refresh coalescing alone.
+      if (hasProviderData.current && loadedOnce.current) return;
       isFetchingRef.current = false;
       pendingForegroundRef.current = false;
       pendingBackgroundRef.current = false;
       void fetchProviders({ background: loadedOnce.current });
     };
-    window.addEventListener("pageshow", onPageShow);
-    return () => window.removeEventListener("pageshow", onPageShow);
+
+    window.addEventListener("pageshow", recoverIfStuck);
+    const onVisibilityChange = () => {
+      if (!document.hidden) recoverIfStuck();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("pageshow", recoverIfStuck);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [fetchProviders]);
+
+  // Last-resort watchdog: if the initial skeleton is still up past the request
+  // timeout, force an error+Retry UI. Covers hung fetches where AbortSignal
+  // never fires (background tabs, broken signal composition, CF-held sockets).
+  useEffect(() => {
+    if (!loading || hasProviderData.current) return;
+    const id = window.setTimeout(() => {
+      if (hasProviderData.current) return;
+      isFetchingRef.current = false;
+      loadedOnce.current = true;
+      setLoading(false);
+      setRefreshing(false);
+      setError((prev) =>
+        prev ||
+        "Dashboard load timed out. Please click Retry."
+      );
+    }, DASHBOARD_LOAD_WATCHDOG_MS);
+    return () => window.clearTimeout(id);
+  }, [loading]);
 
   // Auto-refresh on interval + focus/visibility
   useEffect(() => {
