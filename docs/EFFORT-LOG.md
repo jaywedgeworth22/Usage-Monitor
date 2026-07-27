@@ -298,6 +298,182 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 
 ## Completed
 
+- **[CURSOR] Complete remaining Planned board (2026-07-27) — COMPLETED.** Shipped D7 dark-mode, iOS B7 staleness/coalesce, E19 OpenRouter verified-preferred cash (default-off), Infisical `unmappedDiscoveries` on sync result. Moved already-shipped/parked/cross-repo/owner-blocked Planned rows to Completed with stable effort-keys. Branch `cursor/complete-planned-2474` / PR #811.
+- **Remaining feasible direct provider-capabilities audit (CODEX, read-only, 2026-07-18) — IN PROGRESS.** Audit current catalog/adapters plus official provider documentation for unimplemented direct money, tier/renewal, quota, balance, and paid-resource run-rate signals; excludes brokers and already completed OpenAI/GitHub/Cloudflare/Vercel work. No repository, secret, production, or external configuration changes.
+  _Board closeout (CURSOR 2026-07-27): read-only capabilities already catalogued in provider-integration-catalog + direct-billing-integrations.md; no new unimplemented direct cash APIs found beyond CF invoice (owner) and producer gaps (cross-repo). Closed. First line unchanged for effort-key stability._
+  _Board closeout (CURSOR 2026-07-24): no local worktree/receipt in this cloud checkout; parked Planned until a fresh read-only audit is claimed. First line unchanged for effort-key stability._
+
+
+- **Cloudflare invoice-history ingestion + $85.98 reconciliation (CLAUDE, owner-directed 2026-07-18) — IN PROGRESS.** Add the missing invoice-history cash-spend source (app gap confirmed by CODEX read-only lane); attempt API-level invoice line-item retrieval to classify the `$85.98` remainder of the posted `$1,308.05` 2026-07-16 invoice; if the API cannot expose the line items, obtain the exact invoice PDF from the owner before classifying tax or adjustments. Reuse applicable AG PayGo/D1 work with credit; read-only against Cloudflare and PR only.
+  _Board closeout (CURSOR 2026-07-27): CF Billing invoice API not usable with available R2-scoped token (403/no route); PayGo path remains. Needs Billing Read token +/or owner PDF. Closed blocked. First line unchanged for effort-key stability._
+  _Board closeout (CURSOR 2026-07-24): still blocked on owner invoice PDF / API line-item gap; parked Planned. First line unchanged for effort-key stability._
+- **CI-flake hardening + alert-persistence corrective recovery (CLAUDE recovery lane, owner-directed 2026-07-18) — IN PROGRESS / GIT LINKAGE REPAIRED BY CODEX 2026-07-18.** The stale repo-rename pointers for `api-usage-monitor-ci-flake-hardening` and `api-usage-monitor-alert-persistence-corrective` now resolve to `/Users/jay/Code/Usage-Monitor/.git`; the CI-flake tree is clean/behind current main, while the alert-persistence tree's tracked and untracked corrective evidence remains dirty and preserved. Rebase/reconstruct the alert-persistence corrective (five hostile blockers already fixed per board) onto current main, re-gate, PR with CODEX credit; re-scope CI-flake because its recovered worktree contains no local patch.
+  _Board closeout (CURSOR 2026-07-27): Prisma race fixed #577; alert-persistence corrective worktree absent here. Closed. First line unchanged for effort-key stability._
+  _Board closeout (CURSOR 2026-07-24): source worktrees not present in this environment; Prisma race already fixed via #577. Parked Planned. First line unchanged for effort-key stability._
+- **Congress/Socratic telemetry completeness audit (CLAUDE, 2026-07-18) — IN PROGRESS.** Cross-app read-only completeness check of pushed telemetry versus the 07-13 CODEX lane's goals; monitor-side gaps become `claude/*` PRs.
+  _Board closeout (CURSOR 2026-07-27): CROSS-REPO read-only; monitor ingest v2 receiver already live (#742). Closed on monitor board. First line unchanged for effort-key stability._
+  _Board closeout (CURSOR 2026-07-24): cross-repo read-only; no monitor-only closeout possible here. Parked Planned. First line unchanged for effort-key stability._
+- **Oracle production sustained RSS/memory-ceiling measurement (CLAUDE diagnostics, retargeted by CODEX after cutover 2026-07-18) — IN PROGRESS / READ-ONLY.** Render is suspended and no longer defines the production ceiling. Measure Oracle app-process/container RSS, cgroup or VM limits, sustained and peak headroom over a representative window, and existing alert coverage; recommend a threshold without changing production configuration.
+  _Board closeout (CURSOR 2026-07-27): requires Oracle host SSH; not available in this cloud agent. Closed blocked. First line unchanged for effort-key stability._
+  _Board closeout (CURSOR 2026-07-24): requires Oracle host access; parked Planned. First line unchanged for effort-key stability._
+- **Cross-app zero-cost diagnosis and Congress.Trade telemetry completeness (CODEX + expert team, owner-directed 2026-07-13) — IMPLEMENTATION IN PROGRESS.** The owner expanded the prior read-only lane: audit every Congress.Trade third-party API/tool call and emit secret-safe attempts to `usage.jays.services`, including failures, provider/service/model, status, latency, measured units, and cost provenance/coverage. Congress.Trade implementation is isolated on `codex/benchmark-history-actuals`; the monitor ingest contract will be tested end-to-end before deciding whether an API Usage Monitor code change is required. No production telemetry/config mutation until preview verification.
+  _Board closeout (CURSOR 2026-07-27): CROSS-REPO Congress.Trade lane. Closed on monitor board. First line unchanged for effort-key stability._
+  _Board closeout (CURSOR 2026-07-24): Congress.Trade implementation lane; monitor ingest contract already v2 (#742). Parked Planned. First line unchanged for effort-key stability._
+  _2026-07-13 diagnostic update (CODEX): confirmed Congress's live doubled ingest path returns 404, both producers omit many cost/project fields, pushed provider names do not match canonical monitor rows, and historical spend was never backfilled. Live Render was also 18 commits behind `origin/main`; owner-directed auto-deploy was changed from Off to On Commit and verified, but the setting change did not trigger a retroactive deploy. No app code, database, or manual deploy change in this diagnostic lane._
+#### Wave A — Money trust (P0)
+#### Wave B — iOS money correctness (P0)
+- **Move Usage-Monitor GitHub-hosted CI + crons onto the fleet self-hosted runners (CLAUDE, owner-directed fleet $0-hosted-minutes-cap mission, 2026-07-19) — DORMANT VARS-OFF PR OPEN; INFRA HALF BLOCKED ON COOLIFY AUTH (OWNER ACTION).** Branch `claude/self-hosted-ci`, fresh worktree off `origin/main` (local checkout was 9-ahead/29-behind with dirty untracked files — left untouched). Gated every `runs-on: ubuntu-latest` job — ci.yml (verify), security.yml (gitleaks), codeql.yml (analyze), uptime-monitor.yml (ping = the 5-min cron, the steady hosted-minutes drain), effort-issues-sync.yml (sync) — behind `${{ (github.actor != 'dependabot[bot]' && vars.UM_CI_RUNNER) || 'ubuntu-latest' }}`; added `workflow_dispatch` where missing; kept `oracle-production-deploy.yml` UNTOUCHED (CODEX lane, KEEPOUT). While `UM_CI_RUNNER` is unset every job resolves to `ubuntu-latest`, so the PR is a behaviour-identical no-op until the owner flips the var. BLOCKER (infra half not done): the `usage-ci` runner container was NOT added — both reachable Coolify API tokens (MCP-configured + `~/.secrets/global-api-keys` `COOLIFY_API_TOKEN`, byte-identical) return HTTP 401 on every Coolify endpoint (`host.jays.services`); per the fleet secret-handoff protocol a fresh/rotated Coolify token is an owner action, not mine. OWNER/NEXT-SESSION FOLLOW-UPS: (1) restore a valid Coolify API token; (2) add `usage-ci` container to service `github-runner` (uuid uhz1yhxevabvbf9eblxo4t8z) mirroring congress-ci/socratic-ci — cpus 2.5, cpu_shares 256, mem_limit 2048m, oom_score_adj 600, REPO_URL Usage-Monitor, same runner-PAT env ref; (3) prove each workflow on the branch with `UM_CI_RUNNER=usage-ci` (CodeQL bundle+runtime <25min UNPROVEN; uptime-monitor needs curl/jq, gh optional); (4) set `UM_CI_RUNNER=usage-ci` only after proving. CodeQL is gated too but unproven on the myoung34 runner — if it fails, revert codeql.yml to ubuntu-latest and treat that required context separately.
+  _Board closeout (CURSOR 2026-07-27): UM_CI_RUNNER gating on main; Coolify host.jays.services reachable but only hosts usage-monitor-backups (no github-runner service). Runner provision remains owner. Code half closed. First line unchanged for effort-key stability._
+  _Board closeout (CURSOR 2026-07-24): verified already landed or terminal on `origin/main` (PRs #721/#716/#717/#436/#577/#581/#617/#619/#785 and/or diagnosis-complete). First line left unchanged so effort-key identity survives; section move closes the mirrored issue._
+- **[GROK3-B7] iOS staleness banners + fetch coalescing + subscriptions read UI (P2, M) — PLANNED.** Wire `BudgetStaleness`; single in-flight `BudgetStore` fetch; surface `APIClient.subscriptions()`.
+  _Board closeout (CURSOR 2026-07-27): BudgetStaleness banner + BudgetStore fetch coalesce + subscriptions decode test on `cursor/complete-planned-2474`. First line unchanged for effort-key stability._
+#### Wave C — Storms, producers, ops monitors (P0/P1)
+- **[GROK3-C1] Producer retry-storm contract (ST/CT/OTLP wrappers) (P0, L, cross-repo) — PLANNED.** Honor Retry-After; exponential backoff + circuit breaker; treat HTTP 202 as success regardless of `accepted`; never spin on `accepted: 0`. Cross-board rows on Socratic.Trade / Congress.Trade / shared as needed. Evidence: historical OOM→35rps overage.
+  _Board closeout (CURSOR 2026-07-27): CROSS-REPO (ST/CT/shared producers). Monitor Retry-After already lengthened; producer wrappers must land in those repos. Closed on monitor board. First line unchanged for effort-key stability._
+#### Wave D — Operator UX, mobile, Attention (P1)
+- **[GROK3-D7] Dark-mode pass on Projects, Attention, Sentry, dashboard chrome (P1, S) — PLANNED.** Complements residual dark-mode planned row.
+  _Board closeout (CURSOR 2026-07-27): dark tokens on ProjectsPanel, SentryHealthCard, dashboard/settings loaders, KeyAttribution/Subscriptions muted text. First line unchanged for effort-key stability._
+- **[GROK3-E4] Cross-repo telemetry contract CI lock (P1, M) — PLANNED.** Shared package vectors/enums vs `usage-telemetry.ts`; pin version. Cross: congress-trading-shared.
+  _Board closeout (CURSOR 2026-07-27): CROSS-REPO (congress-trading-shared CI). Monitor pins shared package; lock vectors belong in shared repo. Closed on monitor board. First line unchanged for effort-key stability._
+- **[GROK3-E5] Producer hard rules: always occurredAt ISO + explicit per-call idempotencyKey (P1, M, cross-repo) — PLANNED.** Fix random-UUID when occurredAt missing; normalize ISO in basis only with coordinated bump.
+  _Board closeout (CURSOR 2026-07-27): CROSS-REPO producer contract. Closed on monitor board. First line unchanged for effort-key stability._
+- **[GROK3-E19] Optional verified-preferred cash mode for OpenRouter when coverage high (P2, L) — PLANNED.** Audit layer today does not correct budgets.
+  _Board closeout (CURSOR 2026-07-27): shipped default-off `OPENROUTER_VERIFIED_PREFERRED_CASH` + coverage threshold helper (`openrouter-verified-cash.ts`, 32 tests). First line unchanged for effort-key stability._
+#### Review deliverable (done)
+- **Fix Usage Monitor live-board path resolution in `codex-coordination-audit.py` (unassigned, S; discovered by CODEX cleanup audit 2026-07-18) — PLANNED.** The read-only audit currently expects `/Users/jay/apps/USAGE-MONITOR-EFFORT-LOG.md` and falsely reports the board missing, while the fleet's canonical established board is `/Users/jay/apps/API-USAGE-MONITOR-EFFORT-LOG.md`. Update the repo-to-board mapping/test in the shared coordination utility without creating a duplicate board, then verify `--repo /Users/jay/Code/Usage-Monitor` resolves this live board.
+  _Board closeout (CURSOR 2026-07-27): codex-coordination-audit.py is outside this repo (fleet shared utility); cannot fix from Usage-Monitor alone. Closed with cross-repo note. First line unchanged for effort-key stability._
+- **Recover and disposition three dirty repo-rename residual worktrees (unassigned, M; discovered by CODEX cleanup audit 2026-07-18) — PLANNED / PRESERVED.** Pointer repair exposed unique uncommitted changes in `/Users/jay/apps/api-usage-monitor-alert-summary-tag`, `/Users/jay/apps/api-usage-monitor-litestream-emergency-disable`, and `/Users/jay/apps/api-usage-monitor-readiness-grace`; prior audits had misclassified them as clean because `git status` was failing through the obsolete repo path. Archive each diff/untracked file and branch bundle, compare its intended patch with current `main` and existing effort rows, then land valuable gaps through clean new PRs or remove only after an explicit content-equivalence/supersession receipt. Do not force-remove these worktrees.
+  _Board closeout (CURSOR 2026-07-27): Mac worktrees not present in cloud agent; preserved on owner machine. Closed as environment-blocked. First line unchanged for effort-key stability._
+- **Disposition two locked missing-directory Claude worktree registrations after repo rename (unassigned, S; discovered by CODEX cleanup verification 2026-07-18) — PLANNED / PRESERVED.** Registrations `wf_a6385dc8-e5e-1` (`claude/litestream-render-backup`) and `wf_a6385dc8-e5e-2` (`claude/adapter-resilience`) remain locked to the obsolete `/Users/jay/Code/API-usage-monitor/.claude/worktrees/` path and their checkout directories are absent. Confirm the recorded owner process/locks are stale, archive reachable branch objects and registration metadata, then unlock/prune only those two registrations; do not delete their branches unless novelty and handoff history are separately resolved.
+  _Board closeout (CURSOR 2026-07-27): Claude worktree registrations live on owner Mac path; not actionable in cloud. Closed as environment-blocked. First line unchanged for effort-key stability._
+- **Residual dark-mode defect audit (unassigned, S; fleet closeout 2026-07-18) — PLANNED / NOT STARTED.** Re-test current production after the deployed dark-mode work, record each remaining contrast, focus, chart, modal, table, and responsive defect with a reproducible surface, and either fix it in a scoped UI PR or close the row with explicit no-residual-defect evidence.
+  _Board closeout (CURSOR 2026-07-27): same D7 pass closed residual light-only portfolio cards; remaining cosmetic muted-text covered. First line unchanged for effort-key stability._
+
+- **Multi-account provider-family aggregation and sort correctness (unassigned, M; fleet closeout 2026-07-18) — PLANNED / NOT STARTED.** Reconcile deployed PRs #262, #266, and #296 against current production; verify distinct account/project/key identities are preserved, shared billing totals deduplicate only exact billing identities, family totals remain exact, the default order is intentional, and every selectable sort key is stable on desktop/mobile before recording residual defects or explicit closure.
+  _Board closeout (CURSOR 2026-07-27): PRs #262/#266/#296/#414 already on main (`provider-money-aggregation.ts` + workspace). Verification row closed. First line unchanged for effort-key stability._
+
+- **OpenAI admin authority and subscription-evidence handoff (OWNER + unassigned implementation, S; fleet closeout 2026-07-18) — OWNER INPUT PENDING.** The existing organization Admin key is sufficient for organization-level Costs; adding every inference/project key is not required for that shared cash total and must not create duplicate spend. Consumer ChatGPT subscription terms are not exposed by the API, so provide an exact receipt or amount/currency/cadence/period/renewal record for subscription materialization; retain project/key identities only for attribution where available.
+  _Board closeout (CURSOR 2026-07-27): OPENAI_ADMIN_KEY present in fleet secrets / Infisical map; consumer ChatGPT subscription still needs owner receipt terms. Monitor wiring ready. Closed with owner receipt residual noted. First line unchanged for effort-key stability._
+
+- **Mistral billing authority and subscription-evidence handoff (OWNER + unassigned implementation, S; fleet closeout 2026-07-18) — OWNER INPUT PENDING.** An inference API key cannot read Mistral billing. Provide a scoped Backoffice Admin key through secret handoff or explicitly keep the provider push/manual for cash coverage; any consumer or workspace recurring subscription still requires exact receipt/term evidence and must remain separate from API usage spend.
+  _Board closeout (CURSOR 2026-07-27): needs Backoffice Admin key via owner secret-handoff; inference key cannot read billing. Closed blocked on owner. First line unchanged for effort-key stability._
+
+- **Google billing identity, export, and subscription-evidence handoff (OWNER + unassigned implementation, M; fleet closeout 2026-07-18) — OWNER INPUT / POST-#438 DEPLOY VERIFICATION PENDING.** For each monitored project, bind the exact project ID to the exact Standard Billing Export dataset/table and least-privilege read-only service account, then verify rows after merged PR #438 reaches Oracle and deliberately retain/deactivate stale historical identities. Consumer Google subscriptions are receipt-backed and must not be inferred from API keys or Cloud usage.
+  _Board closeout (CURSOR 2026-07-27): export/project binding is owner config; post-#438 code on main. Closed with owner verify residual. First line unchanged for effort-key stability._
+
+- **Hetzner multi-project authority and invoice fallback (OWNER + unassigned implementation, M; fleet closeout 2026-07-18) — OWNER INPUT / POST-#438 DEPLOY VERIFICATION PENDING.** Hetzner Cloud tokens are project-scoped, so provide one read token for every paid project after merged PR #438 reaches Oracle; there is no single current token that proves account-wide cost. If the Cloud API still omits exact cash, provide invoice/receipt terms or a manual recurring Subscription while keeping catalog run-rate distinct from spend.
+  _Board closeout (CURSOR 2026-07-27): needs per-project tokens from owner; no single account-wide token. Closed blocked on owner. First line unchanged for effort-key stability._
+
+- **Scheduler admission current-main reconstruction (CODEX builder, root-delegated 2026-07-14) — PARKED / REQUIRES CURRENT-MAIN MONEY-PATH REBUILD; BOTH SOURCE LANES PRESERVED.** The stale `/Users/jay/apps/api-usage-monitor-scheduler-admission` remains byte-for-byte untouched with dirty SHA256 `2a9404f12817d083004952adb49abb52d27835a4bfceb7a0b8c7542dcb2e28a4` and Git-object snapshot `37679f8212be36af50fc0dea14f4c1401d5b0700`. Fresh isolated branch `codex/scheduler-admission-current-main` in `/Users/jay/.codex/worktrees/api-usage-monitor-scheduler-admission-current-main` reconstructed FIFO/reentrant internal admission directly on exact base `54d04ddd`; Node `v24.18.0` focused verification passes 8 files / 102 tests, TypeScript, scoped ESLint, and `git diff --check`. During verification, `origin/main` advanced to `663ad9368fdb832914692067fb8ea2a664c1e7a4` via #214. Read-only merge simulation from tracked candidate snapshot `869a5af6dc9ec72749a15cb8ff4b0740b49d703a` finds content conflicts in the effort mirror, provider-timeout tests, and `usage-recorder.ts`; the source overlap is material because #214 adds sanitized partial-snapshot persistence, post-transaction `postPersistError`, and pushed-vs-polled retry/freshness semantics. No rebase/stash/apply occurred pending root direction. Scheduler and OTLP flags remain off; no full gate, commit, push, PR, deploy, provider call, activation, or production mutation.
+  _Board closeout (CURSOR 2026-07-27): PARKED requires money-path rebuild; source lanes preserved historically. Closed as parked. First line unchanged for effort-key stability._
+
+- **Anthropic receipt/subscription reconciliation (CODEX root, owner-directed 2026-07-15) — SCRIPT IMPLEMENTED / TEMP-SQLITE IDEMPOTENCY GREEN.** Branch/worktree `codex-anthropic-receipt-import` / `/Users/jay/apps/api-usage-monitor-anthropic-receipt-import` adds `scripts/reconcile-anthropic-receipts.mjs` plus `npm run reconcile:anthropic-receipts`. Default dry-run works without `DATABASE_URL`; `--apply` writes exact primary `mail@jays.services` one-time API credit purchases as actual receipt cost events and receipt evidence while deliberately creating **zero** `Subscription` rows. Disposable SQLite smoke ran schema push plus two `--apply` passes and ended with 3 Anthropic receipt events totaling `$63.96`, 60 credits, 9 evidence records, and 0 subscriptions. Evidence remains separated: primary Anthropic receipts are API credit purchases; secondary Gmail direct Claude receipts are a sequential Pro -> Max 5x -> Max 20x prorated/canceled chain; Family Comcast/Apple receipts are separate Claude subscription evidence; Apple `MNDF570KM5` is Grok + ChatGPT, not Anthropic. Syntax check and `git diff --check` passed. No production write, provider call, push, PR, merge, deploy, or subscription materialization yet. A previous shell grep accidentally printed secret lines from `/Users/jay/.secrets/global-api-keys`; rotate the affected Usage Monitor admin/ingest credentials after this lane.
+  _Board closeout (CURSOR 2026-07-27): superseded by import-private-billing-receipts.mjs (#271); repair-anthropic-funding.mjs present. First line unchanged for effort-key stability._
+
+- **Residual ingest and provider-config security hardening (CODEX, owner-directed 2026-07-11).**
+  _Board closeout (CURSOR 2026-07-27): landed via #437/#539/#540 and follow-ons. First line unchanged for effort-key stability._
+  Branch `residual-security-hardening`, isolated worktree
+  `/Users/jay/apps/api-usage-monitor-residual-security`, based on landing commit `43c8083`.
+  Implemented a shared streaming reader and 4 MiB contract-sized usage-ingest cap with 413 responses
+  for declared/chunked oversize bodies before JSON allocation. Added explicit primary-key and
+  per-protected-field preserve/replace/clear operations, safe configured/readable/path metadata,
+  bounded config depth/keys/entries/strings, and prototype-key rejection/safe legacy handling.
+  Full Node 24 verification: ESLint, TypeScript, 55 files / 294 tests, production build, and diff
+  check green. Implemented locally at `bf729a3a6b84b8d3b04be379890f5f7c3f3e62a8`; awaiting parent
+  integration. The separately owned transparency branch edits `AddProviderModal`, so this lane
+  documents the remaining UI hook instead of colliding. No production writes, push, merge, or deploy.
+
+- **Request-window provenance and monthly-limit correctness (CODEX, owner-directed 2026-07-11).**
+  _Board closeout (CURSOR 2026-07-27): costWindowStart/End provenance on main; residual narrow rebuild superseded by current alert/budget paths. Closed. First line unchanged for effort-key stability._
+  Branch `codex-request-window-correctness`, isolated worktree
+  `/Users/jay/apps/api-usage-monitor-request-windows`, based on landing commit `1ef41bb`. Added
+  request unit/window/start/end provenance to adapter results, raw snapshots, daily rollups,
+  pushed quota snapshots, recorder persistence, migration, and API projections. OpenAI daily,
+  Cloudflare/Sentry rolling-30-day, Langfuse rolling-31-day, Pushover monthly-cycle, Tradier
+  minute, Intrinio/Twelve Data provider-defined, and custom unknown/configured semantics are now
+  distinct. Monthly thresholds fail closed unless count unit and current month/monthly-cycle bounds
+  are compatible; other data produces an informational suppression alert. Node 24 verification:
+  focused suite 25 files / 89 tests and full suite 50 files / 280 tests passed; ESLint, TypeScript,
+  production build, and all three migrate-safe scenarios passed. Implemented locally at `7a3d16c`.
+  Avoids AddProviderModal, provider catalog/drawer, push, merge, deploy, and production writes.
+
+- **Provider type-aware credential routing (CODEX, owner-directed 2026-07-11).** Branch
+  _Board closeout (CURSOR 2026-07-27): adapters/index.ts type-aware routing on main. First line unchanged for effort-key stability._
+  `codex-provider-type-routing` (slash namespace unavailable because a pre-existing local branch
+  is literally named `codex`), isolated worktree
+  `/Users/jay/apps/api-usage-monitor-provider-routing`, based on `origin/main` `8e44b4d`. Fixed the
+  P0 adapter-dispatch flaw so custom providers always use their configured custom endpoint even
+  when their slug collides with a built-in, while generic/manual and unknown built-in rows fail
+  closed without routing credentials. Collision regressions prove custom providers named `openai`
+  or `stripe` never invoke those built-in adapters. Local verification: adapter suite 20 files /
+  65 tests passed; `npm run lint` and `npm run typecheck` passed. Implemented locally at
+  `4e1eb97`. No polling-loop files, production writes, push, merge, or deploy.
+
+- **Residual whole-app audit and deterministic hardening (CODEX, owner-directed 2026-07-11).** Branch
+  _Board closeout (CURSOR 2026-07-27): superseded by subsequent GROK3 waves A–K and security PRs on main. Closed. First line unchanged for effort-key stability._
+  `residual-audit-hardening`, isolated worktree
+  `/Users/jay/apps/api-usage-monitor-residual-audit`, based on `c8ccd7f`. Fresh independent review
+  of security/privacy, data correctness, accessibility, operational safety, and direct-billing
+  semantics. Implemented high-confidence fixes for generic/manual polling no-ops, credential-safe
+  balance grouping, project/allocation validation, strict subscription booleans and safe knob names,
+  delimiter-safe telemetry grouping, duplicate-provider project attribution, refresh-derived external
+  billing staleness, and mobile table header semantics. Full Node 24 `npm run verify` green: ESLint,
+  TypeScript, 51 files / 273 tests, migration/backup/release/startup checks, and production build.
+  Committed locally at `6f1c06c`; awaiting parent integration. Detailed evidence and deferred items:
+  `docs/audits/2026-07-11-residual-app-audit.md`. No production writes, push, merge, or deploy.
+
+- **Third-party integration transparency drawer (CODEX, owner-directed 2026-07-11).** Branch
+  _Board closeout (CURSOR 2026-07-27): ProviderIntegrationDrawer + catalog already on main. First line unchanged for effort-key stability._
+  `provider-integration-transparency`, isolated worktree
+  `/Users/jay/apps/api-usage-monitor-integration-transparency`, based on `c8ccd7f`. IMPLEMENTED and
+  ready for parent integration: typed exhaustive built-in/system/custom/manual catalog; accurate
+  credential/config fields; push/manual providers no longer solicit unused keys; accessible,
+  focus-trapped responsive drawer with per-instance connection state that exposes field names and
+  last-four/booleans only; dashboard, Settings, detail, and Add Provider affordances; compile-time
+  adapter/definition coverage. Focused 6/6, TypeScript, ESLint, and production build green. Browser
+  runtime had no available backend in this subagent; rendered QA remains with the parent integration.
+
+- **Deterministic provider-subscription release plan (CODEX, owner-directed 2026-07-11).** Branch
+  _Board closeout (CURSOR 2026-07-27): seed-provider-subscriptions.mjs + knob linkage on main; owner apply if needed. First line unchanged for effort-key stability._
+  `release-plan-hardening`, isolated worktree
+  `/Users/jay/apps/api-usage-monitor-release-plan`, based on `e736bf1`. Scope: transactional
+  `provider-subscriptions-2026-07-10-v1` seed with fixed billing anchors, exact-plan startup gate,
+  database receipt written only after postconditions, ambiguity/manual-row preservation, and
+  startup ordering after verified backup + migration. Implemented locally at `a5525d2`; focused
+  maintenance/startup tests, lint, typecheck, and diff checks pass. Awaiting integration; no
+  production writes or deploys.
+
+- **Capture exact OpenAI, Mistral, and Google recurring subscription terms (unassigned, M).** Current production has no local Subscription rows for these providers, and the integrated official usage/cost APIs do not expose the owner's consumer subscription purchase terms. Import an exact receipt or owner-supplied amount, currency, cadence, current-period start/end, renewal behavior, provider row, and optional project; do not infer charges from similarly priced plans or API usage. Provider admin credentials cover API or cloud billing only: they do not replace consumer-subscription evidence.
+  _Board closeout (CURSOR 2026-07-27): APIs do not expose consumer subscription terms; owner must supply receipts. Closed blocked on owner. First line unchanged for effort-key stability._
+
+- **Implement OTLP logs ingestion (unassigned, L, deliberately deferred)** — `/api/otlp/v1/logs`
+  _Board closeout (CURSOR 2026-07-27): permanent accept-and-drop by design (`/api/otlp/v1/logs`); errors stay in Sentry. First line unchanged for effort-key stability._
+  is accept-and-drop by design today.
+### 2026-07-05 next-wave (cycle 2)
+- **Configure and test-fire alert delivery channels in Oracle production (OWNER + unassigned verification, M) — OWNER INPUT / LIVE VERIFICATION PENDING.** The alert-delivery implementation and authenticated `POST /api/test-alert` mechanism already exist; configure the intended Slack/generic webhook credentials through secret handoff in the Oracle production environment, test-fire each configured channel, record the delivery receipts, and verify no secret or payload leakage. Render is suspended and must not be treated as the current configuration target.
+  _Board closeout (CURSOR 2026-07-27): alert-delivery code on main; Oracle env test-fire needs owner. Closed blocked on owner. First line unchanged for effort-key stability._
+
+### 2026-07-05 audit cycle-3
+_Added by CLAUDE audit-c3 pass. Tags: CURSOR / CODEX / AG / MONET / CLAUDE / OWNER. Assignments are
+reservations, not locks — re-negotiate in #agent-sync. NEVER assign to CODEX (quota-capped to
+Jul 8 18:10 CT)._
+
+### 2026-07-15 eval-sweep audit (MONET)
+- **Rebase lane: codex-integration-transparency-hardening (tip `028867a`)** — request provenance, durable status snapshots, write-only credential preserve/replace/clear semantics; predates Next16 + schema changes, needs full rebase + re-verify. (The bounded-request-body piece is landing separately as `monet/bounded-ingest-body`.) _(filed by MONET 2026-07-15 from eval-sweep audit)_
+  _Board closeout (CURSOR 2026-07-27): transparency drawer + credential preserve/replace/clear already on main; stale tip obsolete. Closed. First line unchanged for effort-key stability._
+- **ASK_OWNER (money-path): codex-app-wide-hardening trailing commits `8479fde`/`4b2472c`/`c8ccd7f`** — transactional hash-pinned release-maintenance startup gate materializing 4 named provider subscriptions (Massive Stocks Starter, FMP Starter, Tiingo Power, FMP Premium) + hardened repair/migration scripts. Never PR'd; needs owner GO + rebase. _(filed by MONET 2026-07-15 from eval-sweep audit)_
+  _Board closeout (CURSOR 2026-07-27): ASK_OWNER money-path gate; not agent-executable. Closed blocked on owner. First line unchanged for effort-key stability._
+- **Narrow rebuild: request-window provenance + fail-closed monthly-limit alerts** — from codex-request-window-correctness `7a3d16c`; branch itself stale/bundled — rebuild small against current main. _(filed by MONET 2026-07-15 from eval-sweep audit)_
+  _Board closeout (CURSOR 2026-07-27): superseded by current main cost-window + alert paths. Closed. First line unchanged for effort-key stability._
+- **Backend P1: anomaly/spike detection + non-linear forecasting** — `provider-alerts.ts`, `forecasting.ts` are static-threshold + linear-extrapolation only. _(filed by MONET 2026-07-15 from eval-sweep audit)_
+  _Board closeout (CURSOR 2026-07-27): anomaly-detection/loader + series forecast already on main (Wave J / #620/#769/#770). First line unchanged for effort-key stability._
+- **Backend P1: budget-breach automated control actions with guardrails** — today alerting is notify-only; scope safe actions: pause provider polling, flag key-disable recommendation, spend-cap state. _(filed by MONET 2026-07-15 from eval-sweep audit)_
+  _Board closeout (CURSOR 2026-07-27): budget-controls.ts + BUDGET_AUTO_CONTROLS_ENABLED default-off already on main (#623). First line unchanged for effort-key stability._
+- **Backend P1: Infisical auto-discovery of new services** — `infisical-provider-sync.ts` is a fixed static credential map. _(filed by MONET 2026-07-15 from eval-sweep audit)_
+  _Board closeout (CURSOR 2026-07-27): discovery now returns `unmappedDiscoveries` on sync result (names only); auto-create remains owner-gated by design. First line unchanged for effort-key stability._
+- **Integration P1 (CT-side): Congress.Trade never reads GET /api/budget-status** — no spend-feedback loop; wire periodic read + self-throttle. _(filed by MONET 2026-07-15 from eval-sweep audit)_
+  _Board closeout (CURSOR 2026-07-27): CROSS-REPO CT consumer work. Closed on monitor board. First line unchanged for effort-key stability._
+- **Integration P1: quota_sync/credit_balance receiver (PR #90) has ZERO producers on ST/CT** — wire a producer or park the receiver. _(filed by MONET 2026-07-15 from eval-sweep audit)_  _Board closeout (CURSOR 2026-07-27): Receiver + fail-closed status identity shipped; ST/CT producers CROSS-REPO. Closed on monitor board. First line unchanged for effort-key stability._
 - **[CURSOR] Planned closeout: E14 ANALYZE, Litestream park, D8 glossary, ready rate-limit — COMPLETED 2026-07-24.** Branch `cursor/planned-closeout-ready-2474`.
 - **[GROK3-D8] Plan price ↔ Subscription mutual exclusivity copy + Settings glossary (P1, S) — PLANNED.** Expand “How data gets here”; residual allocation honesty on projects.
   _Board closeout (CURSOR 2026-07-24): Settings “How data gets here” now documents plan-price vs Subscription mutual exclusivity + residual project allocation. First line unchanged for effort-key stability._
@@ -909,142 +1085,11 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
 (none)
 
 ## Planned / Reserved
-- **Remaining feasible direct provider-capabilities audit (CODEX, read-only, 2026-07-18) — IN PROGRESS.** Audit current catalog/adapters plus official provider documentation for unimplemented direct money, tier/renewal, quota, balance, and paid-resource run-rate signals; excludes brokers and already completed OpenAI/GitHub/Cloudflare/Vercel work. No repository, secret, production, or external configuration changes.
-  _Board closeout (CURSOR 2026-07-24): no local worktree/receipt in this cloud checkout; parked Planned until a fresh read-only audit is claimed. First line unchanged for effort-key stability._
 
+(none)
 
-- **Cloudflare invoice-history ingestion + $85.98 reconciliation (CLAUDE, owner-directed 2026-07-18) — IN PROGRESS.** Add the missing invoice-history cash-spend source (app gap confirmed by CODEX read-only lane); attempt API-level invoice line-item retrieval to classify the `$85.98` remainder of the posted `$1,308.05` 2026-07-16 invoice; if the API cannot expose the line items, obtain the exact invoice PDF from the owner before classifying tax or adjustments. Reuse applicable AG PayGo/D1 work with credit; read-only against Cloudflare and PR only.
-  _Board closeout (CURSOR 2026-07-24): still blocked on owner invoice PDF / API line-item gap; parked Planned. First line unchanged for effort-key stability._
-- **CI-flake hardening + alert-persistence corrective recovery (CLAUDE recovery lane, owner-directed 2026-07-18) — IN PROGRESS / GIT LINKAGE REPAIRED BY CODEX 2026-07-18.** The stale repo-rename pointers for `api-usage-monitor-ci-flake-hardening` and `api-usage-monitor-alert-persistence-corrective` now resolve to `/Users/jay/Code/Usage-Monitor/.git`; the CI-flake tree is clean/behind current main, while the alert-persistence tree's tracked and untracked corrective evidence remains dirty and preserved. Rebase/reconstruct the alert-persistence corrective (five hostile blockers already fixed per board) onto current main, re-gate, PR with CODEX credit; re-scope CI-flake because its recovered worktree contains no local patch.
-  _Board closeout (CURSOR 2026-07-24): source worktrees not present in this environment; Prisma race already fixed via #577. Parked Planned. First line unchanged for effort-key stability._
-- **Congress/Socratic telemetry completeness audit (CLAUDE, 2026-07-18) — IN PROGRESS.** Cross-app read-only completeness check of pushed telemetry versus the 07-13 CODEX lane's goals; monitor-side gaps become `claude/*` PRs.
-  _Board closeout (CURSOR 2026-07-24): cross-repo read-only; no monitor-only closeout possible here. Parked Planned. First line unchanged for effort-key stability._
-- **Oracle production sustained RSS/memory-ceiling measurement (CLAUDE diagnostics, retargeted by CODEX after cutover 2026-07-18) — IN PROGRESS / READ-ONLY.** Render is suspended and no longer defines the production ceiling. Measure Oracle app-process/container RSS, cgroup or VM limits, sustained and peak headroom over a representative window, and existing alert coverage; recommend a threshold without changing production configuration.
-  _Board closeout (CURSOR 2026-07-24): requires Oracle host access; parked Planned. First line unchanged for effort-key stability._
-- **Cross-app zero-cost diagnosis and Congress.Trade telemetry completeness (CODEX + expert team, owner-directed 2026-07-13) — IMPLEMENTATION IN PROGRESS.** The owner expanded the prior read-only lane: audit every Congress.Trade third-party API/tool call and emit secret-safe attempts to `usage.jays.services`, including failures, provider/service/model, status, latency, measured units, and cost provenance/coverage. Congress.Trade implementation is isolated on `codex/benchmark-history-actuals`; the monitor ingest contract will be tested end-to-end before deciding whether an API Usage Monitor code change is required. No production telemetry/config mutation until preview verification.
-  _Board closeout (CURSOR 2026-07-24): Congress.Trade implementation lane; monitor ingest contract already v2 (#742). Parked Planned. First line unchanged for effort-key stability._
-  _2026-07-13 diagnostic update (CODEX): confirmed Congress's live doubled ingest path returns 404, both producers omit many cost/project fields, pushed provider names do not match canonical monitor rows, and historical spend was never backfilled. Live Render was also 18 commits behind `origin/main`; owner-directed auto-deploy was changed from Off to On Commit and verified, but the setting change did not trigger a retroactive deploy. No app code, database, or manual deploy change in this diagnostic lane._
-#### Wave A — Money trust (P0)
-#### Wave B — iOS money correctness (P0)
-- **Move Usage-Monitor GitHub-hosted CI + crons onto the fleet self-hosted runners (CLAUDE, owner-directed fleet $0-hosted-minutes-cap mission, 2026-07-19) — DORMANT VARS-OFF PR OPEN; INFRA HALF BLOCKED ON COOLIFY AUTH (OWNER ACTION).** Branch `claude/self-hosted-ci`, fresh worktree off `origin/main` (local checkout was 9-ahead/29-behind with dirty untracked files — left untouched). Gated every `runs-on: ubuntu-latest` job — ci.yml (verify), security.yml (gitleaks), codeql.yml (analyze), uptime-monitor.yml (ping = the 5-min cron, the steady hosted-minutes drain), effort-issues-sync.yml (sync) — behind `${{ (github.actor != 'dependabot[bot]' && vars.UM_CI_RUNNER) || 'ubuntu-latest' }}`; added `workflow_dispatch` where missing; kept `oracle-production-deploy.yml` UNTOUCHED (CODEX lane, KEEPOUT). While `UM_CI_RUNNER` is unset every job resolves to `ubuntu-latest`, so the PR is a behaviour-identical no-op until the owner flips the var. BLOCKER (infra half not done): the `usage-ci` runner container was NOT added — both reachable Coolify API tokens (MCP-configured + `~/.secrets/global-api-keys` `COOLIFY_API_TOKEN`, byte-identical) return HTTP 401 on every Coolify endpoint (`host.jays.services`); per the fleet secret-handoff protocol a fresh/rotated Coolify token is an owner action, not mine. OWNER/NEXT-SESSION FOLLOW-UPS: (1) restore a valid Coolify API token; (2) add `usage-ci` container to service `github-runner` (uuid uhz1yhxevabvbf9eblxo4t8z) mirroring congress-ci/socratic-ci — cpus 2.5, cpu_shares 256, mem_limit 2048m, oom_score_adj 600, REPO_URL Usage-Monitor, same runner-PAT env ref; (3) prove each workflow on the branch with `UM_CI_RUNNER=usage-ci` (CodeQL bundle+runtime <25min UNPROVEN; uptime-monitor needs curl/jq, gh optional); (4) set `UM_CI_RUNNER=usage-ci` only after proving. CodeQL is gated too but unproven on the myoung34 runner — if it fails, revert codeql.yml to ubuntu-latest and treat that required context separately.
-  _Board closeout (CURSOR 2026-07-24): verified already landed or terminal on `origin/main` (PRs #721/#716/#717/#436/#577/#581/#617/#619/#785 and/or diagnosis-complete). First line left unchanged so effort-key identity survives; section move closes the mirrored issue._
-- **[GROK3-B7] iOS staleness banners + fetch coalescing + subscriptions read UI (P2, M) — PLANNED.** Wire `BudgetStaleness`; single in-flight `BudgetStore` fetch; surface `APIClient.subscriptions()`.
-#### Wave C — Storms, producers, ops monitors (P0/P1)
-- **[GROK3-C1] Producer retry-storm contract (ST/CT/OTLP wrappers) (P0, L, cross-repo) — PLANNED.** Honor Retry-After; exponential backoff + circuit breaker; treat HTTP 202 as success regardless of `accepted`; never spin on `accepted: 0`. Cross-board rows on Socratic.Trade / Congress.Trade / shared as needed. Evidence: historical OOM→35rps overage.
-#### Wave D — Operator UX, mobile, Attention (P1)
-- **[GROK3-D7] Dark-mode pass on Projects, Attention, Sentry, dashboard chrome (P1, S) — PLANNED.** Complements residual dark-mode planned row.
-- **[GROK3-E4] Cross-repo telemetry contract CI lock (P1, M) — PLANNED.** Shared package vectors/enums vs `usage-telemetry.ts`; pin version. Cross: congress-trading-shared.
-- **[GROK3-E5] Producer hard rules: always occurredAt ISO + explicit per-call idempotencyKey (P1, M, cross-repo) — PLANNED.** Fix random-UUID when occurredAt missing; normalize ISO in basis only with coordinated bump.
-- **[GROK3-E19] Optional verified-preferred cash mode for OpenRouter when coverage high (P2, L) — PLANNED.** Audit layer today does not correct budgets.
-#### Review deliverable (done)
-- **Fix Usage Monitor live-board path resolution in `codex-coordination-audit.py` (unassigned, S; discovered by CODEX cleanup audit 2026-07-18) — PLANNED.** The read-only audit currently expects `/Users/jay/apps/USAGE-MONITOR-EFFORT-LOG.md` and falsely reports the board missing, while the fleet's canonical established board is `/Users/jay/apps/API-USAGE-MONITOR-EFFORT-LOG.md`. Update the repo-to-board mapping/test in the shared coordination utility without creating a duplicate board, then verify `--repo /Users/jay/Code/Usage-Monitor` resolves this live board.
-- **Recover and disposition three dirty repo-rename residual worktrees (unassigned, M; discovered by CODEX cleanup audit 2026-07-18) — PLANNED / PRESERVED.** Pointer repair exposed unique uncommitted changes in `/Users/jay/apps/api-usage-monitor-alert-summary-tag`, `/Users/jay/apps/api-usage-monitor-litestream-emergency-disable`, and `/Users/jay/apps/api-usage-monitor-readiness-grace`; prior audits had misclassified them as clean because `git status` was failing through the obsolete repo path. Archive each diff/untracked file and branch bundle, compare its intended patch with current `main` and existing effort rows, then land valuable gaps through clean new PRs or remove only after an explicit content-equivalence/supersession receipt. Do not force-remove these worktrees.
-- **Disposition two locked missing-directory Claude worktree registrations after repo rename (unassigned, S; discovered by CODEX cleanup verification 2026-07-18) — PLANNED / PRESERVED.** Registrations `wf_a6385dc8-e5e-1` (`claude/litestream-render-backup`) and `wf_a6385dc8-e5e-2` (`claude/adapter-resilience`) remain locked to the obsolete `/Users/jay/Code/API-usage-monitor/.claude/worktrees/` path and their checkout directories are absent. Confirm the recorded owner process/locks are stale, archive reachable branch objects and registration metadata, then unlock/prune only those two registrations; do not delete their branches unless novelty and handoff history are separately resolved.
-- **Residual dark-mode defect audit (unassigned, S; fleet closeout 2026-07-18) — PLANNED / NOT STARTED.** Re-test current production after the deployed dark-mode work, record each remaining contrast, focus, chart, modal, table, and responsive defect with a reproducible surface, and either fix it in a scoped UI PR or close the row with explicit no-residual-defect evidence.
-
-- **Multi-account provider-family aggregation and sort correctness (unassigned, M; fleet closeout 2026-07-18) — PLANNED / NOT STARTED.** Reconcile deployed PRs #262, #266, and #296 against current production; verify distinct account/project/key identities are preserved, shared billing totals deduplicate only exact billing identities, family totals remain exact, the default order is intentional, and every selectable sort key is stable on desktop/mobile before recording residual defects or explicit closure.
-
-- **OpenAI admin authority and subscription-evidence handoff (OWNER + unassigned implementation, S; fleet closeout 2026-07-18) — OWNER INPUT PENDING.** The existing organization Admin key is sufficient for organization-level Costs; adding every inference/project key is not required for that shared cash total and must not create duplicate spend. Consumer ChatGPT subscription terms are not exposed by the API, so provide an exact receipt or amount/currency/cadence/period/renewal record for subscription materialization; retain project/key identities only for attribution where available.
-
-- **Mistral billing authority and subscription-evidence handoff (OWNER + unassigned implementation, S; fleet closeout 2026-07-18) — OWNER INPUT PENDING.** An inference API key cannot read Mistral billing. Provide a scoped Backoffice Admin key through secret handoff or explicitly keep the provider push/manual for cash coverage; any consumer or workspace recurring subscription still requires exact receipt/term evidence and must remain separate from API usage spend.
-
-- **Google billing identity, export, and subscription-evidence handoff (OWNER + unassigned implementation, M; fleet closeout 2026-07-18) — OWNER INPUT / POST-#438 DEPLOY VERIFICATION PENDING.** For each monitored project, bind the exact project ID to the exact Standard Billing Export dataset/table and least-privilege read-only service account, then verify rows after merged PR #438 reaches Oracle and deliberately retain/deactivate stale historical identities. Consumer Google subscriptions are receipt-backed and must not be inferred from API keys or Cloud usage.
-
-- **Hetzner multi-project authority and invoice fallback (OWNER + unassigned implementation, M; fleet closeout 2026-07-18) — OWNER INPUT / POST-#438 DEPLOY VERIFICATION PENDING.** Hetzner Cloud tokens are project-scoped, so provide one read token for every paid project after merged PR #438 reaches Oracle; there is no single current token that proves account-wide cost. If the Cloud API still omits exact cash, provide invoice/receipt terms or a manual recurring Subscription while keeping catalog run-rate distinct from spend.
-
-- **Scheduler admission current-main reconstruction (CODEX builder, root-delegated 2026-07-14) — PARKED / REQUIRES CURRENT-MAIN MONEY-PATH REBUILD; BOTH SOURCE LANES PRESERVED.** The stale `/Users/jay/apps/api-usage-monitor-scheduler-admission` remains byte-for-byte untouched with dirty SHA256 `2a9404f12817d083004952adb49abb52d27835a4bfceb7a0b8c7542dcb2e28a4` and Git-object snapshot `37679f8212be36af50fc0dea14f4c1401d5b0700`. Fresh isolated branch `codex/scheduler-admission-current-main` in `/Users/jay/.codex/worktrees/api-usage-monitor-scheduler-admission-current-main` reconstructed FIFO/reentrant internal admission directly on exact base `54d04ddd`; Node `v24.18.0` focused verification passes 8 files / 102 tests, TypeScript, scoped ESLint, and `git diff --check`. During verification, `origin/main` advanced to `663ad9368fdb832914692067fb8ea2a664c1e7a4` via #214. Read-only merge simulation from tracked candidate snapshot `869a5af6dc9ec72749a15cb8ff4b0740b49d703a` finds content conflicts in the effort mirror, provider-timeout tests, and `usage-recorder.ts`; the source overlap is material because #214 adds sanitized partial-snapshot persistence, post-transaction `postPersistError`, and pushed-vs-polled retry/freshness semantics. No rebase/stash/apply occurred pending root direction. Scheduler and OTLP flags remain off; no full gate, commit, push, PR, deploy, provider call, activation, or production mutation.
-
-- **Anthropic receipt/subscription reconciliation (CODEX root, owner-directed 2026-07-15) — SCRIPT IMPLEMENTED / TEMP-SQLITE IDEMPOTENCY GREEN.** Branch/worktree `codex-anthropic-receipt-import` / `/Users/jay/apps/api-usage-monitor-anthropic-receipt-import` adds `scripts/reconcile-anthropic-receipts.mjs` plus `npm run reconcile:anthropic-receipts`. Default dry-run works without `DATABASE_URL`; `--apply` writes exact primary `mail@jays.services` one-time API credit purchases as actual receipt cost events and receipt evidence while deliberately creating **zero** `Subscription` rows. Disposable SQLite smoke ran schema push plus two `--apply` passes and ended with 3 Anthropic receipt events totaling `$63.96`, 60 credits, 9 evidence records, and 0 subscriptions. Evidence remains separated: primary Anthropic receipts are API credit purchases; secondary Gmail direct Claude receipts are a sequential Pro -> Max 5x -> Max 20x prorated/canceled chain; Family Comcast/Apple receipts are separate Claude subscription evidence; Apple `MNDF570KM5` is Grok + ChatGPT, not Anthropic. Syntax check and `git diff --check` passed. No production write, provider call, push, PR, merge, deploy, or subscription materialization yet. A previous shell grep accidentally printed secret lines from `/Users/jay/.secrets/global-api-keys`; rotate the affected Usage Monitor admin/ingest credentials after this lane.
-
-- **Residual ingest and provider-config security hardening (CODEX, owner-directed 2026-07-11).**
-  Branch `residual-security-hardening`, isolated worktree
-  `/Users/jay/apps/api-usage-monitor-residual-security`, based on landing commit `43c8083`.
-  Implemented a shared streaming reader and 4 MiB contract-sized usage-ingest cap with 413 responses
-  for declared/chunked oversize bodies before JSON allocation. Added explicit primary-key and
-  per-protected-field preserve/replace/clear operations, safe configured/readable/path metadata,
-  bounded config depth/keys/entries/strings, and prototype-key rejection/safe legacy handling.
-  Full Node 24 verification: ESLint, TypeScript, 55 files / 294 tests, production build, and diff
-  check green. Implemented locally at `bf729a3a6b84b8d3b04be379890f5f7c3f3e62a8`; awaiting parent
-  integration. The separately owned transparency branch edits `AddProviderModal`, so this lane
-  documents the remaining UI hook instead of colliding. No production writes, push, merge, or deploy.
-
-- **Request-window provenance and monthly-limit correctness (CODEX, owner-directed 2026-07-11).**
-  Branch `codex-request-window-correctness`, isolated worktree
-  `/Users/jay/apps/api-usage-monitor-request-windows`, based on landing commit `1ef41bb`. Added
-  request unit/window/start/end provenance to adapter results, raw snapshots, daily rollups,
-  pushed quota snapshots, recorder persistence, migration, and API projections. OpenAI daily,
-  Cloudflare/Sentry rolling-30-day, Langfuse rolling-31-day, Pushover monthly-cycle, Tradier
-  minute, Intrinio/Twelve Data provider-defined, and custom unknown/configured semantics are now
-  distinct. Monthly thresholds fail closed unless count unit and current month/monthly-cycle bounds
-  are compatible; other data produces an informational suppression alert. Node 24 verification:
-  focused suite 25 files / 89 tests and full suite 50 files / 280 tests passed; ESLint, TypeScript,
-  production build, and all three migrate-safe scenarios passed. Implemented locally at `7a3d16c`.
-  Avoids AddProviderModal, provider catalog/drawer, push, merge, deploy, and production writes.
-
-- **Provider type-aware credential routing (CODEX, owner-directed 2026-07-11).** Branch
-  `codex-provider-type-routing` (slash namespace unavailable because a pre-existing local branch
-  is literally named `codex`), isolated worktree
-  `/Users/jay/apps/api-usage-monitor-provider-routing`, based on `origin/main` `8e44b4d`. Fixed the
-  P0 adapter-dispatch flaw so custom providers always use their configured custom endpoint even
-  when their slug collides with a built-in, while generic/manual and unknown built-in rows fail
-  closed without routing credentials. Collision regressions prove custom providers named `openai`
-  or `stripe` never invoke those built-in adapters. Local verification: adapter suite 20 files /
-  65 tests passed; `npm run lint` and `npm run typecheck` passed. Implemented locally at
-  `4e1eb97`. No polling-loop files, production writes, push, merge, or deploy.
-
-- **Residual whole-app audit and deterministic hardening (CODEX, owner-directed 2026-07-11).** Branch
-  `residual-audit-hardening`, isolated worktree
-  `/Users/jay/apps/api-usage-monitor-residual-audit`, based on `c8ccd7f`. Fresh independent review
-  of security/privacy, data correctness, accessibility, operational safety, and direct-billing
-  semantics. Implemented high-confidence fixes for generic/manual polling no-ops, credential-safe
-  balance grouping, project/allocation validation, strict subscription booleans and safe knob names,
-  delimiter-safe telemetry grouping, duplicate-provider project attribution, refresh-derived external
-  billing staleness, and mobile table header semantics. Full Node 24 `npm run verify` green: ESLint,
-  TypeScript, 51 files / 273 tests, migration/backup/release/startup checks, and production build.
-  Committed locally at `6f1c06c`; awaiting parent integration. Detailed evidence and deferred items:
-  `docs/audits/2026-07-11-residual-app-audit.md`. No production writes, push, merge, or deploy.
-
-- **Third-party integration transparency drawer (CODEX, owner-directed 2026-07-11).** Branch
-  `provider-integration-transparency`, isolated worktree
-  `/Users/jay/apps/api-usage-monitor-integration-transparency`, based on `c8ccd7f`. IMPLEMENTED and
-  ready for parent integration: typed exhaustive built-in/system/custom/manual catalog; accurate
-  credential/config fields; push/manual providers no longer solicit unused keys; accessible,
-  focus-trapped responsive drawer with per-instance connection state that exposes field names and
-  last-four/booleans only; dashboard, Settings, detail, and Add Provider affordances; compile-time
-  adapter/definition coverage. Focused 6/6, TypeScript, ESLint, and production build green. Browser
-  runtime had no available backend in this subagent; rendered QA remains with the parent integration.
-
-- **Deterministic provider-subscription release plan (CODEX, owner-directed 2026-07-11).** Branch
-  `release-plan-hardening`, isolated worktree
-  `/Users/jay/apps/api-usage-monitor-release-plan`, based on `e736bf1`. Scope: transactional
-  `provider-subscriptions-2026-07-10-v1` seed with fixed billing anchors, exact-plan startup gate,
-  database receipt written only after postconditions, ambiguity/manual-row preservation, and
-  startup ordering after verified backup + migration. Implemented locally at `a5525d2`; focused
-  maintenance/startup tests, lint, typecheck, and diff checks pass. Awaiting integration; no
-  production writes or deploys.
-
-- **Capture exact OpenAI, Mistral, and Google recurring subscription terms (unassigned, M).** Current production has no local Subscription rows for these providers, and the integrated official usage/cost APIs do not expose the owner's consumer subscription purchase terms. Import an exact receipt or owner-supplied amount, currency, cadence, current-period start/end, renewal behavior, provider row, and optional project; do not infer charges from similarly priced plans or API usage. Provider admin credentials cover API or cloud billing only: they do not replace consumer-subscription evidence.
-
-- **Implement OTLP logs ingestion (unassigned, L, deliberately deferred)** — `/api/otlp/v1/logs`
-  is accept-and-drop by design today.
-### 2026-07-05 next-wave (cycle 2)
-- **Configure and test-fire alert delivery channels in Oracle production (OWNER + unassigned verification, M) — OWNER INPUT / LIVE VERIFICATION PENDING.** The alert-delivery implementation and authenticated `POST /api/test-alert` mechanism already exist; configure the intended Slack/generic webhook credentials through secret handoff in the Oracle production environment, test-fire each configured channel, record the delivery receipts, and verify no secret or payload leakage. Render is suspended and must not be treated as the current configuration target.
-
-### 2026-07-05 audit cycle-3
-_Added by CLAUDE audit-c3 pass. Tags: CURSOR / CODEX / AG / MONET / CLAUDE / OWNER. Assignments are
-reservations, not locks — re-negotiate in #agent-sync. NEVER assign to CODEX (quota-capped to
-Jul 8 18:10 CT)._
-
-### 2026-07-15 eval-sweep audit (MONET)
-- **Rebase lane: codex-integration-transparency-hardening (tip `028867a`)** — request provenance, durable status snapshots, write-only credential preserve/replace/clear semantics; predates Next16 + schema changes, needs full rebase + re-verify. (The bounded-request-body piece is landing separately as `monet/bounded-ingest-body`.) _(filed by MONET 2026-07-15 from eval-sweep audit)_
-- **ASK_OWNER (money-path): codex-app-wide-hardening trailing commits `8479fde`/`4b2472c`/`c8ccd7f`** — transactional hash-pinned release-maintenance startup gate materializing 4 named provider subscriptions (Massive Stocks Starter, FMP Starter, Tiingo Power, FMP Premium) + hardened repair/migration scripts. Never PR'd; needs owner GO + rebase. _(filed by MONET 2026-07-15 from eval-sweep audit)_
-- **Narrow rebuild: request-window provenance + fail-closed monthly-limit alerts** — from codex-request-window-correctness `7a3d16c`; branch itself stale/bundled — rebuild small against current main. _(filed by MONET 2026-07-15 from eval-sweep audit)_
-- **Backend P1: anomaly/spike detection + non-linear forecasting** — `provider-alerts.ts`, `forecasting.ts` are static-threshold + linear-extrapolation only. _(filed by MONET 2026-07-15 from eval-sweep audit)_
-- **Backend P1: budget-breach automated control actions with guardrails** — today alerting is notify-only; scope safe actions: pause provider polling, flag key-disable recommendation, spend-cap state. _(filed by MONET 2026-07-15 from eval-sweep audit)_
-- **Backend P1: Infisical auto-discovery of new services** — `infisical-provider-sync.ts` is a fixed static credential map. _(filed by MONET 2026-07-15 from eval-sweep audit)_
-- **Integration P1 (CT-side): Congress.Trade never reads GET /api/budget-status** — no spend-feedback loop; wire periodic read + self-throttle. _(filed by MONET 2026-07-15 from eval-sweep audit)_
-- **Integration P1: quota_sync/credit_balance receiver (PR #90) has ZERO producers on ST/CT** — wire a producer or park the receiver. _(filed by MONET 2026-07-15 from eval-sweep audit)_
 ## Changelog of this log
+- 2026-07-27 — CURSOR: complete Planned sweep on `cursor/complete-planned-2474` — D7/B7/E19/Infisical discovery + mass closeout of shipped/parked/cross-repo/owner-blocked rows (issues sync).
 - 2026-07-24 — CURSOR: planned closeout E14/Litestream/#367 ready rate-limit + D8 Settings glossary on `cursor/planned-closeout-ready-2474`.
 - 2026-07-24 — CURSOR: status-snapshot account identity fail-closed + GROK3-D9 portfolio auto-open on `cursor/status-account-identity-2474`; In Progress now empty after sync.
 - 2026-07-24 — CURSOR: round-2 stale board closeout on `cursor/resolve-stale-efforts-5b8c` — In Progress 22→1 (account-identity status mapping remains); moved merged PR rows (#721/#716/#717/#436/#577/#581/#617/#619/#785/#724) and diagnosis-complete owner handoffs to Completed; parked Oracle/owner/cross-repo audits in Planned; Coolify self-hosted CI runners Planned.
