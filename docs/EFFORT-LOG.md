@@ -4,6 +4,8 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## Deployed
+- **[CURSOR] Dashboard flash-then-stuck-skeleton fix (2026-07-27) — MERGED #814 / DEPLOYED / LIVE VERIFIED.** Squash merge `e6333d6a6739bc0d4fb1e2b6ba741a6cffd9d142`. Keep content once providers painted (`shouldShowDashboardSkeleton` only when `loading && providerCount === 0`); never re-set `loading` true; coalesce overlapping fetches; abort+generation on unmount; bfcache `pageshow` recovery. Oracle Production Deploy [run 30298779926](https://github.com/jaywedgeworth22/Usage-Monitor/actions/runs/30298779926) **success** at exact `e6333d6`. Open PR count: 0.
+
 - **Land unmerged agent improvements to production (GROK, 2026-07-23) — DEPLOYED / LIVE VERIFIED.** Inventoried open Codex/Claude/Monet/AG/Cursor work. **PR #777** (iOS P1 + web cleanup: dashboard split, budget pure funcs, Vitest thresholds, Next 15.5.21, iOS push/widget/haptics) was already squash-merged as `4149fe9d` by the time of this pass; main CI green; Oracle deploy [run 29970240922](https://github.com/jaywedgeworth22/Usage-Monitor/actions/runs/29970240922) **success**; public `/api/health` + `/api/ready?strict=1` **ok** at exact `4149fe9d` (db/scheduler/maintenanceHealthy true). **Closed as superseded** (unique intent already on main under evolved APIs): #778/#779 Codex admission, #780 AG multi-row+CI pins, #781 AG OpenRouter/reconciliation, #782 Claude xAI helpNote. **Monet**: no open work — historical monet/* PRs already merged. **Skipped non-improvements:** dependabot Next 16 major, stale fix/* branches (auth-gate/finnhub/fmp/strict-typings/render-migration/dashboard-settings) that regress or duplicate main. Open PR count: 0.
 
 - **Multi-account reconciliation compliance nuance (AG, 2026-07-20) — PR #639 PUSHED / CI QUEUED.** Implemented the "fully-honest alternative" for multi-row canonical keys as specified in the usage compliance initiative. Rather than arbitrarily selecting one owner row to receive all pushed telemetry and fabricating false discrepancies against its individual snapshot, the reconciliation loop now marks every row sharing a canonical key as `unverifiable`. This resolves the known "discrepancies between the usage for dif providers" (different accounts) issue. Full local `npm run verify` passed all tests, migration/backup/startup gates, and production build; PR #639 created, currently blocked on saturated self-hosted runners for status checks before merge. No data or secrets were modified.
@@ -1082,13 +1084,14 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
 
 ## In Progress
 
-- **[CURSOR] Dashboard flash-then-stuck-skeleton fix (2026-07-27) — IN PROGRESS.** Owner report: dashboard paints once a few seconds after load, then blanks to skeletons forever (mobile Safari repro). Hardening `useDashboardData` + page gate: never re-blank after provider rows are on screen; coalesce overlapping fetches; abort/generation on unmount; bfcache `pageshow` recovery. Branch `cursor/dashboard-flash-disappear-c527`.
+(none)
 
 ## Planned / Reserved
 
 (none)
 
 ## Changelog of this log
+- 2026-07-27 — CURSOR: merged #814 + Oracle deploy success `e6333d6` (run 30298779926); open PRs → 0.
 - 2026-07-27 — CURSOR: dashboard flash→stuck-skeleton fix on `cursor/dashboard-flash-disappear-c527` (keep content once providers painted; coalesce/abort/bfcache recovery; merged main #816 timeout UX).
 - 2026-07-27 — CURSOR: complete Planned sweep on `cursor/complete-planned-2474` — D7/B7/E19/Infisical discovery + mass closeout of shipped/parked/cross-repo/owner-blocked rows (issues sync).
 - 2026-07-24 — CURSOR: planned closeout E14/Litestream/#367 ready rate-limit + D8 Settings glossary on `cursor/planned-closeout-ready-2474`.
