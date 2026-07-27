@@ -11,17 +11,26 @@ final class SubscriptionManagementStore {
     private(set) var state: LoadState<[SubscriptionSummary]> = .idle
     private(set) var actionSubscriptionID: String?
     private(set) var actionError: APIError?
+    private var inFlightLoad: Task<Void, Never>?
 
     var subscriptions: [SubscriptionSummary] {
         state.value ?? []
     }
 
     func loadIfNeeded(using client: APIClient) async {
+        if let inFlightLoad {
+            await inFlightLoad.value
+            return
+        }
         guard state.value == nil, !state.isLoading else { return }
         await load(using: client, showInitialLoading: true)
     }
 
     func refresh(using client: APIClient) async {
+        if let inFlightLoad {
+            await inFlightLoad.value
+            return
+        }
         await load(using: client, showInitialLoading: state.value == nil)
     }
 
@@ -54,6 +63,19 @@ final class SubscriptionManagementStore {
     }
 
     private func load(using client: APIClient, showInitialLoading: Bool) async {
+        if let inFlightLoad {
+            await inFlightLoad.value
+            return
+        }
+        let task = Task { @MainActor in
+            defer { self.inFlightLoad = nil }
+            await self.performLoad(using: client, showInitialLoading: showInitialLoading)
+        }
+        inFlightLoad = task
+        await task.value
+    }
+
+    private func performLoad(using client: APIClient, showInitialLoading: Bool) async {
         if showInitialLoading { state = .loading }
         do {
             let subscriptions = try await client.subscriptions()

@@ -29,6 +29,11 @@ public final class BudgetStore {
     /// cached first paint, otherwise the successful fetch time).
     public private(set) var lastUpdated: Date?
 
+    /// When this device last successfully confirmed budget connectivity — the
+    /// basis for offline staleness banners in feature roots. Cleared on
+    /// identity invalidation.
+    public private(set) var lastCachedAt: Date?
+
     /// A refresh error that occurred while data was already on screen. `state`
     /// stays `.loaded`; features show this as a transient banner, not a
     /// full-screen error.
@@ -39,6 +44,7 @@ public final class BudgetStore {
     private var dataSourceGeneration: UInt = 0
     private var nextCacheOperationID: UInt = 0
     private var latestCacheOperation: CacheOperation?
+    private var inFlightOperation: Task<Void, Never>?
 
     private struct CacheOperation {
         let id: UInt
@@ -63,6 +69,7 @@ public final class BudgetStore {
         dataSourceGeneration &+= 1
         state = .idle
         lastUpdated = nil
+        lastCachedAt = nil
         lastError = nil
         let sink = sink
         sink.invalidate()
@@ -87,31 +94,27 @@ public final class BudgetStore {
     // MARK: - Loading
 
     /// Fetch once if nothing has been requested yet. Safe to call on every
-    /// appear.
+    /// appear; concurrent callers coalesce onto one in-flight operation.
     public func loadIfNeeded() async {
-        if case .idle = state { await load() }
+        if let inFlightOperation {
+            await inFlightOperation.value
+            return
+        }
+        if case .idle = state {
+            await load()
+        }
     }
 
     /// Full load: paint cached data immediately (offline-first) if present,
-    /// then fetch fresh.
+    /// then fetch fresh. Concurrent callers coalesce onto one operation.
     public func load() async {
-        await drainCacheOperations()
-        let generation = dataSourceGeneration
-        if state.value == nil {
-            state = .loading
-            if let cached = await sink.loadCached() {
-                guard generation == dataSourceGeneration else { return }
-                state = .loaded(cached)
-                lastUpdated = cached.generatedAtDate ?? lastUpdated
-            }
-        }
-        guard generation == dataSourceGeneration else { return }
-        await fetch()
+        await coalescedOperation { await self.performLoad() }
     }
 
     /// Pull-to-refresh: fetch without dropping existing data on failure.
+    /// Concurrent callers coalesce onto one operation.
     public func refresh() async {
-        await fetch()
+        await coalescedOperation { await self.performFetch() }
     }
 
     /// Sign-out: drop in-memory and persisted money state so the next account
@@ -121,7 +124,36 @@ public final class BudgetStore {
         await drainCacheOperations()
     }
 
-    private func fetch() async {
+    private func coalescedOperation(_ body: @escaping @MainActor () async -> Void) async {
+        if let inFlightOperation {
+            await inFlightOperation.value
+            return
+        }
+        let task = Task { @MainActor in
+            defer { self.inFlightOperation = nil }
+            await body()
+        }
+        inFlightOperation = task
+        await task.value
+    }
+
+    private func performLoad() async {
+        await drainCacheOperations()
+        let generation = dataSourceGeneration
+        if state.value == nil {
+            state = .loading
+            if let cached = await sink.loadCached() {
+                guard generation == dataSourceGeneration else { return }
+                state = .loaded(cached.response)
+                lastUpdated = cached.response.generatedAtDate ?? lastUpdated
+                lastCachedAt = cached.cachedAt
+            }
+        }
+        guard generation == dataSourceGeneration else { return }
+        await performFetch()
+    }
+
+    private func performFetch() async {
         await drainCacheOperations()
         let generation = dataSourceGeneration
         let client = apiClient
@@ -130,6 +162,7 @@ public final class BudgetStore {
             guard generation == dataSourceGeneration else { return }
             state = .loaded(response)
             lastUpdated = Date()
+            lastCachedAt = Date()
             lastError = nil
             let sink = sink
             let operation = enqueueCacheOperation { await sink.store(response) }
