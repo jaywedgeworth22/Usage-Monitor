@@ -906,7 +906,7 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
 
 ## In Progress
 
-(none)
+- **[CURSOR] Dashboard flash-then-stuck-skeleton fix (2026-07-27) — IN PROGRESS.** Owner report: dashboard paints once a few seconds after load, then blanks to skeletons forever (mobile Safari repro). Hardening `useDashboardData` + page gate: never re-blank after provider rows are on screen; coalesce overlapping fetches; abort/generation on unmount; bfcache `pageshow` recovery. Branch `cursor/dashboard-flash-disappear-c527`.
 
 ## Planned / Reserved
 - **Remaining feasible direct provider-capabilities audit (CODEX, read-only, 2026-07-18) — IN PROGRESS.** Audit current catalog/adapters plus official provider documentation for unimplemented direct money, tier/renewal, quota, balance, and paid-resource run-rate signals; excludes brokers and already completed OpenAI/GitHub/Cloudflare/Vercel work. No repository, secret, production, or external configuration changes.
@@ -1045,6 +1045,7 @@ Jul 8 18:10 CT)._
 - **Integration P1 (CT-side): Congress.Trade never reads GET /api/budget-status** — no spend-feedback loop; wire periodic read + self-throttle. _(filed by MONET 2026-07-15 from eval-sweep audit)_
 - **Integration P1: quota_sync/credit_balance receiver (PR #90) has ZERO producers on ST/CT** — wire a producer or park the receiver. _(filed by MONET 2026-07-15 from eval-sweep audit)_
 ## Changelog of this log
+- 2026-07-27 — CURSOR: dashboard flash→stuck-skeleton fix on `cursor/dashboard-flash-disappear-c527` (keep content once providers painted; coalesce/abort/bfcache recovery).
 - 2026-07-24 — CURSOR: planned closeout E14/Litestream/#367 ready rate-limit + D8 Settings glossary on `cursor/planned-closeout-ready-2474`.
 - 2026-07-24 — CURSOR: status-snapshot account identity fail-closed + GROK3-D9 portfolio auto-open on `cursor/status-account-identity-2474`; In Progress now empty after sync.
 - 2026-07-24 — CURSOR: round-2 stale board closeout on `cursor/resolve-stale-efforts-5b8c` — In Progress 22→1 (account-identity status mapping remains); moved merged PR rows (#721/#716/#717/#436/#577/#581/#617/#619/#785/#724) and diagnosis-complete owner handoffs to Completed; parked Oracle/owner/cross-repo audits in Planned; Coolify self-hosted CI runners Planned.
