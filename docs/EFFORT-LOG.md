@@ -1082,13 +1082,14 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
 
 ## In Progress
 
-(none)
+- **[CURSOR] Dashboard flash-then-stuck-skeleton fix (2026-07-27) — IN PROGRESS.** Owner report: dashboard paints once a few seconds after load, then blanks to skeletons forever (mobile Safari repro). Hardening `useDashboardData` + page gate: never re-blank after provider rows are on screen; coalesce overlapping fetches; abort/generation on unmount; bfcache `pageshow` recovery. Branch `cursor/dashboard-flash-disappear-c527`.
 
 ## Planned / Reserved
 
 (none)
 
 ## Changelog of this log
+- 2026-07-27 — CURSOR: dashboard flash→stuck-skeleton fix on `cursor/dashboard-flash-disappear-c527` (keep content once providers painted; coalesce/abort/bfcache recovery; merged main #816 timeout UX).
 - 2026-07-27 — CURSOR: complete Planned sweep on `cursor/complete-planned-2474` — D7/B7/E19/Infisical discovery + mass closeout of shipped/parked/cross-repo/owner-blocked rows (issues sync).
 - 2026-07-24 — CURSOR: planned closeout E14/Litestream/#367 ready rate-limit + D8 Settings glossary on `cursor/planned-closeout-ready-2474`.
 - 2026-07-24 — CURSOR: status-snapshot account identity fail-closed + GROK3-D9 portfolio auto-open on `cursor/status-account-identity-2474`; In Progress now empty after sync.

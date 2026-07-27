@@ -14,17 +14,35 @@ export interface ProjectBudgetResponse {
   };
 }
 
-async function fetchJson<T>(url: string, label: string): Promise<T> {
-  const signal = AbortSignal.timeout(30_000);
+/**
+ * Full-page skeleton only before the first fetch settles *and* we have nothing
+ * to show. Once providers are on screen, later loading/refresh flags must not
+ * blank the dashboard (that was the flash-then-stuck-skeleton bug).
+ */
+export function shouldShowDashboardSkeleton(opts: {
+  loading: boolean;
+  providerCount: number;
+}): boolean {
+  return opts.loading && opts.providerCount === 0;
+}
+
+async function fetchJson<T>(url: string, label: string, signal?: AbortSignal): Promise<T> {
+  // 30s matches main (#816); compose with unmount abort so remounts cannot
+  // inherit a stuck in-flight request.
+  const timeout = AbortSignal.timeout(30_000);
+  const combined =
+    signal != null ? AbortSignal.any([timeout, signal]) : timeout;
   try {
-    const response = await fetch(url, { cache: "no-store", signal });
+    const response = await fetch(url, { cache: "no-store", signal: combined });
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
       throw new Error(body.error || `Failed to fetch ${label}`);
     }
     return (await response.json()) as T;
-  } catch (err: any) {
-    if (err?.name === "AbortError" || String(err?.message || "").toLowerCase().includes("aborted")) {
+  } catch (err: unknown) {
+    const name = err instanceof Error ? err.name : "";
+    const message = err instanceof Error ? err.message : String(err ?? "");
+    if (name === "AbortError" || message.toLowerCase().includes("aborted")) {
       throw new Error(`Connection timed out loading ${label}. Please click Retry.`);
     }
     throw err;
@@ -52,34 +70,49 @@ export function useDashboardData() {
   const loadedOnce = useRef(false);
   const hasProviderData = useRef(false);
   const isFetchingRef = useRef(false);
+  const pendingForegroundRef = useRef(false);
+  const pendingBackgroundRef = useRef(false);
   const lastSuccessAtRef = useRef(0);
   const portfolioFetchInFlightRef = useRef(false);
+  const fetchGenerationRef = useRef(0);
+  const unmountAbortRef = useRef<AbortController | null>(null);
 
   const fetchProviders = useCallback(async (opts?: { background?: boolean }) => {
     const background = opts?.background === true;
+
+    // Coalesce overlapping calls onto the in-flight request instead of
+    // flipping loading/refreshing UI and returning with nobody owning cleanup.
     if (isFetchingRef.current) {
+      if (background) pendingBackgroundRef.current = true;
+      else pendingForegroundRef.current = true;
       if (!background && loadedOnce.current) {
         setRefreshing(true);
       }
       return;
     }
     isFetchingRef.current = true;
+    const generation = ++fetchGenerationRef.current;
 
+    // Initial useState(true) covers the first paint. Never set loading back to
+    // true after that — blanking the page after data appeared is the flash bug.
+    if (!background && loadedOnce.current) {
+      setRefreshing(true);
+    }
     if (!background) {
-      if (loadedOnce.current) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
       setError("");
       setWarnings([]);
     }
 
+    const signal = unmountAbortRef.current?.signal;
+
     try {
       const [providersResult, subscriptionsResult] = await Promise.allSettled([
-        fetchJson<unknown[]>("/api/providers?view=dashboard", "providers"),
-        fetchJson<SubscriptionRow[]>("/api/subscriptions", "paid services"),
+        fetchJson<unknown[]>("/api/providers?view=dashboard", "providers", signal),
+        fetchJson<SubscriptionRow[]>("/api/subscriptions", "paid services", signal),
       ]);
+
+      // Stale generation after unmount/remount — do not touch UI state.
+      if (generation !== fetchGenerationRef.current) return;
 
       const nextWarnings: string[] = [];
       if (providersResult.status === "fulfilled") {
@@ -87,7 +120,11 @@ export function useDashboardData() {
         hasProviderData.current = true;
         setError("");
       } else if (!hasProviderData.current) {
-        setError(providersResult.reason instanceof Error ? providersResult.reason.message : "Failed to load providers");
+        setError(
+          providersResult.reason instanceof Error
+            ? providersResult.reason.message
+            : "Failed to load providers"
+        );
       } else {
         nextWarnings.push("Provider data could not be refreshed; showing the last successful result.");
       }
@@ -104,10 +141,22 @@ export function useDashboardData() {
         lastSuccessAtRef.current = Date.now();
       }
     } finally {
-      loadedOnce.current = true;
-      setLoading(false);
-      setRefreshing(false);
-      isFetchingRef.current = false;
+      if (generation === fetchGenerationRef.current) {
+        loadedOnce.current = true;
+        setLoading(false);
+        setRefreshing(false);
+        isFetchingRef.current = false;
+
+        const needForeground = pendingForegroundRef.current;
+        const needBackground = pendingBackgroundRef.current;
+        pendingForegroundRef.current = false;
+        pendingBackgroundRef.current = false;
+        if (needForeground) {
+          void fetchProviders();
+        } else if (needBackground) {
+          void fetchProviders({ background: true });
+        }
+      }
     }
   }, []);
 
@@ -122,7 +171,8 @@ export function useDashboardData() {
         setUsageSummary(
           await fetchJson<ExternalUsageSummary>(
             "/api/usage-events?days=30",
-            "app telemetry"
+            "app telemetry",
+            unmountAbortRef.current?.signal
           )
         );
       } catch {
@@ -131,7 +181,8 @@ export function useDashboardData() {
       try {
         const response = await fetchJson<ProjectBudgetResponse>(
           "/api/projects?includeSummary=1",
-          "projects"
+          "projects",
+          unmountAbortRef.current?.signal
         );
         setProjects(response.projects);
         setProjectSummary(response.summary);
@@ -151,9 +202,36 @@ export function useDashboardData() {
     if (portfolioOpen) await fetchPortfolioData();
   }, [fetchPortfolioData, fetchProviders, portfolioOpen]);
 
-  // Initial load
+  // Initial load + abort in-flight work on unmount so a remount cannot inherit
+  // a stuck isFetching guard from a discarded instance.
   useEffect(() => {
-    fetchProviders();
+    const controller = new AbortController();
+    unmountAbortRef.current = controller;
+    void fetchProviders();
+    return () => {
+      fetchGenerationRef.current += 1;
+      isFetchingRef.current = false;
+      pendingForegroundRef.current = false;
+      pendingBackgroundRef.current = false;
+      controller.abort();
+      if (unmountAbortRef.current === controller) {
+        unmountAbortRef.current = null;
+      }
+    };
+  }, [fetchProviders]);
+
+  // bfcache restore can freeze the page mid-fetch with isFetching=true and
+  // never re-run mount effects — reset the guard and refetch.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      isFetchingRef.current = false;
+      pendingForegroundRef.current = false;
+      pendingBackgroundRef.current = false;
+      void fetchProviders({ background: loadedOnce.current });
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
   }, [fetchProviders]);
 
   // Auto-refresh on interval + focus/visibility

@@ -7,7 +7,10 @@ import DashboardAttentionPanel from "@/components/DashboardAttentionPanel";
 import DashboardProviderWorkspace from "@/components/DashboardProviderWorkspace";
 import DashboardPortfolioSection from "@/components/DashboardPortfolioSection";
 import OperationsOverview from "@/components/OperationsOverview";
-import { useDashboardData } from "@/hooks/useDashboardData";
+import {
+  shouldShowDashboardSkeleton,
+  useDashboardData,
+} from "@/hooks/useDashboardData";
 import { sumProviderFunds } from "@/lib/provider-financial-semantics";
 import { canonicalProviderKey } from "@/lib/provider-identity";
 import { aggregateProviderPortfolioMoney } from "@/lib/provider-money-aggregation";
@@ -107,7 +110,9 @@ export default function DashboardPage() {
   );
   const portfolioSummary = `${portfolioSummaryParts.join(" · ")} · charts & health`;
 
-  if (loading) {
+  // Never blank the dashboard once provider rows are on screen — a later
+  // loading=true race was flashing content then sticking on skeletons.
+  if (shouldShowDashboardSkeleton({ loading, providerCount: providers.length })) {
     return (
       <div className="space-y-8 animate-pulse">
         <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded"></div>
@@ -118,7 +123,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (error) {
+  if (error && providers.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-4">
         <p role="alert" className="text-red-600 dark:text-red-300">{error}</p>
