@@ -91,19 +91,18 @@ describe("dashboard load watchdog contract", () => {
     expect(DASHBOARD_LOAD_WATCHDOG_MS).toBeGreaterThan(30_000);
   });
 
-  it("releases the coalesce lock even when the fetch generation is stale", () => {
-    // Pure-state model of the #814 deadlock: a stale finally used to skip
-    // isFetchingRef=false, so later calls coalesced forever while loading
-    // stayed true and providerCount stayed 0 → perpetual skeleton.
+  it("treats a coalesce lock older than the watchdog as orphaned", () => {
+    // Model: isFetching stayed true after a hung/frozen request. A later
+    // fetchProviders must break the coalesce after DASHBOARD_LOAD_WATCHDOG_MS
+    // so Retry can start a real request instead of returning immediately.
     let isFetching = true;
-    const generation: number = 1;
-    const currentGeneration: number = 2; // unmount/freeze advanced the generation
-
-    const isCurrent = generation === currentGeneration;
-    // ALWAYS release — matches the fixed finally block.
-    isFetching = false;
-
-    expect(isCurrent).toBe(false);
+    const fetchStartedAt = Date.now() - (DASHBOARD_LOAD_WATCHDOG_MS + 1);
+    const orphaned =
+      isFetching &&
+      fetchStartedAt > 0 &&
+      Date.now() - fetchStartedAt > DASHBOARD_LOAD_WATCHDOG_MS;
+    expect(orphaned).toBe(true);
+    if (orphaned) isFetching = false;
     expect(isFetching).toBe(false);
   });
 });

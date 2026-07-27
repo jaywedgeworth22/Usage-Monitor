@@ -122,6 +122,7 @@ export function useDashboardData() {
   const lastSuccessAtRef = useRef(0);
   const portfolioFetchInFlightRef = useRef(false);
   const fetchGenerationRef = useRef(0);
+  const fetchStartedAtRef = useRef(0);
   const unmountAbortRef = useRef<AbortController | null>(null);
 
   const fetchProviders = useCallback(async (opts?: { background?: boolean }) => {
@@ -129,15 +130,26 @@ export function useDashboardData() {
 
     // Coalesce overlapping calls onto the in-flight request instead of
     // flipping loading/refreshing UI and returning with nobody owning cleanup.
+    // If the lock looks orphaned (no settle past the request timeout), clear it
+    // so a Retry / resume can start a real fetch again.
     if (isFetchingRef.current) {
-      if (background) pendingBackgroundRef.current = true;
-      else pendingForegroundRef.current = true;
-      if (!background && loadedOnce.current) {
-        setRefreshing(true);
+      const startedAt = fetchStartedAtRef.current;
+      const orphaned =
+        startedAt > 0 && Date.now() - startedAt > DASHBOARD_LOAD_WATCHDOG_MS;
+      if (!orphaned) {
+        if (background) pendingBackgroundRef.current = true;
+        else pendingForegroundRef.current = true;
+        if (!background && loadedOnce.current) {
+          setRefreshing(true);
+        }
+        return;
       }
-      return;
+      isFetchingRef.current = false;
+      pendingForegroundRef.current = false;
+      pendingBackgroundRef.current = false;
     }
     isFetchingRef.current = true;
+    fetchStartedAtRef.current = Date.now();
     const generation = ++fetchGenerationRef.current;
 
     // Initial useState(true) covers the first paint. Never set loading back to
@@ -188,18 +200,15 @@ export function useDashboardData() {
         lastSuccessAtRef.current = Date.now();
       }
     } finally {
-      const isCurrent = generation === fetchGenerationRef.current;
-
-      // ALWAYS release the coalesce lock — even for stale generations. Skipping
-      // this after a freeze/abort (no React cleanup) left isFetchingRef=true
-      // forever so every later fetchProviders() coalesced and returned, which
-      // is the perpetual-skeleton deadlock after #814.
-      isFetchingRef.current = false;
-
-      if (isCurrent) {
+      // Only the live generation may release the coalesce lock or touch UI.
+      // Clearing isFetching on a stale finally races a remounted in-flight
+      // fetch and can start overlapping requests. Freeze/hang recovery is the
+      // watchdog + bfcache/visibility handlers below.
+      if (generation === fetchGenerationRef.current) {
         loadedOnce.current = true;
         setLoading(false);
         setRefreshing(false);
+        isFetchingRef.current = false;
 
         const needForeground = pendingForegroundRef.current;
         const needBackground = pendingBackgroundRef.current;
@@ -274,40 +283,56 @@ export function useDashboardData() {
     };
   }, [fetchProviders]);
 
-  // Recover after bfcache restore, tab freeze, or visibility resume when the
-  // skeleton is still up. The previous pageshow handler only ran when
-  // event.persisted — mobile Safari often resumes without that flag while
-  // leaving isFetchingRef stuck true (coalesce deadlock → blank forever).
+  // bfcache restore: page was frozen mid-fetch with no React unmount cleanup.
+  // Only act on event.persisted so the initial pageshow cannot double-fetch.
   useEffect(() => {
-    const recoverIfStuck = () => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      // Healthy dashboards: leave in-flight refresh coalescing alone.
-      if (hasProviderData.current && loadedOnce.current) return;
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
       isFetchingRef.current = false;
+      fetchStartedAtRef.current = 0;
       pendingForegroundRef.current = false;
       pendingBackgroundRef.current = false;
       void fetchProviders({ background: loadedOnce.current });
     };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, [fetchProviders]);
 
-    window.addEventListener("pageshow", recoverIfStuck);
+  // If a prior attempt settled without providers (error UI) and the tab becomes
+  // visible again, clear any orphaned coalesce lock so Retry/focus can proceed.
+  useEffect(() => {
     const onVisibilityChange = () => {
-      if (!document.hidden) recoverIfStuck();
+      if (document.hidden) return;
+      if (hasProviderData.current) return;
+      if (!loadedOnce.current) return;
+      const startedAt = fetchStartedAtRef.current;
+      const orphaned =
+        isFetchingRef.current &&
+        startedAt > 0 &&
+        Date.now() - startedAt > DASHBOARD_LOAD_WATCHDOG_MS;
+      if (orphaned) {
+        isFetchingRef.current = false;
+        fetchStartedAtRef.current = 0;
+        pendingForegroundRef.current = false;
+        pendingBackgroundRef.current = false;
+      }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      window.removeEventListener("pageshow", recoverIfStuck);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [fetchProviders]);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
 
   // Last-resort watchdog: if the initial skeleton is still up past the request
   // timeout, force an error+Retry UI. Covers hung fetches where AbortSignal
-  // never fires (background tabs, broken signal composition, CF-held sockets).
+  // never fires (background tabs, broken signal composition, CF-held sockets)
+  // and orphaned isFetching coalesce locks.
   useEffect(() => {
     if (!loading || hasProviderData.current) return;
     const id = window.setTimeout(() => {
       if (hasProviderData.current) return;
       isFetchingRef.current = false;
+      fetchStartedAtRef.current = 0;
+      pendingForegroundRef.current = false;
+      pendingBackgroundRef.current = false;
       loadedOnce.current = true;
       setLoading(false);
       setRefreshing(false);
