@@ -1084,13 +1084,14 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
 
 ## In Progress
 
-(none)
+- **[CURSOR] Blank dashboard skeleton on mobile+desktop (2026-07-27) — IN PROGRESS / PR #823.** Owner report: shell paints, content stays empty gray skeleton on mobile+desktop. Origin healthy at `8d4003e`; public DNS orange-clouded with CF managed challenge on HTML/API. Fix on `cursor/fix-blank-dashboard-5973`: orphaned `isFetching` coalesce break after watchdog; `AbortSignal.any` feature-detect; bfcache `pageshow` recovery; 35s skeleton→Retry watchdog; clearer HTML/403 errors. Ops: grey-cloud or `/api/*` skip rules if CF challenges persist.
 
 ## Planned / Reserved
 
 (none)
 
 ## Changelog of this log
+- 2026-07-27 — CURSOR: blank dashboard skeleton claim on `cursor/fix-blank-dashboard-5973` (isFetching coalesce deadlock after #814 + CF managed challenge on public DNS).
 - 2026-07-27 — CURSOR: merged #814 + Oracle deploy success `e6333d6` (run 30298779926); open PRs → 0.
 - 2026-07-27 — CURSOR: dashboard flash→stuck-skeleton fix on `cursor/dashboard-flash-disappear-c527` (keep content once providers painted; coalesce/abort/bfcache recovery; merged main #816 timeout UX).
 - 2026-07-27 — CURSOR: complete Planned sweep on `cursor/complete-planned-2474` — D7/B7/E19/Infisical discovery + mass closeout of shipped/parked/cross-repo/owner-blocked rows (issues sync).
