@@ -223,7 +223,7 @@ export default function KeyAttributionPanel() {
     }
   }
 
-  if (loading && !data) return <p className="text-sm text-gray-500">Loading key attribution…</p>;
+  if (loading && !data) return <p className="text-sm text-gray-500 dark:text-gray-400">Loading key attribution…</p>;
 
   return (
     <div className="space-y-6">
@@ -264,7 +264,7 @@ export default function KeyAttributionPanel() {
               <Field label="Provider-reported opaque key ID">
                 <input type="password" maxLength={512} autoComplete="off" value={providerReportedKeyId} onChange={(event) => setProviderReportedKeyId(event.target.value)} className={inputClass} placeholder="Optional; HMAC-fingerprinted and discarded" />
               </Field>
-              <p className="text-xs text-gray-500">The raw value is never stored or returned. Current v2 producer references are not auto-matched to this value; create an explicit binding below. This field is not a replacement for the provider credential used to poll billing.</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">The raw value is never stored or returned. Current v2 producer references are not auto-matched to this value; create an explicit binding below. This field is not a replacement for the provider credential used to poll billing.</p>
               <button disabled={pending} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Register identity</button>
             </form>
 
@@ -290,10 +290,10 @@ export default function KeyAttributionPanel() {
               <Field label="Effective from">
                 <input required type="datetime-local" value={bindingEffectiveFrom} onChange={(event) => setBindingEffectiveFrom(event.target.value)} className={inputClass} />
               </Field>
-              <p className="text-xs text-gray-500">The selected local time is stored as an exact timestamp. Reassignment closes the old row and creates the new row atomically at this same instant.</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">The selected local time is stored as an exact timestamp. Reassignment closes the old row and creates the new row atomically at this same instant.</p>
               <div className="flex flex-wrap gap-3">
                 <button disabled={pending} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{replaceBindingId ? "Reassign atomically" : "Create effective binding"}</button>
-                {replaceBindingId ? <button type="button" disabled={pending} onClick={() => setReplaceBindingId("")} className="text-sm font-semibold text-gray-600 disabled:opacity-50">Cancel reassignment</button> : null}
+                {replaceBindingId ? <button type="button" disabled={pending} onClick={() => setReplaceBindingId("")} className="text-sm font-semibold text-gray-600 disabled:opacity-50 dark:text-gray-300">Cancel reassignment</button> : null}
               </div>
             </form>
           </div>
@@ -307,7 +307,7 @@ export default function KeyAttributionPanel() {
                   <li key={JSON.stringify(bucket)} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 text-sm">
                     <div>
                       <p className="font-medium text-gray-900 dark:text-gray-100">{bucket.providerName} · {bucket.producerId} / {bucket.producerKeyRef ?? "no key reference"}</p>
-                      <p className="mt-1 text-xs text-gray-500">{bucket.reason.replaceAll("_", " ")} · {bucket.eventCount} record(s) · {money.format(bucket.costUsd)} proven additive cost{bucket.providerConnectionRef ? ` · connection ${bucket.providerConnectionRef}` : ""}{bucket.billingAccountRef ? ` · account ${bucket.billingAccountRef}` : ""}</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{bucket.reason.replaceAll("_", " ")} · {bucket.eventCount} record(s) · {money.format(bucket.costUsd)} proven additive cost{bucket.providerConnectionRef ? ` · connection ${bucket.providerConnectionRef}` : ""}{bucket.billingAccountRef ? ` · account ${bucket.billingAccountRef}` : ""}</p>
                     </div>
                     <button type="button" disabled={pending || !bucket.producerKeyRef} onClick={() => prepareMapping(bucket)} className="text-xs font-semibold text-blue-700 disabled:text-gray-400 dark:text-blue-300">Map reference</button>
                   </li>
@@ -318,15 +318,15 @@ export default function KeyAttributionPanel() {
 
           <section aria-labelledby="identities-title" className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
             <h2 id="identities-title" className="border-b border-gray-200 px-5 py-4 font-semibold text-gray-900 dark:border-gray-700 dark:text-gray-100">Registered identities</h2>
-            {data.identities.length === 0 ? <p className="px-5 py-6 text-sm text-gray-500">No key identities registered. Usage stays unattributed until an administrator confirms a mapping.</p> : (
+            {data.identities.length === 0 ? <p className="px-5 py-6 text-sm text-gray-500 dark:text-gray-400">No key identities registered. Usage stays unattributed until an administrator confirms a mapping.</p> : (
               <ul className="divide-y divide-gray-200 dark:divide-gray-700">
                 {data.identities.map((identity) => (
                   <li key={identity.id} className="space-y-3 px-5 py-4">
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div><p className="font-medium text-gray-900 dark:text-gray-100">{identity.alias}</p><p className="text-xs text-gray-500">{identity.provider.displayName}{identity.providerKeyFingerprint ? ` · ${identity.providerKeyFingerprint}` : " · no provider ID"}</p></div>
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{money.format(data.coverage.byIdentity[identity.id]?.costUsd ?? 0)} <span className="font-normal text-gray-500">· {data.coverage.byIdentity[identity.id]?.eventCount ?? 0} v2 records this month</span></p>
+                      <div><p className="font-medium text-gray-900 dark:text-gray-100">{identity.alias}</p><p className="text-xs text-gray-500 dark:text-gray-400">{identity.provider.displayName}{identity.providerKeyFingerprint ? ` · ${identity.providerKeyFingerprint}` : " · no provider ID"}</p></div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{money.format(data.coverage.byIdentity[identity.id]?.costUsd ?? 0)} <span className="font-normal text-gray-500 dark:text-gray-400">· {data.coverage.byIdentity[identity.id]?.eventCount ?? 0} v2 records this month</span></p>
                       {identity.status === "active" ? (
-                        <button type="button" disabled={pending} onClick={() => void retireIdentity(identity.id)} className="text-xs font-semibold text-gray-500 hover:text-red-600 disabled:opacity-50">Retire identity</button>
+                        <button type="button" disabled={pending} onClick={() => void retireIdentity(identity.id)} className="text-xs font-semibold text-gray-500 hover:text-red-600 disabled:opacity-50 dark:text-gray-400">Retire identity</button>
                       ) : (
                         <span className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">retired</span>
                       )}
@@ -335,8 +335,8 @@ export default function KeyAttributionPanel() {
                     <ul className="space-y-2">
                       {identity.bindings.map((binding) => (
                         <li key={binding.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2 text-xs dark:bg-gray-900/60">
-                          <span><strong>{binding.producerId}</strong> / {binding.producerKeyRef}{binding.projectName || binding.project?.name ? ` → ${binding.projectName ?? binding.project?.name}` : " → project unattributed"}<span className="mt-1 block text-gray-500">effective {new Date(binding.effectiveFrom).toLocaleString()} → {binding.effectiveTo ? new Date(binding.effectiveTo).toLocaleString() : "open"}{binding.providerConnectionRef ? ` · connection ${binding.providerConnectionRef}` : ""}{binding.billingAccountRef ? ` · account ${binding.billingAccountRef}` : ""}</span></span>
-                          {binding.effectiveTo ? <span>closed</span> : <span className="flex gap-3"><button type="button" disabled={pending} onClick={() => prepareMapping({ ...binding, identityId: identity.id, replaceBindingId: binding.id })} className="font-semibold text-blue-600 disabled:opacity-50">Reassign</button><button type="button" disabled={pending} onClick={() => void closeBinding(binding.id)} className="font-semibold text-gray-600 disabled:opacity-50">Close</button></span>}
+                          <span><strong>{binding.producerId}</strong> / {binding.producerKeyRef}{binding.projectName || binding.project?.name ? ` → ${binding.projectName ?? binding.project?.name}` : " → project unattributed"}<span className="mt-1 block text-gray-500 dark:text-gray-400">effective {new Date(binding.effectiveFrom).toLocaleString()} → {binding.effectiveTo ? new Date(binding.effectiveTo).toLocaleString() : "open"}{binding.providerConnectionRef ? ` · connection ${binding.providerConnectionRef}` : ""}{binding.billingAccountRef ? ` · account ${binding.billingAccountRef}` : ""}</span></span>
+                          {binding.effectiveTo ? <span>closed</span> : <span className="flex gap-3"><button type="button" disabled={pending} onClick={() => prepareMapping({ ...binding, identityId: identity.id, replaceBindingId: binding.id })} className="font-semibold text-blue-600 disabled:opacity-50">Reassign</button><button type="button" disabled={pending} onClick={() => void closeBinding(binding.id)} className="font-semibold text-gray-600 disabled:opacity-50 dark:text-gray-300">Close</button></span>}
                         </li>
                       ))}
                     </ul>
@@ -356,5 +356,5 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function Metric({ label, value, warning = false }: { label: string; value: string; warning?: boolean }) {
-  return <div className={`rounded-lg p-3 ${warning ? "bg-amber-50 dark:bg-amber-950/30" : "bg-gray-50 dark:bg-gray-900/60"}`}><p className="text-xs text-gray-500">{label}</p><p className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">{value}</p></div>;
+  return <div className={`rounded-lg p-3 ${warning ? "bg-amber-50 dark:bg-amber-950/30" : "bg-gray-50 dark:bg-gray-900/60"}`}><p className="text-xs text-gray-500 dark:text-gray-400">{label}</p><p className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">{value}</p></div>;
 }

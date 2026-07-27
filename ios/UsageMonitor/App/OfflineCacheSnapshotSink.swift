@@ -40,8 +40,9 @@ struct OfflineCacheSnapshotSink: BudgetSnapshotSink {
         #endif
     }
 
-    func loadCached() async -> BudgetStatusResponse? {
-        BudgetDiskCache(directory: directory).load()
+    func loadCached() async -> CachedBudgetSnapshot? {
+        guard let entry = BudgetDiskCache(directory: directory).loadEntry() else { return nil }
+        return CachedBudgetSnapshot(response: entry.response, cachedAt: entry.cachedAt)
     }
 
     /// Synchronous identity boundary for host/token/session changes. Both
