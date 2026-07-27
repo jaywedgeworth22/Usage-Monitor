@@ -1084,7 +1084,7 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
 
 ## In Progress
 
-- **[CURSOR] Blank dashboard skeleton on mobile+desktop (2026-07-27) — IN PROGRESS.** Owner report from mobile: Usage Monitor shell paints (header) but content stays empty gray skeleton on mobile and desktop. Live probe: Oracle origin healthy at `8d4003e` (`/api/health`+`/api/ready` ok, scheduler ticking); public DNS is **orange-clouded** (CF anycast) with **managed challenge** on HTML/API (static chunks 200). Code path: `shouldShowDashboardSkeleton` (`loading && providers.length===0`) — #814's stale-generation `finally` skipped `isFetchingRef=false`, so after tab freeze/abort every later fetch coalesced into a no-op → perpetual skeleton; bfcache recovery only ran when `event.persisted`. Fix on `cursor/fix-blank-dashboard-5973`: always release coalesce lock; feature-detect `AbortSignal.any`; visibility/pageshow stuck recovery; 35s watchdog → Retry UI; clearer HTML/403 challenge errors. Ops follow-up: CF Bot Fight / Under Attack may still delay API XHR for some clients — grey-cloud or skip rules for `/api/*` if challenges persist after deploy.
+- **[CURSOR] Blank dashboard skeleton on mobile+desktop (2026-07-27) — IN PROGRESS / PR #823.** Owner report: shell paints, content stays empty gray skeleton on mobile+desktop. Origin healthy at `8d4003e`; public DNS orange-clouded with CF managed challenge on HTML/API. Fix on `cursor/fix-blank-dashboard-5973`: orphaned `isFetching` coalesce break after watchdog; `AbortSignal.any` feature-detect; bfcache `pageshow` recovery; 35s skeleton→Retry watchdog; clearer HTML/403 errors. Ops: grey-cloud or `/api/*` skip rules if CF challenges persist.
 
 ## Planned / Reserved
 
