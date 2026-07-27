@@ -32,6 +32,10 @@ import { deriveGeminiBillingStatus } from "@/lib/gemini-key-status";
 import { providerConfigForServer } from "@/lib/provider-secret-config";
 import { subscriptionChargeIdempotencyKey } from "@/lib/subscription-charge-identity";
 import { isLegacyMistralSpendLimitCostSnapshot } from "@/lib/mistral-snapshot-quarantine";
+import {
+  resolveOpenRouterVerifiedCash,
+  resolveOpenRouterVerifiedCashConfig,
+} from "@/lib/openrouter-verified-cash";
 // Type-only import — erased at compile time, so it introduces NO runtime import
 // cycle with budget-controls.ts (which imports computeBudgetStatus from here).
 import type { BudgetBreachState } from "@/lib/budget-controls";
@@ -109,6 +113,13 @@ export interface ProviderBudgetStatus {
    */
   projectedStatus: BudgetStatusLevel;
   alerts: ProviderAlert[];
+  // GROK3-E19: verified-preferred cash mode for OpenRouter (default-off).
+  // True when OPENROUTER_VERIFIED_PREFERRED_CASH is enabled AND coverage was
+  // high enough AND a period-level verified cost was available. Always false for
+  // non-OpenRouter providers and when the flag is unset.
+  verifiedPreferredCashApplied: boolean;
+  /** The verified period cost that replaced the self-reported estimate, or null. */
+  verifiedPreferredCashUsd: number | null;
   // Budget-breach automated-control observability (default-off). These reflect
   // the durable state written by src/lib/budget-controls.ts. keyDisableRecommended
   // is advisory only and never reflects a credential mutation.
@@ -527,6 +538,111 @@ export function computeSpendCoverage(input: {
   return spendCoverage;
 }
 
+// ---------------------------------------------------------------------------
+// GROK3-E19: OpenRouter verified-preferred-cash compliance fetch
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches per-event verification coverage and the period-level authoritative
+ * cost for each provider whose canonical key is "openrouter".
+ *
+ * Called only when OPENROUTER_VERIFIED_PREFERRED_CASH is enabled — zero DB
+ * overhead on the default-off path.
+ *
+ * Coverage formula mirrors provider-compliance.ts:
+ *   verifiedCoverage = settledCount / (settledCount + pendingCount + unverifiableCount)
+ * where "settled" = match | discrepancy.
+ */
+async function fetchOpenRouterComplianceForBudget(
+  providers: ReadonlyArray<{ id: string; name: string }>,
+  monthStart: Date,
+  now: Date
+): Promise<Map<string, { verifiedCoverage: number | null; periodVerifiedCostUsd: number | null }>> {
+  const result = new Map<
+    string,
+    { verifiedCoverage: number | null; periodVerifiedCostUsd: number | null }
+  >();
+
+  const openRouterProviders = providers.filter(
+    (p) => canonicalProviderKey(p.name) === "openrouter"
+  );
+  if (openRouterProviders.length === 0) return result;
+
+  const providerIds = openRouterProviders.map((p) => p.id);
+  const providerNames = openRouterProviders.map((p) => p.name);
+  // periodEnd matches the stable boundary used by the reconciliation upsert.
+  const periodEnd = new Date(
+    Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 1)
+  );
+
+  const [reconciliations, statusGroups] = await Promise.all([
+    prisma.providerUsageReconciliation.findMany({
+      where: {
+        providerId: { in: providerIds },
+        periodStart: monthStart,
+        periodEnd,
+        keyRef: "",
+      },
+      select: {
+        providerId: true,
+        verifiedCostUsd: true,
+      },
+    }),
+    prisma.externalUsageEvent.groupBy({
+      by: ["provider", "verificationStatus"],
+      where: {
+        provider: { in: providerNames },
+        providerRequestId: { not: null },
+        occurredAt: { gte: monthStart, lte: now },
+      },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const reconByProviderId = new Map(
+    reconciliations.map((r) => [r.providerId, r.verifiedCostUsd] as const)
+  );
+
+  // Aggregate event status counts keyed by stored provider name.
+  type StatusCounts = { settled: number; pending: number; unverifiable: number };
+  const countsByName = new Map<string, StatusCounts>();
+  for (const group of statusGroups) {
+    const counts = countsByName.get(group.provider) ?? {
+      settled: 0,
+      pending: 0,
+      unverifiable: 0,
+    };
+    const n = group._count._all;
+    if (group.verificationStatus === "match" || group.verificationStatus === "discrepancy") {
+      counts.settled += n;
+    } else if (group.verificationStatus === "unverifiable") {
+      counts.unverifiable += n;
+    } else {
+      // null / "pending" / "error" — all still-in-flight
+      counts.pending += n;
+    }
+    countsByName.set(group.provider, counts);
+  }
+
+  for (const provider of openRouterProviders) {
+    const rawVerifiedCost = reconByProviderId.get(provider.id) ?? null;
+    const periodVerifiedCostUsd =
+      rawVerifiedCost !== null && Number.isFinite(rawVerifiedCost) ? rawVerifiedCost : null;
+
+    const counts = countsByName.get(provider.name) ?? {
+      settled: 0,
+      pending: 0,
+      unverifiable: 0,
+    };
+    const denominator = counts.settled + counts.pending + counts.unverifiable;
+    const verifiedCoverage = denominator > 0 ? counts.settled / denominator : null;
+
+    result.set(provider.id, { verifiedCoverage, periodVerifiedCostUsd });
+  }
+
+  return result;
+}
+
 async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusResponse> {
   const monthStart = monthStartUtc(now);
   const rawCutoff = getExternalEventRawCutoff(now);
@@ -920,6 +1036,28 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
     }
   }
 
+  // GROK3-E19: fetch OpenRouter per-event coverage + period-level verified cost
+  // only when the feature flag is on — zero extra queries on the default-off path.
+  const verifiedCashConfig = resolveOpenRouterVerifiedCashConfig();
+  let openRouterComplianceByProviderId = new Map<
+    string,
+    { verifiedCoverage: number | null; periodVerifiedCostUsd: number | null }
+  >();
+  if (verifiedCashConfig.enabled) {
+    try {
+      openRouterComplianceByProviderId = await fetchOpenRouterComplianceForBudget(
+        providers,
+        monthStart,
+        now
+      );
+    } catch (error) {
+      console.warn(
+        "[openrouter-verified-cash] compliance fetch failed; falling back to observed usage",
+        error
+      );
+    }
+  }
+
   const providerStatuses: ProviderBudgetStatus[] = providers.map((p) => {
     const plan = p.plan;
     const latestSnapshot = p.snapshots[0] ?? null;
@@ -1004,7 +1142,23 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       snapshotVariableCostUsd,
       pushed.usagePushed
     );
-    const usageCost = observedVariableUsageUsd;
+    // GROK3-E19: optionally substitute the authoritative verified period cost
+    // (from the reconciliation layer) for the self-reported variable usage
+    // estimate. Only applies for OpenRouter when the feature is enabled AND
+    // per-event coverage exceeds the configured threshold. Default-off — when
+    // the feature is disabled, verifiedCashResult.usageCost === observedVariableUsageUsd.
+    const vrCompliance = openRouterComplianceByProviderId.get(p.id) ?? {
+      verifiedCoverage: null,
+      periodVerifiedCostUsd: null,
+    };
+    const verifiedCashResult = resolveOpenRouterVerifiedCash({
+      providerCanonicalKey: canonicalProviderKey(p.name),
+      observedVariableUsageUsd,
+      verifiedCoverage: vrCompliance.verifiedCoverage,
+      periodVerifiedCostUsd: vrCompliance.periodVerifiedCostUsd,
+      config: verifiedCashConfig,
+    });
+    const usageCost = verifiedCashResult.usageCost;
 
     const liveExternalFixed = p.externalBilling.filter((record) => {
       return (
@@ -1262,6 +1416,8 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       status,
       projectedStatus,
       alerts: budgetAlerts,
+      verifiedPreferredCashApplied: verifiedCashResult.verifiedPreferredCashApplied,
+      verifiedPreferredCashUsd: verifiedCashResult.verifiedPreferredCashUsd,
       budgetControls: {
         enabled: p.budgetControlsEnabled,
         breachState: budgetBreachState,

@@ -111,10 +111,10 @@ export default function DashboardPage() {
   if (shouldShowDashboardSkeleton({ loading, providerCount: providers.length })) {
     return (
       <div className="space-y-8 animate-pulse">
-        <div className="h-8 w-48 bg-gray-200 rounded"></div>
-        <div className="bg-gray-100 rounded-xl border border-gray-200 h-24"></div>
-        <div className="bg-gray-100 rounded-xl border border-gray-200 h-96"></div>
-        <div className="bg-gray-100 rounded-xl border border-gray-200 h-14"></div>
+        <div className="h-8 w-48 bg-gray-200 dark:bg-gray-700 rounded"></div>
+        <div className="bg-gray-100 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 h-24"></div>
+        <div className="bg-gray-100 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 h-96"></div>
+        <div className="bg-gray-100 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 h-14"></div>
       </div>
     );
   }

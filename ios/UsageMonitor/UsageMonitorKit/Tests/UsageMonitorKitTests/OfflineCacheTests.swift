@@ -485,7 +485,7 @@ private actor RecordingBudgetSink: BudgetSnapshotSink {
     private var clears = 0
 
     func store(_ response: BudgetStatusResponse) async {}
-    func loadCached() async -> BudgetStatusResponse? { nil }
+    func loadCached() async -> CachedBudgetSnapshot? { nil }
     func clear() async { clears += 1 }
     func clearCount() -> Int { clears }
 }
@@ -505,6 +505,6 @@ private final class ImmediateInvalidationSink: BudgetSnapshotSink, @unchecked Se
     }
 
     func store(_ response: BudgetStatusResponse) async {}
-    func loadCached() async -> BudgetStatusResponse? { nil }
+    func loadCached() async -> CachedBudgetSnapshot? { nil }
     func clear() async {}
 }

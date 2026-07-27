@@ -27,17 +27,26 @@ export function shouldShowDashboardSkeleton(opts: {
 }
 
 async function fetchJson<T>(url: string, label: string, signal?: AbortSignal): Promise<T> {
-  const timeout = AbortSignal.timeout(20_000);
+  // 30s matches main (#816); compose with unmount abort so remounts cannot
+  // inherit a stuck in-flight request.
+  const timeout = AbortSignal.timeout(30_000);
   const combined =
-    signal != null
-      ? AbortSignal.any([timeout, signal])
-      : timeout;
-  const response = await fetch(url, { cache: "no-store", signal: combined });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || `Failed to fetch ${label}`);
+    signal != null ? AbortSignal.any([timeout, signal]) : timeout;
+  try {
+    const response = await fetch(url, { cache: "no-store", signal: combined });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to fetch ${label}`);
+    }
+    return (await response.json()) as T;
+  } catch (err: unknown) {
+    const name = err instanceof Error ? err.name : "";
+    const message = err instanceof Error ? err.message : String(err ?? "");
+    if (name === "AbortError" || message.toLowerCase().includes("aborted")) {
+      throw new Error(`Connection timed out loading ${label}. Please click Retry.`);
+    }
+    throw err;
   }
-  return response.json() as Promise<T>;
 }
 
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
@@ -111,12 +120,11 @@ export function useDashboardData() {
         hasProviderData.current = true;
         setError("");
       } else if (!hasProviderData.current) {
-        const reason = providersResult.reason;
-        const aborted =
-          reason instanceof DOMException && reason.name === "AbortError";
-        if (!aborted) {
-          setError(reason instanceof Error ? reason.message : "Failed to load providers");
-        }
+        setError(
+          providersResult.reason instanceof Error
+            ? providersResult.reason.message
+            : "Failed to load providers"
+        );
       } else {
         nextWarnings.push("Provider data could not be refreshed; showing the last successful result.");
       }
