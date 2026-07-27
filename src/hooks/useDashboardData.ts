@@ -15,13 +15,20 @@ export interface ProjectBudgetResponse {
 }
 
 async function fetchJson<T>(url: string, label: string): Promise<T> {
-  const signal = AbortSignal.timeout(20_000);
-  const response = await fetch(url, { cache: "no-store", signal });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || `Failed to fetch ${label}`);
+  const signal = AbortSignal.timeout(30_000);
+  try {
+    const response = await fetch(url, { cache: "no-store", signal });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to fetch ${label}`);
+    }
+    return (await response.json()) as T;
+  } catch (err: any) {
+    if (err?.name === "AbortError" || String(err?.message || "").toLowerCase().includes("aborted")) {
+      throw new Error(`Connection timed out loading ${label}. Please click Retry.`);
+    }
+    throw err;
   }
-  return response.json() as Promise<T>;
 }
 
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
@@ -50,16 +57,6 @@ export function useDashboardData() {
 
   const fetchProviders = useCallback(async (opts?: { background?: boolean }) => {
     const background = opts?.background === true;
-    const startForegroundUiState = () => {
-      if (loadedOnce.current) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-      setError("");
-      setWarnings([]);
-    };
-
     if (isFetchingRef.current) {
       if (!background && loadedOnce.current) {
         setRefreshing(true);
@@ -68,10 +65,14 @@ export function useDashboardData() {
     }
     isFetchingRef.current = true;
 
-    if (background) {
-      // no loading/refreshing UI state
-    } else {
-      startForegroundUiState();
+    if (!background) {
+      if (loadedOnce.current) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+      setError("");
+      setWarnings([]);
     }
 
     try {
