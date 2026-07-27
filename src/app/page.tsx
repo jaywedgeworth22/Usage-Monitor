@@ -44,35 +44,39 @@ export default function DashboardPage() {
     ambiguousCostFamilyCount,
     incompleteCostFamilyCount,
   } = portfolioMoney;
-  const incompleteCostProviderCount = providers.filter(
-    (provider: any) => provider.isActive && provider.spendCoverage !== "complete"
+  const incompleteCostProviderCount = (providers || []).filter(
+    (provider: any) => provider?.isActive && provider?.spendCoverage !== "complete"
   ).length;
-  const chartFamilies = portfolioMoney.families.map((family: any) => {
-    const members = providers.filter(
-      (p: any) => (canonicalProviderKey(p.name) || p.id) === family.key
+  const chartFamilies = (portfolioMoney.families || []).map((family: any) => {
+    const members = (providers || []).filter(
+      (p: any) => (canonicalProviderKey(p?.name || "") || p?.id) === family?.key
     );
     const displayName =
-      members.find((m: any) => m.displayName)?.displayName ?? family.displayName;
+      members.find((m: any) => m?.displayName)?.displayName ?? family?.displayName;
     return {
       displayName,
-      projectedEomUsd: family.projectedEomUsd,
-      exact: family.exact,
+      projectedEomUsd: family?.projectedEomUsd,
+      exact: family?.exact,
     };
   });
-  const attentionItems = providers.flatMap((provider: any) =>
-    provider.alerts
-      .filter((alert: any) => alert.severity !== "info")
-      .map((alert: any) => ({ provider, alert }))
-  ).sort((left: any, right: any) => {
-    const severityRank = { critical: 0, warning: 1, info: 2 } as const;
-    return (
-      severityRank[left.alert.severity as keyof typeof severityRank] - severityRank[right.alert.severity as keyof typeof severityRank] ||
-      left.provider.displayName.localeCompare(right.provider.displayName) ||
-      left.alert.message.localeCompare(right.alert.message)
-    );
-  });
+  const attentionItems = (providers || [])
+    .flatMap((provider: any) =>
+      (provider?.alerts || [])
+        .filter((alert: any) => alert?.severity !== "info")
+        .map((alert: any) => ({ provider, alert }))
+    )
+    .sort((left: any, right: any) => {
+      const severityRank = { critical: 0, warning: 1, info: 2 } as const;
+      const leftRank = severityRank[left?.alert?.severity as keyof typeof severityRank] ?? 2;
+      const rightRank = severityRank[right?.alert?.severity as keyof typeof severityRank] ?? 2;
+      return (
+        leftRank - rightRank ||
+        (left?.provider?.displayName || "").localeCompare(right?.provider?.displayName || "") ||
+        (left?.alert?.message || "").localeCompare(right?.alert?.message || "")
+      );
+    });
   const criticalCount = attentionItems.filter(
-    (item) => item.alert.severity === "critical"
+    (item) => item.alert?.severity === "critical"
   ).length;
 
   // GROK3-D9: default-open Portfolio once when critical alerts or incomplete
