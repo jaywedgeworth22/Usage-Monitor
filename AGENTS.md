@@ -1,8 +1,6 @@
 # Usage Monitor — agent notes
 
-Next.js + Prisma (**SQLite**, not Postgres — a single Render web service with a
-persistent disk at `/data`, no separate DB resource; see `render.yaml`) app deployed on
-Render at `usage.jays.services`. It tracks API usage/cost three ways: **poll adapters**
+Next.js + Prisma (**SQLite**, not Postgres — deployed on Oracle Cloud Always Free / production VPS with a persistent disk at `/data`, no separate DB resource; see `deploy/oracle/deploy-production.sh`) app at `usage.jays.services`. It tracks API usage/cost three ways: **poll adapters**
 (`src/lib/adapters/*`, one per provider) that snapshot into `UsageSnapshot`; **pushed
 telemetry** from other apps into `ExternalUsageEvent` via `POST /api/ingest/usage`; and
 **OTLP metrics** from Claude Code (or any OTLP exporter) via `POST /api/otlp/v1/metrics`,
