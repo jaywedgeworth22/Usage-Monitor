@@ -381,14 +381,14 @@ export async function GET(request: NextRequest) {
       latestSnapshot,
     });
     const canonicalBudget = budgetByProviderId.get(p.id);
-    const nonBudgetAlerts = alertState.alerts.filter(
+    const nonBudgetAlerts = (alertState.alerts || []).filter(
       (alert) =>
         alert.code !== "budget_exceeded" && alert.code !== "budget_warning"
     );
     const alerts =
       canonicalBudget && p.isActive
-        ? [...nonBudgetAlerts, ...canonicalBudget.alerts]
-        : alertState.alerts;
+        ? [...nonBudgetAlerts, ...(canonicalBudget.alerts || [])]
+        : alertState.alerts || [];
     const duplicateProviderIds = duplicateIdsByCanonicalName.get(
       canonicalProviderKey(p.name)
     ) ?? [];
