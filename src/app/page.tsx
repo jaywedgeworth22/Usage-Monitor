@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import DashboardSummaryCards from "@/components/DashboardSummaryCards";
 import CostCoverageLegend from "@/components/CostCoverageLegend";
 import DashboardAttentionPanel from "@/components/DashboardAttentionPanel";
@@ -36,48 +36,65 @@ export default function DashboardPage() {
   } = useDashboardData();
   const autoOpenedPortfolio = useRef(false);
 
-  const totalProviderFunds = sumProviderFunds(providers);
-  const portfolioMoney = aggregateProviderPortfolioMoney(providers);
+  const totalProviderFunds = useMemo(() => sumProviderFunds(providers), [providers]);
+  const portfolioMoney = useMemo(() => aggregateProviderPortfolioMoney(providers), [providers]);
   const {
     totalCost,
     totalProjectedMonthlyCost,
     ambiguousCostFamilyCount,
     incompleteCostFamilyCount,
   } = portfolioMoney;
-  const incompleteCostProviderCount = (providers || []).filter(
-    (provider: any) => provider?.isActive && provider?.spendCoverage !== "complete"
-  ).length;
-  const chartFamilies = (portfolioMoney.families || []).map((family: any) => {
-    const members = (providers || []).filter(
-      (p: any) => (canonicalProviderKey(p?.name || "") || p?.id) === family?.key
-    );
-    const displayName =
-      members.find((m: any) => m?.displayName)?.displayName ?? family?.displayName;
-    return {
-      displayName,
-      projectedEomUsd: family?.projectedEomUsd,
-      exact: family?.exact,
-    };
-  });
-  const attentionItems = (providers || [])
-    .flatMap((provider: any) =>
-      (provider?.alerts || [])
-        .filter((alert: any) => alert?.severity !== "info")
-        .map((alert: any) => ({ provider, alert }))
-    )
-    .sort((left: any, right: any) => {
-      const severityRank = { critical: 0, warning: 1, info: 2 } as const;
-      const leftRank = severityRank[left?.alert?.severity as keyof typeof severityRank] ?? 2;
-      const rightRank = severityRank[right?.alert?.severity as keyof typeof severityRank] ?? 2;
-      return (
-        leftRank - rightRank ||
-        (left?.provider?.displayName || "").localeCompare(right?.provider?.displayName || "") ||
-        (left?.alert?.message || "").localeCompare(right?.alert?.message || "")
-      );
-    });
-  const criticalCount = attentionItems.filter(
-    (item) => item.alert?.severity === "critical"
-  ).length;
+
+  const incompleteCostProviderCount = useMemo(
+    () =>
+      (providers || []).filter(
+        (provider: any) => provider?.isActive && provider?.spendCoverage !== "complete"
+      ).length,
+    [providers]
+  );
+
+  const chartFamilies = useMemo(
+    () =>
+      (portfolioMoney.families || []).map((family: any) => {
+        const members = (providers || []).filter(
+          (p: any) => (canonicalProviderKey(p?.name || "") || p?.id) === family?.key
+        );
+        const displayName =
+          members.find((m: any) => m?.displayName)?.displayName ?? family?.displayName;
+        return {
+          displayName,
+          projectedEomUsd: family?.projectedEomUsd,
+          exact: family?.exact,
+        };
+      }),
+    [portfolioMoney.families, providers]
+  );
+
+  const attentionItems = useMemo(
+    () =>
+      (providers || [])
+        .flatMap((provider: any) =>
+          (provider?.alerts || [])
+            .filter((alert: any) => alert?.severity !== "info")
+            .map((alert: any) => ({ provider, alert }))
+        )
+        .sort((left: any, right: any) => {
+          const severityRank = { critical: 0, warning: 1, info: 2 } as const;
+          const leftRank = severityRank[left?.alert?.severity as keyof typeof severityRank] ?? 2;
+          const rightRank = severityRank[right?.alert?.severity as keyof typeof severityRank] ?? 2;
+          return (
+            leftRank - rightRank ||
+            (left?.provider?.displayName || "").localeCompare(right?.provider?.displayName || "") ||
+            (left?.alert?.message || "").localeCompare(right?.alert?.message || "")
+          );
+        }),
+    [providers]
+  );
+
+  const criticalCount = useMemo(
+    () => attentionItems.filter((item) => item.alert?.severity === "critical").length,
+    [attentionItems]
+  );
 
   // GROK3-D9: default-open Portfolio once when critical alerts or incomplete
   // costs are present. Do not fight a later manual collapse.

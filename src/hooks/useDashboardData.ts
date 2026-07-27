@@ -18,6 +18,10 @@ async function fetchJson<T>(url: string, label: string): Promise<T> {
   const signal = AbortSignal.timeout(30_000);
   try {
     const response = await fetch(url, { cache: "no-store", signal });
+    if (response.status === 401 && typeof window !== "undefined" && window.location.pathname !== "/login") {
+      window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+      throw new Error("Session expired. Redirecting to login...");
+    }
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
       throw new Error(body.error || `Failed to fetch ${label}`);
