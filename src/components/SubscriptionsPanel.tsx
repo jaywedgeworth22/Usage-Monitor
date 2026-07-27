@@ -176,12 +176,12 @@ export default function SubscriptionsPanel({
                     {sub.project.name}
                   </span>
                 ) : (
-                  <span className="text-xs text-gray-400">Unattributed</span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">Unattributed</span>
                 )}
               </td>
               <td data-label="Cost" className="px-6 py-4">
                 <p className="font-medium text-gray-900 dark:text-gray-100">{formatUsd(sub.costUsd, sub.currency)}</p>
-                <p className="text-xs text-gray-400">{formatCadence(sub.intervalCount, sub.interval)}</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500">{formatCadence(sub.intervalCount, sub.interval)}</p>
                 {sub.currency !== "USD" && (
                   <p className="mt-1 text-[10px] font-medium text-red-600">Convert to USD before activation</p>
                 )}

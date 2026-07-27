@@ -3,6 +3,7 @@ import AppCore
 import DesignSystem
 import Models
 import Networking
+import OfflineCache
 
 #if canImport(UIKit)
 import UIKit
@@ -65,12 +66,21 @@ public struct DashboardRootView: View {
         RefreshableScrollView(onRefresh: { await refresh() }) {
             if let error = store.lastError {
                 StaleDataBanner(error: error)
+            } else if let staleness = budgetStaleness, staleness.isStale() {
+                BudgetStalenessBanner(staleness: staleness)
             }
 
             DashboardContentView(data: data, generatedAt: store.state.value?.generatedAtDate)
 
-            LastUpdatedFooter(date: store.lastUpdated, incompleteCoverage: data.hasIncompleteCoverage)
+            LastUpdatedFooter(
+                staleness: budgetStaleness,
+                incompleteCoverage: data.hasIncompleteCoverage
+            )
         }
+    }
+
+    private var budgetStaleness: BudgetStaleness? {
+        store.lastCachedAt.map { BudgetStaleness(cachedAt: $0) }
     }
 
     // MARK: - Empty
@@ -166,20 +176,42 @@ private struct StaleDataBanner: View {
     }
 }
 
+/// A non-blocking banner when on-screen budget data is older than the staleness
+/// threshold but still the best available snapshot.
+private struct BudgetStalenessBanner: View {
+    let staleness: BudgetStaleness
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .foregroundStyle(Theme.Colors.warning)
+            Text(staleness.staleLabel())
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(Theme.Spacing.md)
+        .background(Theme.Colors.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(staleness.staleLabel())
+    }
+}
+
 // MARK: - Footer
 
 /// The "Updated <when>" line under the overview, plus a coverage note when spend
 /// may be incomplete.
 private struct LastUpdatedFooter: View {
-    let date: Date?
+    let staleness: BudgetStaleness?
     let incompleteCoverage: Bool
 
     var body: some View {
         VStack(spacing: Theme.Spacing.xs) {
-            if let date {
-                Text("Updated \(date.formatted(.relative(presentation: .named)))")
+            if let staleness {
+                Text(staleness.shortLabel())
                     .font(Theme.Typography.caption)
-                    .foregroundStyle(Theme.Colors.tertiaryText)
+                    .foregroundStyle(staleness.isStale() ? Theme.Colors.warning : Theme.Colors.tertiaryText)
             }
             if incompleteCoverage {
                 Text("Some spend is still syncing and may rise.")

@@ -52,6 +52,16 @@ export interface InfisicalCredentialSyncResult {
   failed: number;
   /** Mappings intentionally left untouched by a caller-supplied safety gate. */
   suppressed?: number;
+  /**
+   * Known provider-shaped Infisical secret names that are present in a root
+   * but not yet in CREDENTIAL_MAPPINGS. Names only — never values. Auto-create
+   * remains owner-gated; this is discovery for the sync/ops surface.
+   */
+  unmappedDiscoveries?: Array<{
+    source: InfisicalCredentialScope;
+    secretName: string;
+    providerName: string;
+  }>;
 }
 
 export interface InfisicalCredentialSyncOptions {
@@ -2468,7 +2478,11 @@ function mappedSecretNames(): Set<string> {
  */
 function discoverUnmappedSecrets(
   reads: ReadonlyMap<InfisicalCredentialScope, SourceRead>
-): void {
+): Array<{
+  source: InfisicalCredentialScope;
+  secretName: string;
+  providerName: string;
+}> {
   try {
     const alreadyMapped = mappedSecretNames();
     const discovered: Array<{
@@ -2488,7 +2502,7 @@ function discoverUnmappedSecrets(
       }
     }
 
-    if (discovered.length === 0) return;
+    if (discovered.length === 0) return [];
 
     console.info(
       `[infisical-discovery] ${JSON.stringify({
@@ -2500,8 +2514,10 @@ function discoverUnmappedSecrets(
         })),
       })}`
     );
+    return discovered;
   } catch {
     // Discovery is best-effort. A failure here must never affect the sync.
+    return [];
   }
 }
 
@@ -2574,7 +2590,10 @@ async function syncRootOnce(
     result.failed += applied.failed;
   }
 
-  discoverUnmappedSecrets(reads);
+  const discoveries = discoverUnmappedSecrets(reads);
+  if (discoveries.length > 0) {
+    result.unmappedDiscoveries = discoveries;
+  }
   return result;
 }
 

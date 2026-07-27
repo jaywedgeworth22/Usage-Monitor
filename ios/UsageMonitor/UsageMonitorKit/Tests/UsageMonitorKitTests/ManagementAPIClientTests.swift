@@ -23,6 +23,23 @@ final class ManagementAPIClientTests: XCTestCase {
         XCTAssertEqual(response.summary.totalSpentUsd, 12.5)
     }
 
+    func testSubscriptionsListDecodes() async throws {
+        let harness = makeHarness(token: "read-token")
+        ManagementURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/subscriptions")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer read-token")
+            return .json(Self.subscriptionsJSON)
+        }
+
+        let subscriptions = try await harness.client.subscriptions()
+
+        XCTAssertEqual(subscriptions.count, 1)
+        XCTAssertEqual(subscriptions[0].id, "subscription-1")
+        XCTAssertEqual(subscriptions[0].name, "OpenAI Plus")
+        XCTAssertEqual(subscriptions[0].effectiveStatus, "active")
+        XCTAssertEqual(subscriptions[0].provider.title, "OpenAI")
+    }
+
     func testSessionCookieCanReadAndManageWithoutBearer() async throws {
         let harness = makeHarness()
         installSessionCookie(in: harness)
@@ -320,6 +337,27 @@ final class ManagementAPIClientTests: XCTestCase {
         "status": "paused",
         "nextRenewalAt": "2026-08-01T00:00:00.000Z",
     ]
+
+    private static let subscriptionsJSON: [[String: Any]] = [[
+        "id": "subscription-1",
+        "name": "OpenAI Plus",
+        "costUsd": 20,
+        "currency": "USD",
+        "interval": "month",
+        "intervalCount": 1,
+        "monthlyEquivalentUsd": 20,
+        "startDate": "2026-01-01T00:00:00.000Z",
+        "currentPeriodStart": "2026-07-01T00:00:00.000Z",
+        "nextRenewalAt": "2026-08-01T00:00:00.000Z",
+        "autoRenew": true,
+        "status": "active",
+        "effectiveStatus": "active",
+        "provider": [
+            "id": "provider-1",
+            "name": "openai",
+            "displayName": "OpenAI",
+        ],
+    ]]
 }
 
 private final class ManagementURLProtocol: URLProtocol {
