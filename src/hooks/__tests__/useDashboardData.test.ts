@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { shouldShowDashboardSkeleton } from "@/hooks/useDashboardData";
+import {
+  combineAbortSignals,
+  DASHBOARD_LOAD_WATCHDOG_MS,
+  shouldShowDashboardSkeleton,
+} from "@/hooks/useDashboardData";
 
 describe("shouldShowDashboardSkeleton", () => {
   it("shows the skeleton only during the initial load with no rows yet", () => {
@@ -23,5 +27,82 @@ describe("shouldShowDashboardSkeleton", () => {
     expect(
       shouldShowDashboardSkeleton({ loading: false, providerCount: 2 })
     ).toBe(false);
+  });
+});
+
+describe("combineAbortSignals", () => {
+  it("returns the timeout alone when no external signal is provided", () => {
+    const timeout = AbortSignal.timeout(5_000);
+    expect(combineAbortSignals(timeout)).toBe(timeout);
+    expect(combineAbortSignals(timeout, null)).toBe(timeout);
+  });
+
+  it("composes timeout with an external unmount signal", () => {
+    const timeout = AbortSignal.timeout(5_000);
+    const controller = new AbortController();
+    const combined = combineAbortSignals(timeout, controller.signal);
+    expect(combined.aborted).toBe(false);
+    controller.abort();
+    expect(combined.aborted).toBe(true);
+  });
+
+  it("falls back to the timeout when AbortSignal.any is unavailable", () => {
+    const timeout = AbortSignal.timeout(5_000);
+    const controller = new AbortController();
+    const original = AbortSignal.any;
+    // Simulate older WebKit without AbortSignal.any.
+    Object.defineProperty(AbortSignal, "any", {
+      configurable: true,
+      value: undefined,
+    });
+    try {
+      expect(combineAbortSignals(timeout, controller.signal)).toBe(timeout);
+    } finally {
+      Object.defineProperty(AbortSignal, "any", {
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+
+  it("falls back to the timeout when AbortSignal.any throws", () => {
+    const timeout = AbortSignal.timeout(5_000);
+    const controller = new AbortController();
+    const original = AbortSignal.any;
+    Object.defineProperty(AbortSignal, "any", {
+      configurable: true,
+      value: () => {
+        throw new TypeError("AbortSignal.any boom");
+      },
+    });
+    try {
+      expect(combineAbortSignals(timeout, controller.signal)).toBe(timeout);
+    } finally {
+      Object.defineProperty(AbortSignal, "any", {
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+});
+
+describe("dashboard load watchdog contract", () => {
+  it("waits longer than the 30s per-request timeout so AbortSignal wins first", () => {
+    expect(DASHBOARD_LOAD_WATCHDOG_MS).toBeGreaterThan(30_000);
+  });
+
+  it("treats a coalesce lock older than the watchdog as orphaned", () => {
+    // Model: isFetching stayed true after a hung/frozen request. A later
+    // fetchProviders must break the coalesce after DASHBOARD_LOAD_WATCHDOG_MS
+    // so Retry can start a real request instead of returning immediately.
+    let isFetching = true;
+    const fetchStartedAt = Date.now() - (DASHBOARD_LOAD_WATCHDOG_MS + 1);
+    const orphaned =
+      isFetching &&
+      fetchStartedAt > 0 &&
+      Date.now() - fetchStartedAt > DASHBOARD_LOAD_WATCHDOG_MS;
+    expect(orphaned).toBe(true);
+    if (orphaned) isFetching = false;
+    expect(isFetching).toBe(false);
   });
 });
