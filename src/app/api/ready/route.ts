@@ -9,6 +9,7 @@ import {
   getStartupRuntimeStatus,
 } from "@/lib/runtime-health";
 import { getIngestAdmissionMetrics } from "@/lib/ingest-admission";
+import { getUsageReadTokenReadiness } from "@/lib/ingest-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -355,6 +356,11 @@ export async function GET(request: Request) {
       // Observability only (Wave C / C8): process-local ingest admission
       // reject/admit counters + waiter depth. Not a readiness gate.
       admission: getIngestAdmissionMetrics(),
+      // Observability only — never part of `ok`. In production a missing
+      // dedicated USAGE_READ_TOKEN 503s every bearer consumer of
+      // budget-status / subscriptions GET; before this, the only signal was
+      // a boot-time console.warn on the host. Booleans only, no token value.
+      usageReadToken: getUsageReadTokenReadiness(),
     },
   };
 

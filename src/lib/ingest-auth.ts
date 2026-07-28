@@ -58,6 +58,35 @@ export function resolveUsageReadToken(
   return env.USAGE_INGEST_TOKEN?.trim() || undefined;
 }
 
+/**
+ * Secret-free observability view of the read-token configuration for
+ * /api/ready. A missing dedicated token in production means every bearer
+ * consumer of GET /api/budget-status and GET /api/subscriptions 503s, but
+ * before this existed the only signal was a boot-time console.warn on the
+ * host. Never gates readiness `ok`; exposes booleans only, never token
+ * material.
+ */
+export function getUsageReadTokenReadiness(
+  env: NodeJS.ProcessEnv = process.env
+): {
+  required: boolean;
+  dedicated: boolean;
+  breakGlassFallback: boolean;
+  readsAuthorized: boolean;
+} {
+  const required = env.NODE_ENV === "production";
+  const dedicated = Boolean(env.USAGE_READ_TOKEN?.trim());
+  const breakGlassFallback =
+    env.USAGE_READ_TOKEN_ALLOW_INGEST_FALLBACK?.trim().toLowerCase() ===
+    "true";
+  return {
+    required,
+    dedicated,
+    breakGlassFallback,
+    readsAuthorized: resolveUsageReadToken(env) !== undefined,
+  };
+}
+
 // Read-only token check for GET /api/subscriptions (and shared by budget-status).
 export function isUsageReadAuthorized(request: NextRequest): boolean {
   const expected = resolveUsageReadToken();

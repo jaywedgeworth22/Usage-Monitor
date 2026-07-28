@@ -52,6 +52,25 @@ describe("GET /api/ready", () => {
     });
   });
 
+  it("exposes secret-free usage-read-token observability, never gating ok", async () => {
+    vi.stubEnv("USAGE_READ_TOKEN", "read-secret");
+
+    const response = await GET(READY_REQUEST);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.checks.usageReadToken).toEqual({
+      required: false, // NODE_ENV is "test" under vitest
+      dedicated: true,
+      breakGlassFallback: false,
+      readsAuthorized: true,
+    });
+    expect(JSON.stringify(body.checks.usageReadToken)).not.toContain(
+      "read-secret"
+    );
+  });
+
   it("keeps HTTP liveness-safe while reporting SQLite unavailable", async () => {
     vi.spyOn(process, "uptime").mockReturnValue(301);
     mocks.queryRawUnsafe.mockRejectedValue(new Error("database unavailable"));
