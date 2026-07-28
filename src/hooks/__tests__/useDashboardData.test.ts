@@ -109,12 +109,10 @@ describe("dashboard load watchdog contract", () => {
 });
 
 describe("timeframeToDays", () => {
-  it("maps 1d, 7d, 14d, 30d, 60d, 90d, 180d, and all correctly", () => {
+  it("maps 1d, 7d, 30d, 90d, 180d, and all correctly", () => {
     expect(timeframeToDays("1d")).toBe(1);
     expect(timeframeToDays("7d")).toBe(7);
-    expect(timeframeToDays("14d")).toBe(14);
     expect(timeframeToDays("30d")).toBe(30);
-    expect(timeframeToDays("60d")).toBe(60);
     expect(timeframeToDays("90d")).toBe(90);
     expect(timeframeToDays("180d")).toBe(180);
     expect(timeframeToDays("all")).toBe(3650);

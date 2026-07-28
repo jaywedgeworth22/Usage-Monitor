@@ -180,9 +180,7 @@ export default function DashboardPage() {
             >
               <option value="1d">Past 24 Hours</option>
               <option value="7d">Past Week</option>
-              <option value="14d">Past 2 Weeks</option>
               <option value="30d">Past Month</option>
-              <option value="60d">Past 2 Months</option>
               <option value="90d">Past 3 Months</option>
               <option value="180d">Past 6 Months</option>
               <option value="all">All Time</option>
