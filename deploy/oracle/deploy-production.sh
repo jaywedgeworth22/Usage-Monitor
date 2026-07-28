@@ -637,6 +637,13 @@ preflight_current_production() {
   [[ "${scheduler}" == "true" ]] || die "USAGE_SCHEDULER_ENABLED must be exactly true"
   [[ "${backup_required}" == "true" ]] || die "LITESTREAM_REQUIRED must be exactly true"
   [[ "${backup_bucket}" == "usage-monitor-prod-v3" ]] || die "production must use Garage bucket usage-monitor-prod-v3"
+  # Production denies the USAGE_INGEST_TOKEN fallback for bearer reads
+  # (src/lib/ingest-auth.ts resolveUsageReadToken), so without a dedicated
+  # read token every budget-status / subscriptions GET bearer consumer 503s
+  # and the only signal is a boot-time console.warn. Gate here like the
+  # scheduler/backup invariants above.
+  [[ -n "$(read_env_value "${RUNTIME_ENV}" USAGE_READ_TOKEN)" ]] || \
+    die "USAGE_READ_TOKEN must be set in ${RUNTIME_ENV} (production denies the ingest fallback; bearer budget-status/subscriptions reads 503 without it)"
 
   require_single_app_container
   expected_image="$(timeout 30 docker image inspect --format '{{.Id}}' \

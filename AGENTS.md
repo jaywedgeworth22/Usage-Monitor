@@ -41,7 +41,8 @@ but contribute zero to `persisted`; never derive it from `activeEvents.length`.
 
 - `POST /api/ingest/usage` — Bearer `USAGE_INGEST_TOKEN` (or `x-usage-ingest-token`). Writes `ExternalUsageEvent`.
 - `GET /api/budget-status` — dashboard session cookie OR Bearer `USAGE_READ_TOKEN`
-  (falls back to `USAGE_INGEST_TOKEN`).
+  (required in production; falls back to `USAGE_INGEST_TOKEN` only outside
+  production or with the explicit break-glass flag — see "Env vars").
   Returns per-provider month-to-date spend (poll snapshot + pushed cost, combined via
   `max()` to avoid double-counting) vs `ProviderPlan.monthlyBudgetUsd`. Logic in
   `src/lib/budget-status.ts`, reusing `buildProviderAlertState` from `src/lib/provider-alerts.ts`.
@@ -260,9 +261,14 @@ Render per `render.yaml`. `BILLING_RECEIPT_INGEST_TOKEN` (must differ from
 receipt importer, alongside the stable 32+ character `BILLING_RECEIPT_IDENTITY_KEY`. The identity
 key must not rotate with the signing key because it derives durable receipt IDs. Receipt
 credentials are manually provisioned and are not used by ordinary
-telemetry. Optional `USAGE_READ_TOKEN` is a separate read-only token for
-`/api/budget-status` and reuses `USAGE_INGEST_TOKEN` when unset. Optional
-`SENTRY_READ_TOKEN`/`SENTRY_ORG` configure the Sentry Health card above.
+telemetry. `USAGE_READ_TOKEN` is a separate read-only token for
+`/api/budget-status` and `GET /api/subscriptions`. It is **required in
+production** (the deploy preflight hard-fails without it): the
+`USAGE_INGEST_TOKEN` fallback only applies outside production or when
+`USAGE_READ_TOKEN_ALLOW_INGEST_FALLBACK=true` break-glass is set
+(`resolveUsageReadToken` in `src/lib/ingest-auth.ts`). `/api/ready` exposes a
+secret-free `checks.usageReadToken` observability block (never part of `ok`).
+Optional `SENTRY_READ_TOKEN`/`SENTRY_ORG` configure the Sentry Health card above.
 
 `SQLITE_PRE_MIGRATION_BACKUP_RETENTION` controls how many verified local SQLite
 Online Backup API snapshots are retained beside the production DB (default `3`,
