@@ -19,8 +19,11 @@ public enum AppGroup {
     }
 
     /// A `UserDefaults` scoped to the app group, or `.standard` as a fallback
-    /// so previews and unsigned builds don't crash.
+    /// so previews and unsigned builds don't crash or trigger cfprefsd detaches.
     public static var defaults: UserDefaults {
-        UserDefaults(suiteName: identifier) ?? .standard
+        guard containerURL != nil, let groupDefaults = UserDefaults(suiteName: identifier) else {
+            return .standard
+        }
+        return groupDefaults
     }
 }
