@@ -14,6 +14,31 @@ export interface ProjectBudgetResponse {
   };
 }
 
+export type TimeframeOption = "1d" | "7d" | "14d" | "30d" | "60d" | "90d" | "180d" | "all";
+
+export function timeframeToDays(tf: TimeframeOption): number {
+  switch (tf) {
+    case "1d":
+      return 1;
+    case "7d":
+      return 7;
+    case "14d":
+      return 14;
+    case "30d":
+      return 30;
+    case "60d":
+      return 60;
+    case "90d":
+      return 90;
+    case "180d":
+      return 180;
+    case "all":
+      return 3650;
+    default:
+      return 30;
+  }
+}
+
 /** Must exceed the per-request AbortSignal.timeout (30s) so normal timeouts win first. */
 export const DASHBOARD_LOAD_WATCHDOG_MS = 35_000;
 
@@ -100,6 +125,7 @@ const AUTO_REFRESH_INTERVAL_MS = 60_000;
 const FOCUS_REFRESH_THROTTLE_MS = 15_000;
 
 export function useDashboardData() {
+  const [timeframe, setTimeframe] = useState<TimeframeOption>("30d");
   const [providers, setProviders] = useState<any[]>([]);
   const [usageSummary, setUsageSummary] = useState<ExternalUsageSummary | null>(null);
   const [projects, setProjects] = useState<ProjectBudgetStatus[]>([]);
@@ -223,7 +249,9 @@ export function useDashboardData() {
     }
   }, []);
 
-  const fetchPortfolioData = useCallback(async () => {
+  const fetchPortfolioData = useCallback(async (overrideTimeframe?: TimeframeOption) => {
+    const activeTimeframe = overrideTimeframe ?? timeframe;
+    const days = timeframeToDays(activeTimeframe);
     if (portfolioFetchInFlightRef.current) return;
     portfolioFetchInFlightRef.current = true;
     setPortfolioLoading(true);
@@ -233,7 +261,7 @@ export function useDashboardData() {
       try {
         setUsageSummary(
           await fetchJson<ExternalUsageSummary>(
-            "/api/usage-events?days=30",
+            `/api/usage-events?days=${days}`,
             "app telemetry",
             unmountAbortRef.current?.signal
           )
@@ -258,7 +286,7 @@ export function useDashboardData() {
       setPortfolioLoading(false);
       portfolioFetchInFlightRef.current = false;
     }
-  }, []);
+  }, [timeframe]);
 
   const refreshDashboard = useCallback(async () => {
     await fetchProviders();
@@ -403,6 +431,8 @@ export function useDashboardData() {
   }, [loading, openAttentionPanel]);
 
   return {
+    timeframe,
+    setTimeframe,
     providers,
     usageSummary,
     projects,

@@ -97,7 +97,9 @@ export default function ExternalTelemetryPanel({ usageSummary }: ExternalTelemet
             External App Telemetry
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Last {usageSummary.days} days from sibling app reports
+            {usageSummary.days >= 3650
+              ? "All time from sibling app reports"
+              : `Last ${usageSummary.days} ${usageSummary.days === 1 ? "day" : "days"} from sibling app reports`}
           </p>
         </div>
         <div className="text-right shrink-0">

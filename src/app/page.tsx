@@ -17,6 +17,8 @@ import { aggregateProviderPortfolioMoney } from "@/lib/provider-money-aggregatio
 
 export default function DashboardPage() {
   const {
+    timeframe,
+    setTimeframe,
     providers,
     usageSummary,
     projects,
@@ -165,6 +167,27 @@ export default function DashboardPage() {
               Updated {new Date(lastUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
             </span>
           )}
+          <div className="flex items-center gap-1.5">
+            <label htmlFor="dashboard-timeframe-select" className="sr-only">
+              Timeframe
+            </label>
+            <select
+              id="dashboard-timeframe-select"
+              aria-label="Dashboard timeframe filter"
+              value={timeframe}
+              onChange={(e) => setTimeframe(e.target.value as any)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              <option value="1d">Past 24 Hours</option>
+              <option value="7d">Past Week</option>
+              <option value="14d">Past 2 Weeks</option>
+              <option value="30d">Past Month</option>
+              <option value="60d">Past 2 Months</option>
+              <option value="90d">Past 3 Months</option>
+              <option value="180d">Past 6 Months</option>
+              <option value="all">All Time</option>
+            </select>
+          </div>
           <button
             type="button"
             onClick={() => void refreshDashboard()}
