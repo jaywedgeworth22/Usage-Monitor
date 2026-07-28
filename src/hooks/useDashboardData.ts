@@ -14,7 +14,7 @@ export interface ProjectBudgetResponse {
   };
 }
 
-export type TimeframeOption = "1d" | "7d" | "14d" | "30d" | "60d" | "90d" | "180d" | "all";
+export type TimeframeOption = "1d" | "7d" | "30d" | "90d" | "180d" | "all";
 
 export function timeframeToDays(tf: TimeframeOption): number {
   switch (tf) {
@@ -22,12 +22,8 @@ export function timeframeToDays(tf: TimeframeOption): number {
       return 1;
     case "7d":
       return 7;
-    case "14d":
-      return 14;
     case "30d":
       return 30;
-    case "60d":
-      return 60;
     case "90d":
       return 90;
     case "180d":
