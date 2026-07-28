@@ -26,6 +26,8 @@ interface DashboardPortfolioSectionProps {
   attentionCount: number;
 }
 
+const DashboardCharts = dynamic(() => import("@/components/DashboardCharts"));
+
 export default function DashboardPortfolioSection({
   portfolioOpen,
   onToggle,
@@ -41,7 +43,6 @@ export default function DashboardPortfolioSection({
   chartFamilies,
   portfolioSummary,
 }: DashboardPortfolioSectionProps) {
-  const DashboardCharts = dynamic(() => import("@/components/DashboardCharts"));
   return (
     <details
       className="group"
