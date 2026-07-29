@@ -4,37 +4,69 @@ import { isSubscriptionInterval, rollForwardRenewal } from "@/lib/subscriptions"
 
 export type AlertSeverity = "critical" | "warning" | "info";
 
+// Runtime source of truth for every alert code (the union type is derived from
+// this array) so config validation (ALERT_CODE_SEVERITY_OVERRIDES /
+// ALERT_CODE_CHANNEL_ROUTING in alert-delivery.ts) can reject typo'd codes.
+export const PROVIDER_ALERT_CODES = [
+  "budget_exceeded",
+  "budget_warning",
+  "fixed_cost_conflict",
+  "billing_sync_incomplete",
+  "balance_low",
+  "credits_low",
+  "request_limit",
+  "request_limit_warning",
+  "renewal_overdue",
+  "renewal_due",
+  "missing_balance_visibility",
+  "stale_snapshot",
+  "missing_snapshot",
+  "unconfigured_budget",
+  "usage_reconciliation_discrepancy",
+  // Statistical spike/anomaly alerts (see anomaly-detection.ts). Consumed by
+  // the generic providerId:code alert-delivery machinery like any other code.
+  "spend_anomaly",
+  "request_anomaly",
+  // Advisory codes emitted by the budget-breach control layer (see
+  // budget-controls.ts / budget-status.ts). budget_control_paused surfaces a
+  // provider whose polling was auto-paused on a sustained budget breach;
+  // key_disable_recommended is advisory only and never reflects a credential
+  // mutation. Produced in budget-status.ts, not here — this file only carries
+  // the code names.
+  "budget_control_paused",
+  "key_disable_recommended",
+  // Per-project budget + anomaly alerts (S1). Delivered on the dedicated
+  // "project-budgets" system provider row with `scope` = project id, through
+  // the same incident/dedup/hysteresis machinery as provider alerts.
+  "project_budget_exceeded",
+  "project_budget_warning",
+  "project_spend_anomaly",
+  // Info alert when month-to-date spend is not attributed to any configured
+  // project beyond an env-tunable floor (S1c).
+  "unassigned_spend",
+  // Subscription & billing insight alerts (S14), all info-severity advisories
+  // attached to the subscription's own provider. `scope` identifies the
+  // subscription (or duplicate group) so each gets its own incident.
+  "unused_subscription",
+  "possible_duplicate_subscription",
+  "price_change_detected",
+] as const;
+
+export type ProviderAlertCode = (typeof PROVIDER_ALERT_CODES)[number];
+
 export interface ProviderAlert {
-  code:
-    | "budget_exceeded"
-    | "budget_warning"
-    | "fixed_cost_conflict"
-    | "billing_sync_incomplete"
-    | "balance_low"
-    | "credits_low"
-    | "request_limit"
-    | "request_limit_warning"
-    | "renewal_overdue"
-    | "renewal_due"
-    | "missing_balance_visibility"
-    | "stale_snapshot"
-    | "missing_snapshot"
-    | "unconfigured_budget"
-    | "usage_reconciliation_discrepancy"
-    // Statistical spike/anomaly alerts (see anomaly-detection.ts). Consumed by
-    // the generic providerId:code alert-delivery machinery like any other code.
-    | "spend_anomaly"
-    | "request_anomaly"
-    // Advisory codes emitted by the budget-breach control layer (see
-    // budget-controls.ts / budget-status.ts). budget_control_paused surfaces a
-    // provider whose polling was auto-paused on a sustained budget breach;
-    // key_disable_recommended is advisory only and never reflects a credential
-    // mutation. Produced in budget-status.ts, not here — this file only carries
-    // the code names.
-    | "budget_control_paused"
-    | "key_disable_recommended";
+  code: ProviderAlertCode;
   severity: AlertSeverity;
   message: string;
+  /**
+   * Optional incident discriminator folded into the durable stateKey
+   * (`providerId:code[:scope]`). Without it, one provider can only carry a
+   * single open incident per code — per-project alerts on the shared
+   * project-budgets provider and per-subscription insights need one incident
+   * EACH, so they set scope to the project/subscription id. Absent keeps the
+   * legacy key byte-for-byte identical.
+   */
+  scope?: string;
 }
 
 export interface ProviderPlanForAlerts {
@@ -349,4 +381,101 @@ export function buildProviderAlertState(
   }
 
   return { alerts, estimatedMonthlyCostUsd, projectedEomUsd, billingMode };
+}
+
+// ---------------------------------------------------------------------------
+// Per-project budget alerts (S1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Structural subset of budget-status's ProjectBudgetStatus this builder needs.
+ * Kept local so provider-alerts stays dependency-free of budget-status (which
+ * itself imports this module).
+ */
+export interface ProjectBudgetAlertCandidate {
+  id: string;
+  name: string;
+  monthlyBudgetUsd: number | null;
+  spentUsd: number;
+}
+
+export interface ProjectBudgetAlertInput {
+  projects: readonly ProjectBudgetAlertCandidate[];
+  /** Prior open tier per project id for flap-free boundary hysteresis (C9). */
+  previousTierByProjectId?: ReadonlyMap<string, BudgetAlertTier>;
+  /** Pre-computed per-project cost anomalies (anomaly-loader). */
+  anomaliesByProjectId?: ReadonlyMap<string, AnomalyResult[]>;
+  /** App-wide month-to-date spend not attributed to any project. */
+  unassignedSpentUsd?: number;
+  /** Info-alert floor for unassigned spend; <= 0 disables that alert. */
+  unassignedSpentFloorUsd?: number;
+}
+
+/**
+ * Translate per-project budget status into alerts. Pure: the caller owns data
+ * loading (computeProjectBudgetStatus + the project anomaly loader) and the
+ * delivery layer carries each alert through the standard incident/dedup
+ * machinery with `scope` = project id.
+ *
+ * Projects without a positive budget produce no budget alert (matching the
+ * dashboard's "unconfigured" treatment). Unassigned-spend is a single
+ * app-level info alert, only meaningful once at least one project exists —
+ * with zero projects ALL spend is unassigned by definition and alerting on it
+ * would be pure noise.
+ */
+export function buildProjectBudgetAlerts(
+  input: ProjectBudgetAlertInput
+): ProviderAlert[] {
+  const alerts: ProviderAlert[] = [];
+  for (const project of input.projects) {
+    const budget = project.monthlyBudgetUsd;
+    if (budget != null && budget > 0) {
+      const tier = resolveBudgetAlertTier(
+        project.spentUsd,
+        budget,
+        input.previousTierByProjectId?.get(project.id) ?? "ok"
+      );
+      if (tier === "exceeded") {
+        alerts.push({
+          code: "project_budget_exceeded",
+          severity: "critical",
+          scope: project.id,
+          message: `Project "${project.name}": ${formatUsd(
+            project.spentUsd
+          )} tracked against ${formatUsd(budget)} monthly budget.`,
+        });
+      } else if (tier === "warning") {
+        alerts.push({
+          code: "project_budget_warning",
+          severity: "warning",
+          scope: project.id,
+          message: `Project "${project.name}": ${formatUsd(
+            project.spentUsd
+          )} tracked against ${formatUsd(budget)} monthly budget.`,
+        });
+      }
+    }
+    for (const anomaly of input.anomaliesByProjectId?.get(project.id) ?? []) {
+      if (anomaly.metric !== "cost") continue;
+      alerts.push({
+        code: "project_spend_anomaly",
+        severity: anomaly.severity,
+        scope: project.id,
+        message: `Project "${project.name}": ${describeAnomaly(anomaly)}`,
+      });
+    }
+  }
+
+  const floor = input.unassignedSpentFloorUsd ?? 0;
+  const unassigned = input.unassignedSpentUsd ?? 0;
+  if (input.projects.length > 0 && floor > 0 && unassigned >= floor) {
+    alerts.push({
+      code: "unassigned_spend",
+      severity: "info",
+      message: `${formatUsd(
+        unassigned
+      )} of month-to-date spend is not attributed to any project.`,
+    });
+  }
+  return alerts;
 }
