@@ -71,6 +71,20 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertNotNil(WidgetPresentation.budgetCaption(for: makeSnapshot(overBudget: false, warning: false, totalBudget: 900)))
     }
 
+    // MARK: - Staleness caption
+
+    func testShowsUpdatedAtForRealSnapshot() {
+        XCTAssertTrue(WidgetPresentation.showsUpdatedAt(
+            for: makeSnapshot(overBudget: false, warning: false, totalBudget: 900)
+        ))
+        XCTAssertTrue(WidgetPresentation.showsUpdatedAt(for: .placeholder))
+    }
+
+    func testHidesUpdatedAtForEmptySnapshot() {
+        // The empty sentinel must never render "updated 56 years ago".
+        XCTAssertFalse(WidgetPresentation.showsUpdatedAt(for: .empty))
+    }
+
     // MARK: - Helpers
 
     private func makeSnapshot(overBudget: Bool, warning: Bool, totalBudget: Double) -> WidgetSnapshot {

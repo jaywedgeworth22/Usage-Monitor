@@ -194,8 +194,14 @@ struct ProviderDetailView: View {
         }
     }
 
-    /// Warn when the run-rate projects meaningfully past budget.
+    /// Prefer the server's `projectedStatus` (computed from the same
+    /// `projectedEomUsd`-vs-budget thresholds the web uses) so the two UIs
+    /// cannot disagree; fall back to local projection math for payloads that
+    /// predate the field.
     private func projectionStatus(_ provider: ProviderBudgetStatus) -> Theme.SemanticStatus {
+        if let projected = provider.projectedStatus {
+            return Theme.SemanticStatus(projected)
+        }
         guard let budget = provider.monthlyBudgetUsd, budget > 0 else { return .neutral }
         if provider.projectedEomUsd > budget { return .danger }
         if provider.projectedEomUsd > budget * 0.9 { return .warning }
@@ -305,25 +311,18 @@ struct ProviderDetailView: View {
         .dsCard()
     }
 
-    // MARK: - Identifier (masked key preview)
+    // MARK: - Identifier
 
+    /// The budget-status payload carries no key material, so this card shows
+    /// the provider slug only. It must NEVER mask the provider's database id
+    /// and present it as a credential preview — the real masked key preview
+    /// lives in Settings → Provider inventory (full access), decoded from the
+    /// management DTO's `keyPreview`.
     private func identifierCard(_ provider: ProviderBudgetStatus) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             SectionHeader("Identifier")
             DetailStatRow(label: "Slug", value: provider.name, monospaced: false)
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.md) {
-                Text("Key preview")
-                    .font(Theme.Typography.callout)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                Spacer(minLength: Theme.Spacing.sm)
-                Text(KeyMask.preview(provider.id))
-                    .font(.system(.callout, design: .monospaced))
-                    .foregroundStyle(Theme.Colors.primaryText)
-                    .textSelection(.enabled)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Key preview, \(KeyMask.preview(provider.id))")
-            Text("Masked as first-6…last-4. The full key is never exposed to the app.")
+            Text("The masked credential preview is available in Settings → Provider inventory when full access is enabled.")
                 .font(Theme.Typography.caption)
                 .foregroundStyle(Theme.Colors.tertiaryText)
         }

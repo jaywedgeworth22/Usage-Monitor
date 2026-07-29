@@ -97,6 +97,11 @@ public struct ProviderBudgetStatus: Codable, Hashable, Sendable, Identifiable {
     public var remainingUsd: Double?
     public var percentUsed: Double?
     public var status: BudgetLevel
+    /// Server-computed runway status from `projectedEomUsd` vs budget
+    /// (`src/lib/budget-status.ts` `projectedStatus`). Optional so older
+    /// payloads (and cached snapshots written before this shipped) still
+    /// decode; callers fall back to local projection math when it is absent.
+    public var projectedStatus: BudgetLevel?
     public var alerts: [ProviderAlert]
 
     public init(
@@ -120,6 +125,7 @@ public struct ProviderBudgetStatus: Codable, Hashable, Sendable, Identifiable {
         remainingUsd: Double? = nil,
         percentUsed: Double? = nil,
         status: BudgetLevel = .unconfigured,
+        projectedStatus: BudgetLevel? = nil,
         alerts: [ProviderAlert] = []
     ) {
         self.id = id
@@ -142,6 +148,7 @@ public struct ProviderBudgetStatus: Codable, Hashable, Sendable, Identifiable {
         self.remainingUsd = remainingUsd
         self.percentUsed = percentUsed
         self.status = status
+        self.projectedStatus = projectedStatus
         self.alerts = alerts
     }
 

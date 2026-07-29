@@ -45,11 +45,50 @@ final class SubscriptionManagementStore {
         else {
             return false
         }
+        return await mutate(id: id, using: client, afterMutation: afterMutation) { client in
+            _ = try await client.pauseSubscription(id: id)
+        }
+    }
+
+    /// Reactivate a non-active subscription via the server's `activationMode`
+    /// contract. `resume` continues the previously paid term; `repurchase`
+    /// starts a fresh cycle (the response's `nextRenewalAt` defines the new
+    /// term). `renewAutomatically` is only set when repurchasing an expired
+    /// term, where the server requires `autoRenew: true` to treat the update
+    /// as an activation.
+    func activate(
+        id: String,
+        mode: SubscriptionActivationMode,
+        renewAutomatically: Bool? = nil,
+        using client: APIClient,
+        afterMutation: ManagementMutationHandler
+    ) async -> Bool {
+        guard actionSubscriptionID == nil,
+              let subscription = subscriptions.first(where: { $0.id == id }),
+              subscription.effectiveStatus != "active"
+        else {
+            return false
+        }
+        return await mutate(id: id, using: client, afterMutation: afterMutation) { client in
+            _ = try await client.activateSubscription(
+                id: id,
+                mode: mode,
+                renewAutomatically: renewAutomatically
+            )
+        }
+    }
+
+    private func mutate(
+        id: String,
+        using client: APIClient,
+        afterMutation: ManagementMutationHandler,
+        action: @MainActor (APIClient) async throws -> Void
+    ) async -> Bool {
         actionSubscriptionID = id
         actionError = nil
         defer { actionSubscriptionID = nil }
         do {
-            _ = try await client.pauseSubscription(id: id)
+            try await action(client)
             await afterMutation()
             await load(using: client, showInitialLoading: false)
             return actionError == nil
@@ -166,7 +205,7 @@ struct SubscriptionManagementInventoryView: View {
                 } header: {
                     Text("Tracked plans")
                 } footer: {
-                    Text("Pause is available natively. Purchase, resume, cadence, external-billing links, and environment-knob edits remain on the web because those flows require additional server-validated context.")
+                    Text("Pause, resume, and repurchase are available natively. New purchases, cadence changes, external-billing links, and environment-knob edits remain on the web because those flows require additional server-validated context.")
                 }
             }
 
@@ -267,6 +306,7 @@ private struct SubscriptionManagementDetailView: View {
     let client: APIClient
     let afterMutation: ManagementMutationHandler
     @State private var showPauseConfirmation = false
+    @State private var showReactivateDialog = false
 
     private var subscription: SubscriptionSummary? {
         store.subscriptions.first { $0.id == subscriptionID }
@@ -338,6 +378,8 @@ private struct SubscriptionManagementDetailView: View {
                     } footer: {
                         Text("Pausing prevents future synthetic subscription charges. Existing usage and charge history remain intact.")
                     }
+                } else {
+                    reactivationSection(subscription)
                 }
 
                 if let error = store.actionError {
@@ -364,14 +406,111 @@ private struct SubscriptionManagementDetailView: View {
             Button("Pause subscription", role: .destructive, action: pause)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The server will stop materializing future recurring charges until the plan is reactivated through a validated resume or repurchase flow.")
+            Text(pauseWarning)
         }
+        .confirmationDialog(
+            "Reactivate this subscription?",
+            isPresented: $showReactivateDialog,
+            titleVisibility: .visible
+        ) {
+            if subscription?.canAttemptResume != false {
+                Button("Resume paid-through term") { activate(mode: .resume) }
+            }
+            Button("Repurchase — new term starts today") { activate(mode: .repurchase) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Resume continues the already-paid term and charges again at the next renewal. Repurchase starts a fresh billing cycle today and charges the new period. Either choice converts an auto-managed row to owner-managed.")
+        }
+    }
+
+    /// I5(b): pausing silently relinquishes server-side auto-management for
+    /// `externalBillingManaged` rows — make that consequence explicit. The
+    /// list DTO may not carry the managed flag, so externally-linked rows get
+    /// the cautionary wording when the flag itself is unknown.
+    private var pauseWarning: String {
+        guard let subscription else {
+            return "The server will stop materializing future recurring charges until the plan is reactivated through a validated resume or repurchase flow."
+        }
+        if subscription.isExternalBillingManaged {
+            return "This plan is auto-managed from the provider's billing records. Pausing PERMANENTLY converts it to owner-managed: the monitor will no longer reconcile, pause, or reprice it from billing syncs, and future charges stop until you reactivate it."
+        }
+        if subscription.isExternalBillingLinked {
+            return "This plan is linked to the provider's billing records. If it is auto-managed, pausing permanently converts it to owner-managed. Future charges stop until the plan is reactivated through a validated resume or repurchase flow."
+        }
+        return "The server will stop materializing future recurring charges until the plan is reactivated through a validated resume or repurchase flow."
+    }
+
+    @ViewBuilder
+    private func reactivationSection(_ subscription: SubscriptionSummary) -> some View {
+        Section {
+            switch subscription.effectiveStatus {
+            case "paused", "canceled":
+                actionButton(subscription, label: "Reactivate…", systemImage: "play.circle") {
+                    showReactivateDialog = true
+                }
+            case "considering":
+                actionButton(subscription, label: "Mark as purchased", systemImage: "checkmark.circle") {
+                    activate(mode: .repurchase)
+                }
+            case "expired":
+                actionButton(subscription, label: "Repurchase — start a new term", systemImage: "arrow.clockwise.circle") {
+                    // An expired term has autoRenew off; the server only treats
+                    // this as an activation when autoRenew is set back on.
+                    activate(mode: .repurchase, renewAutomatically: true)
+                }
+            default:
+                EmptyView()
+            }
+        } footer: {
+            switch subscription.effectiveStatus {
+            case "paused", "canceled":
+                Text("Resume continues the paid-through term (available when the plan was previously charged); repurchase anchors a fresh cycle today. Reactivating an auto-managed row converts it to owner-managed.")
+            case "considering":
+                Text("Marks the plan as purchased and starts its first billing cycle today; the next maintenance run records the charge.")
+            case "expired":
+                Text("Starts a fresh auto-renewing billing cycle today; the next maintenance run records the charge.")
+            default:
+                EmptyView()
+            }
+        }
+    }
+
+    private func actionButton(
+        _ subscription: SubscriptionSummary,
+        label: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            if store.actionSubscriptionID == subscription.id {
+                HStack {
+                    ProgressView()
+                    Text("Applying…")
+                }
+            } else {
+                Label(label, systemImage: systemImage)
+            }
+        }
+        .disabled(store.actionSubscriptionID != nil)
     }
 
     private func pause() {
         Task {
             let success = await store.pause(
                 id: subscriptionID,
+                using: client,
+                afterMutation: afterMutation
+            )
+            success ? Haptics.success() : Haptics.error()
+        }
+    }
+
+    private func activate(mode: SubscriptionActivationMode, renewAutomatically: Bool? = nil) {
+        Task {
+            let success = await store.activate(
+                id: subscriptionID,
+                mode: mode,
+                renewAutomatically: renewAutomatically,
                 using: client,
                 afterMutation: afterMutation
             )

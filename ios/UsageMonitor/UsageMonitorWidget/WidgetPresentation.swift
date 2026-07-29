@@ -67,4 +67,12 @@ enum WidgetPresentation {
         guard snapshot.totalBudgetUsd > 0 else { return nil }
         return "of \(CurrencyFormat.compactUSD(snapshot.totalBudgetUsd))"
     }
+
+    /// Whether the "updated … ago" staleness caption should render. The empty
+    /// snapshot (fresh install / signed-out) carries a sentinel epoch
+    /// timestamp that must never surface as a relative age; everything else
+    /// shows its real `generatedAt` so days-old data is visibly stale.
+    static func showsUpdatedAt(for snapshot: WidgetSnapshot) -> Bool {
+        !snapshot.month.isEmpty && snapshot.generatedAt.timeIntervalSince1970 > 0
+    }
 }
