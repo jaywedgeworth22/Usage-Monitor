@@ -48,12 +48,14 @@ describe("resolveSqliteMemoryPragmaValues", () => {
     vi.unstubAllEnvs();
   });
 
-  it("defaults to a 2MB cache, mmap disabled, and disk-backed temp B-trees", async () => {
+  it("defaults to a 2MB cache, mmap disabled, disk-backed temp B-trees, WAL, and a 5s busy timeout", async () => {
     const { resolveSqliteMemoryPragmaValues } = await import("@/lib/prisma");
     expect(resolveSqliteMemoryPragmaValues()).toEqual({
       cacheSizeKib: -2000,
       mmapSizeBytes: 0,
       tempStore: "file",
+      journalMode: "wal",
+      busyTimeoutMs: 5_000,
     });
   });
 
@@ -61,11 +63,14 @@ describe("resolveSqliteMemoryPragmaValues", () => {
     vi.stubEnv("SQLITE_CACHE_SIZE_KIB", "4000");
     vi.stubEnv("SQLITE_MMAP_SIZE_BYTES", "8388608");
     vi.stubEnv("SQLITE_TEMP_STORE", "memory");
+    vi.stubEnv("SQLITE_BUSY_TIMEOUT_MS", "7500");
     const { resolveSqliteMemoryPragmaValues } = await import("@/lib/prisma");
     expect(resolveSqliteMemoryPragmaValues()).toEqual({
       cacheSizeKib: -4000,
       mmapSizeBytes: 8_388_608,
       tempStore: "memory",
+      journalMode: "wal",
+      busyTimeoutMs: 7_500,
     });
   });
 
@@ -73,11 +78,13 @@ describe("resolveSqliteMemoryPragmaValues", () => {
     vi.stubEnv("SQLITE_CACHE_SIZE_KIB", "not-a-number");
     vi.stubEnv("SQLITE_MMAP_SIZE_BYTES", "999999999999");
     vi.stubEnv("SQLITE_TEMP_STORE", "not-a-mode");
+    vi.stubEnv("SQLITE_BUSY_TIMEOUT_MS", "999999999999");
     const { resolveSqliteMemoryPragmaValues } = await import("@/lib/prisma");
     const values = resolveSqliteMemoryPragmaValues();
     expect(values.cacheSizeKib).toBe(-2000); // invalid input falls back to default
     expect(values.mmapSizeBytes).toBe(268_435_456); // clamped to the 256MB ceiling
     expect(values.tempStore).toBe("file"); // invalid input fails closed to the RSS-safe mode
+    expect(values.busyTimeoutMs).toBe(60_000); // clamped to the 60s ceiling
   });
 });
 
@@ -93,6 +100,7 @@ describe("applySqliteNativeMemoryPragmas", () => {
     vi.stubEnv("SQLITE_CACHE_SIZE_KIB", "1234");
     vi.stubEnv("SQLITE_MMAP_SIZE_BYTES", "1048576");
     vi.stubEnv("SQLITE_TEMP_STORE", "memory");
+    vi.stubEnv("SQLITE_BUSY_TIMEOUT_MS", "4321");
     const { applySqliteNativeMemoryPragmas, readSqliteMemoryPragmas } = await import(
       "@/lib/prisma"
     );
@@ -104,11 +112,13 @@ describe("applySqliteNativeMemoryPragmas", () => {
       cacheSizeKib: -1234,
       mmapSizeBytes: 1_048_576,
       tempStore: "memory",
+      journalMode: "wal",
+      busyTimeoutMs: 4_321,
     });
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it("pins the ~2MB cache, disables mmap, and uses disk-backed temp storage by default", async () => {
+  it("pins the ~2MB cache, disables mmap, uses disk-backed temp storage, WAL, and a 5s busy timeout by default", async () => {
     const { applySqliteNativeMemoryPragmas, readSqliteMemoryPragmas } = await import(
       "@/lib/prisma"
     );
@@ -119,6 +129,8 @@ describe("applySqliteNativeMemoryPragmas", () => {
       cacheSizeKib: -2000,
       mmapSizeBytes: 0,
       tempStore: "file",
+      journalMode: "wal",
+      busyTimeoutMs: 5_000,
     });
   });
 
@@ -155,8 +167,10 @@ describe("applySqliteNativeMemoryPragmas", () => {
 
     const setCalls = querySpy.mock.calls
       .map((call) => String(call[0]))
-      .filter((sql) => /PRAGMA (cache_size|mmap_size|temp_store)\s*=/.test(sql));
-    expect(setCalls).toHaveLength(3);
+      .filter((sql) =>
+        /PRAGMA (cache_size|mmap_size|temp_store|journal_mode|busy_timeout)\s*=/.test(sql)
+      );
+    expect(setCalls).toHaveLength(5);
     expect(executeSpy).not.toHaveBeenCalled();
   });
 

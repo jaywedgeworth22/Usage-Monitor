@@ -529,7 +529,7 @@ function SettingsPageContent() {
               <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-blue-900 dark:text-blue-100">
                 How data gets here
               </h2>
-              <div className="grid gap-4 text-sm text-blue-800 dark:text-blue-200 sm:grid-cols-3">
+              <div className="grid gap-4 text-sm text-blue-800 dark:text-blue-200 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-1">
                   <p className="font-medium text-blue-900 dark:text-blue-100">Automatic account sync</p>
                   <p className="text-xs opacity-90">Read-only provider adapters fetch authoritative usage, billing, plan, and quota fields whenever the provider exposes them.</p>
@@ -537,6 +537,10 @@ function SettingsPageContent() {
                 <div className="space-y-1">
                   <p className="font-medium text-blue-900 dark:text-blue-100">Pushed telemetry</p>
                   <p className="text-xs opacity-90">Apps send metered usage and cost when a provider has no suitable account API or when project-level detail is needed.</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="font-medium text-blue-900 dark:text-blue-100">OTLP metrics</p>
+                  <p className="text-xs opacity-90">Claude Code and other OTLP exporters push usage metrics over standard OTLP/HTTP; they land alongside pushed telemetry as Anthropic (Claude Code) cost.</p>
                 </div>
                 <div className="space-y-1">
                   <p className="font-medium text-blue-900 dark:text-blue-100">Manual plan tracking</p>
