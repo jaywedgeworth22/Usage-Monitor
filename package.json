@@ -17,6 +17,7 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "repair:claude-cost": "node scripts/repair-claude-cumulative-cost.mjs",
+    "pricing:update": "node scripts/update-model-pricing.mjs",
     "repair:anthropic-funding": "node scripts/repair-anthropic-funding.mjs",
     "add:cursor-subscription": "node scripts/add-cursor-subscription.mjs",
     "import:receipt-screenshots": "node scripts/add-user-billing-receipts.mjs",

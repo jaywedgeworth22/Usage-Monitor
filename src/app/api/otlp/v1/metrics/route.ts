@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { ExternalUsageIdempotencyCollisionError } from "@/lib/external-usage-events";
-import { isUsageIngestAuthorized } from "@/lib/ingest-auth";
-import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
+import { isUsageIngestAuthorized, tokenFromRequest } from "@/lib/ingest-auth";
+import {
+  getIngestIdentityRateLimitKey,
+  getLoginBackstopKey,
+  getNamedRateLimiter,
+} from "@/lib/rate-limit";
 import { decodeMetricsJson } from "@/lib/otlp/json-decode";
 import { decodeMetricsProtobuf } from "@/lib/otlp/protobuf-decode";
 import { BoundedLogOnce } from "@/lib/otlp/bounded-log-once";
@@ -74,7 +78,23 @@ export const dynamic = "force-dynamic";
 // Same generosity as /api/ingest/usage: OTLP exporters batch on a fixed
 // interval (default 60s) rather than per-event, so request volume is low,
 // but keep a rate limiter for the same abuse-prevention reasons.
-const otlpMetricsRateLimiter = createRateLimiter(1_000, 10);
+//
+// Like /api/ingest/usage (X1), limiting runs AFTER authentication and is
+// keyed on identity: authenticated requests get a per-credential bucket (a
+// SHA-256 of the presented token — every OTLP producer arrives through
+// Cloudflare's shared egress IP, so the old pre-auth per-IP bucket let one
+// source 429 every producer), while unauthenticated requests are throttled
+// by the topology-aware IP backstop (getLoginBackstopKey).
+const otlpMetricsIdentityRateLimiter = getNamedRateLimiter(
+  "otlp-metrics-identity",
+  1_000,
+  10
+);
+const otlpMetricsUnauthenticatedRateLimiter = getNamedRateLimiter(
+  "otlp-metrics-unauthenticated",
+  1_000,
+  10
+);
 
 const loggedUnknownMetrics = new BoundedLogOnce(1_000);
 
@@ -94,10 +114,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Usage ingest is not configured" }, { status: 503 });
   }
 
-  const ip = getClientIp(request);
   const ingestEnabled = isOtlpMetricsIngestEnabled();
-  if (!otlpMetricsRateLimiter.check(ip)) {
-    return NextResponse.json(
+  const rateLimitedResponse = () =>
+    NextResponse.json(
       { error: "Too many requests. Slow down." },
       {
         status: 429,
@@ -108,10 +127,17 @@ export async function POST(request: NextRequest) {
         },
       }
     );
-  }
 
+  // Authenticate first, then rate-limit on identity (see limiter comment).
   if (!isUsageIngestAuthorized(request)) {
+    if (!otlpMetricsUnauthenticatedRateLimiter.check(getLoginBackstopKey(request))) {
+      return rateLimitedResponse();
+    }
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const presentedToken = tokenFromRequest(request, "x-usage-ingest-token");
+  if (!otlpMetricsIdentityRateLimiter.check(getIngestIdentityRateLimitKey(presentedToken))) {
+    return rateLimitedResponse();
   }
 
   if (!ingestEnabled) {
@@ -279,6 +305,26 @@ export async function POST(request: NextRequest) {
     },
     { status: 202 }
   );
+  } catch (error) {
+    // X6: unexpected failures (e.g. non-collision persistence errors) surface
+    // as a typed, retryable contract error — never an untyped HTML 500.
+    console.error(
+      "[otlp/metrics] unhandled failure:",
+      error instanceof Error ? error.message : error
+    );
+    return NextResponse.json(
+      {
+        ok: false,
+        schemaVersion: 2,
+        error: {
+          code: "internal_error",
+          message: "Internal error",
+          retryable: true,
+          retryAfterSeconds: 30,
+        },
+      },
+      { status: 500, headers: { "Retry-After": "30" } }
+    );
   } finally {
     releaseAdmission();
   }

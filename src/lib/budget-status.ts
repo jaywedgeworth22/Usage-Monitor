@@ -15,12 +15,17 @@ import {
   resolveProviderIdentity,
 } from "@/lib/provider-identity";
 import { buildCanonicalProjectIdMap } from "@/lib/project-resolver";
-import { buildProviderAlertState, type ProviderAlert } from "@/lib/provider-alerts";
+import { buildProviderAlertState, type BudgetAlertTier, type ProviderAlert } from "@/lib/provider-alerts";
 import { getExternalEventRawCutoff } from "@/lib/data-retention";
-import { calculateEomForecast, calculateEomForecastFromSeries } from "@/lib/forecasting";
+import { calculateEomForecast, calculateEomForecastFromSeries, projectBudgetRunout } from "@/lib/forecasting";
 import { resolveAnomalyConfig, type AnomalyResult } from "@/lib/anomaly-detection";
 import { loadSpendAnomaliesByProviderId } from "@/lib/anomaly-loader";
-import { loadMtdDailyVariableUsageByProviderId } from "@/lib/daily-usage-series";
+import {
+  buildSnapshotVariableDayPeaks,
+  dailyIncrementsFromSnapshotPeaks,
+  loadMtdDailyVariableUsageByProviderId,
+  maxDailySeries,
+} from "@/lib/daily-usage-series";
 import { advancePeriod, isSubscriptionInterval } from "@/lib/subscriptions";
 import {
   canLinkSubscriptionToExternalBilling,
@@ -103,6 +108,15 @@ export interface ProviderBudgetStatus {
   forecastedSubscriptionRenewalsUsd: number;
   spentUsd: number;
   projectedEomUsd: number;
+  /**
+   * S9: the day the cumulative forecast crosses the monthly budget
+   * ("budget exhausts ~Aug 22 at current burn"). ISO string; `now` when the
+   * budget is already exhausted; null when unconfigured or never projected
+   * to cross within the current forecast.
+   */
+  projectedRunoutDate: string | null;
+  /** Fractional days (1-decimal) until the budget is exhausted; 0 when already exhausted; null when never projected. */
+  daysUntilBudgetExhausted: number | null;
   remainingUsd: number | null;
   percentUsed: number | null;
   /** MTD spend vs budget (lagging). */
@@ -653,6 +667,8 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
     receiptCashByProviderId,
     latestCostTimes,
     materializedSubscriptionEvents,
+    snapshotCostSeriesRows,
+    latestScopeCostTimes,
   ] = await Promise.all([
     prisma.provider.findMany({
       orderBy: { name: "asc" },
@@ -822,7 +838,137 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
         windowEnd: true,
       },
     }),
+    // S4: scalar-only MTD cost snapshot history for trend-aware forecasting.
+    // Same cash-eligibility filter as latestCostTimes above (scope + window),
+    // so the forecast series never drinks from daily windows or mid-month
+    // straddle cycles the MTD math excludes. Bounded like the anomaly
+    // loader's scan; descending so truncation (if it ever hits) drops the
+    // OLDEST days, which the forward-fill in dailyIncrementsFromSnapshotPeaks
+    // tolerates far better than losing recent trend.
+    prisma.usageSnapshot.findMany({
+      where: {
+        fetchedAt: { gte: monthStart, lte: now },
+        totalCost: { not: null },
+        AND: [
+          {
+            OR: [
+              { costScope: null },
+              {
+                costScope: {
+                  in: ["calendar_month_to_date", "billing_cycle_to_date"],
+                },
+              },
+            ],
+          },
+          {
+            OR: [
+              { costWindowStart: null },
+              { costWindowStart: { gte: monthStart } },
+            ],
+          },
+        ],
+      },
+      orderBy: { fetchedAt: "desc" },
+      take: 20_000,
+      select: {
+        providerId: true,
+        fetchedAt: true,
+        totalCost: true,
+        fixedCostIncludedUsd: true,
+      },
+    }),
+    // S13: latest scope-eligible cost snapshot per provider WITHOUT the
+    // costWindowStart eligibility clause. Comparing this against
+    // latestCostTimes finds providers whose newest cost snapshot was
+    // silently dropped by the month-straddle filter (mid-month billing
+    // cycle), so the dashboard can surface an info alert instead of staying
+    // silent.
+    prisma.usageSnapshot.groupBy({
+      by: ["providerId"],
+      where: {
+        fetchedAt: { gte: monthStart, lte: now },
+        totalCost: { not: null },
+        OR: [
+          { costScope: null },
+          {
+            costScope: {
+              in: ["calendar_month_to_date", "billing_cycle_to_date"],
+            },
+          },
+        ],
+      },
+      _max: { fetchedAt: true },
+    }),
   ]);
+
+  // S4: per-provider MTD variable-cost day-peaks, diffed into daily
+  // increments inside the provider loop (quarantined providers skip theirs).
+  const snapshotVariableDayPeaksByProviderId =
+    buildSnapshotVariableDayPeaks(snapshotCostSeriesRows);
+
+  // S13: fetch the straddle-candidate rows (bounded to providers that HAVE a
+  // scope-eligible cost snapshot this month) so the loop can compare each
+  // provider's newest scope-eligible snapshot against the newest MTD-eligible
+  // one.
+  const latestScopeCostSnapshots = latestScopeCostTimes.length
+    ? await prisma.usageSnapshot.findMany({
+        where: {
+          OR: latestScopeCostTimes.flatMap((row) =>
+            row._max.fetchedAt
+              ? [{ providerId: row.providerId, fetchedAt: row._max.fetchedAt }]
+              : []
+          ),
+        },
+        select: {
+          providerId: true,
+          fetchedAt: true,
+          costWindowStart: true,
+        },
+      })
+    : [];
+  const latestScopeCostByProviderId = new Map<
+    string,
+    (typeof latestScopeCostSnapshots)[number]
+  >();
+  for (const snapshot of latestScopeCostSnapshots) {
+    const existing = latestScopeCostByProviderId.get(snapshot.providerId);
+    if (!existing || snapshot.fetchedAt > existing.fetchedAt) {
+      latestScopeCostByProviderId.set(snapshot.providerId, snapshot);
+    }
+  }
+
+  // S11: budget hysteresis for the dashboard/API path, mirroring
+  // alert-delivery.ts (C9). Open budget_warning/budget_exceeded notifications
+  // are the durable record of the prior tier; passing them into
+  // buildProviderAlertState lowers the CLEAR thresholds (75%/95%) so spend
+  // oscillating around 80%/100% does not flap the surfaced alerts. Fully
+  // defensive: a read failure degrades to no-hysteresis (legacy behavior)
+  // rather than breaking the money-path computation.
+  const previousBudgetTierByProviderId = new Map<string, BudgetAlertTier>();
+  try {
+    const openBudgetNotifications =
+      await prisma.providerAlertNotification.findMany({
+        where: {
+          resolvedAt: null,
+          alertCode: { in: ["budget_exceeded", "budget_warning"] },
+        },
+        select: { providerId: true, alertCode: true },
+      });
+    for (const notification of openBudgetNotifications) {
+      if (notification.alertCode === "budget_exceeded") {
+        previousBudgetTierByProviderId.set(notification.providerId, "exceeded");
+      } else if (
+        previousBudgetTierByProviderId.get(notification.providerId) !== "exceeded"
+      ) {
+        previousBudgetTierByProviderId.set(notification.providerId, "warning");
+      }
+    }
+  } catch (error) {
+    console.warn(
+      "[budget-status] open budget notification read failed; computing budget alerts without hysteresis",
+      error
+    );
+  }
 
   const geminiProviders = providers.filter(
     (provider) =>
@@ -1136,8 +1282,8 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
     );
     // Variable *consumption* only. max(snapshot, push) assumes one channel
     // supersets the other (org MTD vs app subset). Prepaid receipt cash is
-    // funding, not usage — it stays in receiptCashPaidUsd and may floor EOM
-    // projection, but must not inflate spentUsd / budget breach on top-ups.
+    // funding, not usage — it stays visible as receiptCashPaidUsd but takes
+    // no part in spentUsd or the EOM projection (S2).
     const observedVariableUsageUsd = Math.max(
       snapshotVariableCostUsd,
       pushed.usagePushed
@@ -1225,33 +1371,64 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       p.subscriptions,
       now
     );
-    // Receipt funding is a lumpy cash event, not a consumption sample. While
-    // it covers the observed variable usage, keep the receipt amount as the
-    // variable projection instead of annualizing/month-elapsed extrapolating
-    // that deposit. Once observed usage exceeds receipt cash, resume the
-    // ordinary usage-rate forecast with the receipt as a lower bound.
-    // Wave J / E11: prefer recency-weighted series when this provider owns
-    // push samples; always floor by observedVariableUsageUsd so a small push
-    // series cannot under-project against a larger poll snapshot (Codex P2).
+    // Receipt funding is a lumpy cash event, not a consumption sample (S2).
+    // Prepaid receipt cash is FUNDING COVERAGE for the observed usage — it
+    // must NEVER become the projected consumption itself: a $500 top-up over
+    // $12 of usage does not mean $500 will be consumed by EOM. The variable
+    // projection is floored only at max(observedUsage, linear-or-trend
+    // forecast); receiptCashPaidUsd stays visible on the DTO as funding
+    // evidence but no longer participates in the projection at all.
+    //
+    // S4 / Wave J / E11: build the daily series from BOTH channels — push
+    // telemetry (dailyUsageByProviderId) and poll snapshot day-peaks diffed
+    // into increments — merged element-wise via maxDailySeries, so
+    // poll-primary providers get the same recency-weighted trend forecast as
+    // push-primary ones. Always floor by observedVariableUsageUsd so a small
+    // series cannot under-project against a larger snapshot/push total
+    // (Codex P2). Quarantined snapshots (identity/config change, legacy
+    // Mistral spend-limit provenance) contribute no poll series.
     const pushDailySeries = dailyUsageByProviderId.get(p.id) ?? null;
+    const pollDayPeaks = billingSnapshotQuarantined
+      ? null
+      : snapshotVariableDayPeaksByProviderId.get(p.id) ?? null;
+    const pollDailySeries =
+      pollDayPeaks && pollDayPeaks.size > 0
+        ? dailyIncrementsFromSnapshotPeaks(pollDayPeaks, monthStart, now)
+        : null;
+    const mergedDailySeries = maxDailySeries(pushDailySeries, pollDailySeries);
+    // Trend fitting needs real history, not one lump. With fewer than 5
+    // NONZERO complete days the recency-weighted fit degrades to a
+    // single-spike extrapolation (clamped at 3x linear) — for a poll provider
+    // added mid-month, the unobserved days before its first snapshot read as
+    // zeros and one cumulative peak looks like a spike, fabricating a 3x
+    // projection (same fabrication class as S2). Fall back to the linear
+    // forecast until the provider has genuine day-to-day history.
+    const completeElapsedDays = Math.floor(
+      now.getUTCDate() + now.getUTCHours() / 24 + now.getUTCMinutes() / 1440
+    );
+    const nonzeroCompleteDays = mergedDailySeries
+      ? mergedDailySeries
+          .slice(0, Math.max(0, completeElapsedDays))
+          .filter((value) => value > 0).length
+      : 0;
     const linearProjectedVariable = calculateEomForecast(
       observedVariableUsageUsd,
       0,
       now
     );
     const seriesProjectedVariable =
-      pushDailySeries && pushDailySeries.some((v) => v > 0)
+      mergedDailySeries && nonzeroCompleteDays >= 5
         ? Math.max(
             observedVariableUsageUsd,
-            calculateEomForecastFromSeries(pushDailySeries, 0, now, {
+            calculateEomForecastFromSeries(mergedDailySeries, 0, now, {
               usageSoFarFallback: observedVariableUsageUsd,
             })
           )
         : linearProjectedVariable;
-    const projectedVariableUsageUsd =
-      receiptCash.paidUsd >= observedVariableUsageUsd
-        ? receiptCash.paidUsd
-        : Math.max(receiptCash.paidUsd, seriesProjectedVariable);
+    const projectedVariableUsageUsd = Math.max(
+      observedVariableUsageUsd,
+      seriesProjectedVariable
+    );
     const monthlyBudgetUsd = plan?.monthlyBudgetUsd ?? null;
 
     // Reuse the shared alert logic for budget alerts by feeding the combined usage cost as the
@@ -1272,6 +1449,10 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
         fixedAccruedUsd: reconciled.fixedAccruedUsd,
         reconciliationDiscrepancyUsd: p.usageReconciliations?.[0]?.status === "discrepancy" ? p.usageReconciliations[0].deltaUsd : null,
         anomalies: anomaliesByProviderId.get(p.id),
+        // S11: same hysteresis the delivery path applies (alert-delivery.ts
+        // C9), so the dashboard/API view stops flapping at 80%/100%.
+        previousBudgetTier:
+          previousBudgetTierByProviderId.get(p.id) ?? "ok",
       },
       now
     );
@@ -1309,6 +1490,56 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
             ? "warning"
             : "info",
         message,
+      });
+    }
+
+    // S13: a cost snapshot whose billing window started BEFORE this UTC month
+    // is excluded from month-to-date math (see the latestCostTimes filter),
+    // which silently hides mid-month-billing-cycle providers from budgets.
+    // Surface that exclusion as a visible info alert instead of staying
+    // silent. Fires only when the provider's NEWEST scope-eligible cost
+    // snapshot is the straddling one (a newer eligible snapshot supersedes).
+    const straddleCandidate = latestScopeCostByProviderId.get(p.id) ?? null;
+    if (
+      p.isActive &&
+      straddleCandidate != null &&
+      straddleCandidate.costWindowStart != null &&
+      straddleCandidate.costWindowStart < monthStart &&
+      (latestCostSnapshot == null ||
+        straddleCandidate.fetchedAt > latestCostSnapshot.fetchedAt)
+    ) {
+      budgetAlerts.push({
+        // Reuses the existing billing_sync_incomplete code (dedicated codes
+        // require extending the union in provider-alerts.ts, owned by another
+        // lane — cross-lane follow-up). The message carries the distinction.
+        code: "billing_sync_incomplete",
+        severity: "info",
+        message: `Latest cost snapshot covers a billing window starting ${straddleCandidate.costWindowStart.toISOString().slice(0, 10)} (before this UTC month) and is excluded from month-to-date budget math; spend for this mid-month billing cycle is understated until the cycle rolls over.`,
+      });
+    }
+
+    // S8: non-USD subscriptions are never charged as USD — creation rejects
+    // them (subscription-input.ts) and the materializer skips any legacy row
+    // loudly. Surface survivors here so a skipped charge is visible, not
+    // silent, until authoritative FX conversion exists.
+    const nonUsdActiveSubscriptions = p.subscriptions.filter(
+      (subscription) =>
+        subscription.status === "active" &&
+        subscription.currency.toUpperCase() !== "USD"
+    );
+    if (nonUsdActiveSubscriptions.length > 0) {
+      const currencies = [
+        ...new Set(
+          nonUsdActiveSubscriptions.map((subscription) =>
+            subscription.currency.toUpperCase()
+          )
+        ),
+      ].join(", ");
+      budgetAlerts.push({
+        // Same billing_sync_incomplete reuse rationale as the straddle alert.
+        code: "billing_sync_incomplete",
+        severity: "warning",
+        message: `${nonUsdActiveSubscriptions.length} active subscription(s) denominated in ${currencies} are NOT being charged: non-USD amounts are never materialized as USD until authoritative FX conversion exists.`,
       });
     }
 
@@ -1370,6 +1601,19 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       }
     }
 
+    const projectedEomUsd =
+      reconciled.fixedAccruedUsd +
+      projectedVariableUsageUsd +
+      forecastedSubscriptionRenewalsUsd;
+    // S9: budget runout ("exhausts ~Aug 22 at current burn") from the same
+    // trend-aware projection; null when unconfigured or never crossing.
+    const runout = projectBudgetRunout({
+      spentUsd,
+      projectedEomUsd,
+      monthlyBudgetUsd,
+      now,
+    });
+
     return {
       id: p.id,
       name: p.name,
@@ -1407,10 +1651,9 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       fixedCostConflict: reconciled.fixedCostConflict,
       forecastedSubscriptionRenewalsUsd,
       spentUsd,
-      projectedEomUsd:
-        reconciled.fixedAccruedUsd +
-        projectedVariableUsageUsd +
-        forecastedSubscriptionRenewalsUsd,
+      projectedEomUsd,
+      projectedRunoutDate: runout.runoutDate?.toISOString() ?? null,
+      daysUntilBudgetExhausted: runout.daysUntilBudgetExhausted,
       remainingUsd,
       percentUsed,
       status,
@@ -1814,6 +2057,10 @@ export interface ProjectBudgetStatus {
   monthlyBudgetUsd: number | null;
   spentUsd: number;
   projectedEomUsd: number;
+  /** S9: day the project's cumulative forecast crosses its budget (ISO), or null. */
+  projectedRunoutDate: string | null;
+  /** Fractional days until the project budget is exhausted, or null. */
+  daysUntilBudgetExhausted: number | null;
   spendCoverage: CostCoverage;
   pricedEventCount: number;
   unpricedEventCount: number;
@@ -2094,23 +2341,35 @@ async function computeProjectBudgetStatusUncached(now: Date): Promise<ProjectBud
             : "ok";
     }
 
+    const projectedEomUsd = calculateEomForecast(
+      spentUsd,
+      Math.min(
+        spentUsd,
+        directFixedUsd +
+          allocatedFixedUsd +
+          directReceiptBackedUsd +
+          allocatedReceiptBackedUsd
+      ),
+      now
+    );
+    // S9: per-project runout where the inputs exist (MTD spend + linear
+    // project forecast + budget); null when unconfigured/never crossing.
+    const projectRunout = projectBudgetRunout({
+      spentUsd,
+      projectedEomUsd,
+      monthlyBudgetUsd: proj.monthlyBudgetUsd,
+      now,
+    });
+
     return {
       id: proj.id,
       name: proj.name,
       description: proj.description,
       monthlyBudgetUsd: proj.monthlyBudgetUsd,
       spentUsd,
-      projectedEomUsd: calculateEomForecast(
-        spentUsd,
-        Math.min(
-          spentUsd,
-          directFixedUsd +
-            allocatedFixedUsd +
-            directReceiptBackedUsd +
-            allocatedReceiptBackedUsd
-        ),
-        now
-      ),
+      projectedEomUsd,
+      projectedRunoutDate: projectRunout.runoutDate?.toISOString() ?? null,
+      daysUntilBudgetExhausted: projectRunout.daysUntilBudgetExhausted,
       spendCoverage,
       ...directCoverage,
       incompleteAllocatedProviderCount,

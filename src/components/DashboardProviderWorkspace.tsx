@@ -22,7 +22,6 @@ import { costCoverageHelpText } from "@/lib/cost-coverage-help";
 import { providerFinancialSemantics } from "@/lib/provider-financial-semantics";
 import { aggregateProviderFamilyMoney } from "@/lib/provider-money-aggregation";
 import { canonicalProviderKey } from "@/lib/provider-identity";
-import { type DisplayDensity } from "@/lib/display-density";
 
 interface WorkspaceProvider {
   id: string;
@@ -551,7 +550,7 @@ export function emptyStateMessage(query: string, chip: FilterChip): string {
 }
 
 function toggleButtonClass(active: boolean): string {
-  return `rounded-lg px-3 py-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 ${
+  return `min-h-11 rounded-lg px-3 py-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 ${
     active
       ? "bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900"
       : "border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -564,10 +563,6 @@ function isWorkspaceSortField(value: unknown): value is WorkspaceSortField {
 
 function isSortDirection(value: unknown): value is SortDirection {
   return value === "asc" || value === "desc";
-}
-
-function isDensity(value: unknown): value is DisplayDensity {
-  return value === "compact" || value === "comfortable";
 }
 
 function coverageDotClass(family: ProviderFamily): string {
@@ -1084,7 +1079,7 @@ export default function DashboardProviderWorkspace({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search providers, accounts, keys, services"
-            className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:focus:ring-blue-950"
+            className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-base sm:text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:focus:ring-blue-950"
           />
         </label>
         <div className="flex flex-wrap items-center gap-2">
