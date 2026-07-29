@@ -36,14 +36,35 @@ export interface SentryHealthUnconfigured {
 
 const DEFAULT_ORG = "jays-services";
 
-// The three projects named in the task spec. Kept as a small static list
-// (not env-configurable) since this card is scoped to the owner's known
-// fleet, same as how provider adapters are a fixed built-in list.
-const TRACKED_PROJECTS = [
+// The three sibling projects named in the task spec, plus this app itself
+// (review finding O4d: now that the app reports its own errors to Sentry,
+// its own project belongs on the same health card). The fleet entries stay a
+// small static list (not env-configurable) since this card is scoped to the
+// owner's known fleet, same as how provider adapters are a fixed built-in
+// list. The self-project slug IS env-configurable (SENTRY_SELF_PROJECT) so it
+// can track the actual Sentry project name; default "usage-monitor".
+const DEFAULT_SELF_PROJECT_SLUG = "usage-monitor";
+
+const TRACKED_FLEET_PROJECTS = [
   { slug: "socratic-trade", displayName: "Socratic Trade" },
   { slug: "congress-trade", displayName: "Congress Trade" },
   { slug: "fleet-infra", displayName: "Fleet Infra" },
 ];
+
+function trackedProjects(): Array<{ slug: string; displayName: string }> {
+  const selfSlug =
+    process.env.SENTRY_SELF_PROJECT?.trim() || DEFAULT_SELF_PROJECT_SLUG;
+  const projects = [
+    { slug: selfSlug, displayName: "Usage Monitor (this app)" },
+    ...TRACKED_FLEET_PROJECTS,
+  ];
+  // Defensive dedupe: if SENTRY_SELF_PROJECT is ever set to a slug already in
+  // the fleet list, fetch it once rather than showing the same project twice.
+  return projects.filter(
+    (project, index) =>
+      projects.findIndex((other) => other.slug === project.slug) === index
+  );
+}
 
 function sentryConfig(): { token: string; org: string } | undefined {
   const token = process.env.SENTRY_READ_TOKEN?.trim();
@@ -127,7 +148,7 @@ export async function fetchSentryHealth(): Promise<SentryHealthSummary | SentryH
   if (!config) return { configured: false };
 
   const projects = await Promise.all(
-    TRACKED_PROJECTS.map((project) => fetchProjectHealth(config.org, config.token, project))
+    trackedProjects().map((project) => fetchProjectHealth(config.org, config.token, project))
   );
 
   return {
