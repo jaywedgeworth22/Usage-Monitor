@@ -199,6 +199,63 @@ describe("materializeDueSubscriptions + project attribution (integration)", () =
     });
   }
 
+  it("skips non-USD subscriptions loudly instead of charging them as USD (S8)", async () => {
+    const provider = await prisma.provider.create({
+      data: { name: "eur-provider", displayName: "EUR Provider", type: "push", refreshIntervalMin: 60 },
+    });
+    const { currentPeriodStart, nextRenewalAt } = initialCycle({
+      startDate: new Date("2026-07-01T00:00:00Z"),
+      interval: "monthly",
+      intervalCount: 1,
+      anchorDay: null,
+    });
+    // API validation rejects non-USD creation (subscription-input.ts), so
+    // this row simulates a legacy/direct-DB survivor.
+    await prisma.subscription.create({
+      data: {
+        providerId: provider.id,
+        name: "EUR plan",
+        costUsd: 100,
+        currency: "EUR",
+        interval: "monthly",
+        intervalCount: 1,
+        startDate: new Date("2026-07-01T00:00:00Z"),
+        currentPeriodStart,
+        nextRenewalAt,
+      },
+    });
+    await prisma.subscription.create({
+      data: {
+        providerId: provider.id,
+        name: "USD plan",
+        costUsd: 30,
+        currency: "USD",
+        interval: "monthly",
+        intervalCount: 1,
+        startDate: new Date("2026-07-01T00:00:00Z"),
+        currentPeriodStart,
+        nextRenewalAt,
+      },
+    });
+
+    const result = await materializeDueSubscriptions(NOW);
+
+    // The EUR row is suppressed and counted; the USD sibling still charges.
+    expect(result.nonUsdSkipped).toBe(1);
+    expect(result.charged).toBe(1);
+    expect(result.eventsWritten).toBe(1);
+    const events = await prisma.externalUsageEvent.findMany();
+    expect(events).toHaveLength(1);
+    expect(events[0].service).toBe("USD plan");
+    expect(events[0].costUsd).toBe(30);
+
+    // Re-running keeps the EUR row suppressed (watermark never advances).
+    const second = await materializeDueSubscriptions(NOW);
+    expect(second.nonUsdSkipped).toBe(1);
+    expect(second.charged).toBe(0);
+    expect(await prisma.externalUsageEvent.count()).toBe(1);
+  });
+
   it("materializes one charge per period and attributes it to the project budget", async () => {
     const provider = await prisma.provider.create({
       data: { name: "anthropic", displayName: "Anthropic", type: "push", refreshIntervalMin: 60 },
@@ -443,8 +500,10 @@ describe("materializeDueSubscriptions + project attribution (integration)", () =
       estimatedApiEquivalentUsd: 9_000,
       // Prepaid receipt cash is funding, not consumption — spentUsd uses usage only.
       spentUsd: 245,
-      // Projection still floors on receipt when funding ≥ observed usage.
-      projectedEomUsd: 247.25,
+      // S2: receipts no longer floor the projection. With usage observed on a
+      // single day (< 5 nonzero days → linear forecast): $45/15.5d*31d = $90
+      // variable + $200 fixed. Pre-fix this was 247.25 (receipt-floored).
+      projectedEomUsd: 290,
       spendCoverage: "complete",
     });
   });
