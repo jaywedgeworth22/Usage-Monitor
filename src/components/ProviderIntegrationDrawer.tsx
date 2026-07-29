@@ -290,7 +290,7 @@ export default function ProviderIntegrationDrawer({
               type="button"
               onClick={onClose}
               aria-label={`Close ${displayName} integration details`}
-              className="flex h-10 w-10 flex-none items-center justify-center rounded-lg border border-gray-200 text-xl text-gray-500 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
+              className="flex h-11 w-11 flex-none items-center justify-center rounded-lg border border-gray-200 text-xl text-gray-500 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100"
             >
               <span aria-hidden="true">×</span>
             </button>

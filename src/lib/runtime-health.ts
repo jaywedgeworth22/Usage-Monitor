@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statfsSync, statSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
 import packageJson from "../../package.json";
 import type { CloudflareLegacyHandoffStatus } from "@/lib/external-billing-subscription-adoption";
 
@@ -390,11 +391,87 @@ export function getStartupRuntimeStatus(): {
   entrypoint: string | null;
 } {
   const entrypoint = process.env.APP_STARTUP_WRAPPER || null;
+  // The startup-wrapper requirement must hold on any host that can serve
+  // production traffic. It used to key off RENDER === "true", which is never
+  // set on the Oracle production host, so the check was inert there and a
+  // bare `npm start` (skipping the verified pre-migration backup, safe
+  // migration, and Litestream layers in scripts/start-with-litestream.sh)
+  // still reported ready. Require the wrapper whenever Litestream is
+  // required or the process runs as production, unless explicitly opted out
+  // via STARTUP_WRAPPER_REQUIRED=false (for disposable throwaway containers
+  // only - never set it on a SQLite writer).
+  const required =
+    process.env.LITESTREAM_REQUIRED === "true" ||
+    (process.env.NODE_ENV === "production" &&
+      process.env.STARTUP_WRAPPER_REQUIRED !== "false");
   return {
-    required: process.env.RENDER === "true",
+    required,
     active: entrypoint === "start-with-litestream-v2",
     entrypoint,
   };
+}
+
+// Aligned with the deploy preflight's MIN_DATA_FREE_BYTES in
+// deploy/oracle/deploy-production.sh so the steady-state signal trips at the
+// same headroom the next deploy would demand.
+const DEFAULT_DISK_WARN_FREE_BYTES = 5 * 1024 * 1024 * 1024;
+
+function diskWarnFreeBytes(): number {
+  const configured = Number(process.env.READY_DISK_WARN_FREE_BYTES);
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_DISK_WARN_FREE_BYTES;
+}
+
+// The SQLite file's directory is the filesystem whose exhaustion would stop
+// the writer (production: /data on its own block volume). Fall back to the
+// process working directory when DATABASE_URL is absent or not a file: URL.
+function databaseDirectory(): string {
+  const url = process.env.DATABASE_URL ?? "";
+  if (url.startsWith("file:")) {
+    const raw = url.slice("file:".length);
+    if (raw.length > 0) {
+      return dirname(isAbsolute(raw) ? raw : resolve(process.cwd(), raw));
+    }
+  }
+  return process.cwd();
+}
+
+export function getDiskRuntimeStatus(): {
+  ok: boolean;
+  freeBytes: number | null;
+  totalBytes: number | null;
+  thresholdBytes: number;
+  checkedAt: string;
+  reason: "free_bytes_below_warn_threshold" | "disk_stat_failed" | null;
+} {
+  const thresholdBytes = diskWarnFreeBytes();
+  const checkedAt = new Date().toISOString();
+  try {
+    // The absolute filesystem path is deliberately not reported: /api/ready
+    // is public and only needs free/total bytes plus the threshold verdict.
+    const stats = statfsSync(databaseDirectory());
+    const freeBytes = stats.bavail * stats.bsize;
+    const totalBytes = stats.blocks * stats.bsize;
+    const ok = freeBytes >= thresholdBytes;
+    return {
+      ok,
+      freeBytes,
+      totalBytes,
+      thresholdBytes,
+      checkedAt,
+      reason: ok ? null : "free_bytes_below_warn_threshold",
+    };
+  } catch {
+    return {
+      ok: false,
+      freeBytes: null,
+      totalBytes: null,
+      thresholdBytes,
+      checkedAt,
+      reason: "disk_stat_failed",
+    };
+  }
 }
 
 export function resetRuntimeHealthForTests(): void {

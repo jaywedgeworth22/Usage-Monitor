@@ -2,6 +2,7 @@ import crypto from "crypto";
 import {
   deriveUsageTelemetryV2IdempotencyKey,
   UsageTelemetryV2BatchSchema,
+  UsageTelemetryV2EventSchema,
   type UsageTelemetryV2Batch,
 } from "@jaywedgeworth22/congress-trading-shared";
 
@@ -140,11 +141,60 @@ function v2Metadata(
 }
 
 /** Parse the shared v2 wire authority into the monitor-owned persistence input. */
-export async function parseUsageTelemetryV2Batch(
-  value: unknown
-): Promise<ParsedUsageTelemetryEvent[]> {
-  const batch = UsageTelemetryV2BatchSchema.parse(value);
-  return Promise.all(batch.events.map(async (event) => ({
+
+/**
+ * One event-level validation failure inside an otherwise valid v2 batch.
+ * `issues` is a bounded, human-readable summary (never the raw Zod blob).
+ */
+export interface UsageTelemetryV2EventRejection {
+  index: number;
+  eventId?: string;
+  issues: string[];
+}
+
+export interface ParsedUsageTelemetryV2Batch {
+  /** Valid events, in submission order, ready for persistence. */
+  events: ParsedUsageTelemetryEvent[];
+  /** Total number of rejected events (may exceed `rejections.length`). */
+  rejected: number;
+  /**
+   * Per-event rejection detail, capped at MAX_V2_BATCH_REJECTIONS_REPORTED
+   * entries so a fully poisoned batch cannot echo an unbounded response.
+   */
+  rejections: UsageTelemetryV2EventRejection[];
+}
+
+// Cap on the rejection detail echoed in the ACK body. The `rejected` COUNT is
+// always exact; only the per-event detail array is bounded.
+export const MAX_V2_BATCH_REJECTIONS_REPORTED = 10;
+
+const MAX_V2_REJECTION_ISSUES_PER_EVENT = 5;
+
+// A known-valid placeholder event used to validate the batch ENVELOPE
+// (schemaVersion/producerId/producerInstanceId, plus strict-key checking)
+// through the shared batch schema without also validating real events. This
+// keeps envelope strictness byte-for-byte shared while letting individual
+// events fail per-event validation below.
+const V2_ENVELOPE_PROBE_EVENT = {
+  eventId: "__usage_monitor_envelope_probe__",
+  provider: "__usage_monitor_envelope_probe__",
+} as const;
+
+function summarizeV2Issues(error: {
+  issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>;
+}): string[] {
+  return error.issues
+    .slice(0, MAX_V2_REJECTION_ISSUES_PER_EVENT)
+    .map((issue) =>
+      `${issue.path.map(String).join(".") || "(root)"}: ${issue.message}`.slice(0, 200)
+    );
+}
+
+async function mapV2Event(
+  batch: UsageTelemetryV2Batch,
+  event: UsageTelemetryV2Batch["events"][number]
+): Promise<ParsedUsageTelemetryEvent> {
+  return {
     sourceApp: batch.producerId,
     environment: event.environment,
     provider: event.provider,
@@ -172,7 +222,77 @@ export async function parseUsageTelemetryV2Batch(
       producerId: batch.producerId,
       eventId: event.eventId,
     }),
-  })));
+  };
+}
+
+/**
+ * Validates a v2 batch through the shared schema, per event. One poison event
+ * no longer fails the whole batch: valid events are returned for persistence
+ * and each invalid event is counted in `rejected` with bounded detail in
+ * `rejections`, so the route can ACK `rejected: N` (X5). ENVELOPE failures
+ * (bad/missing producerId, wrong schemaVersion, non-array events, unknown
+ * top-level keys) still throw, preserving the route's 400 invalid_request.
+ */
+export async function parseUsageTelemetryV2Batch(
+  value: unknown
+): Promise<ParsedUsageTelemetryV2Batch> {
+  // Fast path: the entire batch (envelope + every event) is valid.
+  const whole = UsageTelemetryV2BatchSchema.safeParse(value);
+  if (whole.success) {
+    return {
+      events: await Promise.all(
+        whole.data.events.map((event) => mapV2Event(whole.data, event))
+      ),
+      rejected: 0,
+      rejections: [],
+    };
+  }
+
+  // The batch failed somewhere. Decide whether the failure is at the envelope
+  // level (still a hard 400) or confined to individual events (per-event
+  // rejection). The envelope probe runs the strict shared batch schema over
+  // the same top-level fields with a known-valid placeholder event, so strict
+  // unknown-key and producerId/schemaVersion checks are unchanged.
+  const record = asRecord(value);
+  const rawEvents = record.events;
+  if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
+    throw new Error("Invalid usage telemetry v2 batch");
+  }
+  const { events: _events, ...envelope } = record;
+  const probe = UsageTelemetryV2BatchSchema.safeParse({
+    ...envelope,
+    events: [V2_ENVELOPE_PROBE_EVENT],
+  });
+  if (!probe.success) {
+    throw new Error("Invalid usage telemetry v2 batch");
+  }
+
+  const events: ParsedUsageTelemetryEvent[] = [];
+  const rejections: UsageTelemetryV2EventRejection[] = [];
+  let rejected = 0;
+  for (let index = 0; index < rawEvents.length; index += 1) {
+    const raw = rawEvents[index];
+    const result = UsageTelemetryV2EventSchema.safeParse(raw);
+    if (!result.success) {
+      rejected += 1;
+      if (rejections.length < MAX_V2_BATCH_REJECTIONS_REPORTED) {
+        const rawEventId =
+          raw && typeof raw === "object" && !Array.isArray(raw)
+            ? (raw as { eventId?: unknown }).eventId
+            : undefined;
+        rejections.push({
+          index,
+          ...(typeof rawEventId === "string" && rawEventId
+            ? { eventId: rawEventId.slice(0, 200) }
+            : {}),
+          issues: summarizeV2Issues(result.error),
+        });
+      }
+      continue;
+    }
+    events.push(await mapV2Event(probe.data, result.data));
+  }
+  return { events, rejected, rejections };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

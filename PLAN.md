@@ -1,5 +1,10 @@
 # Plan
 
+> **Historical snapshot — 2026-07-21.** This plan tracked the unmerged side
+> branch `codex/mobile-first-ios-parity-20260721` (native iOS parity worktree).
+> It is retained as a dated record only and does not describe current `main`;
+> see `docs/EFFORT-LOG.md` and the live effort board for current work.
+
 Updated: 2026-07-21
 
 ## Objective
