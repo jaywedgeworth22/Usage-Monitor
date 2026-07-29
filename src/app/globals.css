@@ -122,17 +122,20 @@ body {
    ==========================================================================
    Only pure spacing tweaks live here (padding/gap/font-size) - nothing in
    this file hides content. Collapsing a secondary line in compact mode is
-   done in the component itself (ProviderTable.tsx, ProviderCard.tsx, the
-   provider detail page) so secondary text can use an explicit disclosure or
-   accessible label. A blind CSS selector cannot preserve touch/keyboard
-   access, which is why this used to hide several field labels by accident.
+   done in the component itself (ProviderTable.tsx, the provider detail
+   page) so secondary text can use an explicit disclosure or accessible
+   label. A blind CSS selector cannot preserve touch/keyboard access, which
+   is why this used to hide several field labels by accident.
 
-   DashboardProviderWorkspace.tsx is intentionally NOT styled from here: it
-   already ships its own compact/comfortable "Row density" control (see the
-   `density` state and `usage-monitor:dashboard-density` storage key in that
-   file, from the #383/#384 density-redesign work), with its own row markup
-   and `title`-based detail fallbacks. Applying this global class on top of
-   that would fight its independent state instead of building on it. */
+   The preference is set from the Compact/Comfortable toggle in Nav.tsx
+   (setStoredDisplayDensity in src/lib/display-density.ts), persisted under
+   the `display-density` storage key, and mirrored onto <html> as
+   `density-<value>` by the pre-hydration script in layout.tsx.
+
+   DashboardProviderWorkspace.tsx is intentionally NOT styled from here: its
+   rows ship their own always-compact markup (CompactFamilyCells) and do not
+   read this preference. Applying the global class on top of that fixed
+   markup would have no consistent effect. */
 
 /* Global table row/cell height reduction (safe: padding only, no content
    changes; SortHeader/th padding included, so the sticky header shrinks
