@@ -1,4 +1,5 @@
 import { externalBillingFreshnessWindowMs } from "@/lib/external-billing-link";
+import { formatCurrency, formatDate, formatNumber } from "@/lib/format";
 
 export interface ExternalBillingRecord {
   source: string;
@@ -34,22 +35,8 @@ export function isExternalBillingStale(
   return !Number.isFinite(syncedAt) || now - syncedAt > staleAfterMs;
 }
 
-function formatCurrency(amount: number, currency: string | null): string {
-  const normalizedCurrency = currency?.trim().toUpperCase() || "UNKNOWN";
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: normalizedCurrency,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${normalizedCurrency}`;
-  }
-}
-
-function formatDate(value: string | null): string {
-  return value
-    ? new Date(value).toLocaleDateString(undefined, { timeZone: "UTC" })
-    : "--";
+function formatMoney(amount: number, currency: string | null): string {
+  return formatCurrency(amount, { currency: currency ?? "UNKNOWN" });
 }
 
 function statusClass(status: string): string {
@@ -116,7 +103,7 @@ export default function ExternalBillingDetails({
               <div>
                 <dt className="text-xs text-gray-500">Reported amount</dt>
                 <dd className="mt-0.5 font-medium text-gray-900">
-                  {record.amountUsd == null ? "--" : formatCurrency(record.amountUsd, record.currency)}
+                  {record.amountUsd == null ? "--" : formatMoney(record.amountUsd, record.currency)}
                   {record.billingInterval ? ` / ${record.billingInterval}` : ""}
                 </dd>
               </div>
@@ -135,7 +122,7 @@ export default function ExternalBillingDetails({
                 <dd className="mt-0.5 text-gray-700">
                   {record.requestLimit == null
                     ? "--"
-                    : `${new Intl.NumberFormat("en-US").format(record.requestLimit)}${
+                    : `${formatNumber(record.requestLimit)}${
                         record.requestLimitWindow ? ` / ${record.requestLimitWindow}` : ""
                       }`}
                 </dd>
@@ -145,7 +132,7 @@ export default function ExternalBillingDetails({
                 <dd className="mt-0.5 text-gray-700">
                   {record.spendLimitUsd == null
                     ? "--"
-                    : `${formatCurrency(record.spendLimitUsd, "USD")}${
+                    : `${formatCurrency(record.spendLimitUsd)}${
                         record.spendLimitWindow ? ` / ${record.spendLimitWindow}` : ""
                       }`}
                 </dd>

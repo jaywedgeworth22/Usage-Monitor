@@ -1,4 +1,5 @@
 import React from "react";
+import { formatCurrency } from "@/lib/format";
 
 interface DashboardSummaryCardsProps {
   totalProviderFunds: number;
@@ -41,10 +42,7 @@ export default function DashboardSummaryCards({
             : "Tracked Spend This Month"}
         </p>
         <p className="mt-1 text-lg font-semibold tabular-nums text-amber-600 dark:text-amber-400">
-          {new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency: "USD",
-          }).format(totalCost)}
+          {formatCurrency(totalCost)}
         </p>
         {incompleteCostProviderCount > 0 && (
           <p className="mt-0.5 text-[11px] text-amber-600 dark:text-amber-300">
@@ -64,10 +62,7 @@ export default function DashboardSummaryCards({
             : "Projected Monthly Spend"}
         </p>
         <p className="mt-1 text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-          {new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency: "USD",
-          }).format(totalProjectedMonthlyCost)}
+          {formatCurrency(totalProjectedMonthlyCost)}
         </p>
         {(incompleteCostProviderCount > 0 || ambiguousCostFamilyCount > 0) && (
           <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
@@ -80,10 +75,7 @@ export default function DashboardSummaryCards({
           Known Provider Funds
         </p>
         <p className="mt-1 text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-          {new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency: "USD",
-          }).format(totalProviderFunds)}
+          {formatCurrency(totalProviderFunds)}
         </p>
         <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
           Excludes ambiguous, brokerage, and merchant assets

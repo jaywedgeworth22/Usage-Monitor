@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DashboardSummaryCards from "@/components/DashboardSummaryCards";
 import CostCoverageLegend from "@/components/CostCoverageLegend";
 import DashboardAttentionPanel from "@/components/DashboardAttentionPanel";
@@ -13,7 +13,11 @@ import {
 } from "@/hooks/useDashboardData";
 import { sumProviderFunds } from "@/lib/provider-financial-semantics";
 import { canonicalProviderKey } from "@/lib/provider-identity";
-import { aggregateProviderPortfolioMoney } from "@/lib/provider-money-aggregation";
+import {
+  aggregateProviderPortfolioMoney,
+  type ProviderMoneyMember,
+} from "@/lib/provider-money-aggregation";
+import type { ProviderBudgetIntel } from "@/lib/format";
 
 export default function DashboardPage() {
   const {
@@ -41,8 +45,74 @@ export default function DashboardPage() {
   } = useDashboardData();
   const autoOpenedPortfolio = useRef(false);
 
+  // S9/S10: projection intelligence (projectedStatus, budget runout) lives on
+  // the budget-status DTO, not on the dashboard providers payload. Read it
+  // once per refresh via the session cookie; failure leaves the UI exactly as
+  // before (badges/runout text simply don't render).
+  const [budgetIntelByProviderId, setBudgetIntelByProviderId] = useState<
+    Record<string, ProviderBudgetIntel>
+  >({});
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/budget-status", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (cancelled || !body || !Array.isArray(body.providers)) return;
+        const map: Record<string, ProviderBudgetIntel> = {};
+        for (const row of body.providers) {
+          if (!row || typeof row.id !== "string") continue;
+          map[row.id] = {
+            projectedStatus: row.projectedStatus ?? null,
+            projectedRunoutDate: row.projectedRunoutDate ?? null,
+            daysUntilBudgetExhausted: row.daysUntilBudgetExhausted ?? null,
+          };
+        }
+        setBudgetIntelByProviderId(map);
+      })
+      .catch(() => {
+        // Best-effort surface; the dashboard works without it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lastUpdatedAt]);
+
   const totalProviderFunds = useMemo(() => sumProviderFunds(providers), [providers]);
-  const portfolioMoney = useMemo(() => aggregateProviderPortfolioMoney(providers), [providers]);
+  // S6: thread computeBudgetStatus's authoritative fixedAccruedUsd (already on
+  // each provider from /api/providers?view=dashboard) into the portfolio
+  // aggregator explicitly, so the family math consumes the reconcile rather
+  // than the legacy fallback derivation.
+  const portfolioMoney = useMemo(
+    () =>
+      aggregateProviderPortfolioMoney(
+        (providers || []).map(
+          (provider: any): ProviderMoneyMember => ({
+            id: provider.id,
+            name: provider.name,
+            groupId: provider.groupId ?? null,
+            billingAccount: provider.billingAccount ?? null,
+            spentUsd: provider.spentUsd ?? null,
+            projectedEomUsd: provider.projectedEomUsd ?? 0,
+            snapshotCostUsd: provider.snapshotCostUsd ?? null,
+            snapshotCostFetchedAt: provider.snapshotCostFetchedAt ?? null,
+            snapshotCostWindowStart: provider.snapshotCostWindowStart ?? null,
+            snapshotCostWindowEnd: provider.snapshotCostWindowEnd ?? null,
+            snapshotCostScope: provider.snapshotCostScope ?? null,
+            snapshotFixedCostIncludedUsd: provider.snapshotFixedCostIncludedUsd,
+            pushedMonthToDateUsd: provider.pushedMonthToDateUsd,
+            receiptCashPaidUsd: provider.receiptCashPaidUsd,
+            subscriptionMonthToDateUsd: provider.subscriptionMonthToDateUsd,
+            fixedMonthlyCostUsd: provider.fixedMonthlyCostUsd,
+            linkedFixedDedupeUsd: provider.linkedFixedDedupeUsd,
+            forecastedSubscriptionRenewalsUsd: provider.forecastedSubscriptionRenewalsUsd,
+            fixedAccruedUsd: Number.isFinite(provider.fixedAccruedUsd)
+              ? provider.fixedAccruedUsd
+              : null,
+          })
+        )
+      ),
+    [providers]
+  );
   const {
     totalCost,
     totalProjectedMonthlyCost,
@@ -216,11 +286,18 @@ export default function DashboardPage() {
         onAlertsNavigate={openAttentionPanel}
       />
 
-      <DashboardAttentionPanel attentionItems={attentionItems} />
+      <DashboardAttentionPanel
+        attentionItems={attentionItems}
+        budgetIntelByProviderId={budgetIntelByProviderId}
+      />
 
       <CostCoverageLegend />
 
-      <DashboardProviderWorkspace providers={providers} subscriptions={subscriptions} />
+      <DashboardProviderWorkspace
+        providers={providers}
+        subscriptions={subscriptions}
+        budgetIntelByProviderId={budgetIntelByProviderId}
+      />
 
       <OperationsOverview />
 

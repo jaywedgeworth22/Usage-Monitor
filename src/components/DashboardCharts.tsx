@@ -10,6 +10,7 @@ import {
   Legend,
 } from "recharts";
 import { useTheme } from "next-themes";
+import { formatCurrency } from "@/lib/format";
 
 /** Family-aggregated projection rows (must match portfolio KPI aggregation). */
 export interface ChartFamilySlice {
@@ -89,12 +90,7 @@ export default function DashboardCharts({
               ))}
             </Pie>
             <Tooltip
-              formatter={(value: any) =>
-                new Intl.NumberFormat("en-US", {
-                  style: "currency",
-                  currency: "USD",
-                }).format(value)
-              }
+              formatter={(value: any) => formatCurrency(Number(value))}
               contentStyle={{
                 backgroundColor: resolvedTheme === "dark" ? "#1f2937" : "#ffffff",
                 borderColor: resolvedTheme === "dark" ? "#374151" : "#e5e7eb",

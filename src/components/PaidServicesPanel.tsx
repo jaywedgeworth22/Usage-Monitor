@@ -10,8 +10,21 @@ import {
   type BillingInventoryItem,
   type BillingInventoryProvider,
   type BillingInventorySubscription,
-  type BillingInventoryProvenance,
 } from "@/lib/billing-inventory";
+import {
+  formatCompactNumber,
+  formatCurrency,
+  formatDate,
+  formatNumber,
+  NOT_REPORTED,
+} from "@/lib/format";
+import {
+  BILLING_PROVENANCE_DESCRIPTIONS,
+  BILLING_PROVENANCE_LABELS,
+  BILLING_PROVENANCE_STYLES,
+  formatStatusLabel,
+  statusBadgeStyle,
+} from "@/lib/status-vocab";
 
 interface PaidServicesPanelProps {
   providers: BillingInventoryProvider[];
@@ -20,44 +33,6 @@ interface PaidServicesPanelProps {
   maxItems?: number;
   showCoverage?: boolean;
 }
-
-const STATUS_STYLES: Record<string, string> = {
-  active: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  enabled: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  open: "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300",
-  paid: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  trialing: "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300",
-  considering: "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300",
-  paused: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
-  canceled: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
-  cancelled: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
-  expired: "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300",
-  failed: "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300",
-  unpaid: "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300",
-  payment_failed: "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300",
-  "payment-failed": "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300",
-  past_due: "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300",
-  "past-due": "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300",
-  limit_reached: "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
-  "limit-reached": "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
-  disabled: "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400",
-  inactive: "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400",
-  unavailable: "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400",
-};
-
-const PROVENANCE_LABELS: Record<BillingInventoryProvenance, string> = {
-  automatic: "Provider API",
-  linked: "Verified + tracked",
-  tracked: "Tracked",
-  "provider-plan": "Plan settings",
-};
-
-const PROVENANCE_STYLES: Record<BillingInventoryProvenance, string> = {
-  automatic: "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300",
-  linked: "bg-violet-50 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300",
-  tracked: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  "provider-plan": "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
-};
 
 const COVERAGE_LABELS: Record<BillingCoverageStatus, string> = {
   automatic: "Syncing",
@@ -77,50 +52,31 @@ const COVERAGE_STYLES: Record<BillingCoverageStatus, string> = {
   "not-applicable": "bg-gray-50 text-gray-500 dark:bg-gray-900 dark:text-gray-500",
 };
 
-function formatCurrency(amount: number, currency = "USD"): string {
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${currency}`;
-  }
+function formatMoney(amount: number, currency = "USD"): string {
+  return formatCurrency(amount, { currency });
 }
 
-function formatDate(value: string | null): string {
-  if (!value) return "Not reported";
-  const time = Date.parse(value);
-  if (!Number.isFinite(time)) return "Invalid date";
-  return new Date(time).toLocaleDateString(undefined, { timeZone: "UTC" });
+function formatServiceDate(value: string | null): string {
+  return formatDate(value, { nullState: NOT_REPORTED, invalidState: "Invalid date" });
 }
 
 function formatCompact(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    notation: Math.abs(value) >= 10_000 ? "compact" : "standard",
-    maximumFractionDigits: 1,
-  }).format(value);
-}
-
-function formatStatus(value: string): string {
-  const normalized = value.trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
-  return normalized
-    ? normalized[0].toUpperCase() + normalized.slice(1)
-    : "Unknown";
+  return Math.abs(value) >= 10_000
+    ? formatCompactNumber(value)
+    : formatNumber(value, { maximumFractionDigits: 1 });
 }
 
 function costDescription(item: BillingInventoryItem): { primary: string; secondary: string } {
   if (item.amount == null) {
     return {
-      primary: "Not reported",
+      primary: NOT_REPORTED,
       secondary:
         item.costKind === "current-period" ? "current-period spend" : "price unavailable",
     };
   }
   if (item.costKind === "current-period") {
     return {
-      primary: formatCurrency(item.amount, item.currency),
+      primary: formatMoney(item.amount, item.currency),
       secondary:
         item.rollupRole === "component"
           ? "service breakdown · excluded from summaries"
@@ -128,7 +84,7 @@ function costDescription(item: BillingInventoryItem): { primary: string; seconda
     };
   }
   return {
-    primary: formatCurrency(item.amount, item.currency),
+    primary: formatMoney(item.amount, item.currency),
     secondary: item.cadence ? `/ ${item.cadence}` : "recurring price",
   };
 }
@@ -171,8 +127,8 @@ function quotaDescription(item: BillingInventoryItem): { primary: string; second
     return {
       primary:
         item.spendMonthToDateUsd == null
-          ? `${formatCurrency(item.spendLimitUsd)} limit`
-          : `${formatCurrency(item.spendMonthToDateUsd)} / ${formatCurrency(item.spendLimitUsd)}`,
+          ? `${formatMoney(item.spendLimitUsd)} limit`
+          : `${formatMoney(item.spendMonthToDateUsd)} / ${formatMoney(item.spendLimitUsd)}`,
       secondary: item.spendLimitWindow
         ? `spend / ${item.spendLimitWindow}`
         : "spend limit",
@@ -184,7 +140,7 @@ function quotaDescription(item: BillingInventoryItem): { primary: string; second
       secondary: "credits",
     };
   }
-  return { primary: "Not reported", secondary: "usage / quota" };
+  return { primary: NOT_REPORTED, secondary: "usage / quota" };
 }
 
 function relativeSync(value: string | null): string {
@@ -260,6 +216,27 @@ export default function PaidServicesPanel({
           <p className="mt-1 max-w-3xl text-xs text-gray-500 dark:text-gray-400">
             Provider-reported billing, quotas, and locally tracked subscriptions in one deduplicated inventory.
           </p>
+          <details className="mt-1 max-w-3xl text-xs text-gray-500 dark:text-gray-400">
+            <summary className="cursor-pointer font-medium text-gray-600 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-gray-300 dark:hover:text-gray-100">
+              What the source labels mean
+            </summary>
+            <ul className="mt-2 space-y-1.5">
+              {(
+                Object.keys(BILLING_PROVENANCE_LABELS) as Array<
+                  keyof typeof BILLING_PROVENANCE_LABELS
+                >
+              ).map((key) => (
+                <li key={key} className="flex flex-wrap items-baseline gap-1.5">
+                  <span
+                    className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${BILLING_PROVENANCE_STYLES[key]}`}
+                  >
+                    {BILLING_PROVENANCE_LABELS[key]}
+                  </span>
+                  <span>{BILLING_PROVENANCE_DESCRIPTIONS[key]}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
         </div>
         <div className="flex items-center gap-3">
           {variant !== "dashboard" && inventory.items.length > 5 && (
@@ -303,7 +280,7 @@ export default function PaidServicesPanel({
         />
         <SummaryStat
           label="Recurring"
-          value={formatCurrency(inventory.summary.monthlyRecurringUsd)}
+          value={formatMoney(inventory.summary.monthlyRecurringUsd)}
           detail={
             nonUsdRecurringCount > 0
               ? `USD only · ${nonUsdRecurringCount} non-USD excluded`
@@ -312,7 +289,7 @@ export default function PaidServicesPanel({
         />
         <SummaryStat
           label="Next renewal"
-          value={formatDate(inventory.summary.nextRenewalAt)}
+          value={formatServiceDate(inventory.summary.nextRenewalAt)}
           detail={inventory.summary.nextRenewalAt ? "active services" : "none reported"}
         />
       </div>
@@ -389,15 +366,15 @@ export default function PaidServicesPanel({
                     </td>
                     <td data-label="Plan / tier" className="px-4 py-4">
                       <p className="font-medium text-gray-800 dark:text-gray-200">{item.tierName || "Tier not reported"}</p>
-                      <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLES[item.status] ?? "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"}`}>
-                        {formatStatus(item.status)}
+                      <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${statusBadgeStyle(item.status)}`}>
+                        {formatStatusLabel(item.status)}
                       </span>
                     </td>
                     <td data-label="Cost" className="px-4 py-4">
                       <p className="font-semibold text-gray-900 dark:text-gray-100">{cost.primary}</p>
                       <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{cost.secondary}</p>
                       {item.monthlyEquivalentUsd != null && item.cadence && !["month", "monthly"].includes(item.cadence.toLowerCase()) && (
-                        <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">≈ {formatCurrency(item.monthlyEquivalentUsd)} / month</p>
+                        <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">≈ {formatMoney(item.monthlyEquivalentUsd)} / month</p>
                       )}
                     </td>
                     <td data-label="Usage / quota" className="px-4 py-4">
@@ -407,10 +384,10 @@ export default function PaidServicesPanel({
                     <td data-label="Renewal / period" className="px-4 py-4">
                       <p className="font-medium text-gray-800 dark:text-gray-200">
                         {item.nextRenewalAt
-                          ? formatDate(item.nextRenewalAt)
+                          ? formatServiceDate(item.nextRenewalAt)
                           : item.currentPeriodEnd
-                            ? formatDate(item.currentPeriodEnd)
-                            : "Not reported"}
+                            ? formatServiceDate(item.currentPeriodEnd)
+                            : NOT_REPORTED}
                       </p>
                       <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                         {item.nextRenewalAt
@@ -435,8 +412,8 @@ export default function PaidServicesPanel({
                       </p>
                     </td>
                     <td data-label="Source" className="px-4 py-4 sm:px-6">
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${PROVENANCE_STYLES[item.provenance]}`}>
-                        {PROVENANCE_LABELS[item.provenance]}
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${BILLING_PROVENANCE_STYLES[item.provenance]}`}>
+                        {BILLING_PROVENANCE_LABELS[item.provenance]}
                       </span>
                       <p className="mt-1 break-words text-[11px] text-gray-500 dark:text-gray-400">{item.source || "local"}</p>
                       <p className={`mt-1 text-[11px] ${item.stale ? "font-medium text-amber-700 dark:text-amber-300" : "text-gray-400 dark:text-gray-400"}`}>

@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { formatCurrency } from "@/lib/format";
 
 interface Choice { id: string; name: string; displayName?: string }
 interface Binding {
@@ -61,7 +62,7 @@ interface Payload {
   coverage: Coverage;
 }
 
-const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+const money = (amount: number) => formatCurrency(amount);
 const inputClass = "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100";
 const toLocalDateTime = (value: Date) => {
   const local = new Date(value.getTime() - value.getTimezoneOffset() * 60_000);
@@ -242,12 +243,12 @@ export default function KeyAttributionPanel() {
           <section aria-labelledby="coverage-title" className="rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-800">
             <h2 id="coverage-title" className="font-semibold text-gray-900 dark:text-gray-100">Current-month pushed v2 coverage</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <Metric label="Proven additive key cost" value={money.format(data.coverage.totalCostUsd)} />
-              <Metric label="Identity matched" value={money.format(data.coverage.identityMatchedCostUsd)} />
-              <Metric label="Unattributed" value={money.format(data.coverage.identityUnattributedCostUsd)} warning={data.coverage.identityUnattributedCostUsd !== 0} />
+              <Metric label="Proven additive key cost" value={money(data.coverage.totalCostUsd)} />
+              <Metric label="Identity matched" value={money(data.coverage.identityMatchedCostUsd)} />
+              <Metric label="Unattributed" value={money(data.coverage.identityUnattributedCostUsd)} warning={data.coverage.identityUnattributedCostUsd !== 0} />
             </div>
             <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">{data.coverage.note} {data.coverage.unclassifiedCostEventCount} cost record(s) are currently unclassified; {data.coverage.excludedNonKeyScopeEventCount} non-key record(s) are excluded from key counts.</p>
-            {data.coverage.projectAuthorityConflictEventCount > 0 ? <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"><strong>Project authority conflict:</strong> {data.coverage.projectAuthorityConflictEventCount} record(s) totaling {money.format(data.coverage.projectAuthorityConflictCostUsd)} have different event and binding projects. Identity attribution is retained, but project coverage stays unattributed until corrected.</p> : null}
+            {data.coverage.projectAuthorityConflictEventCount > 0 ? <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"><strong>Project authority conflict:</strong> {data.coverage.projectAuthorityConflictEventCount} record(s) totaling {money(data.coverage.projectAuthorityConflictCostUsd)} have different event and binding projects. Identity attribution is retained, but project coverage stays unattributed until corrected.</p> : null}
           </section>
 
           <div className="grid gap-6 lg:grid-cols-2">
@@ -307,7 +308,7 @@ export default function KeyAttributionPanel() {
                   <li key={JSON.stringify(bucket)} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 text-sm">
                     <div>
                       <p className="font-medium text-gray-900 dark:text-gray-100">{bucket.providerName} · {bucket.producerId} / {bucket.producerKeyRef ?? "no key reference"}</p>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{bucket.reason.replaceAll("_", " ")} · {bucket.eventCount} record(s) · {money.format(bucket.costUsd)} proven additive cost{bucket.providerConnectionRef ? ` · connection ${bucket.providerConnectionRef}` : ""}{bucket.billingAccountRef ? ` · account ${bucket.billingAccountRef}` : ""}</p>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{bucket.reason.replaceAll("_", " ")} · {bucket.eventCount} record(s) · {money(bucket.costUsd)} proven additive cost{bucket.providerConnectionRef ? ` · connection ${bucket.providerConnectionRef}` : ""}{bucket.billingAccountRef ? ` · account ${bucket.billingAccountRef}` : ""}</p>
                     </div>
                     <button type="button" disabled={pending || !bucket.producerKeyRef} onClick={() => prepareMapping(bucket)} className="text-xs font-semibold text-blue-700 disabled:text-gray-400 dark:text-blue-300">Map reference</button>
                   </li>
@@ -324,7 +325,7 @@ export default function KeyAttributionPanel() {
                   <li key={identity.id} className="space-y-3 px-5 py-4">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div><p className="font-medium text-gray-900 dark:text-gray-100">{identity.alias}</p><p className="text-xs text-gray-500 dark:text-gray-400">{identity.provider.displayName}{identity.providerKeyFingerprint ? ` · ${identity.providerKeyFingerprint}` : " · no provider ID"}</p></div>
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{money.format(data.coverage.byIdentity[identity.id]?.costUsd ?? 0)} <span className="font-normal text-gray-500 dark:text-gray-400">· {data.coverage.byIdentity[identity.id]?.eventCount ?? 0} v2 records this month</span></p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{money(data.coverage.byIdentity[identity.id]?.costUsd ?? 0)} <span className="font-normal text-gray-500 dark:text-gray-400">· {data.coverage.byIdentity[identity.id]?.eventCount ?? 0} v2 records this month</span></p>
                       {identity.status === "active" ? (
                         <button type="button" disabled={pending} onClick={() => void retireIdentity(identity.id)} className="text-xs font-semibold text-gray-500 hover:text-red-600 disabled:opacity-50 dark:text-gray-400">Retire identity</button>
                       ) : (
