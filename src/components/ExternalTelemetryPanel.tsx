@@ -41,6 +41,10 @@ export interface ExternalUsageSummary {
   totalCostUsd: number;
   receiptCashPaidUsd?: number;
   estimatedApiEquivalentUsd: number;
+  /** Monitor-computed token x LiteLLM estimates (metadata-only stamps). Never
+   * cash, never counted as priced — visibility into unpriced coverage gaps. */
+  derivedCostEstimateUsd?: number;
+  derivedCostEstimateEventCount?: number;
   pricedEventCount: number;
   unpricedEventCount: number;
   unclassifiedCostEventCount: number;
@@ -135,6 +139,17 @@ export default function ExternalTelemetryPanel({ usageSummary }: ExternalTelemet
               Receipt cash paid: {usd(receiptCashPaid)}
               <span className="block text-[10px] font-normal">
                 Reconciled with observed usage by max, not added twice
+              </span>
+            </p>
+          )}
+          {(usageSummary.derivedCostEstimateUsd ?? 0) > 0 && (
+            <p className="mt-1 text-xs font-medium text-sky-700 dark:text-sky-300">
+              Monitor-estimated: {usd.format(usageSummary.derivedCostEstimateUsd ?? 0)}
+              {usageSummary.derivedCostEstimateEventCount
+                ? ` · ${new Intl.NumberFormat("en-US").format(usageSummary.derivedCostEstimateEventCount)} events`
+                : ""}
+              <span className="block text-[10px] font-normal">
+                Token × LiteLLM pricing · not cash, not counted as priced
               </span>
             </p>
           )}

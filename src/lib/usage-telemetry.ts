@@ -23,6 +23,12 @@ const RESERVED_V2_METADATA_KEYS = new Set([
   "_coverageMode",
   "_coverageRelationship",
   "_coverageReportThrough",
+  // Server-side LiteLLM cost-derivation stamps (pricing/derive-ingest-cost.ts).
+  // Producers must not be able to forge a monitor-computed estimate.
+  "_derivedCostUsd",
+  "_derivedCostPricingKey",
+  "_derivedCostSnapshot",
+  "_derivedCostIncomplete",
 ]);
 // 100 events * 50 metadata entries * (80-byte key + 500-byte value), plus
 // event fields and JSON framing, fits below 4 MiB. The route enforces this

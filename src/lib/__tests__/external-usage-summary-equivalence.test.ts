@@ -611,6 +611,11 @@ describe("summarizeExternalUsageEvents E1 equivalence", () => {
     prismaMock.externalUsageEventDailyRollup.findMany.mockResolvedValue([]);
 
     const actual = await summarizeExternalUsageEvents(since, rawCutoff);
-    expect(actual).toEqual({ eventCount: 0, groups: [] });
+    expect(actual).toEqual({
+      eventCount: 0,
+      groups: [],
+      derivedCostEstimateUsd: 0,
+      derivedCostEstimateEventCount: 0,
+    });
   });
 });
