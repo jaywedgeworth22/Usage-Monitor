@@ -1,6 +1,7 @@
 import React from "react";
 import Link from "next/link";
 import type { ProviderCostCoverage } from "@/components/ProviderCard";
+import { formatCurrency } from "@/lib/format";
 
 export interface ProjectBudgetStatus {
   id: string;
@@ -31,10 +32,7 @@ interface ProjectsPanelProps {
 }
 
 function formatUsd(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(value);
+  return formatCurrency(value);
 }
 
 export default function ProjectsPanel({ projects, summary }: ProjectsPanelProps) {

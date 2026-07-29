@@ -6,6 +6,12 @@ import { isExternalBillingStale, type ExternalBillingRecord } from "./ExternalBi
 import ProviderIntegrationInfo, { publicConfigFieldNames } from "./ProviderIntegrationInfo";
 import { usageUnitLabelForProvider } from "@/lib/provider-definitions";
 import { costCoverageHelpText } from "@/lib/cost-coverage-help";
+import {
+  formatCurrency,
+  formatNumber,
+  projectedStatusLabel,
+  type ProviderBudgetIntel,
+} from "@/lib/format";
 export type ProviderCostCoverage =
   | "complete"
   | "partial"
@@ -52,6 +58,8 @@ interface ProviderCardProps {
   estimatedMonthlyCostUsd?: number;
   projectedEomUsd?: number;
   spentUsd?: number;
+  /** S10: projected (runway) status from the budget-status DTO; badge renders only when worse than ok. */
+  projectedStatus?: ProviderBudgetIntel["projectedStatus"];
   snapshotCostFetchedAt?: string | null;
   spendCoverage?: ProviderCostCoverage;
   costCoverageCaveat?: ProviderCostCoverageCaveat | null;
@@ -123,6 +131,7 @@ export default function ProviderCard({
   estimatedMonthlyCostUsd = 0,
   projectedEomUsd = 0,
   spentUsd,
+  projectedStatus,
   snapshotCostFetchedAt,
   spendCoverage,
   costCoverageCaveat,
@@ -156,17 +165,9 @@ export default function ProviderCard({
     )
   ).length;
 
-  const formatNumber = (n: number | null) => {
-    if (n == null) return "--";
-    return new Intl.NumberFormat("en-US").format(n);
-  };
+  const formatUsd = (amount: number) => formatCurrency(amount);
 
-  const formatUsd = (amount: number) =>
-    new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 2,
-    }).format(amount);
+  const paceLabel = projectedStatusLabel(projectedStatus);
 
   const cardDetailTitle = [
     label,
@@ -277,6 +278,17 @@ export default function ProviderCard({
               }`}
             >
               {openAlerts.length} alert{openAlerts.length === 1 ? "" : "s"}
+            </span>
+          )}
+          {paceLabel && (
+            <span
+              className={`text-xs font-medium px-2 py-0.5 rounded ${
+                projectedStatus === "exceeded"
+                  ? "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300"
+                  : "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
+              }`}
+            >
+              {paceLabel}
             </span>
           )}
         </div>
