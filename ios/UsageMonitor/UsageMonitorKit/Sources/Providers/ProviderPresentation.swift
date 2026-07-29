@@ -134,27 +134,6 @@ struct SpendComponent: Identifiable, Hashable {
     var label: String { kind.label }
 }
 
-// MARK: - Key / identifier masking
-
-/// Masks a sensitive-looking identifier for display as `first6…last4`, the
-/// convention the app uses to preview a provider key/id without revealing it in
-/// full. Short values are masked defensively rather than shown whole.
-enum KeyMask {
-    static func preview(_ raw: String, first: Int = 6, last: Int = 4) -> String {
-        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return "—" }
-        // Not enough to safely reveal both ends without overlap → mask entirely.
-        if value.count <= first + last {
-            if value.count <= 4 { return String(repeating: "•", count: value.count) }
-            let head = value.prefix(2)
-            return "\(head)\(String(repeating: "•", count: value.count - 2))"
-        }
-        let head = value.prefix(first)
-        let tail = value.suffix(last)
-        return "\(head)…\(tail)"
-    }
-}
-
 // MARK: - Haptics
 
 /// Markers and helpers for the provider list. Moved to DesignSystem Haptics.

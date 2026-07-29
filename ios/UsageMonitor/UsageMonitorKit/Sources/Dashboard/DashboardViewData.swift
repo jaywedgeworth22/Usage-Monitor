@@ -89,8 +89,20 @@ struct DashboardViewData: Equatable, Sendable {
     }
 
     /// Status the *projection* implies (may be worse than today's status).
+    ///
+    /// Prefers the server's per-provider `projectedStatus` (computed from the
+    /// same projected-vs-budget thresholds the web uses — WARNING_RATIO 0.8)
+    /// rolled up worst-first, so the dashboard agrees with the server's
+    /// throttle consumers. Only when the payload predates the field does it
+    /// fall back to the local aggregate math below.
     var projectionStatus: BudgetLevel {
         guard hasBudget else { return .unconfigured }
+        let budgeted = providers.filter(\.hasBudget)
+        if !budgeted.isEmpty, budgeted.allSatisfy({ $0.projectedStatus != nil }) {
+            if budgeted.contains(where: { $0.projectedStatus == .exceeded }) { return .exceeded }
+            if budgeted.contains(where: { $0.projectedStatus == .warning }) { return .warning }
+            return .ok
+        }
         if projectedEom > totalBudget { return .exceeded }
         if projectedFraction >= 0.9 { return .warning }
         return .ok

@@ -100,6 +100,7 @@ struct BudgetWidgetView: View {
 private struct BudgetSummaryColumn: View {
     let snapshot: WidgetSnapshot
     var showsBadge = true
+    var showsUpdatedAt = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -140,6 +141,19 @@ private struct BudgetSummaryColumn: View {
                     systemImage: WidgetPresentation.overallSymbol(for: snapshot)
                 )
                 .padding(.top, Theme.Spacing.xxs)
+            }
+
+            if showsUpdatedAt, WidgetPresentation.showsUpdatedAt(for: snapshot) {
+                // Staleness is first-class: the widget re-reads a cached
+                // snapshot, so days-old data must be visibly dated.
+                HStack(spacing: Theme.Spacing.xxs) {
+                    Image(systemName: "clock")
+                    Text("Updated \(Text(snapshot.generatedAt, style: .relative))")
+                }
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.tertiaryText)
+                .padding(.top, Theme.Spacing.xxs)
+                .accessibilityElement(children: .combine)
             }
         }
     }
