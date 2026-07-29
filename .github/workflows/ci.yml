@@ -24,7 +24,7 @@ jobs:
     # behaves exactly as before (hosted).
     # Runbook — clearing the variable is an instant, global hosted fallback:
     #   gh variable set UM_CI_RUNNER --repo jaywedgeworth22/Usage-Monitor --body ""
-    runs-on: ${{ (github.actor != 'dependabot[bot]' && vars.UM_CI_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       CI: true
