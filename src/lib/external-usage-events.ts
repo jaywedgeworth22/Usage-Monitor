@@ -14,6 +14,7 @@ import {
   receiptCashProviderId,
 } from "@/lib/receipt-cash";
 import { SUBSCRIPTION_SOURCE_APP } from "@/lib/subscription-charge-identity";
+import { ingestCostDerivationEnabled } from "@/lib/pricing/derive-ingest-cost";
 import {
   MTD_SCAN_MEMO_TTL_MS,
   clearMtdScanMemo,
@@ -543,6 +544,39 @@ function addSummaryContribution(
 export interface ExternalUsageEventSummary {
   eventCount: number;
   groups: ExternalUsageEventSummaryGroup[];
+  /** Monitor-computed token x LiteLLM cost estimates (metadata-only
+   * `_derivedCostUsd` stamps from pricing/derive-ingest-cost.ts). Never cash,
+   * never counted as priced — surfaced separately so unpriced-coverage gaps
+   * can be sized without distorting the producer-reported cost pool. Zero
+   * when INGEST_COST_DERIVATION_ENABLED is off. */
+  derivedCostEstimateUsd: number;
+  derivedCostEstimateEventCount: number;
+}
+
+/**
+ * Sum server-stamped derived cost estimates over the RAW window. One bounded
+ * aggregate query (json_extract over metadata), called only when the
+ * derivation flag is enabled so default-off deployments pay zero query cost.
+ * Derived stamps exist only on metricType="usage"/unit="token" rows, so
+ * receipt-cash and status-metric shapes are excluded by construction — no
+ * receipt-candidate where-clause replication needed here.
+ */
+async function sumDerivedCostEstimates(
+  rawSince: Date
+): Promise<{ totalUsd: number; eventCount: number }> {
+  const rows = await prisma.$queryRaw<Array<{ totalUsd: unknown; eventCount: unknown }>>`
+    SELECT
+      COALESCE(SUM(json_extract("metadata", '$._derivedCostUsd')), 0) AS "totalUsd",
+      COUNT(*) AS "eventCount"
+    FROM "ExternalUsageEvent"
+    WHERE "occurredAt" >= ${rawSince}
+      AND json_extract("metadata", '$._derivedCostUsd') IS NOT NULL
+  `;
+  const row = rows[0];
+  return {
+    totalUsd: Number(row?.totalUsd ?? 0),
+    eventCount: Number(row?.eventCount ?? 0),
+  };
 }
 
 // The dashboard portfolio panel polls this every 60s. The SQL groupBy below
@@ -572,8 +606,10 @@ export async function summarizeExternalUsageEvents(
   // the MTD cost material memo below).
   const memoEnabled = process.env.VITEST !== "true";
   // Day-granularity key (same shape as mtdScanKey): sequential same-day
-  // default-window dashboard calls share one memo entry.
-  const key = `${since.toISOString().slice(0, 10)}|${rawCutoff.toISOString().slice(0, 10)}`;
+  // default-window dashboard calls share one memo entry. The derivation-flag
+  // bit keeps a same-day flag flip from serving the other mode's cached
+  // derived-estimate totals.
+  const key = `${since.toISOString().slice(0, 10)}|${rawCutoff.toISOString().slice(0, 10)}|${ingestCostDerivationEnabled() ? 1 : 0}`;
   if (memoEnabled) {
     const hit = getUsageEventsSummaryMemo<ExternalUsageEventSummary>();
     if (hit && hit.key === key && hit.expiresAt > Date.now()) {
@@ -628,7 +664,7 @@ async function summarizeExternalUsageEventsUnserialized(
   const rawSince = since > rawCutoff ? since : rawCutoff;
 
   const receiptCandidates = await rawReceiptCashCandidates(rawSince);
-  const [rawGroups, rollups] = await Promise.all([
+  const [rawGroups, rollups, derivedCostEstimates] = await Promise.all([
     prisma.externalUsageEvent.groupBy({
       by: [
         "sourceApp",
@@ -684,6 +720,10 @@ async function summarizeExternalUsageEventsUnserialized(
           },
         })
       : Promise.resolve([]),
+    // Flag-gated: default-off deployments skip the json_extract scan entirely.
+    ingestCostDerivationEnabled()
+      ? sumDerivedCostEstimates(rawSince)
+      : Promise.resolve({ totalUsd: 0, eventCount: 0 }),
   ]);
 
   let rawEventCount = receiptCandidates.length;
@@ -822,6 +862,8 @@ async function summarizeExternalUsageEventsUnserialized(
     eventCount:
       rawEventCount + rollups.reduce((sum, rollup) => sum + rollup.eventCount, 0),
     groups: summaries,
+    derivedCostEstimateUsd: derivedCostEstimates.totalUsd,
+    derivedCostEstimateEventCount: derivedCostEstimates.eventCount,
   };
 }
 

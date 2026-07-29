@@ -832,3 +832,23 @@ describe("parseUsageTelemetryBatch reserved sourceApp", () => {
     expect(events[0].sourceApp).toBe("subscription");
   });
 });
+
+describe("reserved derived-cost metadata keys", () => {
+  it("strips producer-supplied _derivedCost* keys so a monitor-computed estimate cannot be forged (v1)", () => {
+    const events = parseUsageTelemetryBatch({
+      sourceApp: "evil-producer",
+      provider: "openai",
+      metricType: "usage",
+      unit: "token",
+      quantity: 1000,
+      metadata: {
+        _derivedCostUsd: 999.99,
+        _derivedCostPricingKey: "gpt-4o",
+        _derivedCostSnapshot: "2020-01-01",
+        _derivedCostIncomplete: false,
+        legitimate: "kept",
+      },
+    });
+    expect(events[0].metadata).toEqual({ legitimate: "kept" });
+  });
+});
