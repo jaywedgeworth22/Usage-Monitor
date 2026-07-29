@@ -59,11 +59,15 @@ export async function auditReceiptLifecycle(env) {
           Authorization: `Bearer ${env.RECEIPT_LIFECYCLE_AUDIT_TOKEN}`,
           Accept: "application/json",
         },
-        redirect: "error",
+        // Workers fetch does not implement redirect:"error"; use manual and fail on 3xx.
+        redirect: "manual",
         signal: AbortSignal.timeout(AUDIT_TIMEOUT_MS),
       },
     );
-    if (!response.ok) throw new Error("lifecycle_api_failure");
+    if (response.status >= 300 && response.status < 400) {
+      throw new Error(`lifecycle_api_redirect:${response.status}`);
+    }
+    if (!response.ok) throw new Error(`lifecycle_api_failure:${response.status}`);
 
     const body = await readBoundedJson(response);
     return {
