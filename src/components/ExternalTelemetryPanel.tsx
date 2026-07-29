@@ -144,9 +144,9 @@ export default function ExternalTelemetryPanel({ usageSummary }: ExternalTelemet
           )}
           {(usageSummary.derivedCostEstimateUsd ?? 0) > 0 && (
             <p className="mt-1 text-xs font-medium text-sky-700 dark:text-sky-300">
-              Monitor-estimated: {usd.format(usageSummary.derivedCostEstimateUsd ?? 0)}
+              Monitor-estimated: {usd(usageSummary.derivedCostEstimateUsd ?? 0)}
               {usageSummary.derivedCostEstimateEventCount
-                ? ` · ${new Intl.NumberFormat("en-US").format(usageSummary.derivedCostEstimateEventCount)} events`
+                ? ` · ${formatNumber(usageSummary.derivedCostEstimateEventCount)} events`
                 : ""}
               <span className="block text-[10px] font-normal">
                 Token × LiteLLM pricing · not cash, not counted as priced
