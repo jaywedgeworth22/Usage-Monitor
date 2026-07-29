@@ -79,6 +79,8 @@ export interface AnomalyConfig {
 export interface AnomalyResult {
   /** Set by the DB loader; the pure detector leaves it undefined. */
   providerId?: string;
+  /** Set by the per-project loader (anomaly-loader) for project-scoped results. */
+  projectId?: string;
   metric: AnomalyMetric;
   /** UTC day the observed value belongs to. */
   day: string;

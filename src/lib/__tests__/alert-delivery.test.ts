@@ -8,6 +8,7 @@ import { tryAcquireIngestAdmission } from "../ingest-admission";
 let dbPath: string;
 let prisma: typeof import("@/lib/prisma").prisma;
 let deliverProviderAlerts: typeof import("../alert-delivery").deliverProviderAlerts;
+let readAlertDeliveryConfig: typeof import("../alert-delivery").readAlertDeliveryConfig;
 let AlertNotificationSummaryPersistenceTimeout: typeof import("../alert-delivery").AlertNotificationSummaryPersistenceTimeout;
 let encrypt: typeof import("@/lib/crypto").encrypt;
 
@@ -21,7 +22,7 @@ beforeAll(async () => {
 
   ({ prisma } = await import("@/lib/prisma"));
   ({ encrypt } = await import("@/lib/crypto"));
-  ({ deliverProviderAlerts, AlertNotificationSummaryPersistenceTimeout } = await import(
+  ({ deliverProviderAlerts, readAlertDeliveryConfig, AlertNotificationSummaryPersistenceTimeout } = await import(
     "../alert-delivery"
   ));
 }, 60_000);
@@ -44,6 +45,7 @@ beforeEach(async () => {
   await prisma.usageSnapshotDailyRollup.deleteMany();
   await prisma.usageSnapshot.deleteMany();
   await prisma.providerPlan.deleteMany();
+  await prisma.project.deleteMany();
   await prisma.provider.deleteMany();
 });
 
@@ -3345,5 +3347,374 @@ describe("alert delivery", () => {
       where: { id: openBudgetNotification.id },
     });
     expect(resolvedBudgetNotification.resolvedAt).not.toBeNull();
+  });
+});
+
+describe("S12: per-code severity overrides and channel routing (env parsing)", () => {
+  it("parses valid severity overrides and channel routing", () => {
+    const config = readAlertDeliveryConfig({
+      ALERT_CODE_SEVERITY_OVERRIDES: '{"stale_snapshot":"info","budget_exceeded":"critical"}',
+      ALERT_CODE_CHANNEL_ROUTING: '{"budget_exceeded":["slack","pagerduty"],"stale_snapshot":[]}',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(config.severityOverrides).toEqual({
+      stale_snapshot: "info",
+      budget_exceeded: "critical",
+    });
+    expect(config.channelRouting).toEqual({
+      budget_exceeded: ["slack", "pagerduty"],
+      // Empty array is meaningful: suppress external delivery for that code.
+      stale_snapshot: [],
+    });
+  });
+
+  it("ignores malformed JSON with a warning instead of throwing", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const config = readAlertDeliveryConfig({
+      ALERT_CODE_SEVERITY_OVERRIDES: "{not json",
+      ALERT_CODE_CHANNEL_ROUTING: '["slack"]',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(config.severityOverrides).toBeUndefined();
+    expect(config.channelRouting).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops unknown codes, invalid severities, and invalid routing shapes with warnings", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const config = readAlertDeliveryConfig({
+      ALERT_CODE_SEVERITY_OVERRIDES:
+        '{"stale_snapshot":"info","typo_code":"warning","budget_exceeded":"loud"}',
+      ALERT_CODE_CHANNEL_ROUTING:
+        '{"balance_low":"slack","typo_code":["slack"],"credits_low":["slack","carrier-pigeon"]}',
+    } as unknown as NodeJS.ProcessEnv);
+    expect(config.severityOverrides).toEqual({ stale_snapshot: "info" });
+    expect(config.channelRouting).toEqual({ credits_low: ["slack"] });
+    expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe("S12: severity overrides drive delivery eligibility", () => {
+  async function seedLowBalanceProvider() {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "override-target",
+        displayName: "Override Target",
+        type: "builtin",
+        refreshIntervalMin: 60,
+        plan: { create: { billingMode: "actual", lowBalanceUsd: 10 } },
+        snapshots: {
+          create: { fetchedAt: new Date("2026-07-20T08:00:00.000Z"), balance: 5 },
+        },
+      },
+    });
+    return provider;
+  }
+
+  it("demoting balance_low to info suppresses delivery under a warning policy", async () => {
+    await seedLowBalanceProvider();
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const result = await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config: {
+        channels: [{ kind: "webhook", url: "https://alerts.example/webhook" }],
+        minSeverity: "warning",
+        reminderHours: 24,
+        severityOverrides: { balance_low: "info" },
+      },
+      fetchImpl: fetchMock,
+    });
+    // The condition remains active (counted), but is not deliverable.
+    expect(result.activeAlerts).toBe(1);
+    expect(result.sent).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await prisma.providerAlertNotification.count()).toBe(0);
+  });
+
+  it("raising balance_low to critical delivers and persists the effective severity", async () => {
+    const provider = await seedLowBalanceProvider();
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const result = await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config: {
+        channels: [{ kind: "webhook", url: "https://alerts.example/webhook" }],
+        minSeverity: "critical",
+        reminderHours: 24,
+        severityOverrides: { balance_low: "critical" },
+      },
+      fetchImpl: fetchMock,
+    });
+    expect(result.sent).toBe(1);
+    const notification = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { stateKey: `${provider.id}:balance_low` },
+    });
+    expect(notification.severity).toBe("critical");
+  });
+});
+
+describe("S12: channel routing narrows trigger channels only", () => {
+  it("routes balance_low to slack only when two channel kinds are configured", async () => {
+    await prisma.provider.create({
+      data: {
+        name: "routing-target",
+        displayName: "Routing Target",
+        type: "builtin",
+        refreshIntervalMin: 60,
+        plan: { create: { billingMode: "actual", lowBalanceUsd: 10 } },
+        snapshots: {
+          create: { fetchedAt: new Date("2026-07-20T08:00:00.000Z"), balance: 5 },
+        },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const result = await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config: {
+        channels: [
+          { kind: "slack", url: "https://alerts.example/slack" },
+          { kind: "webhook", url: "https://alerts.example/webhook" },
+        ],
+        minSeverity: "warning",
+        reminderHours: 24,
+        channelRouting: { balance_low: ["slack"] },
+      },
+      fetchImpl: fetchMock,
+    });
+    expect(result.sent).toBe(1);
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(urls).toEqual(["https://alerts.example/slack"]);
+  });
+
+  it("an empty route suppresses external delivery but still tracks the incident", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "suppressed-target",
+        displayName: "Suppressed Target",
+        type: "builtin",
+        refreshIntervalMin: 60,
+        plan: { create: { billingMode: "actual", lowBalanceUsd: 10 } },
+        snapshots: {
+          create: { fetchedAt: new Date("2026-07-20T08:00:00.000Z"), balance: 5 },
+        },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const result = await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config: {
+        channels: [{ kind: "webhook", url: "https://alerts.example/webhook" }],
+        minSeverity: "warning",
+        reminderHours: 24,
+        channelRouting: { balance_low: [] },
+      },
+      fetchImpl: fetchMock,
+    });
+    expect(result.sent).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Incident still exists and resolves through the normal clear path.
+    const notification = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { stateKey: `${provider.id}:balance_low` },
+    });
+    expect(notification.resolvedAt).toBeNull();
+    await prisma.usageSnapshot.create({
+      data: { providerId: provider.id, fetchedAt: new Date("2026-07-20T14:00:00.000Z"), balance: 25 },
+    });
+    const cleared = await deliverProviderAlerts({
+      now: new Date("2026-07-20T14:30:00.000Z"),
+      config: {
+        channels: [{ kind: "webhook", url: "https://alerts.example/webhook" }],
+        minSeverity: "warning",
+        reminderHours: 24,
+        channelRouting: { balance_low: [] },
+      },
+      fetchImpl: fetchMock,
+    });
+    expect(cleared.resolved).toBe(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("S1: project budget alerts flow through the standard delivery machinery", () => {
+  it("delivers project_budget_exceeded with dedup, then resolves when the budget is raised", async () => {
+    const provider = await prisma.provider.create({
+      data: { name: "Anthropic", displayName: "Anthropic", type: "builtin", refreshIntervalMin: 60 },
+    });
+    const project = await prisma.project.create({
+      data: { name: "Alpha", monthlyBudgetUsd: 50 },
+    });
+    await prisma.externalUsageEvent.create({
+      data: {
+        idempotencyKey: "project-spend-1",
+        sourceApp: "test-producer",
+        provider: "Anthropic",
+        billingMode: "actual",
+        metricType: "usage",
+        confidence: "exact",
+        costUsd: 120,
+        occurredAt: new Date("2026-07-19T10:00:00.000Z"),
+        projectId: project.id,
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const config = {
+      channels: [{ kind: "webhook" as const, url: "https://alerts.example/webhook" }],
+      minSeverity: "warning" as const,
+      reminderHours: 24,
+    };
+
+    const first = await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config,
+      fetchImpl: fetchMock,
+    });
+    expect(first.sent).toBeGreaterThanOrEqual(1);
+
+    // The dedicated system provider row now exists, inactive and unpolled.
+    const sentinel = await prisma.provider.findFirstOrThrow({
+      where: { name: "project-budgets" },
+    });
+    expect(sentinel.isActive).toBe(false);
+
+    const notification = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { stateKey: `${sentinel.id}:project_budget_exceeded:${project.id}` },
+    });
+    expect(notification.severity).toBe("critical");
+    expect(notification.message).toContain('Project "Alpha"');
+    expect(notification.message).toContain("$120.00");
+    expect(notification.message).toContain("$50.00");
+
+    // Webhook bodies are JSON-encoded, so decode before searching for literal quotes.
+    const decodedMessages = fetchMock.mock.calls.map((call) =>
+      String(JSON.parse(String(call[1]?.body ?? ""))?.alert?.message ?? "")
+    );
+    expect(decodedMessages.length).toBeGreaterThan(0);
+    expect(decodedMessages.some((body) => body.includes('Project "Alpha"'))).toBe(true);
+
+    // Dedup: a second pass does not resend (reminder not due).
+    const second = await deliverProviderAlerts({
+      now: new Date("2026-07-20T13:00:00.000Z"),
+      config,
+      fetchImpl: fetchMock,
+    });
+    expect(second.sent).toBe(0);
+    const callsAfterFirst = fetchMock.mock.calls.length;
+
+    // Raising the budget clears the condition and resolves the incident.
+    await prisma.project.update({
+      where: { id: project.id },
+      data: { monthlyBudgetUsd: 200 },
+    });
+    const third = await deliverProviderAlerts({
+      now: new Date("2026-07-20T14:00:00.000Z"),
+      config,
+      fetchImpl: fetchMock,
+    });
+    expect(third.resolved).toBe(1);
+    expect(fetchMock.mock.calls.length).toBe(callsAfterFirst);
+    const resolved = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { stateKey: `${sentinel.id}:project_budget_exceeded:${project.id}` },
+    });
+    expect(resolved.resolvedAt).not.toBeNull();
+  });
+
+  it("delivers unassigned_spend as an info alert above the floor once projects exist", async () => {
+    await prisma.provider.create({
+      data: { name: "Anthropic", displayName: "Anthropic", type: "builtin", refreshIntervalMin: 60 },
+    });
+    // A configured project that none of the spend maps to.
+    await prisma.project.create({ data: { name: "Alpha", monthlyBudgetUsd: 1000 } });
+    await prisma.externalUsageEvent.create({
+      data: {
+        idempotencyKey: "unassigned-spend-1",
+        sourceApp: "unknown-producer",
+        provider: "Anthropic",
+        billingMode: "actual",
+        metricType: "usage",
+        confidence: "exact",
+        costUsd: 120,
+        occurredAt: new Date("2026-07-19T10:00:00.000Z"),
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const result = await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config: {
+        channels: [{ kind: "webhook", url: "https://alerts.example/webhook" }],
+        minSeverity: "info",
+        reminderHours: 24,
+      },
+      fetchImpl: fetchMock,
+    });
+
+    const sentinel = await prisma.provider.findFirstOrThrow({
+      where: { name: "project-budgets" },
+    });
+    const notification = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { stateKey: `${sentinel.id}:unassigned_spend` },
+    });
+    expect(notification.severity).toBe("info");
+    expect(notification.message).toContain("$120.00");
+    expect(notification.message).toContain("not attributed to any project");
+    expect(result.sent).toBeGreaterThanOrEqual(1);
+  });
+
+  it("creates no project-budgets provider and no alerts when no projects exist", async () => {
+    await prisma.provider.create({
+      data: { name: "Anthropic", displayName: "Anthropic", type: "builtin", refreshIntervalMin: 60 },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config: {
+        channels: [{ kind: "webhook", url: "https://alerts.example/webhook" }],
+        minSeverity: "info",
+        reminderHours: 24,
+      },
+      fetchImpl: fetchMock,
+    });
+    expect(await prisma.provider.findFirst({ where: { name: "project-budgets" } })).toBeNull();
+  });
+});
+
+describe("S14: subscription insight alerts flow through delivery", () => {
+  it("delivers unused_subscription as a scoped info alert on the provider", async () => {
+    const provider = await prisma.provider.create({
+      data: { name: "Anthropic", displayName: "Anthropic", type: "builtin", refreshIntervalMin: 60 },
+    });
+    const subscription = await prisma.subscription.create({
+      data: {
+        providerId: provider.id,
+        name: "Claude Pro",
+        costUsd: 20,
+        interval: "monthly",
+        startDate: new Date("2026-06-01T00:00:00.000Z"),
+        currentPeriodStart: new Date("2026-07-01T00:00:00.000Z"),
+        nextRenewalAt: new Date("2026-08-01T00:00:00.000Z"),
+        lastChargedPeriodStart: new Date("2026-07-01T00:00:00.000Z"),
+        status: "active",
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const config = {
+      channels: [{ kind: "webhook" as const, url: "https://alerts.example/webhook" }],
+      minSeverity: "info" as const,
+      reminderHours: 24,
+    };
+    await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config,
+      fetchImpl: fetchMock,
+    });
+
+    const notification = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { stateKey: `${provider.id}:unused_subscription:${subscription.id}` },
+    });
+    expect(notification.severity).toBe("info");
+    expect(notification.message).toContain("Claude Pro");
+    expect(notification.message).toContain("~$0 variable usage");
+
+    const bodies = fetchMock.mock.calls.map((call) => String(call[1]?.body ?? ""));
+    expect(bodies.some((body) => body.includes("Claude Pro"))).toBe(true);
   });
 });
