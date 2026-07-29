@@ -107,6 +107,14 @@ SQLite datasource — match provider names case-insensitively in JS (`.toLowerCa
   against Claude Code's own `cost.usage` estimate (drift ≥ 15% = investigate;
   `unpriced` = new model missing from the catalog → refresh the snapshot).
   See `docs/rollouts/2026-07-29-open-source-lessons.md`.
+- `INGEST_COST_DERIVATION_ENABLED` (default-off) extends the same catalog to
+  generic pushed telemetry: unpriced `usage`/`token` ingest events get a
+  `_derivedCostUsd` estimate stamped into **metadata only**
+  (`src/lib/pricing/derive-ingest-cost.ts`). `costUsd` stays null, so
+  pushed-cash budgets and priced/unpriced coverage are untouched; the total
+  surfaces separately as `derivedCostEstimateUsd` in `GET /api/usage-events`
+  and the dashboard telemetry panel. The four `_derivedCost*` metadata keys
+  are reserved in `usage-telemetry.ts` (producer spoof-proof).
 - `OTLP_METRICS_INGEST_ENABLED` is a default-on emergency switch for the
   database-writing metrics route only. Explicit `false` returns authenticated
   requests admitted by the IP limiter `503` plus `Retry-After: 300` before body

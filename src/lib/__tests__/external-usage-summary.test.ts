@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
   externalUsageEvent: { findMany: vi.fn(), groupBy: vi.fn() },
   externalUsageEventDailyRollup: { findMany: vi.fn() },
+  $queryRaw: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
@@ -111,6 +112,8 @@ describe("summarizeExternalUsageEvents", () => {
     );
     expect(result).toEqual({
       eventCount: 1_007,
+      derivedCostEstimateUsd: 0,
+      derivedCostEstimateEventCount: 0,
       groups: [
         expect.objectContaining({
           eventCount: 1_007,
@@ -790,5 +793,43 @@ describe("summarizeExternalUsageEvents", () => {
         estimatedApiEquivalentUsd: 0,
       }),
     ]);
+  });
+});
+
+describe("summarizeExternalUsageEvents derived cost estimates", () => {
+  const FLAG = "INGEST_COST_DERIVATION_ENABLED";
+
+  beforeEach(() => {
+    prismaMock.externalUsageEvent.findMany.mockResolvedValue([]);
+    prismaMock.externalUsageEvent.groupBy.mockResolvedValue([]);
+    prismaMock.externalUsageEventDailyRollup.findMany.mockResolvedValue([]);
+    prismaMock.$queryRaw.mockResolvedValue([{ totalUsd: 12.5, eventCount: 7 }]);
+  });
+
+  afterEach(() => {
+    delete process.env[FLAG];
+  });
+
+  it("skips the json_extract scan entirely when the flag is off (default)", async () => {
+    const summary = await summarizeExternalUsageEvents(
+      new Date("2026-06-01T00:00:00.000Z"),
+      new Date("2026-07-01T00:00:00.000Z")
+    );
+    expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+    expect(summary.derivedCostEstimateUsd).toBe(0);
+    expect(summary.derivedCostEstimateEventCount).toBe(0);
+  });
+
+  it("surfaces monitor-estimated totals separately when the flag is on", async () => {
+    process.env[FLAG] = "true";
+    const summary = await summarizeExternalUsageEvents(
+      new Date("2026-06-01T00:00:00.000Z"),
+      new Date("2026-07-01T00:00:00.000Z")
+    );
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(summary.derivedCostEstimateUsd).toBe(12.5);
+    expect(summary.derivedCostEstimateEventCount).toBe(7);
+    // Derived estimates never leak into the producer-reported cost pool.
+    expect(summary.groups).toEqual([]);
   });
 });
