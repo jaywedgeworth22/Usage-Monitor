@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import Nav from "@/components/Nav";
+import PwaRegistration from "@/components/PwaRegistration";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
@@ -55,6 +56,7 @@ export default async function RootLayout({
           <main className="max-w-7xl mx-auto px-3 py-5 sm:px-6 sm:py-8 lg:px-8">
             {children}
           </main>
+          <PwaRegistration />
         </ThemeProvider>
       </body>
     </html>
