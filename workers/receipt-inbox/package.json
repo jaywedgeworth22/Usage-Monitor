@@ -1,9 +1,0 @@
-{
-  "name": "receipt-inbox-worker",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Cloudflare Email Routing worker for the private receipt quarantine (deployed via the root `receipt-inbox:deploy` script). Dependencies live here, not in the root package.json, because the Next.js app never imports them.",
-  "dependencies": {
-    "postal-mime": "^2.7.5"
-  }
-}
