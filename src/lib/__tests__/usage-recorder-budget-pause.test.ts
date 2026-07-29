@@ -12,7 +12,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // DB or network is touched — the test isolates the skip decision.
 
 const findMany = vi.fn();
-const findFirst = vi.fn();
+const snapshotGroupBy = vi.fn();
+const snapshotFindMany = vi.fn();
+const queryRaw = vi.fn();
 const create = vi.fn();
 const fetchProviderUsage = vi.fn();
 const bootstrapStGeminiCredentialToInfisical = vi.fn();
@@ -24,8 +26,10 @@ vi.mock("@/lib/prisma", () => ({
     provider: { findMany: () => findMany(), create: vi.fn() },
     usageSnapshot: {
       create: (args: unknown) => create(args),
-      findFirst: (args: unknown) => findFirst(args),
+      groupBy: (args: unknown) => snapshotGroupBy(args),
+      findMany: (args: unknown) => snapshotFindMany(args),
     },
+    $queryRaw: (args: unknown) => queryRaw(args),
     $transaction: (run: (tx: unknown) => unknown) =>
       run({ usageSnapshot: { create: (args: unknown) => create(args) } }),
   },
@@ -73,8 +77,12 @@ describe("fetchAllDueProviders budget-breach pause skip", () => {
   beforeEach(() => {
     vi.resetModules();
     findMany.mockReset();
-    findFirst.mockReset();
-    findFirst.mockResolvedValue(null);
+    snapshotGroupBy.mockReset();
+    snapshotGroupBy.mockResolvedValue([]);
+    snapshotFindMany.mockReset();
+    snapshotFindMany.mockResolvedValue([]);
+    queryRaw.mockReset();
+    queryRaw.mockResolvedValue([]);
     create.mockReset();
     create.mockResolvedValue({ id: "snap" });
     fetchProviderUsage.mockReset();

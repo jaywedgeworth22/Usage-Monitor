@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { Monitor, Moon, Sun } from "lucide-react";
+import { setStoredDisplayDensity, useDisplayDensity } from "@/lib/display-density";
 
 export default function Nav() {
   const pathname = usePathname();
@@ -14,6 +15,7 @@ export default function Nav() {
   const [logoutError, setLogoutError] = useState("");
 
   const { theme, setTheme } = useTheme();
+  const density = useDisplayDensity();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -120,6 +122,30 @@ export default function Nav() {
                     );
                   })}
                 </div>
+                {/* Display density segmented control */}
+                <div className="flex items-center gap-0.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800/80 p-0.5" role="group" aria-label="Display density selector">
+                  {(["compact", "comfortable"] as const).map((d) => {
+                    const active = density === d;
+                    const label = d === "compact" ? "Compact" : "Comfortable";
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setStoredDisplayDensity(d)}
+                        aria-pressed={active}
+                        title={`Set display density to ${label}`}
+                        aria-label={`Set display density to ${label}`}
+                        className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
+                          active
+                            ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm border border-gray-200/80 dark:border-gray-700"
+                            : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 border border-transparent"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               </>
             )}
             {logoutError && <span role="alert" className="max-w-48 text-xs text-red-600 dark:text-red-300">{logoutError}</span>}
@@ -192,6 +218,28 @@ export default function Nav() {
                         >
                           <Icon size={14} />
                           <span>{label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Density</div>
+                  <div className="flex items-center gap-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800/80 p-0.5" role="group" aria-label="Display density selector">
+                    {(["compact", "comfortable"] as const).map((d) => {
+                      const active = density === d;
+                      const label = d === "compact" ? "Compact" : "Comfortable";
+                      return (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => setStoredDisplayDensity(d)}
+                          aria-pressed={active}
+                          className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-all ${
+                            active
+                              ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm border border-gray-200/80 dark:border-gray-700"
+                              : "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 border border-transparent"
+                          }`}
+                        >
+                          {label}
                         </button>
                       );
                     })}

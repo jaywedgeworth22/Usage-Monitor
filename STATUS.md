@@ -1,5 +1,11 @@
 # Status
 
+> **Historical snapshot — 2026-07-21.** This file describes the unmerged side
+> branch `codex/mobile-first-ios-parity-20260721` (native iOS parity worktree),
+> not the current state of `main`. It is retained as a dated record only. For
+> current production state see `main` (deployed revision: `/api/health` on
+> https://usage.jays.services) and `docs/EFFORT-LOG.md`.
+
 Updated: 2026-07-21
 
 ## Current state

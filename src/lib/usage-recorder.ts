@@ -166,6 +166,10 @@ export interface ProviderFetchOutcome {
   status: "success" | "failure" | "skipped";
   durationMs: number;
   errorCode?: AdapterErrorCode | "UNKNOWN";
+  // E5: why a skip happened, when the reason matters operationally. Only set
+  // for total-tick-budget skips today (other skips are interval/backoff/pause
+  // gates whose meaning is already implied by cadence).
+  skipReason?: "tick_budget";
 }
 
 export interface FetchAllProvidersResult {
@@ -175,6 +179,10 @@ export interface FetchAllProvidersResult {
   skipped: number;
   errors: ProviderFetchError[];
   outcomes: ProviderFetchOutcome[];
+  // E5: true when the total-tick time budget stopped new provider fetches
+  // before the poll set was exhausted. Surfaced through the existing
+  // providerFetchDegraded scheduler signal in runUsagePollingSchedulerTick.
+  tickBudgetExceeded: boolean;
   // Safe status/code only. The one-time bootstrap never returns credential
   // material or an upstream response body.
   credentialBootstrap?: StGeminiInfisicalBootstrapResult;
@@ -213,6 +221,139 @@ export function isProviderFetchTickDegraded(
   // misconfigured above its intended 0-1 range.
   if (result.successes === 0 && result.failures > 0) return true;
   return result.failures / attempted >= resolveProviderFetchDegradedFailureRatio();
+}
+
+// E5: total-tick time budget for the provider-fetch phase. Worst case the
+// sequential loop used to be ~39 providers x the 90s per-provider timeout,
+// far past the 15-minute cadence, so one slow-tick pileup could starve
+// maintenance and the next tick. Past this budget the loop stops STARTING
+// new provider fetches; remaining providers are marked skipped
+// (skipReason "tick_budget") and the tick is flagged providerFetchDegraded.
+const DEFAULT_PROVIDER_FETCH_TICK_BUDGET_MS = 10 * 60 * 1000;
+
+function resolveProviderFetchTickBudgetMs(): number {
+  const raw = process.env.PROVIDER_FETCH_TICK_BUDGET_MS;
+  if (raw == null || raw.trim() === "") return DEFAULT_PROVIDER_FETCH_TICK_BUDGET_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_PROVIDER_FETCH_TICK_BUDGET_MS;
+  return parsed;
+}
+
+interface LatestPollSnapshotMarker {
+  fetchedAt: Date;
+  retryable: boolean;
+}
+
+/**
+ * E4: per-provider latest poll snapshot (fetchedAt + retryable-partial
+ * marker) WITHOUT selecting rawData blobs. Re-selecting every provider's
+ * rawData (a full adapter raw-API-response payload) every 15 minutes was the
+ * pattern removed elsewhere after the #392 OOM. The only consumer is the
+ * retry gate below, so this pulls just the tiny __apiUsageMonitor
+ * partialFailure sub-object via SQLite json_extract - the same pattern as
+ * api/providers/route.ts's batchSnapshotCostCoverageCaveats.
+ *
+ * "Latest poll snapshot" means the latest snapshot with a non-null rawData
+ * (pushed quota/credit events intentionally write rawData-less rows). That
+ * is exactly what the old two-step logic resolved to: snapshots[0] when it
+ * had rawData is trivially the latest non-null-rawData row, and the fallback
+ * findFirst asked for the same thing when it didn't.
+ */
+async function loadLatestPollSnapshotMarkers(
+  providerIds: string[]
+): Promise<Map<string, LatestPollSnapshotMarker>> {
+  const result = new Map<string, LatestPollSnapshotMarker>();
+  if (providerIds.length === 0) return result;
+
+  const latestByProvider = await prisma.usageSnapshot.groupBy({
+    by: ["providerId"],
+    where: {
+      providerId: { in: providerIds },
+      rawData: { not: Prisma.DbNull },
+    },
+    _max: { fetchedAt: true },
+  });
+  const pairs = latestByProvider.filter(
+    (row): row is typeof row & { _max: { fetchedAt: Date } } =>
+      row._max.fetchedAt != null
+  );
+  if (pairs.length === 0) return result;
+
+  // Resolve (providerId, maxFetchedAt) pairs to concrete snapshot ids. Rows
+  // carry only scalars - never the rawData blob. A fetchedAt tie can return
+  // more than one row per provider; keep the first, matching the old
+  // orderBy(fetchedAt desc), take-1 semantics' arbitrary tie-break.
+  const rows = await prisma.usageSnapshot.findMany({
+    where: {
+      OR: pairs.map((row) => ({
+        providerId: row.providerId,
+        fetchedAt: row._max.fetchedAt,
+      })),
+    },
+    select: { id: true, providerId: true, fetchedAt: true },
+  });
+  const rowByProviderId = new Map<string, { id: string; fetchedAt: Date }>();
+  for (const row of rows) {
+    if (!rowByProviderId.has(row.providerId)) {
+      rowByProviderId.set(row.providerId, row);
+    }
+  }
+  if (rowByProviderId.size === 0) return result;
+
+  const markers = await prisma.$queryRaw<
+    Array<{
+      id: string;
+      version: unknown;
+      code: unknown;
+      status: unknown;
+      retryable: unknown;
+    }>
+  >(Prisma.sql`
+    SELECT
+      "id" AS "id",
+      json_extract("rawData", '$.__apiUsageMonitor.version') AS "version",
+      json_extract("rawData", '$.__apiUsageMonitor.partialFailure.code') AS "code",
+      json_extract("rawData", '$.__apiUsageMonitor.partialFailure.status') AS "status",
+      json_extract("rawData", '$.__apiUsageMonitor.partialFailure.retryable') AS "retryable"
+    FROM "UsageSnapshot"
+    WHERE "id" IN (${Prisma.join(
+      Array.from(rowByProviderId.values(), (row) => row.id)
+    )})
+  `);
+  const markerBySnapshotId = new Map(markers.map((marker) => [marker.id, marker]));
+
+  for (const [providerId, row] of rowByProviderId) {
+    const marker = markerBySnapshotId.get(row.id);
+    // json_extract surfaces JSON integers/booleans as SQL values that Prisma
+    // returns as BigInt; coerce them back, rebuild the tiny metadata bag, and
+    // run it through the SAME validator the rawData path used
+    // (snapshot-sync-status.ts) so malformed markers fail closed identically.
+    const hasPartialFailure =
+      marker != null &&
+      (marker.code != null || marker.status != null || marker.retryable != null);
+    const syntheticRawData = {
+      __apiUsageMonitor: {
+        version: marker?.version == null ? null : Number(marker.version),
+        ...(hasPartialFailure
+          ? {
+              partialFailure: {
+                code: marker.code ?? undefined,
+                status: marker.status == null ? null : Number(marker.status),
+                retryable:
+                  marker.retryable == null
+                    ? undefined
+                    : Number(marker.retryable) === 1,
+              },
+            }
+          : {}),
+      },
+    };
+    result.set(providerId, {
+      fetchedAt: row.fetchedAt,
+      retryable: isRetryablePartialSnapshot(syntheticRawData),
+    });
+  }
+  return result;
 }
 
 let fetchAllInFlight: Promise<FetchAllProvidersResult> | null = null;
@@ -265,13 +406,9 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
     }
     const storedProviders = await prisma.provider.findMany({
       where: { isActive: true },
-      include: {
-        snapshots: {
-          orderBy: { fetchedAt: "desc" },
-          take: 1,
-          select: { fetchedAt: true, rawData: true },
-        },
-      },
+      // E4: the snapshots include (latest row's rawData blob per provider) is
+      // gone - the retry marker it fed is loaded below via
+      // loadLatestPollSnapshotMarkers, which never touches rawData.
     });
 
     // A startup failure or a row created by an older client must not turn a
@@ -281,6 +418,10 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
       (provider) => !isDecommissionedProviderName(provider.name)
     );
 
+    const latestPollByProviderId = await loadLatestPollSnapshotMarkers(
+      providers.map((provider) => provider.id)
+    );
+
     let successes = 0;
     let failures = 0;
     let skipped = 0;
@@ -288,8 +429,11 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
     const outcomes: ProviderFetchOutcome[] = [];
     const now = Date.now();
     const providerTimeoutMs = resolveProviderTimeoutMs();
+    const tickStartedAtMs = now;
+    const tickBudgetMs = resolveProviderFetchTickBudgetMs();
+    let tickBudgetExceeded = false;
 
-    for (const { snapshots, ...provider } of providers) {
+    for (const provider of providers) {
       const startedAt = Date.now();
       // Budget-breach control: a provider paused by the (default-off) automated
       // control layer is cleanly skipped here, exactly like an interval-gated
@@ -306,26 +450,17 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
         });
         continue;
       }
-      const latestSnapshot = snapshots[0];
       const intervalMs = provider.refreshIntervalMin * 60 * 1000;
       // Pushed quota/credit events intentionally create rawData-less
       // snapshots. They may be newer than the last poll snapshot, but must not
-      // hide its retry marker or make an old/missing poll look fresh.
-      const latestPollSnapshot =
-        latestSnapshot?.rawData == null
-          ? await prisma.usageSnapshot.findFirst({
-              where: {
-                providerId: provider.id,
-                rawData: { not: Prisma.DbNull },
-              },
-              orderBy: { fetchedAt: "desc" },
-              select: { fetchedAt: true, rawData: true },
-            })
-          : latestSnapshot;
-      const latestPollFetchedAt = latestPollSnapshot?.fetchedAt.getTime();
+      // hide its retry marker or make an old/missing poll look fresh. The
+      // marker here comes from the json_extract batch above (E4), not from a
+      // re-selected rawData blob.
+      const latestPoll = latestPollByProviderId.get(provider.id);
+      const latestPollFetchedAt = latestPoll?.fetchedAt.getTime();
       if (
         latestPollFetchedAt &&
-        !isRetryablePartialSnapshot(latestPollSnapshot?.rawData) &&
+        !latestPoll?.retryable &&
         now - latestPollFetchedAt < intervalMs
       ) {
         skipped++;
@@ -351,6 +486,22 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
           name: provider.name,
           status: "skipped",
           durationMs: Date.now() - startedAt,
+        });
+        continue;
+      }
+
+      // E5: total-tick budget. Stop STARTING new provider fetches once the
+      // tick has consumed its budget; remaining providers are marked as
+      // budget-skipped (they stay "due" and are picked up on the next tick).
+      if (Date.now() - tickStartedAtMs >= tickBudgetMs) {
+        tickBudgetExceeded = true;
+        skipped++;
+        outcomes.push({
+          providerId: provider.id,
+          name: provider.name,
+          status: "skipped",
+          durationMs: Date.now() - startedAt,
+          skipReason: "tick_budget",
         });
         continue;
       }
@@ -446,6 +597,7 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
       skipped,
       errors,
       outcomes,
+      tickBudgetExceeded,
       credentialBootstrap,
       credentialSync,
     };
@@ -510,7 +662,8 @@ export async function runUsagePollingSchedulerTick(
     // restarting. It is tracked as its own consecutive-tick streak in
     // runtime-health so a single flaky provider can't flap readiness, and
     // surfaced as a distinct scheduler.providerFetchDegraded signal instead.
-    const providerFetchDegraded = isProviderFetchTickDegraded(result);
+    const providerFetchDegraded =
+      isProviderFetchTickDegraded(result) || result.tickBudgetExceeded === true;
     markTickCompleted(maintenanceHealthy, {
       total: result.total,
       successes: result.successes,

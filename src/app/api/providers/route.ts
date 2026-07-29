@@ -12,7 +12,7 @@ import { buildKeyPreview } from "@/lib/provider-key-preview";
 import {
   hasProviderSecrets,
   providerConfigForClient,
-  providerConfigForServer,
+  providerConfigForServerOrNull,
   splitProviderConfig,
 } from "@/lib/provider-secret-config";
 import {
@@ -44,17 +44,6 @@ function decryptKey(encryptedKey: string | null): string | null {
   if (!encryptedKey) return null;
   try {
     return decrypt(encryptedKey);
-  } catch {
-    return null;
-  }
-}
-
-function serverConfig(
-  config: unknown,
-  encryptedSecretConfig: string | null
-): Record<string, unknown> | null {
-  try {
-    return providerConfigForServer(config, encryptedSecretConfig);
   } catch {
     return null;
   }
@@ -272,7 +261,7 @@ export async function GET(request: NextRequest) {
   const serverConfigsByProviderId = new Map(
     providers.map((provider) => [
       provider.id,
-      serverConfig(provider.config, provider.secretConfig),
+      providerConfigForServerOrNull(provider.config, provider.secretConfig),
     ])
   );
   const billingAccountMatches = projectProviderBillingAccountMatches(

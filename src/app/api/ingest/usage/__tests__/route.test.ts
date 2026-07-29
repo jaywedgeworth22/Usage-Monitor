@@ -22,6 +22,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import { POST } from "../route";
 import { tryAcquireIngestAdmission } from "@/lib/ingest-admission";
+import { getNamedRateLimiter } from "@/lib/rate-limit";
 import { signReceiptCashEvent } from "@/lib/receipt-cash";
 import {
   MAX_NEGATIVE_SUBSCRIPTION_COST_USD,
@@ -149,6 +150,11 @@ beforeEach(() => {
   vi.stubEnv("USAGE_INGEST_TOKEN", USAGE_TOKEN);
   vi.stubEnv("BILLING_RECEIPT_INGEST_TOKEN", RECEIPT_TOKEN);
   vi.stubEnv("BILLING_RECEIPT_HMAC_KEY", RECEIPT_HMAC_KEY);
+  // The route's rate limiters are process-wide named singletons (they key on
+  // the token hash / backstop identity now, not the per-test rotating IP), so
+  // clear their windows between tests to keep each case isolated.
+  getNamedRateLimiter("ingest-identity", 1_000, 10).reset();
+  getNamedRateLimiter("ingest-unauthenticated", 1_000, 10).reset();
   resolveProjects.mockResolvedValue(new Map());
   externalUsageMocks.persist.mockResolvedValue({
     attempted: 1,
@@ -260,9 +266,11 @@ describe("POST /api/ingest/usage admission", () => {
     );
   });
 
-  it("returns the typed v2 error shape for a headerless invalid v2 body", async () => {
+  it("returns the typed v2 error shape for a headerless invalid v2 envelope", async () => {
+    // Missing producerId is an ENVELOPE failure: still a hard 400, unlike
+    // per-event rejections (X5).
     const response = await POST(nextRequest(
-      { schemaVersion: 2, producerId: "socratic-trade", events: [{}] },
+      { schemaVersion: 2, events: [{ eventId: "e", provider: "openai" }] },
       USAGE_TOKEN
     ));
     expect(response.status).toBe(400);
@@ -274,6 +282,73 @@ describe("POST /api/ingest/usage admission", () => {
         retryable: false,
       }),
     }));
+    expect(externalUsageMocks.persist).not.toHaveBeenCalled();
+  });
+
+  it("persists valid events and ACKs rejected ones for a poison event in a v2 batch (X5)", async () => {
+    externalUsageMocks.persist.mockResolvedValueOnce({
+      attempted: 2,
+      persisted: 2,
+      skippedPrunedDuplicates: 0,
+      newEvents: [],
+    });
+    const response = await POST(nextRequest(
+      {
+        schemaVersion: 2,
+        producerId: "socratic-trade",
+        events: [
+          { eventId: "good-1", provider: "openai", occurredAt: "2026-07-21T00:00:00.000Z" },
+          { provider: "openai" }, // poison: missing eventId
+          { eventId: "good-2", provider: "anthropic", occurredAt: "2026-07-21T00:01:00.000Z" },
+        ],
+      },
+      USAGE_TOKEN,
+      "https://usage.jays.services/api/ingest/usage",
+      2
+    ));
+
+    expect(response.status).toBe(202);
+    const body = await response.json();
+    // ACK invariant: persisted + duplicates + pruned + rejected === received.
+    expect(body).toEqual({
+      ok: true,
+      schemaVersion: 2,
+      received: 3,
+      persisted: 2,
+      duplicates: 0,
+      pruned: 0,
+      rejected: 1,
+      rejections: [
+        expect.objectContaining({ index: 1, issues: expect.any(Array) }),
+      ],
+    });
+    // Only the valid events reached persistence.
+    expect(externalUsageMocks.persist).toHaveBeenCalledTimes(1);
+    const persistedEvents = externalUsageMocks.persist.mock.calls[0][0];
+    expect(persistedEvents).toHaveLength(2);
+    expect(
+      persistedEvents.map((event: { metadata?: { _producerEventId?: string } }) =>
+        event.metadata?._producerEventId
+      )
+    ).toEqual(["good-1", "good-2"]);
+  });
+
+  it("ACKs an all-poison v2 batch with rejected === received instead of a 400", async () => {
+    const response = await POST(nextRequest(
+      { schemaVersion: 2, producerId: "socratic-trade", events: [{}] },
+      USAGE_TOKEN
+    ));
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({
+      ok: true,
+      schemaVersion: 2,
+      received: 1,
+      persisted: 0,
+      duplicates: 0,
+      pruned: 0,
+      rejected: 1,
+      rejections: [expect.objectContaining({ index: 0 })],
+    });
     expect(externalUsageMocks.persist).not.toHaveBeenCalled();
   });
 
@@ -329,7 +404,7 @@ describe("POST /api/ingest/usage admission", () => {
     release?.();
   });
 
-  it("reports zero accepted rows for an idempotent replay", async () => {
+  it("reports received/duplicates alongside zero accepted rows for an idempotent replay (X7)", async () => {
     externalUsageMocks.persist.mockResolvedValueOnce({
       attempted: 1,
       persisted: 0,
@@ -342,6 +417,8 @@ describe("POST /api/ingest/usage admission", () => {
     expect(await response.json()).toEqual({
       ok: true,
       accepted: 0,
+      received: 1,
+      duplicates: 1,
       ignoredPruned: 0,
     });
 
@@ -350,9 +427,34 @@ describe("POST /api/ingest/usage admission", () => {
     release?.();
   });
 
-  it("releases admission when persistence throws", async () => {
+  it("returns a typed internal_error and releases admission when persistence fails unexpectedly (X6)", async () => {
     externalUsageMocks.persist.mockRejectedValueOnce(new Error("database unavailable"));
-    await expect(POST(ordinaryRequest())).rejects.toThrow("database unavailable");
+    const response = await POST(ordinaryRequest());
+    expect(response.status).toBe(500);
+    expect(response.headers.get("retry-after")).toBe("30");
+    expect(response.headers.get("content-type")).toContain("application/json");
+    // v1 clients get a JSON error body (never an untyped HTML 500)...
+    expect(await response.json()).toEqual({ error: "Internal error" });
+
+    const release = tryAcquireIngestAdmission();
+    expect(release).not.toBeNull();
+    release?.();
+  });
+
+  it("returns the typed v2 internal_error shape when persistence fails for a v2 batch (X6)", async () => {
+    externalUsageMocks.persist.mockRejectedValueOnce(new Error("database unavailable"));
+    const response = await POST(v2Request());
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      ok: false,
+      schemaVersion: 2,
+      error: {
+        code: "internal_error",
+        message: "Internal error",
+        retryable: true,
+        retryAfterSeconds: 30,
+      },
+    });
 
     const release = tryAcquireIngestAdmission();
     expect(release).not.toBeNull();
@@ -652,5 +754,82 @@ describe("POST /api/ingest/usage body limits", () => {
     const response = await POST(ordinaryRequest());
     expect(response.status).toBe(202);
     expect(externalUsageMocks.persist).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /api/ingest/usage rate limiting (X1)", () => {
+  function requestFrom(
+    headers: Record<string, string>,
+    body: unknown = {
+      sourceApp: "socratic-trade",
+      provider: "openai",
+      metricType: "cost",
+      costUsd: 0,
+      occurredAt: "2026-07-14T00:00:00.000Z",
+    }
+  ): NextRequest {
+    return new NextRequest("https://usage.jays.services/api/ingest/usage", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("limits authenticated traffic per token, not per source IP", async () => {
+    // 10 distinct source IPs but ONE credential: the 11th request 429s,
+    // proving the bucket follows the authenticated identity (before X1 each
+    // of these would have had its own per-IP bucket).
+    for (let index = 1; index <= 10; index += 1) {
+      const response = await POST(requestFrom({
+        authorization: `Bearer ${USAGE_TOKEN}`,
+        "x-forwarded-for": `10.9.0.${index}`,
+      }));
+      expect(response.status).toBe(202);
+    }
+    const limited = await POST(requestFrom({
+      authorization: `Bearer ${USAGE_TOKEN}`,
+      "x-forwarded-for": "10.9.0.11",
+    }));
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("30");
+    expect(externalUsageMocks.persist).toHaveBeenCalledTimes(10);
+  });
+
+  it("does not let unauthenticated hammering through the shared Cloudflare egress IP drain the producer bucket", async () => {
+    // Production topology: every client shares Cloudflare's egress IP as the
+    // rightmost XFF hop; CF-Connecting-IP distinguishes them. Bad-token
+    // requests from many distinct CF-proxied clients each get their own
+    // backstop bucket...
+    for (let index = 1; index <= 15; index += 1) {
+      const response = await POST(requestFrom({
+        authorization: "Bearer wrong-token",
+        "x-forwarded-for": "173.245.48.1",
+        "cf-connecting-ip": `198.51.100.${index}`,
+      }));
+      expect(response.status).toBe(401);
+    }
+    // ...and the legitimate producer (same shared egress IP) is unaffected.
+    const producer = await POST(requestFrom({
+      authorization: `Bearer ${USAGE_TOKEN}`,
+      "x-forwarded-for": "173.245.48.1",
+      "cf-connecting-ip": "198.51.100.1",
+    }));
+    expect(producer.status).toBe(202);
+  });
+
+  it("throttles unauthenticated hammering from one direct (non-Cloudflare) peer", async () => {
+    for (let index = 0; index < 10; index += 1) {
+      const response = await POST(requestFrom({
+        authorization: "Bearer wrong-token",
+        "x-forwarded-for": "45.33.12.9",
+      }));
+      expect(response.status).toBe(401);
+    }
+    const limited = await POST(requestFrom({
+      authorization: "Bearer wrong-token",
+      "x-forwarded-for": "45.33.12.9",
+    }));
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("30");
   });
 });

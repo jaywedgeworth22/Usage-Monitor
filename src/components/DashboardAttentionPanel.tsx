@@ -55,10 +55,10 @@ export default function DashboardAttentionPanel({
                     Open provider
                   </Link>
                   <Link
-                    href={`/providers/${provider.id}`}
+                    href="/settings?tab=connections"
                     className="text-xs font-medium text-blue-600 dark:text-blue-400"
                   >
-                    Edit budget
+                    Edit budget in Settings
                   </Link>
                 </div>
               </div>

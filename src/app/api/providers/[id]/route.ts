@@ -15,7 +15,7 @@ import {
   hasProviderSecrets,
   mergeProviderConfig,
   providerConfigForClient,
-  providerConfigForServer,
+  providerConfigForServerOrNull,
   splitProviderConfig,
 } from "@/lib/provider-secret-config";
 import {
@@ -46,17 +46,6 @@ function decryptKey(encryptedKey: string | null): string | null {
   if (!encryptedKey) return null;
   try {
     return decrypt(encryptedKey);
-  } catch {
-    return null;
-  }
-}
-
-function serverConfig(
-  config: unknown,
-  encryptedSecretConfig: string | null
-): Record<string, unknown> | null {
-  try {
-    return providerConfigForServer(config, encryptedSecretConfig);
   } catch {
     return null;
   }
@@ -208,7 +197,7 @@ export async function GET(
     return null;
   });
   const decryptedKey = decryptKey(apiKey);
-  const adapterConfig = serverConfig(config, secretConfig);
+  const adapterConfig = providerConfigForServerOrNull(config, secretConfig);
   const billingAccount = projectProviderBillingAccountMatches([
     {
       id: provider.id,

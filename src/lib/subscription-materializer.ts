@@ -40,6 +40,16 @@ export interface MaterializeSubscriptionsResult {
   eventsWritten: number;
   /** Managed rows paused because their stored period window is not an exact cadence. */
   ambiguousPaused: number;
+  /**
+   * S8: active rows skipped because they are denominated in a non-USD
+   * currency. Non-USD amounts are NEVER materialized as USD; creation is
+   * rejected at the API layer (subscription-input.ts), so any such row is a
+   * legacy/direct-DB survivor and its suppression is surfaced loudly (warn
+   * log + this count + a billing_sync_incomplete budget alert). Optional so
+   * partial maintenance-result mocks in other lanes' tests keep compiling;
+   * materializeDueSubscriptions always populates it.
+   */
+  nonUsdSkipped?: number;
 }
 
 interface SubscriptionChargePlanInput {
@@ -358,9 +368,24 @@ export async function materializeDueSubscriptions(
   let charged = 0;
   let eventsWritten = 0;
   let ambiguousPaused = 0;
+  let nonUsdSkipped = 0;
 
   for (const observedSubscription of subscriptions) {
     let subscription: DueSubscription = observedSubscription;
+
+    // S8: never charge a non-USD-denominated subscription AS USD. The API
+    // validation layer rejects non-USD creation (subscription-input.ts), so
+    // a non-USD row here is a legacy/direct-DB survivor: suppress its charges
+    // loudly (warn + count + budget-status alert) instead of silently
+    // materializing a wrong-currency amount, until authoritative FX
+    // conversion exists.
+    if (subscription.currency.toUpperCase() !== "USD") {
+      console.warn(
+        `[subscription-materializer] suppressing non-USD subscription ${subscription.id} (${subscription.name}, currency=${subscription.currency}): charges are skipped, never charged as USD, until authoritative FX conversion exists`
+      );
+      nonUsdSkipped += 1;
+      continue;
+    }
 
     // Wave K / E13: external-managed rows with a non-exact period window are
     // mid-period / provider-skew evidence — pause and skip inventing charges
@@ -449,5 +474,6 @@ export async function materializeDueSubscriptions(
     charged,
     eventsWritten,
     ambiguousPaused,
+    nonUsdSkipped,
   };
 }

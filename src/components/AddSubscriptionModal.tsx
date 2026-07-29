@@ -176,7 +176,7 @@ export default function AddSubscriptionModal({
   };
 
   const inputClass =
-    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100";
+    "w-full px-3 py-2 border border-gray-300 rounded-lg text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100";
   const labelClass = "block text-sm font-medium text-gray-700 mb-1 dark:text-gray-200";
 
   const handleStatusChange = (nextStatus: string) => {
@@ -406,6 +406,7 @@ export default function AddSubscriptionModal({
                 <input
                   id="subscription-cost"
                   type="number"
+                  inputMode="decimal"
                   min="0"
                   step="0.01"
                   value={costUsd}
@@ -609,7 +610,7 @@ export default function AddSubscriptionModal({
               type="button"
               onClick={onClose}
               disabled={saving}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 dark:text-gray-200 dark:bg-gray-800 dark:border-gray-600 dark:hover:bg-gray-700"
+              className="min-h-11 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 dark:text-gray-200 dark:bg-gray-800 dark:border-gray-600 dark:hover:bg-gray-700"
             >
               Cancel
             </button>
@@ -617,7 +618,7 @@ export default function AddSubscriptionModal({
               type="button"
               onClick={handleSave}
               disabled={saving || providers.length === 0}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="min-h-11 px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save Subscription"}
             </button>
