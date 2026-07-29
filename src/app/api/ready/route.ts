@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
 import {
   getBackupRuntimeStatus,
+  getDiskRuntimeStatus,
   getRuntimeIdentity,
   getSchedulerReadiness,
   getSchedulerRuntimeStatus,
@@ -42,8 +43,6 @@ type DatabaseCheck = {
   cached: boolean;
   retryAfter: string | null;
   probeInFlight: boolean;
-  probeSkipped?: boolean;
-  healthCheckCompatibilityActive?: boolean;
 };
 
 type DatabaseFailureCache = Omit<DatabaseCheck, "cached" | "probeInFlight"> & {
@@ -53,9 +52,10 @@ type DatabaseFailureCache = Omit<DatabaseCheck, "cached" | "probeInFlight"> & {
 // Prisma does not cancel the underlying SQLite query when Promise.race's
 // timeout wins. Reusing one outstanding probe prevents repeated readiness
 // requests from queueing another query every few seconds while SQLite is busy;
-// caching a completed failure extends that protection across Render's polling
-// interval. The tracked promise always resolves, so a late database failure
-// cannot become an unhandled rejection after the HTTP response is returned.
+// caching a completed failure extends that protection across the host's
+// polling interval. The tracked promise always resolves, so a late database
+// failure cannot become an unhandled rejection after the HTTP response is
+// returned.
 let databaseProbeInFlight: Promise<DatabaseCheck> | null = null;
 let databaseProbeHasSucceeded = false;
 let databaseFailureCache: DatabaseFailureCache | null = null;
@@ -200,19 +200,6 @@ async function checkDatabase(): Promise<DatabaseCheck> {
   }
 }
 
-function skippedDatabaseCheck(): DatabaseCheck {
-  return {
-    ok: false,
-    latencyMs: 0,
-    checkedAt: new Date().toISOString(),
-    cached: false,
-    retryAfter: null,
-    probeInFlight: false,
-    probeSkipped: true,
-    healthCheckCompatibilityActive: true,
-  };
-}
-
 export async function GET(request: Request) {
   // -----------------------------------------------------------------------
   // Per-IP rate limiting — reject excessive polling before doing any work.
@@ -256,23 +243,16 @@ export async function GET(request: Request) {
     });
   }
 
-  // Live evidence showed a native Prisma query could outlive JavaScript's
-  // timeout and the host continued polling this route even after its service
-  // metadata named /api/health. The temporary flag keeps strict diagnostics
-  // without starting the blocking probe at all.
-  const databaseHealthCheckCompatibilityRequested =
-    process.env.RENDER_READINESS_HTTP_COMPATIBILITY === "true";
   // Budget-breach control observability runs inside the same Promise.all as
   // the other probes so it cannot serialize behind a stalled DB check and
   // bypass readiness timeout/cache shapes (owner review F5).
-  const [database, scheduler, backup, startup, budgetControls] =
+  const [database, scheduler, backup, startup, disk, budgetControls] =
     await Promise.all([
-      databaseHealthCheckCompatibilityRequested
-        ? Promise.resolve(skippedDatabaseCheck())
-        : checkDatabase(),
+      checkDatabase(),
       Promise.resolve(getSchedulerRuntimeStatus()),
       Promise.resolve(getBackupRuntimeStatus()),
       Promise.resolve(getStartupRuntimeStatus()),
+      Promise.resolve(getDiskRuntimeStatus()),
       budgetControlsReadiness(),
     ]);
   const schedulerReadiness = getSchedulerReadiness();
@@ -293,14 +273,13 @@ export async function GET(request: Request) {
   const ok = database.ok && schedulerReady && backupReady && startupReady;
   const databaseOnlyFailure =
     !database.ok && schedulerReady && backupReady && startupReady;
-  // Render currently points its process health check at this strict dependency
-  // endpoint. Give a newly-started process a bounded window to finish opening a
-  // large SQLite/Litestream database without creating a restart loop. The grace
+  // A newly-started process gets a bounded window to finish opening a large
+  // SQLite/Litestream database before reporting not_ready, so a dependency
+  // probe cannot turn the normal open time into a restart loop. The grace
   // applies only to a database-only failure, ends after five minutes, and can
   // never reactivate after this process has completed one successful probe.
   const databaseColdStartGraceActive =
     databaseOnlyFailure &&
-    !databaseHealthCheckCompatibilityRequested &&
     !databaseProbeHasSucceeded &&
     process.uptime() * 1_000 < DATABASE_COLD_START_GRACE_MS;
   const status = ok
@@ -308,11 +287,12 @@ export async function GET(request: Request) {
     : databaseColdStartGraceActive
       ? "starting"
       : "not_ready";
-  // Render's internal liveness probe must keep receiving HTTP 200 from the
-  // historical route, but independent uptime monitors need transport-level
-  // failure semantics. `?strict=1` is public and returns 503 whenever the
-  // dependency body says not ready; it adds no extra database work because it
-  // reuses this request's already-bounded probe result.
+  // The default transport stays HTTP 200 so a host liveness probe cannot kill
+  // the only SQLite process over a dependency failure and turn a temporary
+  // lock into a restart loop; independent uptime monitors use `?strict=1`,
+  // which is public and returns 503 whenever the dependency body says not
+  // ready. It adds no extra database work because it reuses this request's
+  // already-bounded probe result.
 
   const body = {
     ok,
@@ -349,6 +329,11 @@ export async function GET(request: Request) {
         ok: startupReady,
         ...startup,
       },
+      // Observability only — never part of `ok`. Steady-state free/total
+      // bytes on the SQLite filesystem (production: the /data block volume)
+      // against a warn threshold, so a monitor can alert on disk exhaustion
+      // between deploys instead of only at deploy preflight.
+      disk,
       // Observability only — never part of `ok`. Reports the master flag and,
       // when enabled, how many providers are currently budget-paused / carry a
       // (advisory) key-disable recommendation.
@@ -373,13 +358,10 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json(body, {
-    // Render's live service configuration still points its process health
-    // check at /api/ready even though render.yaml now names /api/health.
-    // A dependency-level 503 here therefore kills the only SQLite process
-    // and can turn a temporary lock into a restart loop. Keep the body
-    // semantically strict (`ok`, `status`, and every check) while making the
-    // transport status liveness-safe until Render applies the configured
-    // health-check path.
+    // Transport stays liveness-safe by default (200) even when a dependency
+    // is down; `?strict=1` upgrades the same body to 503. See the comment
+    // above for why a process restart on dependency failure is dangerous for
+    // the sole SQLite writer.
     status: strictTransport && !ok ? 503 : 200,
     headers: {
       "Cache-Control": "no-store",

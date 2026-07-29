@@ -236,97 +236,6 @@ describe("GET /api/ready", () => {
     });
   });
 
-  it("skips the blocking database probe only in Render compatibility mode", async () => {
-    vi.stubEnv("RENDER_READINESS_HTTP_COMPATIBILITY", "true");
-    vi.spyOn(process, "uptime").mockReturnValue(301);
-
-    const response = await GET(READY_REQUEST);
-    const body = await response.json();
-
-    expect(mocks.queryRawUnsafe).not.toHaveBeenCalled();
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-readiness-status")).toBe("not_ready");
-    expect(body).toMatchObject({
-      ok: false,
-      status: "not_ready",
-      checks: {
-        database: {
-          ok: false,
-          latencyMs: 0,
-          probeSkipped: true,
-          probeInFlight: false,
-          coldStartGraceActive: false,
-          healthCheckCompatibilityActive: true,
-        },
-      },
-    });
-  });
-
-  it("keeps backup failures visible while the database probe is skipped", async () => {
-    vi.stubEnv("RENDER_READINESS_HTTP_COMPATIBILITY", "true");
-    vi.stubEnv("LITESTREAM_REQUIRED", "true");
-    vi.stubEnv("LITESTREAM_ACTIVE", "false");
-
-    const response = await GET(READY_REQUEST);
-    const body = await response.json();
-
-    expect(mocks.queryRawUnsafe).not.toHaveBeenCalled();
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-readiness-status")).toBe("not_ready");
-    expect(body).toMatchObject({
-      ok: false,
-      status: "not_ready",
-      checks: {
-        database: { probeSkipped: true },
-        backup: { ok: false, required: true, active: false },
-      },
-    });
-  });
-
-  it("keeps scheduler and startup failures visible while the database probe is skipped", async () => {
-    vi.stubEnv("RENDER_READINESS_HTTP_COMPATIBILITY", "true");
-    vi.stubEnv("RENDER", "true");
-    markSchedulerTickCompleted(false, null);
-    markSchedulerTickCompleted(false, null);
-    markSchedulerTickCompleted(false, null);
-
-    const response = await GET(READY_REQUEST);
-    const body = await response.json();
-
-    expect(mocks.queryRawUnsafe).not.toHaveBeenCalled();
-    expect(response.status).toBe(200);
-    expect(response.headers.get("x-readiness-status")).toBe("not_ready");
-    expect(body).toMatchObject({
-      ok: false,
-      status: "not_ready",
-      checks: {
-        database: { probeSkipped: true },
-        scheduler: { ok: false, readinessReason: "repeated_tick_failures" },
-        startup: { ok: false, required: true, active: false },
-      },
-    });
-  });
-
-  it("keeps compatibility explicitly not-ready during cold start", async () => {
-    vi.stubEnv("RENDER_READINESS_HTTP_COMPATIBILITY", "true");
-    vi.spyOn(process, "uptime").mockReturnValue(30);
-
-    const response = await GET(READY_REQUEST);
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body).toMatchObject({
-      ok: false,
-      status: "not_ready",
-      checks: {
-        database: {
-          probeSkipped: true,
-          coldStartGraceActive: false,
-        },
-      },
-    });
-  });
-
   it("reuses a timed-out SQLite probe instead of queueing more uncancelled queries", async () => {
     vi.useFakeTimers();
     vi.spyOn(process, "uptime").mockReturnValue(301);
@@ -521,7 +430,9 @@ describe("GET /api/ready", () => {
   });
 
   it("reports startup not-ready without failing HTTP liveness", async () => {
-    vi.stubEnv("RENDER", "true");
+    // A production-mode process booted without the verified startup wrapper
+    // (bare `npm start`) must fail strict readiness even over HTTP 200.
+    vi.stubEnv("NODE_ENV", "production");
 
     const response = await GET(READY_REQUEST);
     const body = await response.json();
@@ -532,6 +443,56 @@ describe("GET /api/ready", () => {
       ok: false,
       required: true,
       active: false,
+    });
+  });
+
+  it("fails strict readiness for a production process missing the startup wrapper", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+
+    const response = await GET(
+      new Request("https://usage.jays.services/api/ready?strict=1")
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      status: "not_ready",
+      checks: {
+        startup: { ok: false, required: true, active: false },
+      },
+    });
+  });
+
+  it("exposes disk free-space observability without gating readiness", async () => {
+    const response = await GET(READY_REQUEST);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.checks.disk).toMatchObject({
+      ok: true,
+      thresholdBytes: 5 * 1024 * 1024 * 1024,
+      reason: null,
+    });
+    expect(typeof body.checks.disk.freeBytes).toBe("number");
+    expect(body.checks.disk.freeBytes).toBeGreaterThan(0);
+    expect(typeof body.checks.disk.totalBytes).toBe("number");
+    // The absolute filesystem path is deliberately not disclosed publicly.
+    expect(JSON.stringify(body.checks.disk)).not.toContain(process.cwd());
+  });
+
+  it("reports low disk headroom as observability only, never flipping ok", async () => {
+    vi.stubEnv("READY_DISK_WARN_FREE_BYTES", "1000000000000000000");
+
+    const response = await GET(READY_REQUEST);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, status: "ready" });
+    expect(body.checks.disk).toMatchObject({
+      ok: false,
+      thresholdBytes: 1e18,
+      reason: "free_bytes_below_warn_threshold",
     });
   });
 });

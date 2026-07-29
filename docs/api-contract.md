@@ -1,0 +1,239 @@
+# Usage Monitor public API contract
+
+Machine-checkable reference for the four public endpoints. The v2 ingest wire
+schema, canonical idempotency, and ACK semantics are owned byte-for-byte by
+`@jaywedgeworth22/congress-trading-shared` (currently pinned at `v2.3.0` in
+`package.json`); this document describes the receiver side only. Do not loosen
+the v2 schema or change idempotency semantics here.
+
+Base URL (production): `https://usage.jays.services`
+
+## Conventions
+
+- **Typed v2 error body** (ingest endpoints, when the request is v2 — see
+  version marker below). Error codes are the shared enum:
+  `invalid_request | unauthorized | forbidden | rate_limited | receiver_busy |
+  idempotency_conflict | payload_too_large | not_configured | internal_error`.
+
+  ```json
+  {
+    "ok": false,
+    "schemaVersion": 2,
+    "error": {
+      "code": "receiver_busy",
+      "message": "Usage ingest is busy. Retry later.",
+      "retryable": true,
+      "retryAfterSeconds": 5
+    }
+  }
+  ```
+
+  `retryAfterSeconds` mirrors the `Retry-After` response header (seconds).
+  Producers must persist an outbox and retry after the signaled backoff;
+  retries are deduped by the canonical idempotency key.
+- **Unexpected failures** are always JSON — `{ "error": "..." }` for v1/plain
+  clients, the typed body above (code `internal_error`, `retryable: true`) for
+  v2 clients and `POST /api/otlp/v1/metrics`. The receiver never intentionally
+  returns an untyped HTML 500.
+- **Rate limiting** is per authenticated identity (a hash of the presented
+  token), 10 rps, checked after authentication; unauthenticated traffic is
+  throttled separately by a topology-aware IP backstop. One producer bursting
+  cannot consume another producer's budget.
+
+## `POST /api/ingest/usage`
+
+Writes `ExternalUsageEvent` rows (ordinary usage telemetry and, for the
+dedicated receipt credential, signed billing-receipt cash events).
+
+**Auth** (either form, ordinary events):
+
+```
+Authorization: Bearer <USAGE_INGEST_TOKEN>
+# or
+x-usage-ingest-token: <USAGE_INGEST_TOKEN>
+```
+
+Billing-receipt cash events use the distinct `BILLING_RECEIPT_INGEST_TOKEN`
+(same two header forms, header name `x-billing-receipt-ingest-token`).
+
+**Version marker (v2):** send header `x-usage-telemetry-version: 2`, or simply
+include `"schemaVersion": 2` in the body — the body marker alone is
+sufficient. Unmarked bodies are parsed as legacy v1.
+
+**Request (v2):** strict `UsageTelemetryV2BatchSchema` envelope; events are
+validated per event, so one poison event no longer fails the batch.
+
+```json
+{
+  "schemaVersion": 2,
+  "producerId": "socratic-trade",
+  "producerInstanceId": "prod-a",
+  "events": [
+    {
+      "eventId": "ledger-event-1",
+      "provider": "openai",
+      "producerKeyRef": "configured-openai-primary",
+      "metricType": "cost",
+      "costUsd": 0.0231,
+      "occurredAt": "2026-07-21T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+**Response `202` (v2 ACK):** counts satisfy
+`persisted + duplicates + pruned + rejected === received`.
+
+```json
+{
+  "ok": true,
+  "schemaVersion": 2,
+  "received": 3,
+  "persisted": 2,
+  "duplicates": 0,
+  "pruned": 0,
+  "rejected": 1,
+  "rejections": [
+    { "index": 1, "eventId": "bad-event", "issues": ["provider: Required"] }
+  ]
+}
+```
+
+- `received` — every submitted event (valid + rejected).
+- `persisted` — rows newly inserted by this call (idempotent replays add 0).
+- `duplicates` — valid replays of already-active idempotency keys.
+- `pruned` — blocked by retention tombstones.
+- `rejected` — events that failed per-event schema validation.
+- `rejections` — present only when `rejected > 0`; bounded to the first 10
+  entries (`rejected` is always the exact total).
+
+**Response `202` (legacy v1 ACK):**
+
+```json
+{
+  "ok": true,
+  "accepted": 1,
+  "received": 2,
+  "duplicates": 1,
+  "ignoredPruned": 0
+}
+```
+
+`accepted` is newly inserted rows; `received`/`duplicates` make full replays
+visible (additive fields; older receivers omit them).
+
+**Notable statuses:** `400 invalid_request` (malformed body or invalid v2
+envelope), `401 unauthorized`, `409 idempotency_conflict`, `413
+payload_too_large` (body > 4 MiB), `429 rate_limited` (`Retry-After: 30`),
+`503 receiver_busy` (`Retry-After: 5` — single-writer admission; retry the
+batch), `503 not_configured`.
+
+## `POST /api/otlp/v1/metrics`
+
+Standard OTLP-HTTP metrics receiver (Claude Code or any OTLP exporter).
+
+**Auth:** identical to `POST /api/ingest/usage` (`USAGE_INGEST_TOKEN`).
+
+**Content-Type:** `application/json` (or omitted) or `application/x-protobuf`.
+gRPC is not supported — a gRPC-configured client gets `415` with a message
+naming `OTEL_EXPORTER_OTLP_PROTOCOL=http/json` / `http/protobuf`.
+
+**Response `202`:**
+
+```json
+{
+  "ok": true,
+  "accepted": 1,
+  "ignoredPruned": 0,
+  "ignoredOutOfOrder": 0,
+  "idempotentRetries": 0,
+  "unknownMetrics": [
+    { "name": "claude_code.brand_new_metric.count", "dataPointCount": 1 }
+  ]
+}
+```
+
+Optional counts are omitted when zero. Unknown metric names are accepted,
+tallied, and never mapped or 500'd. Retries are idempotent via content-hash
+keys. Failure modes mirror the ingest route; unexpected failures return the
+typed `internal_error` body with `Retry-After: 30`.
+`OTLP_METRICS_INGEST_ENABLED=false` fails closed with authenticated `503` +
+`Retry-After: 300` before body decoding.
+
+## `GET /api/budget-status`
+
+Per-provider and per-project month-to-date spend vs configured budgets.
+
+**Auth (either):** dashboard session cookie, or a read token as
+
+```
+Authorization: Bearer <USAGE_READ_TOKEN>
+# or
+x-usage-read-token: <USAGE_READ_TOKEN>
+# legacy header-name alias, still accepted:
+x-usage-ingest-token: <USAGE_READ_TOKEN>
+```
+
+In production `USAGE_READ_TOKEN` is required (no silent ingest-token fallback);
+outside production it falls back to `USAGE_INGEST_TOKEN`. Without a session
+cookie and no resolvable read token the endpoint is `503`; a wrong token is
+`401`.
+
+**Versioning:** responses carry `x-api-version: 1`. Additive changes keep the
+version; a breaking change bumps it.
+
+**Response `200` (shape, abbreviated):**
+
+```json
+{
+  "generatedAt": "2026-07-29T12:00:00.000Z",
+  "providers": [
+    {
+      "provider": "openai",
+      "monthToDateUsd": 12.34,
+      "monthlyBudgetUsd": 50,
+      "breachState": "ok"
+    }
+  ],
+  "projects": [],
+  "summary": {}
+}
+```
+
+Also sends `cache-control: no-store`, `x-budget-generated-at`, and `age`
+(snapshot age in seconds) so throttled consumers can back off without parsing
+the body.
+
+## `GET /api/subscriptions`
+
+Lists subscriptions with provider/project labels, monthly-equivalent cost,
+status, and effective `knobEnv` vs the provider free tier.
+
+**Auth:** identical to `GET /api/budget-status` (dashboard session cookie OR
+the read token, same three header forms). `POST /api/subscriptions` and the
+`/:id` sub-routes remain dashboard-session-only and are not part of this
+public contract.
+
+**Versioning:** `x-api-version: 1` response header.
+
+**Response `200` (one row, abbreviated):**
+
+```json
+[
+  {
+    "id": "sub_...",
+    "name": "Tiingo Pro",
+    "costUsd": 30,
+    "currency": "USD",
+    "interval": "monthly",
+    "monthlyEquivalentUsd": 30,
+    "status": "active",
+    "effectiveStatus": "active",
+    "nextRenewalAt": "2026-08-01T00:00:00.000Z",
+    "knobEnv": { "PROVIDER_QUOTA_TIINGO_PER_HOUR": "500" },
+    "freeTierKnobEnv": { "PROVIDER_QUOTA_TIINGO_PER_HOUR": "50" },
+    "provider": { "id": "...", "name": "tiingo", "displayName": "Tiingo" },
+    "project": null
+  }
+]
+```
