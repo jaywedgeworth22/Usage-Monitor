@@ -19,6 +19,7 @@ public actor APIClient {
         case get = "GET"
         case post = "POST"
         case put = "PUT"
+        case delete = "DELETE"
     }
 
     private static let dashboardSessionCookieName = "dashboard_session"
@@ -336,6 +337,94 @@ public actor APIClient {
         )
     }
 
+    // MARK: - Project management (session-only)
+
+    /// `POST /api/projects` — create a project. Session-cookie-only by server
+    /// policy (the route re-checks the dashboard session even though the
+    /// middleware already gates it). `description`/`monthlyBudgetUsd` are
+    /// omitted when nil; the server rejects a duplicate or case-equivalent
+    /// `name` with 400/409 (surfaced as typed `APIError`s).
+    @discardableResult
+    public func createProject(
+        name: String,
+        description: String?,
+        monthlyBudgetUsd: Double?
+    ) async throws -> ProjectMutationReceipt {
+        try await send(
+            "/api/projects",
+            method: .post,
+            authorization: .session,
+            body: ProjectCreateRequest(
+                name: name,
+                description: description,
+                monthlyBudgetUsd: monthlyBudgetUsd
+            )
+        )
+    }
+
+    /// `PUT /api/projects/:id` — update name/description/budget. Follows the
+    /// server's field semantics: `description` is always sent (a blank string
+    /// clears the stored value server-side); `monthlyBudgetUsd` encodes an
+    /// explicit JSON null when nil so a cleared budget is actually cleared
+    /// (an omitted key would preserve the old value).
+    @discardableResult
+    public func updateProject(
+        id: String,
+        name: String,
+        description: String,
+        monthlyBudgetUsd: Double?
+    ) async throws -> ProjectMutationReceipt {
+        try await send(
+            "/api/projects/\(id)",
+            method: .put,
+            authorization: .session,
+            body: ProjectUpdateRequest(
+                name: name,
+                description: description,
+                monthlyBudgetUsd: monthlyBudgetUsd
+            )
+        )
+    }
+
+    /// `DELETE /api/projects/:id` — remove a project. Usage history survives;
+    /// the server set-nulls `projectId` on tagged events.
+    @discardableResult
+    public func deleteProject(id: String) async throws -> ProjectDeleteReceipt {
+        try await sendWithoutBody(
+            "/api/projects/\(id)",
+            method: .delete,
+            authorization: .session
+        )
+    }
+
+    // MARK: - Provider read depth (session-only)
+
+    /// `GET /api/snapshots?providerId=&days=` — real recorded usage history
+    /// (raw points plus server-synthesized daily rollups past the raw
+    /// retention cutoff), chronological. Session-gated by the middleware
+    /// allow-list, so this throws `APIError.unauthorized` (401) when no
+    /// dashboard session is active.
+    public func usageSnapshots(
+        providerID: String,
+        days: Int = 30
+    ) async throws -> [UsageSnapshotPoint] {
+        try await get(
+            "/api/snapshots",
+            queryItems: [
+                URLQueryItem(name: "providerId", value: providerID),
+                URLQueryItem(name: "days", value: String(days)),
+            ],
+            authorization: .session
+        )
+    }
+
+    /// `GET /api/providers/:id` — the bounded detail payload carrying
+    /// provider-reported external billing records. Session-gated like the
+    /// inventory route.
+    public func providerDetail(id: String) async throws -> ProviderDetailRecord {
+        try await get("/api/providers/\(id)", authorization: .session)
+    }
+
     // MARK: - Request plumbing
 
     private func get<T: Decodable>(
@@ -367,6 +456,19 @@ public actor APIClient {
         )
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
+        return try await execute(request)
+    }
+
+    private func sendWithoutBody<Response: Decodable>(
+        _ path: String,
+        method: Method,
+        authorization: AuthorizationMode
+    ) async throws -> Response {
+        let request = try makeRequest(
+            path: path,
+            method: method,
+            authorization: authorization
+        )
         return try await execute(request)
     }
 
@@ -644,6 +746,42 @@ private struct ProviderPlanUpdate: Encodable {
 
 private struct SubscriptionStatusUpdate: Encodable {
     let status: String
+}
+
+/// `POST /api/projects` body. The server reads exactly `name`, `description`,
+/// and `monthlyBudgetUsd`; nil optionals are omitted (absent keys simply leave
+/// the column unset on create).
+private struct ProjectCreateRequest: Encodable {
+    let name: String
+    let description: String?
+    let monthlyBudgetUsd: Double?
+}
+
+/// `PUT /api/projects/:id` body. `description` is always sent: the server
+/// trims it and stores null for a blank string, so editing the field down to
+/// empty really clears it. `monthlyBudgetUsd` uses explicit-null semantics —
+/// nil must encode JSON null (clear), not an omitted key (preserve).
+private struct ProjectUpdateRequest: Encodable {
+    let name: String
+    let description: String
+    let monthlyBudgetUsd: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case description
+        case monthlyBudgetUsd
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(description, forKey: .description)
+        if let monthlyBudgetUsd {
+            try container.encode(monthlyBudgetUsd, forKey: .monthlyBudgetUsd)
+        } else {
+            try container.encodeNil(forKey: .monthlyBudgetUsd)
+        }
+    }
 }
 
 private struct SubscriptionActivationUpdate: Encodable {

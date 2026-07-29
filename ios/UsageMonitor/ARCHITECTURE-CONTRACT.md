@@ -6,12 +6,14 @@ today (SPM package `UsageMonitorKit` + a thin app target + a widget extension).
 Do not re-architect it — extend it. If something here disagrees with the code,
 the code wins; fix the doc.
 
-**Status (2026-07-21):** Dashboard, Providers, Alerts, Project budgets
-(read-only), Settings, protected account-scoped OfflineCache, Widget, AppLock,
-and session-backed native provider/subscription management are implemented.
-Account Overview / widget totals are **provider-scoped** (do not mix server
-project-summary budget with provider total spend). Project add/edit remains
-disabled until its server-validated native mutation flow is implemented.
+**Status (2026-07-29):** Dashboard, Providers, Alerts, Project budgets,
+Settings, protected account-scoped OfflineCache, Widget, AppLock, and
+session-backed native provider/subscription/**project** management are
+implemented. Provider detail additionally loads recorded snapshot history and
+provider-reported external billing through session-gated routes when a
+dashboard session is active (labeled-estimate fallback + sign-in hint
+otherwise). Account Overview / widget totals are **provider-scoped** (do not
+mix server project-summary budget with provider total spend).
 
 Toolchain on the build host: **Swift 6.4** (`swift --version`), **Xcode 27.0**
 (`xcodebuild -version`). Package targets iOS 26+ for the owner's single-user device fleet.
@@ -84,6 +86,11 @@ session or the expected `USAGE_READ_TOKEN` (falling back to
 | `GET /api/providers?view=dashboard` | **Session only** | Bounded native management inventory; secret values are not modeled client-side. |
 | `PUT /api/providers/{id}` | **Session only** | Native exposes active-state and full-plan-preserving budget edits. |
 | `PUT /api/subscriptions/{id}` | **Session only** | Native currently exposes the safe pause transition only. |
+| `POST /api/projects` | **Session only** | Create project; 400/409 on duplicate/case-equivalent name. |
+| `PUT /api/projects/{id}` | **Session only** | Blank `description` clears; `monthlyBudgetUsd: null` clears the budget. |
+| `DELETE /api/projects/{id}` | **Session only** | Usage history survives (`projectId` set-null server-side). |
+| `GET /api/snapshots?providerId=&days=` | **Session only** | Recorded history: raw points + server daily rollups, chronological. |
+| `GET /api/providers/{id}` | **Session only** | Bounded detail read; native consumes only `externalBilling` records. |
 
 **Consequence for lanes:** `budgetStatus()` remains the sole daily-driver money
 fetch and powers Dashboard, Providers (+ detail), Alerts, and Project budgets.
@@ -112,6 +119,10 @@ Public methods (all `async throws`):
 - `providerInventory()`, `setProviderActive(...)`,
   `setProviderMonthlyBudget(...)`, `pauseSubscription(id:)` — bounded,
   server-validated native management.
+- `createProject(...)`, `updateProject(...)`, `deleteProject(id:)` —
+  session-gated project CRUD (`/api/projects`).
+- `usageSnapshots(providerID:days:)`, `providerDetail(id:)` — session-gated
+  provider-detail read depth (recorded history, external billing records).
 - `var hasToken: Bool`
 
 Construction: `APIClient(configuration: APIConfiguration = .production,
@@ -267,9 +278,9 @@ mounts these via `AppFeatures.live`. **Do not rename the root type or change its
 | Lane | Directory | Public root (mounted) | Tab slot | Reads | Uses (DesignSystem / Models) | Status |
 |---|---|---|---|---|---|---|
 | **Dashboard** | `Sources/Dashboard/` | `DashboardRootView` | `.dashboard` (Overview) | `@Environment(BudgetStore.self)` → `summary`, `providers` | Account overview, pace chart, top providers, refresh/stale/error states | Implemented |
-| **Providers** | `Sources/Providers/` | `ProvidersRootView` | `.providers` | `BudgetStore.providers` | Searchable budget list and provider detail from the shared snapshot | Implemented |
+| **Providers** | `Sources/Providers/` | `ProvidersRootView` | `.providers` | `BudgetStore.providers` + session-gated `ProviderDepthStore` | Searchable budget list and provider detail: shared snapshot plus recorded history (`/api/snapshots`) and external billing (`/api/providers/{id}`) when a session is active | Implemented |
 | **Alerts** | `Sources/Alerts/` | `AlertsRootView` | `.alerts` | `BudgetStore.alertItems` (`[ProviderAlertItem]`, pre-sorted) | Severity feed, detail, resolution state, local-notification integration | Implemented |
-| **ProjectBudgets** | `Sources/ProjectBudgets/` | `ProjectBudgetsRootView` | `.projects` | `BudgetStore.projects` (`[ProjectBudgetStatus]`, may be empty) | Project attribution, allocation caveats, and read-only detail | Implemented (read-only) |
+| **ProjectBudgets** | `Sources/ProjectBudgets/` | `ProjectBudgetsRootView` | `.projects` | `BudgetStore.projects` (`[ProjectBudgetStatus]`, may be empty) + session-gated `ProjectManagementStore` | Project attribution, allocation caveats, detail, and session-backed add/edit/delete (`/api/projects`) | Implemented |
 | **Settings** | `Sources/Settings/` | `SettingsRootView` | `.settings` | `AppEnvironment`, public health, bearer + session access | Secure connection, full-access login, provider/subscription management, notifications, appearance, app lock | Implemented |
 
 Feature lanes may add their own `LoadState`-based `@Observable` stores for
