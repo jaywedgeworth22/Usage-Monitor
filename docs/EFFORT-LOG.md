@@ -3,6 +3,9 @@
 Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this file
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
+## In progress
+- **[KIMI] Open-source lessons: LiteLLM pricing + Claude cost cross-check (2026-07-29) — RESERVED.** Owner-directed sweep of adjacent OSS repos (ccusage, LiteLLM, Langfuse, Helicone, codeburn, OpenMeter, Lago, Meteroid, OTel collector, Wallos; license/activity verified live 2026-07-29). Implementing: bundled provenance-stamped LiteLLM pricing snapshot + `npm run pricing:update` refresh script; read-time token×price cross-check lib + `GET /api/claude-cost-check`; dashboard `ClaudeCostCheckCard` drift UI; lessons doc `docs/rollouts/2026-07-29-open-source-lessons.md`. Deliberately NOT changing cash/budget semantics or the shared v2 ingest contract. (Note: Slack #agent-sync reservation unavailable from this runtime — no Slack tools; mirror entry here only.)
+
 ## Deployed
 - **[CURSOR] Dashboard flash-then-stuck-skeleton fix (2026-07-27) — MERGED #814 / DEPLOYED / LIVE VERIFIED.** Squash merge `e6333d6a6739bc0d4fb1e2b6ba741a6cffd9d142`. Keep content once providers painted (`shouldShowDashboardSkeleton` only when `loading && providerCount === 0`); never re-set `loading` true; coalesce overlapping fetches; abort+generation on unmount; bfcache `pageshow` recovery. Oracle Production Deploy [run 30298779926](https://github.com/jaywedgeworth22/Usage-Monitor/actions/runs/30298779926) **success** at exact `e6333d6`. Open PR count: 0.
 

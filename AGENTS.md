@@ -98,6 +98,15 @@ SQLite datasource — match provider names case-insensitively in JS (`.toLowerCa
   configures one in Settings) — but only if no `anthropic`-named provider exists yet, so it never
   collides with a manually-added one from the existing poll adapter
   (`src/lib/adapters/anthropic.ts`, keyed on `orgId`).
+- Model pricing for token-cost derivation comes from a **bundled LiteLLM
+  catalog snapshot** (`src/lib/pricing/model-pricing.snapshot.json`, refresh
+  with `npm run pricing:update`; lookup/derivation in
+  `src/lib/pricing/model-pricing.ts`). It is used ONLY as an analytics
+  cross-check/fallback, never as cash: `GET /api/claude-cost-check` re-derives
+  API-equivalent cost from ingested `token.usage` rows and diffs it per-model
+  against Claude Code's own `cost.usage` estimate (drift ≥ 15% = investigate;
+  `unpriced` = new model missing from the catalog → refresh the snapshot).
+  See `docs/rollouts/2026-07-29-open-source-lessons.md`.
 - `OTLP_METRICS_INGEST_ENABLED` is a default-on emergency switch for the
   database-writing metrics route only. Explicit `false` returns authenticated
   requests admitted by the IP limiter `503` plus `Retry-After: 300` before body
