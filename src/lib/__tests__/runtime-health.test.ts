@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getBackupRuntimeStatus,
+  getDiskRuntimeStatus,
   getRuntimeIdentity,
   getSchedulerReadiness,
   getSchedulerRuntimeStatus,
@@ -99,10 +100,76 @@ describe("runtime health state", () => {
       replicaAgeSeconds: null,
       reason: "env_active_unverified",
     });
+    // LITESTREAM_REQUIRED=true also makes the verified startup wrapper
+    // mandatory, regardless of hosting platform.
+    expect(getStartupRuntimeStatus()).toEqual({
+      required: true,
+      active: false,
+      entrypoint: null,
+    });
+  });
+
+  it("requires the startup wrapper in production mode and on Litestream-required hosts", () => {
+    // Plain test/dev mode without Litestream: not required.
     expect(getStartupRuntimeStatus()).toEqual({
       required: false,
       active: false,
       entrypoint: null,
+    });
+
+    // Production mode requires the wrapper so a bare `npm start` fails strict
+    // readiness instead of silently skipping backup/migration/Litestream.
+    vi.stubEnv("NODE_ENV", "production");
+    expect(getStartupRuntimeStatus().required).toBe(true);
+
+    // Explicit opt-out for disposable throwaway containers.
+    vi.stubEnv("STARTUP_WRAPPER_REQUIRED", "false");
+    expect(getStartupRuntimeStatus().required).toBe(false);
+    vi.unstubAllEnvs();
+
+    // Litestream-required hosts need the wrapper in any NODE_ENV.
+    vi.stubEnv("LITESTREAM_REQUIRED", "true");
+    expect(getStartupRuntimeStatus().required).toBe(true);
+
+    // The wrapper marks itself via APP_STARTUP_WRAPPER.
+    vi.stubEnv("APP_STARTUP_WRAPPER", "start-with-litestream-v2");
+    expect(getStartupRuntimeStatus()).toEqual({
+      required: true,
+      active: true,
+      entrypoint: "start-with-litestream-v2",
+    });
+  });
+
+  it("reports steady-state disk headroom against the warn threshold", () => {
+    const status = getDiskRuntimeStatus();
+    expect(status).toMatchObject({
+      ok: true,
+      thresholdBytes: 5 * 1024 * 1024 * 1024,
+      reason: null,
+    });
+    expect(status.freeBytes).toBeGreaterThan(0);
+    expect(status.totalBytes).toBeGreaterThan(0);
+
+    // DATABASE_URL's directory wins over the cwd fallback.
+    vi.stubEnv("DATABASE_URL", "file:./dev.db");
+    expect(getDiskRuntimeStatus().ok).toBe(true);
+
+    // A warn threshold above current free space flips only this check.
+    vi.stubEnv("READY_DISK_WARN_FREE_BYTES", "1000000000000000000");
+    expect(getDiskRuntimeStatus()).toMatchObject({
+      ok: false,
+      reason: "free_bytes_below_warn_threshold",
+      thresholdBytes: 1e18,
+    });
+    vi.unstubAllEnvs();
+
+    // An unreadable database directory degrades the check, never throws.
+    vi.stubEnv("DATABASE_URL", "file:/nonexistent-usage-monitor-dir/prod.db");
+    expect(getDiskRuntimeStatus()).toMatchObject({
+      ok: false,
+      freeBytes: null,
+      totalBytes: null,
+      reason: "disk_stat_failed",
     });
   });
 
