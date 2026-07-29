@@ -104,9 +104,26 @@ export interface SqliteMemoryPragmaValues {
   cacheSizeKib: number;
   mmapSizeBytes: number;
   tempStore: SqliteTempStore;
+  journalMode: string;
+  busyTimeoutMs: number;
 }
 
 export type SqliteTempStore = "default" | "file" | "memory";
+
+// E2a: journal_mode and busy_timeout were previously left to Prisma/SQLite
+// defaults (journal=delete, no explicit busy timeout). WAL gives readers and
+// the single writer separate locks so a long read (e.g. the MTD groupBy) no
+// longer blocks ingest writes behind the whole database file, and an
+// explicit busy_timeout makes a genuinely contended write wait briefly
+// instead of failing immediately with SQLITE_BUSY. journal_mode is
+// persistent on the database file (not per-connection), but it is applied
+// and read back through the same verified-pragma path as the memory bounds
+// so a rejected PRAGMA is logged loudly rather than silently no-op'ing.
+const DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
+function sqliteJournalModeFromPragma(value: unknown): string {
+  return typeof value === "string" ? value.toLowerCase() : String(value);
+}
 
 function sqliteTempStoreFromEnv(): Exclude<SqliteTempStore, "default"> {
   switch (process.env.SQLITE_TEMP_STORE?.trim().toLowerCase()) {
@@ -139,13 +156,23 @@ export function resolveSqliteMemoryPragmaValues(): SqliteMemoryPragmaValues {
     // 0 disables mmap I/O entirely; a positive value is a byte ceiling.
     mmapSizeBytes: clampedIntEnv("SQLITE_MMAP_SIZE_BYTES", 0, 0, 268_435_456),
     tempStore: sqliteTempStoreFromEnv(),
+    // WAL is not operator-tunable: it is the correctness fix for read/write
+    // blocking on the single-connection pool. busy_timeout stays tunable.
+    journalMode: "wal",
+    busyTimeoutMs: clampedIntEnv(
+      "SQLITE_BUSY_TIMEOUT_MS",
+      DEFAULT_SQLITE_BUSY_TIMEOUT_MS,
+      0,
+      60_000
+    ),
   };
 }
 
 /**
- * Reads the currently-effective cache_size / mmap_size / temp_store off the live
- * connection. SQLite returns these as 64-bit INTEGERs, which Prisma surfaces
- * as JS BigInt, so each is coerced to Number before returning.
+ * Reads the currently-effective cache_size / mmap_size / temp_store /
+ * journal_mode / busy_timeout off the live connection. SQLite returns these
+ * as 64-bit INTEGERs, which Prisma surfaces as JS BigInt, so each is coerced
+ * to Number before returning.
  */
 export async function readSqliteMemoryPragmas(): Promise<SqliteMemoryPragmaValues> {
   const cacheRows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
@@ -157,10 +184,19 @@ export async function readSqliteMemoryPragmas(): Promise<SqliteMemoryPragmaValue
   const tempStoreRows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
     "PRAGMA temp_store"
   );
+  const journalModeRows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+    "PRAGMA journal_mode"
+  );
+  const busyTimeoutRows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+    "PRAGMA busy_timeout"
+  );
   return {
     cacheSizeKib: Number(cacheRows[0]?.cache_size),
     mmapSizeBytes: Number(mmapRows[0]?.mmap_size),
     tempStore: sqliteTempStoreFromPragma(tempStoreRows[0]?.temp_store),
+    journalMode: sqliteJournalModeFromPragma(journalModeRows[0]?.journal_mode),
+    // SQLite names the busy_timeout pragma's result column "timeout".
+    busyTimeoutMs: Number(busyTimeoutRows[0]?.timeout),
   };
 }
 
@@ -179,6 +215,8 @@ export function applySqliteNativeMemoryPragmas(): Promise<void> {
         await prisma.$queryRawUnsafe(`PRAGMA cache_size = ${target.cacheSizeKib}`);
         await prisma.$queryRawUnsafe(`PRAGMA mmap_size = ${target.mmapSizeBytes}`);
         await prisma.$queryRawUnsafe(`PRAGMA temp_store = ${target.tempStore.toUpperCase()}`);
+        await prisma.$queryRawUnsafe(`PRAGMA journal_mode = ${target.journalMode.toUpperCase()}`);
+        await prisma.$queryRawUnsafe(`PRAGMA busy_timeout = ${target.busyTimeoutMs}`);
         // Read the values back on the same connection and confirm they took.
         // A mismatch is logged loudly (never swallowed): it would mean a future
         // engine change rejected a PRAGMA, or connection_limit was raised above
@@ -188,13 +226,17 @@ export function applySqliteNativeMemoryPragmas(): Promise<void> {
         if (
           applied.cacheSizeKib !== target.cacheSizeKib ||
           applied.mmapSizeBytes !== target.mmapSizeBytes ||
-          applied.tempStore !== target.tempStore
+          applied.tempStore !== target.tempStore ||
+          applied.journalMode !== target.journalMode ||
+          applied.busyTimeoutMs !== target.busyTimeoutMs
         ) {
           console.error(
             `[prisma] SQLite native memory bounds did not take effect ` +
               `(wanted cache_size=${target.cacheSizeKib}, mmap_size=${target.mmapSizeBytes}; ` +
-              `temp_store=${target.tempStore}; read back cache_size=${applied.cacheSizeKib}, ` +
-              `mmap_size=${applied.mmapSizeBytes}, temp_store=${applied.tempStore})`
+              `temp_store=${target.tempStore}; journal_mode=${target.journalMode}; ` +
+              `busy_timeout=${target.busyTimeoutMs}; read back cache_size=${applied.cacheSizeKib}, ` +
+              `mmap_size=${applied.mmapSizeBytes}, temp_store=${applied.tempStore}, ` +
+              `journal_mode=${applied.journalMode}, busy_timeout=${applied.busyTimeoutMs})`
           );
         }
       } catch (error) {

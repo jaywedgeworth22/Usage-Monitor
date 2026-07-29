@@ -10,7 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // the real 90s budget.
 
 const findMany = vi.fn();
-const findFirst = vi.fn();
+const snapshotGroupBy = vi.fn();
+const snapshotFindMany = vi.fn();
+const queryRaw = vi.fn();
 const create = vi.fn();
 const fetchProviderUsage = vi.fn();
 const runUsageMaintenance = vi.fn();
@@ -19,11 +21,13 @@ const syncProviderCredentialsFromInfisical = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    provider: { findMany: () => findMany(), create: vi.fn() },
+    provider: { findMany: (args: unknown) => findMany(args), create: vi.fn() },
     usageSnapshot: {
       create: (args: unknown) => create(args),
-      findFirst: (args: unknown) => findFirst(args),
+      groupBy: (args: unknown) => snapshotGroupBy(args),
+      findMany: (args: unknown) => snapshotFindMany(args),
     },
+    $queryRaw: (args: unknown) => queryRaw(args),
     $transaction: (run: (tx: unknown) => unknown) =>
       run({ usageSnapshot: { create: (args: unknown) => create(args) } }),
   },
@@ -62,9 +66,31 @@ function providerRow(name: string) {
     id: `id-${name}`,
     name,
     refreshIntervalMin: 60,
-    // no prior snapshots => always "due"
-    snapshots: [],
+    // no prior poll-snapshot marker => always "due"
   };
+}
+
+// Stub the E4 marker pipeline (groupBy -> findMany ids -> json_extract) for a
+// provider whose latest poll snapshot is `fetchedAt`, with an optional
+// __apiUsageMonitor.partialFailure marker. `retryable: null` models a blob
+// with no marker at all.
+function stubLatestPollSnapshot(
+  providerId: string,
+  fetchedAt: Date,
+  marker: { version: number | null; code: string | null; status: number | null; retryable: number | null } = {
+    version: null,
+    code: null,
+    status: null,
+    retryable: null,
+  }
+) {
+  snapshotGroupBy.mockResolvedValueOnce([
+    { providerId, _max: { fetchedAt } },
+  ]);
+  snapshotFindMany.mockResolvedValueOnce([
+    { id: `snap-${providerId}`, providerId, fetchedAt },
+  ]);
+  queryRaw.mockResolvedValueOnce([{ id: `snap-${providerId}`, ...marker }]);
 }
 
 // A minimal maintenance result that isUsageMaintenanceHealthy accepts as
@@ -104,8 +130,12 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
   beforeEach(() => {
     vi.resetModules();
     findMany.mockReset();
-    findFirst.mockReset();
-    findFirst.mockResolvedValue(null);
+    snapshotGroupBy.mockReset();
+    snapshotGroupBy.mockResolvedValue([]);
+    snapshotFindMany.mockReset();
+    snapshotFindMany.mockResolvedValue([]);
+    queryRaw.mockReset();
+    queryRaw.mockResolvedValue([]);
     create.mockReset();
     fetchProviderUsage.mockReset();
     runUsageMaintenance.mockReset();
@@ -190,6 +220,7 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
   afterEach(() => {
     vi.useRealTimers();
     delete process.env.ADAPTER_PROVIDER_TIMEOUT_MS;
+    delete process.env.PROVIDER_FETCH_TICK_BUDGET_MS;
   });
 
   it("counts a hung provider as a timeout failure and still processes the others", async () => {
@@ -234,6 +265,150 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
       "success",
       "failure",
     ]);
+  });
+
+  it("E4: never selects rawData blobs when loading providers or poll markers", async () => {
+    const now = new Date();
+    findMany.mockResolvedValue([providerRow("marked")]);
+    stubLatestPollSnapshot("id-marked", new Date(now.getTime() - 30 * 60 * 1000));
+    fetchProviderUsage.mockResolvedValue({
+      balance: 1,
+      totalCost: null,
+      totalRequests: null,
+      credits: null,
+      rawData: {},
+    });
+
+    const { fetchAllDueProviders } = await import("@/lib/usage-recorder");
+    await fetchAllDueProviders();
+
+    // The provider query no longer includes the per-provider latest-snapshot
+    // rawData blob at all.
+    expect(findMany).toHaveBeenCalledWith({ where: { isActive: true } });
+    // The marker pipeline selects only scalar columns; rawData is only ever
+    // touched inside SQLite via json_extract in the $queryRaw batch.
+    expect(snapshotFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: { id: true, providerId: true, fetchedAt: true },
+      })
+    );
+    const markerQuery = queryRaw.mock.calls[0]?.[0];
+    expect(JSON.stringify(markerQuery)).toContain("json_extract");
+  });
+
+  it("E5: stops starting new providers past the total-tick budget and marks them budget-skipped", async () => {
+    vi.useFakeTimers();
+    process.env.PROVIDER_FETCH_TICK_BUDGET_MS = "1000";
+    findMany.mockResolvedValue([
+      providerRow("one"),
+      providerRow("two"),
+      providerRow("three"),
+      providerRow("four"),
+    ]);
+    // Each fetch consumes 800ms of tick time; the 1s budget therefore admits
+    // exactly two fetches before the remaining providers are budget-skipped.
+    fetchProviderUsage.mockImplementation(async () => {
+      vi.advanceTimersByTime(800);
+      return {
+        balance: 1,
+        totalCost: null,
+        totalRequests: null,
+        credits: null,
+        rawData: {},
+      };
+    });
+
+    const { fetchAllDueProviders } = await import("@/lib/usage-recorder");
+    const result = await fetchAllDueProviders();
+
+    expect(result).toMatchObject({
+      total: 4,
+      successes: 2,
+      failures: 0,
+      skipped: 2,
+      tickBudgetExceeded: true,
+    });
+    expect(fetchProviderUsage).toHaveBeenCalledTimes(2);
+    expect(result.outcomes.map((outcome) => outcome.status)).toEqual([
+      "success",
+      "success",
+      "skipped",
+      "skipped",
+    ]);
+    expect(result.outcomes.slice(2)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "three", skipReason: "tick_budget" }),
+        expect.objectContaining({ name: "four", skipReason: "tick_budget" }),
+      ])
+    );
+  });
+
+  it("E5: reports tickBudgetExceeded=false when the tick fits inside the budget", async () => {
+    findMany.mockResolvedValue([providerRow("only")]);
+    fetchProviderUsage.mockResolvedValue({
+      balance: 1,
+      totalCost: null,
+      totalRequests: null,
+      credits: null,
+      rawData: {},
+    });
+
+    const { fetchAllDueProviders } = await import("@/lib/usage-recorder");
+    const result = await fetchAllDueProviders();
+
+    expect(result.tickBudgetExceeded).toBe(false);
+    expect(result.successes).toBe(1);
+  });
+
+  it("E5: surfaces a budget-exhausted tick through providerFetchDegraded", async () => {
+    const markTickStarted = vi.fn();
+    const markTickCompleted = vi.fn();
+    const fetchProviders = vi.fn(async () => ({
+      total: 3,
+      successes: 1,
+      failures: 0,
+      skipped: 2,
+      errors: [],
+      outcomes: [
+        { providerId: "a", name: "a", status: "success" as const, durationMs: 1 },
+        {
+          providerId: "b",
+          name: "b",
+          status: "skipped" as const,
+          durationMs: 0,
+          skipReason: "tick_budget" as const,
+        },
+        {
+          providerId: "c",
+          name: "c",
+          status: "skipped" as const,
+          durationMs: 0,
+          skipReason: "tick_budget" as const,
+        },
+      ],
+      tickBudgetExceeded: true,
+    }));
+    const runMaintenance = vi.fn(async () => healthyMaintenanceResult());
+    const { runUsagePollingSchedulerTick } = await import("@/lib/usage-recorder");
+
+    await runUsagePollingSchedulerTick({
+      fetchProviders,
+      runMaintenance,
+      markTickStarted,
+      markTickCompleted,
+    });
+
+    // 0 failures / 1 attempted would NOT be degraded on the failure-ratio
+    // path alone - the budget exhaustion itself is the degradation signal.
+    expect(markTickCompleted).toHaveBeenCalledWith(true, {
+      total: 3,
+      successes: 1,
+      failures: 0,
+      skipped: 2,
+      maintenanceHealthy: true,
+      providerFetchDegraded: true,
+      cloudflareLegacyHandoff: "disabled",
+    });
   });
 
   it("classifies an intentionally unsupported push-only poll as skipped", async () => {
@@ -308,6 +483,7 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
       skipped: 0,
       errors: [],
       outcomes: [],
+      tickBudgetExceeded: false,
     }));
     const runMaintenance = vi.fn(async () => ({
       subscriptionAdoption: {
@@ -379,6 +555,7 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
       skipped: 0,
       errors: [],
       outcomes: [],
+      tickBudgetExceeded: false,
     }));
     const runMaintenance = vi.fn(async () => ({
       subscriptionAdoption: {
@@ -513,20 +690,14 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
     ).rejects.toMatchObject({ code: "HTTP_ERROR", retryable: true });
 
     const firstWrite = create.mock.calls[0]?.[0]?.data;
-    findMany.mockResolvedValue([
-      {
-        ...providerRow("partial-retry"),
-        snapshots: [
-          {
-            fetchedAt: new Date(firstWrite.fetchedAt.getTime() + 1_000),
-            rawData: null,
-          },
-        ],
-      },
-    ]);
-    findFirst.mockResolvedValueOnce({
-      fetchedAt: firstWrite.fetchedAt,
-      rawData: firstWrite.rawData,
+    findMany.mockResolvedValue([providerRow("partial-retry")]);
+    // E4: the marker now arrives through groupBy + id resolution + json_extract
+    // (never the rawData blob). retryable=1 is the extracted JSON boolean true.
+    stubLatestPollSnapshot("id-partial-retry", firstWrite.fetchedAt, {
+      version: 1,
+      code: "HTTP_ERROR",
+      status: 503,
+      retryable: 1,
     });
     fetchProviderUsage.mockResolvedValueOnce({
       balance: 1,
@@ -547,28 +718,30 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
     });
     expect(fetchProviderUsage).toHaveBeenCalledTimes(2);
     expect(create).toHaveBeenCalledTimes(1);
-    expect(findFirst).toHaveBeenCalledWith({
-      where: {
-        providerId: "id-partial-retry",
-        rawData: { not: expect.anything() },
-      },
-      orderBy: { fetchedAt: "desc" },
-      select: { fetchedAt: true, rawData: true },
-    });
+    expect(snapshotGroupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: ["providerId"],
+        where: expect.objectContaining({
+          providerId: { in: ["id-partial-retry"] },
+          rawData: { not: expect.anything() },
+        }),
+      })
+    );
+    expect(snapshotFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: { id: true, providerId: true, fetchedAt: true },
+      })
+    );
+    expect(queryRaw).toHaveBeenCalled();
   });
 
   it("does not let a fresh pushed snapshot hide a stale poll", async () => {
     const now = new Date();
-    findMany.mockResolvedValue([
-      {
-        ...providerRow("stale-poll"),
-        snapshots: [{ fetchedAt: now, rawData: null }],
-      },
-    ]);
-    findFirst.mockResolvedValueOnce({
-      fetchedAt: new Date(now.getTime() - 61 * 60 * 1000),
-      rawData: { providerPoll: "complete" },
-    });
+    findMany.mockResolvedValue([providerRow("stale-poll")]);
+    stubLatestPollSnapshot(
+      "id-stale-poll",
+      new Date(now.getTime() - 61 * 60 * 1000)
+    );
     fetchProviderUsage.mockResolvedValueOnce({
       balance: 1,
       totalCost: 2,
@@ -591,16 +764,11 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
 
   it("uses a fresh poll behind a pushed snapshot for interval skipping", async () => {
     const now = new Date();
-    findMany.mockResolvedValue([
-      {
-        ...providerRow("fresh-poll"),
-        snapshots: [{ fetchedAt: now, rawData: null }],
-      },
-    ]);
-    findFirst.mockResolvedValueOnce({
-      fetchedAt: new Date(now.getTime() - 30 * 60 * 1000),
-      rawData: { providerPoll: "complete" },
-    });
+    findMany.mockResolvedValue([providerRow("fresh-poll")]);
+    stubLatestPollSnapshot(
+      "id-fresh-poll",
+      new Date(now.getTime() - 30 * 60 * 1000)
+    );
 
     const { fetchAllDueProviders } = await import("@/lib/usage-recorder");
     const result = await fetchAllDueProviders();
@@ -615,26 +783,13 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
   });
 
   it("respects the normal interval after a nonretryable partial snapshot", async () => {
-    findMany.mockResolvedValue([
-      {
-        ...providerRow("partial-terminal"),
-        snapshots: [
-          {
-            fetchedAt: new Date(),
-            rawData: {
-              __apiUsageMonitor: {
-                version: 1,
-                partialFailure: {
-                  code: "HTTP_ERROR",
-                  status: 404,
-                  retryable: false,
-                },
-              },
-            },
-          },
-        ],
-      },
-    ]);
+    findMany.mockResolvedValue([providerRow("partial-terminal")]);
+    stubLatestPollSnapshot("id-partial-terminal", new Date(), {
+      version: 1,
+      code: "HTTP_ERROR",
+      status: 404,
+      retryable: 0,
+    });
 
     const { fetchAllDueProviders } = await import("@/lib/usage-recorder");
     const result = await fetchAllDueProviders();
@@ -763,6 +918,7 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
       skipped: 0,
       errors: [],
       outcomes: [],
+      tickBudgetExceeded: false,
     }));
     const runMaintenance = vi.fn(async () => healthyMaintenanceResult());
     const { runUsagePollingSchedulerTick } = await import("@/lib/usage-recorder");
@@ -798,6 +954,7 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
       skipped: 3,
       errors: [],
       outcomes: [],
+      tickBudgetExceeded: false,
     }));
     const runMaintenance = vi.fn(async () => healthyMaintenanceResult());
     const { runUsagePollingSchedulerTick } = await import("@/lib/usage-recorder");
