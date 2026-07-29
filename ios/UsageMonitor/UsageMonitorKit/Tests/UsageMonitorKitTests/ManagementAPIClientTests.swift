@@ -377,6 +377,115 @@ final class ManagementAPIClientTests: XCTestCase {
         XCTAssertNotNil(receipt.fetchedDate)
     }
 
+    func testProjectCreatePostsSessionOnlyBoundedPayload() async throws {
+        let harness = makeHarness(token: "read-token")
+        installSessionCookie(in: harness)
+        ManagementURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/projects")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertNil(
+                request.value(forHTTPHeaderField: "Authorization"),
+                "Project mutations are session-only; the bearer must not be attached."
+            )
+            let body = Self.jsonObject(request)
+            XCTAssertEqual(body["name"] as? String, "Socratic Trade")
+            XCTAssertEqual(body["description"] as? String, "Trading loop")
+            XCTAssertEqual(body["monthlyBudgetUsd"] as? Double, 400)
+            return .json(Self.projectMutationJSON)
+        }
+
+        let receipt = try await harness.client.createProject(
+            name: "Socratic Trade",
+            description: "Trading loop",
+            monthlyBudgetUsd: 400
+        )
+        XCTAssertEqual(receipt.id, "project-1")
+        XCTAssertEqual(receipt.backfilledEvents, 3)
+    }
+
+    func testProjectUpdateSendsExplicitNullToClearBudget() async throws {
+        let harness = makeHarness()
+        installSessionCookie(in: harness)
+        ManagementURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/projects/project-1")
+            XCTAssertEqual(request.httpMethod, "PUT")
+            let body = Self.jsonObject(request)
+            XCTAssertEqual(body["name"] as? String, "Renamed")
+            // Blank description is SENT (the server trims it to null); a cleared
+            // budget is an explicit JSON null, never an omitted key.
+            XCTAssertEqual(body["description"] as? String, "")
+            XCTAssertTrue(body.keys.contains("monthlyBudgetUsd"))
+            XCTAssertTrue(body["monthlyBudgetUsd"] is NSNull)
+            return .json(Self.projectMutationJSON)
+        }
+
+        _ = try await harness.client.updateProject(
+            id: "project-1",
+            name: "Renamed",
+            description: "",
+            monthlyBudgetUsd: nil
+        )
+    }
+
+    func testProjectDeleteIssuesSessionOnlyDelete() async throws {
+        let harness = makeHarness()
+        installSessionCookie(in: harness)
+        ManagementURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/projects/project-1")
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertNil(request.httpBody)
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            return .json(["success": true])
+        }
+
+        let receipt = try await harness.client.deleteProject(id: "project-1")
+        XCTAssertTrue(receipt.success)
+    }
+
+    func testUsageSnapshotsSendsBoundedQuerySessionOnly() async throws {
+        let harness = makeHarness()
+        installSessionCookie(in: harness)
+        ManagementURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/snapshots")
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.query
+            XCTAssertEqual(query, "providerId=provider-1&days=30")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            return .json(Self.snapshotsJSON)
+        }
+
+        let snapshots = try await harness.client.usageSnapshots(providerID: "provider-1")
+
+        XCTAssertEqual(snapshots.count, 2)
+        XCTAssertEqual(snapshots[0].totalCost, 120.5)
+        XCTAssertFalse(snapshots[0].isRollup)
+        XCTAssertTrue(snapshots[1].isRollup)
+        XCTAssertEqual(snapshots[1].sampleCount, 4)
+        XCTAssertNotNil(snapshots[0].fetchedDate)
+    }
+
+    func testProviderDetailDecodesExternalBilling() async throws {
+        let harness = makeHarness()
+        installSessionCookie(in: harness)
+        ManagementURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/providers/provider-1")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            return .json(Self.providerDetailJSON)
+        }
+
+        let detail = try await harness.client.providerDetail(id: "provider-1")
+
+        XCTAssertEqual(detail.id, "provider-1")
+        let records = try XCTUnwrap(detail.externalBilling)
+        XCTAssertEqual(records.count, 1)
+        let record = records[0]
+        XCTAssertEqual(record.source, "stripe")
+        XCTAssertEqual(record.displayName, "Workers Paid")
+        XCTAssertEqual(record.amountUsd, 5)
+        XCTAssertEqual(record.status, "active")
+        XCTAssertNotNil(record.currentPeriodStartDate)
+        XCTAssertNotNil(record.syncedDate)
+    }
+
     // MARK: - Harness
 
     private struct Harness {
@@ -510,6 +619,65 @@ final class ManagementAPIClientTests: XCTestCase {
         "totalRequests": 910,
         "credits": NSNull(),
         "createdAt": "2026-07-29T12:00:00.000Z",
+    ]
+
+    private static let projectMutationJSON: [String: Any] = [
+        "id": "project-1",
+        "name": "Socratic Trade",
+        "nameKey": "socratic trade",
+        "description": "Trading loop",
+        "monthlyBudgetUsd": 400,
+        "backfilledEvents": 3,
+    ]
+
+    private static let snapshotsJSON: [[String: Any]] = [
+        [
+            "id": "snapshot-1",
+            "providerId": "provider-1",
+            "fetchedAt": "2026-07-28T12:00:00.000Z",
+            "balance": NSNull(),
+            "totalCost": 120.5,
+            "totalRequests": 610,
+            "credits": NSNull(),
+            "createdAt": "2026-07-28T12:00:00.000Z",
+        ],
+        [
+            "id": "rollup:rollup-1",
+            "providerId": "provider-1",
+            "fetchedAt": "2026-07-01T23:59:00.000Z",
+            "balance": NSNull(),
+            "totalCost": 40.25,
+            "totalRequests": 200,
+            "credits": NSNull(),
+            "createdAt": "2026-07-02T00:10:00.000Z",
+            "rollup": true,
+            "sampleCount": 4,
+        ],
+    ]
+
+    private static let providerDetailJSON: [String: Any] = [
+        "id": "provider-1",
+        "name": "openai",
+        "displayName": "OpenAI",
+        "type": "openai",
+        "isActive": true,
+        "refreshIntervalMin": 15,
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "externalBilling": [[
+            "source": "stripe",
+            "externalId": "sub_123",
+            "kind": "subscription",
+            "serviceName": "Workers Paid",
+            "planName": NSNull(),
+            "status": "active",
+            "amountUsd": 5,
+            "currency": "USD",
+            "billingInterval": "monthly",
+            "currentPeriodStart": "2026-07-17T00:00:00.000Z",
+            "currentPeriodEnd": "2026-08-17T00:00:00.000Z",
+            "nextRenewalAt": "2026-08-17T00:00:00.000Z",
+            "syncedAt": "2026-07-29T08:00:00.000Z",
+        ]],
     ]
 
     private static let subscriptionsJSON: [[String: Any]] = [[

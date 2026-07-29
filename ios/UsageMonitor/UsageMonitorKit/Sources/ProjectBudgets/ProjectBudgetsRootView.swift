@@ -8,9 +8,10 @@ import Networking
 ///
 /// Per-project budget tracking: a list of projects with spend-vs-budget meters
 /// and a project detail screen. Budget data comes from the shared
-/// `BudgetStore` (the single authenticated fetch). **Add/edit is disabled**
-/// until a bearer-reachable mutation API exists — local-only Save previously
-/// looked real but never hit the monitor (money-path hazard).
+/// `BudgetStore` (the single authenticated fetch). Add/edit/delete run through
+/// the session-gated monitor API (`POST/PUT/DELETE /api/projects`) via
+/// `ProjectManagementStore` — offered only while a dashboard session is active,
+/// exactly like the provider/subscription management in Settings.
 ///
 /// Public entry point — keep `ProjectBudgetsRootView` + `public init()` stable.
 public struct ProjectBudgetsRootView: View {
@@ -18,6 +19,8 @@ public struct ProjectBudgetsRootView: View {
     /// Optional so previews (store-only) don't trap; the app injects it.
     @Environment(AppEnvironment.self) private var env: AppEnvironment?
     @State private var detailID: String?
+    @State private var managementStore = ProjectManagementStore()
+    @State private var editorContext: ProjectEditorContext?
 
     public init() {}
 
@@ -39,14 +42,42 @@ public struct ProjectBudgetsRootView: View {
                 onRetry: { Task { await store.load() } },
                 onConnect: { env?.selectTab?(.settings) },
                 onSelect: { detailID = $0.id },
-                onAdd: nil
+                onAdd: managementStore.canManage ? { editorContext = .add } : nil
             )
             .navigationTitle(AppTab.projects.title)
             .navigationBarTitleDisplayMode(.large)
             .navigationDestination(item: $detailID) { id in
                 projectDetail(id: id)
             }
+            .toolbar {
+                if managementStore.canManage {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            Haptics.tap()
+                            editorContext = .add
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("Add project")
+                    }
+                }
+            }
+            .sheet(item: $editorContext) { context in
+                if let env {
+                    ProjectBudgetEditView(
+                        existing: context.existing,
+                        store: managementStore,
+                        client: env.apiClient,
+                        budgetStore: store
+                    )
+                }
+            }
             .task { await store.loadIfNeeded() }
+            .task(id: env?.accessIdentityRevision ?? 0) { [apiClient = env?.apiClient] in
+                if let apiClient {
+                    await managementStore.probeCapabilities(using: apiClient)
+                }
+            }
         }
     }
 
@@ -55,7 +86,7 @@ public struct ProjectBudgetsRootView: View {
         if let project = mergedProjects.first(where: { $0.id == id }) {
             ProjectBudgetDetailView(
                 presentation: ProjectBudgetPresentation(project),
-                onEdit: nil
+                onEdit: managementStore.canManage ? { editorContext = .edit(project) } : nil
             )
         } else {
             EmptyState(
@@ -66,6 +97,24 @@ public struct ProjectBudgetsRootView: View {
         }
     }
 
+}
+
+/// What the add/edit sheet is editing: a new project, or an existing one.
+private enum ProjectEditorContext: Identifiable {
+    case add
+    case edit(ProjectBudgetStatus)
+
+    var id: String {
+        switch self {
+        case .add: return "add"
+        case .edit(let project): return project.id
+        }
+    }
+
+    var existing: ProjectBudgetStatus? {
+        guard case .edit(let project) = self else { return nil }
+        return project
+    }
 }
 
 // MARK: - Content (pure, value-driven — previewable without a live store)
@@ -121,9 +170,11 @@ struct ProjectBudgetsContentView: View {
             EmptyState(
                 systemImage: "folder.badge.plus",
                 title: "No project budgets yet",
-                message: "Track spend per project. Projects are managed on the web dashboard — visit usage.jays.services to create and edit them.",
-                actionTitle: nil,
-                action: nil
+                message: onAdd != nil
+                    ? "Track spend per project. Add your first project to start budgeting."
+                    : "Track spend per project. Sign in for full access in Settings to manage projects here, or use the web dashboard.",
+                actionTitle: onAdd != nil ? "Add project" : nil,
+                action: onAdd
             )
         }
         .frame(maxHeight: .infinity)
