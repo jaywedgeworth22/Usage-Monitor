@@ -3,15 +3,13 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { setupPrismaSqliteTestDb } from "./setup-test-db";
-import {
-  detectDuplicateSubscriptions,
-  detectPriceChanges,
-  detectUnusedSubscriptions,
-  type SubscriptionInsightRow,
-} from "../subscription-insights";
+import type { SubscriptionInsightRow } from "../subscription-insights";
 
 let dbPath: string;
 let prisma: typeof import("@/lib/prisma").prisma;
+let detectDuplicateSubscriptions: typeof import("../subscription-insights").detectDuplicateSubscriptions;
+let detectPriceChanges: typeof import("../subscription-insights").detectPriceChanges;
+let detectUnusedSubscriptions: typeof import("../subscription-insights").detectUnusedSubscriptions;
 let loadSubscriptionInsightAlerts: typeof import("../subscription-insights").loadSubscriptionInsightAlerts;
 
 beforeAll(async () => {
@@ -22,8 +20,18 @@ beforeAll(async () => {
 
   setupPrismaSqliteTestDb(dbPath);
 
+  // subscription-insights.ts statically imports @/lib/prisma, which
+  // instantiates the client at module load — so EVERY import of it (and of
+  // prisma) must stay dynamic, after DATABASE_URL points at the temp schema
+  // above. A static import would bind the client to the ambient DATABASE_URL
+  // (works locally where dev.db has the schema; P2021 in CI where it doesn't).
   ({ prisma } = await import("@/lib/prisma"));
-  ({ loadSubscriptionInsightAlerts } = await import("../subscription-insights"));
+  ({
+    detectDuplicateSubscriptions,
+    detectPriceChanges,
+    detectUnusedSubscriptions,
+    loadSubscriptionInsightAlerts,
+  } = await import("../subscription-insights"));
 }, 60_000);
 
 afterAll(async () => {
