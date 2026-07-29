@@ -88,9 +88,26 @@ export function getUsageReadTokenReadiness(
 }
 
 // Read-only token check for GET /api/subscriptions (and shared by budget-status).
+//
+// Accepted credentials, in precedence order:
+//   1. `Authorization: Bearer <token>`
+//   2. `x-usage-read-token: <token>`   — canonical read header
+//   3. `x-usage-ingest-token: <token>` — legacy alias, kept so existing
+//      consumers that already send the ingest-style header name keep working.
+// The expected secret is unchanged (USAGE_READ_TOKEN, with the documented
+// non-production/break-glass fallback to USAGE_INGEST_TOKEN): only the header
+// *name* gained an alias, never the credential set.
 export function isUsageReadAuthorized(request: NextRequest): boolean {
   const expected = resolveUsageReadToken();
   if (!expected) return false;
-  const actual = tokenFromRequest(request, "x-usage-ingest-token");
+  const authorization = request.headers.get("authorization") ?? "";
+  const bearer = authorization.toLowerCase().startsWith("bearer ")
+    ? authorization.slice(7).trim()
+    : "";
+  const actual =
+    bearer ||
+    request.headers.get("x-usage-read-token")?.trim() ||
+    request.headers.get("x-usage-ingest-token")?.trim() ||
+    "";
   return Boolean(actual) && safeEqual(actual, expected);
 }

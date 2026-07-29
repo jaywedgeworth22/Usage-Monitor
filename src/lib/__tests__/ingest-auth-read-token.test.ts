@@ -1,8 +1,71 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 import {
   getUsageReadTokenReadiness,
+  isUsageReadAuthorized,
   resolveUsageReadToken,
 } from "@/lib/ingest-auth";
+
+function readRequest(headers: Record<string, string>): NextRequest {
+  return new NextRequest("https://usage.jays.services/api/subscriptions", {
+    method: "GET",
+    headers,
+  });
+}
+
+describe("isUsageReadAuthorized header names (X3)", () => {
+  beforeEach(() => {
+    vi.stubEnv("USAGE_READ_TOKEN", "read-secret");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("accepts the canonical x-usage-read-token header", () => {
+    expect(
+      isUsageReadAuthorized(readRequest({ "x-usage-read-token": "read-secret" }))
+    ).toBe(true);
+  });
+
+  it("still accepts the legacy x-usage-ingest-token header-name alias", () => {
+    expect(
+      isUsageReadAuthorized(readRequest({ "x-usage-ingest-token": "read-secret" }))
+    ).toBe(true);
+  });
+
+  it("accepts Authorization: Bearer and rejects wrong/missing tokens", () => {
+    expect(
+      isUsageReadAuthorized(readRequest({ authorization: "Bearer read-secret" }))
+    ).toBe(true);
+    expect(
+      isUsageReadAuthorized(readRequest({ "x-usage-read-token": "wrong" }))
+    ).toBe(false);
+    expect(
+      isUsageReadAuthorized(readRequest({ "x-usage-ingest-token": "wrong" }))
+    ).toBe(false);
+    expect(isUsageReadAuthorized(readRequest({}))).toBe(false);
+  });
+
+  it("prefers the Bearer credential over either header", () => {
+    expect(
+      isUsageReadAuthorized(
+        readRequest({
+          authorization: "Bearer read-secret",
+          "x-usage-read-token": "wrong",
+        })
+      )
+    ).toBe(true);
+    expect(
+      isUsageReadAuthorized(
+        readRequest({
+          authorization: "Bearer wrong",
+          "x-usage-read-token": "read-secret",
+        })
+      )
+    ).toBe(false);
+  });
+});
 
 describe("resolveUsageReadToken (C10)", () => {
   it("prefers USAGE_READ_TOKEN when set", () => {
