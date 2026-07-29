@@ -1,9 +1,56 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSnapshotVariableDayPeaks,
   dailyIncrementsFromSnapshotPeaks,
   maxDailySeries,
 } from "../daily-usage-series";
 import { calculateEomForecast, calculateEomForecastFromSeries } from "../forecasting";
+
+describe("buildSnapshotVariableDayPeaks (S4)", () => {
+  it("keeps one variable-cost peak per provider per UTC day", () => {
+    const peaks = buildSnapshotVariableDayPeaks([
+      {
+        providerId: "p1",
+        fetchedAt: new Date("2026-07-02T08:00:00.000Z"),
+        totalCost: 20,
+        fixedCostIncludedUsd: 5,
+      },
+      {
+        providerId: "p1",
+        fetchedAt: new Date("2026-07-02T20:00:00.000Z"),
+        totalCost: 30,
+        fixedCostIncludedUsd: 5,
+      },
+      {
+        providerId: "p2",
+        fetchedAt: new Date("2026-07-02T12:00:00.000Z"),
+        totalCost: 7,
+        fixedCostIncludedUsd: null,
+      },
+      {
+        providerId: "p2",
+        fetchedAt: new Date("2026-07-03T12:00:00.000Z"),
+        totalCost: null,
+        fixedCostIncludedUsd: null,
+      },
+    ]);
+    expect(peaks.get("p1")).toEqual(new Map([["2026-07-02", 25]]));
+    expect(peaks.get("p2")).toEqual(new Map([["2026-07-02", 7]]));
+  });
+
+  it("clamps the fixed portion to the snapshot total before differencing", () => {
+    const peaks = buildSnapshotVariableDayPeaks([
+      {
+        providerId: "p1",
+        fetchedAt: new Date("2026-07-02T08:00:00.000Z"),
+        totalCost: 4,
+        fixedCostIncludedUsd: 10, // fixed exceeds total → variable is 0
+      },
+    ]);
+    expect(peaks.get("p1")).toEqual(new Map([["2026-07-02", 0]]));
+  });
+});
+
 
 describe("daily-usage-series helpers (Wave J / E11)", () => {
   it("builds incremental series from cumulative snapshot peaks", () => {
