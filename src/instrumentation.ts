@@ -5,6 +5,16 @@ export function isUsageSchedulerEnabled(
 }
 
 export async function register() {
+  // Self error-reporting (review finding O4). Both config modules are fully
+  // DSN-gated internally: with SENTRY_DSN unset they import and no-op, so
+  // this costs nothing in CI/dev. Done BEFORE the nodejs early-return below
+  // so the edge runtime (middleware) is covered too.
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    await import("./sentry.server.config");
+  } else if (process.env.NEXT_RUNTIME === "edge") {
+    await import("./sentry.edge.config");
+  }
+
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
   // Bound native (non-heap) SQLite memory before any request or scheduler
@@ -56,4 +66,17 @@ export async function register() {
   }
   const { startUsagePollingScheduler } = await import("@/lib/usage-recorder");
   startUsagePollingScheduler();
+}
+
+// Next 15 `onRequestError` hook: captures errors from Server Components,
+// route handlers, and middleware into Sentry (review finding O4). The SDK is
+// imported lazily so this module's static import graph is unchanged (the
+// webpack dev compiler already struggles with Node builtins via this file —
+// see AGENTS.md — and we must not add another edge-analysis edge case).
+// captureRequestError is itself a no-op unless a DSN-gated init ran above.
+export async function onRequestError(
+  ...args: Parameters<typeof import("@sentry/nextjs").captureRequestError>
+): Promise<void> {
+  const Sentry = await import("@sentry/nextjs");
+  Sentry.captureRequestError(...args);
 }

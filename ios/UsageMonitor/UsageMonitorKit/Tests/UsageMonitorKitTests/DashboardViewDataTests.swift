@@ -120,6 +120,45 @@ final class DashboardViewDataTests: XCTestCase {
         XCTAssertEqual(DashboardViewData(okResponse).projectionStatus, .ok)
     }
 
+    func testProjectionStatusPrefersServerPerProviderValues() {
+        // Aggregate projection is only 60% of the total budget (locally "ok"),
+        // but the server flags one provider's runway as exceeded — the server's
+        // per-provider statuses must win when every budgeted provider has one.
+        let response = makeResponse(
+            budget: 300,
+            providers: [
+                provider(id: "a", name: "A", spent: 90, projected: 150, budget: 100, status: .ok,
+                         projectedStatus: .exceeded),
+                provider(id: "b", name: "B", spent: 10, projected: 30, budget: 200, status: .ok,
+                         projectedStatus: .ok),
+            ]
+        )
+        XCTAssertEqual(DashboardViewData(response).projectionStatus, .exceeded)
+
+        // Mixed payload (one provider missing the field) → local fallback.
+        let mixed = makeResponse(
+            budget: 300,
+            providers: [
+                provider(id: "a", name: "A", spent: 90, projected: 150, budget: 100, status: .ok,
+                         projectedStatus: .exceeded),
+                provider(id: "b", name: "B", spent: 10, projected: 30, budget: 200, status: .ok),
+            ]
+        )
+        XCTAssertEqual(DashboardViewData(mixed).projectionStatus, .ok)
+
+        // All-server warning rolls up to warning.
+        let warning = makeResponse(
+            budget: 300,
+            providers: [
+                provider(id: "a", name: "A", spent: 40, projected: 85, budget: 100, status: .ok,
+                         projectedStatus: .warning),
+                provider(id: "b", name: "B", spent: 10, projected: 30, budget: 200, status: .ok,
+                         projectedStatus: .ok),
+            ]
+        )
+        XCTAssertEqual(DashboardViewData(warning).projectionStatus, .warning)
+    }
+
     // MARK: - Roll-ups
 
     func testTopProvidersSpendDescendingWithLimit() {
@@ -275,7 +314,8 @@ final class DashboardViewDataTests: XCTestCase {
         projected: Double,
         budget: Double?,
         status: BudgetLevel,
-        coverage: CostCoverage = .complete
+        coverage: CostCoverage = .complete,
+        projectedStatus: BudgetLevel? = nil
     ) -> ProviderBudgetStatus {
         ProviderBudgetStatus(
             id: id, name: name, displayName: name,
@@ -285,7 +325,8 @@ final class DashboardViewDataTests: XCTestCase {
             projectedEomUsd: projected,
             remainingUsd: budget.map { $0 - spent },
             percentUsed: budget.map { $0 > 0 ? spent / $0 : 0 },
-            status: status
+            status: status,
+            projectedStatus: projectedStatus
         )
     }
 }

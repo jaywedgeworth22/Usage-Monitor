@@ -30,6 +30,9 @@ public actor APIClient {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
+    private static let sessionProbeCacheTTL: TimeInterval = 45
+    private var sessionProbeCache: (status: DashboardSessionStatus, probedAt: Date)?
+
     public init(
         configuration: APIConfiguration = .production,
         tokenStore: TokenStoring = KeychainTokenStore(),
@@ -126,6 +129,8 @@ public actor APIClient {
             authorization: .none,
             body: DashboardLoginRequest(password: password)
         )
+        // A fresh cookie must never inherit a cached validation of an older one.
+        sessionProbeCache = nil
         return response
     }
 
@@ -135,7 +140,10 @@ public actor APIClient {
         // Local sign-out is fail-closed: an offline/5xx server response may mean
         // the remote cookie remains valid until expiry, but this device must not
         // retain or reuse it after the user chose Sign Out.
-        defer { deleteDashboardSessionCookies() }
+        defer {
+            sessionProbeCache = nil
+            deleteDashboardSessionCookies()
+        }
         return try await send(
             "/api/auth/logout",
             method: .post,
@@ -145,18 +153,58 @@ public actor APIClient {
     }
 
     /// Validate the cookie against a session-gated endpoint. There is no
-    /// dedicated server session-status route, so the bounded dashboard provider
-    /// inventory is the authoritative probe and also gives Settings a useful
-    /// provider count.
+    /// dedicated server session-status route, so the probe is the cheapest
+    /// bounded session-gated query available: one indexed `take` on
+    /// `GET /api/usage-events?raw=1&limit=1&days=1`. The dashboard provider
+    /// inventory (`?view=dashboard`) previously served as the probe, but it is
+    /// the heaviest endpoint in the app and fired on every Settings appear;
+    /// the public `/api/health` and `/api/ready` routes cannot validate a
+    /// session because they answer 200 without one. Results are cached briefly
+    /// so repeated Settings visits don't re-probe.
     public func sessionStatus() async throws -> DashboardSessionStatus {
-        guard hasDashboardSessionCookie else { return .signedOut }
-        do {
-            let providers = try await providerInventory()
-            return .active(providerCount: providers.count)
-        } catch APIError.unauthorized {
-            deleteDashboardSessionCookies()
+        guard hasDashboardSessionCookie else {
+            sessionProbeCache = nil
             return .signedOut
         }
+        if let cache = sessionProbeCache,
+           Date().timeIntervalSince(cache.probedAt) < Self.sessionProbeCacheTTL {
+            return cache.status
+        }
+        do {
+            try await probeDashboardSession()
+            let status = DashboardSessionStatus.active(providerCount: nil)
+            sessionProbeCache = (status: status, probedAt: Date())
+            return status
+        } catch APIError.unauthorized {
+            deleteDashboardSessionCookies()
+            sessionProbeCache = nil
+            return .signedOut
+        }
+    }
+
+    /// Forget any cached session validation. Called after login/logout and on
+    /// host switches so a stale "active" can never survive a credential change.
+    public func invalidateSessionStatusCache() {
+        sessionProbeCache = nil
+    }
+
+    private struct SessionProbeResponse: Decodable {
+        // Only the envelope marker is consumed; every field is optional so a
+        // response-shape evolution can never turn a healthy probe into a
+        // decoding failure.
+        let mode: String?
+    }
+
+    private func probeDashboardSession() async throws {
+        let _: SessionProbeResponse = try await get(
+            "/api/usage-events",
+            queryItems: [
+                URLQueryItem(name: "raw", value: "1"),
+                URLQueryItem(name: "limit", value: "1"),
+                URLQueryItem(name: "days", value: "1"),
+            ],
+            authorization: .session
+        )
     }
 
     /// Local bearer configuration plus server-validated dashboard-session state.
@@ -204,7 +252,7 @@ public actor APIClient {
             "/api/providers/\(provider.id)",
             method: .put,
             authorization: .session,
-            body: ProviderBudgetUpdate(
+            body: ProviderPlanUpdateRequest(
                 plan: ProviderPlanUpdate(
                     preserving: provider.plan,
                     monthlyBudgetUsd: monthlyBudgetUsd
@@ -213,8 +261,9 @@ public actor APIClient {
         )
     }
 
-    /// Pause an active subscription. Reactivation is intentionally not exposed:
-    /// the server requires resume-vs-repurchase context absent from the list DTO.
+    /// Pause an active subscription. Note the server converts an
+    /// `externalBillingManaged` row to owner-managed on ANY owner edit
+    /// (including pause); the UI warns before calling this for such rows.
     @discardableResult
     public func pauseSubscription(id: String) async throws -> SubscriptionMutationReceipt {
         try await send(
@@ -222,6 +271,68 @@ public actor APIClient {
             method: .put,
             authorization: .session,
             body: SubscriptionStatusUpdate(status: "paused")
+        )
+    }
+
+    /// Reactivate a paused/canceled/considering/expired subscription using the
+    /// server's `activationMode` contract (`parseSubscriptionUpdateInput`):
+    /// `resume` continues the paid-through term (previously charged rows only);
+    /// `repurchase` anchors a fresh cycle at activation. `renewAutomatically`
+    /// is sent only when the caller must also flip `autoRenew` (repurchasing an
+    /// expired term requires it for the server to treat this as an activation).
+    /// The response carries the new `nextRenewalAt`.
+    @discardableResult
+    public func activateSubscription(
+        id: String,
+        mode: SubscriptionActivationMode,
+        renewAutomatically: Bool? = nil
+    ) async throws -> SubscriptionMutationReceipt {
+        try await send(
+            "/api/subscriptions/\(id)",
+            method: .put,
+            authorization: .session,
+            body: SubscriptionActivationUpdate(
+                status: "active",
+                activationMode: mode.rawValue,
+                autoRenew: renewAutomatically
+            )
+        )
+    }
+
+    /// Submit the native plan editor's full form state. Editable fields use
+    /// clear-on-nil semantics (JSON null clears the stored value); the plan
+    /// fields the editor does not manage (`monthlyRequestLimit`,
+    /// `lowBalanceUsd`, `lowCredits`, `billingMode`, `mustKeepFunded`) are
+    /// preserved from the inventory item exactly as the budget-only update
+    /// does. The server rejects a positive `fixedMonthlyCostUsd` when an
+    /// active/considering Subscription already models the same fee (400).
+    @discardableResult
+    public func updateProviderPlan(
+        provider: ProviderManagementItem,
+        patch: ProviderPlanPatch
+    ) async throws -> ProviderMutationReceipt {
+        try await send(
+            "/api/providers/\(provider.id)",
+            method: .put,
+            authorization: .session,
+            body: ProviderPlanUpdateRequest(
+                plan: ProviderPlanUpdate(preserving: provider.plan, patch: patch)
+            )
+        )
+    }
+
+    /// `POST /api/providers/:id/fetch` — record a fresh usage snapshot
+    /// immediately instead of waiting for the next scheduled poll. Returns the
+    /// stored snapshot (201). Server error bodies carry `{error, code,
+    /// retryable}`; non-retryable adapter/config failures arrive as 4xx and
+    /// surface as typed `APIError`s like any other mutation.
+    @discardableResult
+    public func fetchProviderNow(id: String) async throws -> ProviderFetchReceipt {
+        try await send(
+            "/api/providers/\(id)/fetch",
+            method: .post,
+            authorization: .session,
+            body: EmptyRequestBody()
         )
     }
 
@@ -438,7 +549,7 @@ private struct ProviderActiveUpdate: Encodable {
     let isActive: Bool
 }
 
-private struct ProviderBudgetUpdate: Encodable {
+private struct ProviderPlanUpdateRequest: Encodable {
     let plan: ProviderPlanUpdate
 }
 
@@ -453,7 +564,11 @@ private struct ProviderPlanUpdate: Encodable {
     let billingInterval: String?
     let mustKeepFunded: Bool
     let notes: String?
+    /// Fields the editor submitted with clear-on-nil semantics: nil encodes an
+    /// explicit JSON null (clear) instead of an omitted key (preserve).
+    let clearableKeys: Set<CodingKeys>
 
+    /// Budget-only edit: every field except `monthlyBudgetUsd` is preserved.
     init(preserving plan: ProviderManagementItem.Plan?, monthlyBudgetUsd: Double?) {
         billingMode = plan?.billingMode ?? "manual"
         fixedMonthlyCostUsd = plan?.fixedMonthlyCostUsd
@@ -465,9 +580,26 @@ private struct ProviderPlanUpdate: Encodable {
         billingInterval = plan?.billingInterval
         mustKeepFunded = plan?.mustKeepFunded ?? false
         notes = plan?.notes
+        clearableKeys = [.monthlyBudgetUsd]
     }
 
-    private enum CodingKeys: String, CodingKey {
+    /// Full plan-editor submission: the editable fields follow the patch's
+    /// clear-on-nil semantics; the rest round-trip from the inventory item.
+    init(preserving plan: ProviderManagementItem.Plan?, patch: ProviderPlanPatch) {
+        billingMode = plan?.billingMode ?? "manual"
+        fixedMonthlyCostUsd = patch.fixedMonthlyCostUsd
+        monthlyBudgetUsd = patch.monthlyBudgetUsd
+        monthlyRequestLimit = plan?.monthlyRequestLimit
+        lowBalanceUsd = plan?.lowBalanceUsd
+        lowCredits = plan?.lowCredits
+        renewalDate = patch.renewalDate
+        billingInterval = patch.billingInterval
+        mustKeepFunded = plan?.mustKeepFunded ?? false
+        notes = patch.notes
+        clearableKeys = [.fixedMonthlyCostUsd, .monthlyBudgetUsd, .renewalDate, .billingInterval, .notes]
+    }
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case billingMode
         case fixedMonthlyCostUsd
         case monthlyBudgetUsd
@@ -483,24 +615,54 @@ private struct ProviderPlanUpdate: Encodable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(billingMode, forKey: .billingMode)
-        try container.encodeIfPresent(fixedMonthlyCostUsd, forKey: .fixedMonthlyCostUsd)
-        if let monthlyBudgetUsd {
-            try container.encode(monthlyBudgetUsd, forKey: .monthlyBudgetUsd)
-        } else {
-            // `nil` is an intentional edit here, not an omitted field: the
-            // server uses JSON null to clear an existing budget.
-            try container.encodeNil(forKey: .monthlyBudgetUsd)
-        }
+        try encodeClearable(fixedMonthlyCostUsd, forKey: .fixedMonthlyCostUsd, in: &container)
+        try encodeClearable(monthlyBudgetUsd, forKey: .monthlyBudgetUsd, in: &container)
         try container.encodeIfPresent(monthlyRequestLimit, forKey: .monthlyRequestLimit)
         try container.encodeIfPresent(lowBalanceUsd, forKey: .lowBalanceUsd)
         try container.encodeIfPresent(lowCredits, forKey: .lowCredits)
-        try container.encodeIfPresent(renewalDate, forKey: .renewalDate)
-        try container.encodeIfPresent(billingInterval, forKey: .billingInterval)
+        try encodeClearable(renewalDate, forKey: .renewalDate, in: &container)
+        try encodeClearable(billingInterval, forKey: .billingInterval, in: &container)
         try container.encode(mustKeepFunded, forKey: .mustKeepFunded)
-        try container.encodeIfPresent(notes, forKey: .notes)
+        try encodeClearable(notes, forKey: .notes, in: &container)
+    }
+
+    /// Editable fields: present → value; nil → explicit JSON null so the
+    /// server CLEARS the stored value. Non-editable fields use
+    /// `encodeIfPresent` so a nil there preserves the server value.
+    private func encodeClearable<T: Encodable>(
+        _ value: T?,
+        forKey key: CodingKeys,
+        in container: inout KeyedEncodingContainer<CodingKeys>
+    ) throws {
+        if let value {
+            try container.encode(value, forKey: key)
+        } else if clearableKeys.contains(key) {
+            try container.encodeNil(forKey: key)
+        }
     }
 }
 
 private struct SubscriptionStatusUpdate: Encodable {
     let status: String
+}
+
+private struct SubscriptionActivationUpdate: Encodable {
+    let status: String
+    let activationMode: String
+    let autoRenew: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case activationMode
+        case autoRenew
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(status, forKey: .status)
+        try container.encode(activationMode, forKey: .activationMode)
+        // autoRenew is only sent when the caller must flip it (e.g. repurchasing
+        // an expired term); omitting it preserves the stored value.
+        try container.encodeIfPresent(autoRenew, forKey: .autoRenew)
+    }
 }
