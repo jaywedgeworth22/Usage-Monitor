@@ -31,7 +31,7 @@ jobs:
     # main saving. It relies on curl + jq (readiness probe) and gh (incident
     # issue/streak steps, all continue-on-error); confirm those exist on the
     # runner during the proving dispatch — the readiness gate needs only curl+jq.
-    runs-on: ${{ (github.actor != 'dependabot[bot]' && vars.UM_CI_RUNNER) || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       # Consecutive failed 5-minute checks required before this fires a
