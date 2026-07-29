@@ -26,9 +26,10 @@ import {
 // This is the ONE collection route the dashboard-session middleware excludes
 // (see src/middleware.ts's `api/subscriptions/?$` — collection path only, the
 // [id] sub-route stays session-gated there), so GET self-authenticates here:
-// the dashboard session cookie OR a bearer/x-usage-ingest-token
-// (USAGE_READ_TOKEN falling back to USAGE_INGEST_TOKEN, same as
-// GET /api/budget-status) so a headless sibling app can read the
+// the dashboard session cookie OR a bearer/x-usage-read-token
+// (x-usage-ingest-token accepted as a legacy header-name alias;
+// USAGE_READ_TOKEN falling back to USAGE_INGEST_TOKEN per resolveUsageReadToken,
+// same as GET /api/budget-status) so a headless sibling app can read the
 // subscription/knobEnv list without a browser session.
 export async function GET(request: NextRequest) {
   if (!hasValidDashboardSession(request) && !isUsageReadAuthorized(request)) {
@@ -99,7 +100,13 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json(result, {
+      headers: {
+        // Read-surface version marker (X4; see docs/api-contract.md). Additive
+        // changes keep "1"; a breaking change bumps it.
+        "x-api-version": "1",
+      },
+    });
   } catch (error) {
     console.error("Failed to fetch subscriptions:", error);
     return NextResponse.json({ error: "Failed to fetch subscriptions" }, { status: 500 });
