@@ -6,6 +6,13 @@ import { getProviderIntegrationProfile } from "@/lib/provider-integration-catalo
 import SortHeader, { type SortDirection } from "@/components/table/SortHeader";
 import { useDisplayDensity } from "@/lib/display-density";
 import { costCoverageHelpText } from "@/lib/cost-coverage-help";
+import {
+  formatBudgetRunout,
+  formatCurrency,
+  formatNumber,
+  projectedStatusLabel,
+  type ProviderBudgetIntel,
+} from "@/lib/format";
 
 interface ProviderTableProps {
   providers: Provider[];
@@ -18,6 +25,12 @@ interface ProviderTableProps {
   onAddProvider: () => void;
   onToggleActive: (provider: Provider) => void;
   onFetchNow: (id: string) => void;
+  /**
+   * S9/S10: server projection intelligence (projectedStatus / budget runout)
+   * keyed by provider id, from GET /api/budget-status. Optional — when absent
+   * the table renders exactly as before.
+   */
+  budgetIntelByProviderId?: Record<string, ProviderBudgetIntel>;
 }
 
 type SortField = "name" | "type" | "status" | "spend" | "alerts" | "credits" | "lastFetched";
@@ -209,6 +222,7 @@ export default function ProviderTable({
   onAddProvider,
   onToggleActive,
   onFetchNow,
+  budgetIntelByProviderId,
 }: ProviderTableProps) {
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
@@ -239,14 +253,7 @@ export default function ProviderTable({
     return new Date(dateStr);
   };
 
-  const formatUsd = (amount: number | null | undefined) => {
-    if (amount == null) return "--";
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 2,
-    }).format(amount);
-  };
+  const formatUsd = (amount: number | null | undefined) => formatCurrency(amount);
 
   const hasAnyCredits = providers.some(
     (p) => p.latestSnapshot?.credits != null
@@ -603,6 +610,34 @@ export default function ProviderTable({
                         <p className="text-gray-600 dark:text-gray-300">
                           Budget {formatUsd(provider.plan?.monthlyBudgetUsd)}
                         </p>
+                        {(() => {
+                          // S9/S10: projection intelligence from the budget-status
+                          // DTO — a pace badge when worse than ok, and subtle
+                          // runout info text. Never an alert of its own.
+                          const intel = budgetIntelByProviderId?.[provider.id];
+                          if (!intel) return null;
+                          const paceLabel = projectedStatusLabel(intel.projectedStatus);
+                          const runoutLabel = formatBudgetRunout(intel);
+                          if (!paceLabel && !runoutLabel) return null;
+                          return (
+                            <>
+                              {paceLabel && (
+                                <p
+                                  className={`font-medium ${
+                                    intel.projectedStatus === "exceeded"
+                                      ? "text-red-600 dark:text-red-300"
+                                      : "text-amber-600 dark:text-amber-300"
+                                  }`}
+                                >
+                                  {paceLabel}
+                                </p>
+                              )}
+                              {runoutLabel && (
+                                <p className="text-gray-500 dark:text-gray-400">{runoutLabel}</p>
+                              )}
+                            </>
+                          );
+                        })()}
                         {density === "compact" && (
                           <details className="mt-1 text-gray-500 dark:text-gray-400">
                             <summary className="cursor-pointer font-medium text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-blue-300">
@@ -654,9 +689,7 @@ export default function ProviderTable({
                 {hasAnyCredits && (
                   <td data-label="Credits" className="px-6 py-4 text-right text-xs text-purple-600 dark:text-purple-300">
                     {provider.latestSnapshot?.credits != null
-                      ? new Intl.NumberFormat("en-US").format(
-                          provider.latestSnapshot.credits
-                        )
+                      ? formatNumber(provider.latestSnapshot.credits)
                       : "--"}
                   </td>
                 )}

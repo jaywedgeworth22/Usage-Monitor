@@ -31,6 +31,10 @@ export const isPublicPath = (pathname: string) => {
   if (publicPaths.includes(pathname)) return true;
   if (publicPaths.some((p) => pathname.startsWith(p + "/"))) return true;
   if (pathname === "/api/subscriptions" || pathname === "/api/subscriptions/") return true;
+  // Self-authenticates via isUsageReadAuthorized (same pattern as the
+  // subscriptions collection exclusion above) — without this, bearer read
+  // tokens 401 at the session gate before the route's own auth runs.
+  if (pathname === "/api/export/daily-rollups" || pathname === "/api/export/daily-rollups/") return true;
   return false;
 };
 

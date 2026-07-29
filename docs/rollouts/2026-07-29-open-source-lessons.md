@@ -114,19 +114,39 @@ pattern is noted as a deferred option (see below).
   monthly-equivalent normalization) — already covered by the Subscriptions
   tab and `forecastSubscriptionRenewals`.
 
+### 4. Ingest-time pricing of generic unpriced events (follow-up, same day)
+
+The one deferred Langfuse pattern, implemented behind **default-off**
+`INGEST_COST_DERIVATION_ENABLED` after owner sign-off:
+
+- `src/lib/pricing/derive-ingest-cost.ts` — stamps `_derivedCostUsd` +
+  provenance keys (`_derivedCostPricingKey`, `_derivedCostSnapshot`,
+  `_derivedCostIncomplete`) into **metadata only** for unpriced
+  `metricType="usage"`/`unit="token"` events whose `keyRef` resolves in the
+  bundled snapshot. `costUsd` stays null: the pushed-cash pool
+  (`usagePushed` → budget spend) and priced/unpriced coverage counts are
+  byte-for-byte untouched, because producers' own costUsd (including their
+  `billingMode="estimated"`) is the only cost that enters that pool. The four
+  keys are reserved in `usage-telemetry.ts` so producers cannot forge them.
+- Token-rate selection: `metadata.tokenType` (input/output/cacheRead/
+  cacheCreation) picks the matching rate; absent it, the INPUT rate is a
+  documented floor flagged `_derivedCostIncomplete` (output usually costs
+  more — the floor under-estimates, never over).
+- Visibility: `GET /api/usage-events` and the dashboard telemetry panel
+  surface `derivedCostEstimateUsd` / event count as a separate
+  "Monitor-estimated" figure via one bounded `json_extract` aggregate scan
+  (raw window only; rollups pre-date the stamps). The scan is skipped
+  entirely when the flag is off, and the summary memo key carries the flag
+  bit so a same-day flip can't serve stale totals.
+
 ## Deferred (deliberately not done)
 
-1. **Ingest-time pricing of generic unpriced events.** Langfuse computes
-   cost at ingest when the producer omits it. Doing that here would change
-   the meaning of `pushedUnpricedEventCount` / cost coverage and could turn
-   estimates into quasi-cash — a money-semantics decision for the owner, not
-   a side effect of this change. The pricing module is ready if approved.
-2. **>200k-context premium auto-detection.** Needs per-request context size;
+1. **>200k-context premium auto-detection.** Needs per-request context size;
    not present in OTLP points. Base rates are used (documented in
    `model-pricing.ts`).
-3. **Per-event ingest error detail** in the v2 ACK — belongs in
+2. **Per-event ingest error detail** in the v2 ACK — belongs in
    `congress-trading-shared`, not here.
-4. **5-hour billing-block windows** (ccusage's headline feature for Max-plan
+3. **5-hour billing-block windows** (ccusage's headline feature for Max-plan
    users) — useful projection UX, but orthogonal to cost attribution;
    candidate for a follow-up.
 
@@ -136,3 +156,5 @@ pattern is noted as a deferred option (see below).
   Cadence suggestion: monthly, or whenever a new model shows up as
   `unpriced` in the cross-check card.
 - Endpoint: `GET /api/claude-cost-check?days=30` (dashboard session).
+- Enable ingest derivation: `INGEST_COST_DERIVATION_ENABLED="true"` (see
+  `.env.example`).

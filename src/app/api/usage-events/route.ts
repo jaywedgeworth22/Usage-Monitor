@@ -156,6 +156,8 @@ export async function GET(request: NextRequest) {
       (sum, group) => sum + group.estimatedApiEquivalentUsd,
       0
     ),
+    derivedCostEstimateUsd: summary.derivedCostEstimateUsd,
+    derivedCostEstimateEventCount: summary.derivedCostEstimateEventCount,
     ...costCounts,
     costCoverage: classifyCostCoverage(costCounts),
     totalRequests: groups.reduce((sum, group) => sum + group.totalRequests, 0),

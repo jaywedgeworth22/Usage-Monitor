@@ -13,6 +13,7 @@ import {
   parseUsageTelemetryV2Batch,
   type UsageTelemetryV2EventRejection,
 } from "@/lib/usage-telemetry";
+import { applyIngestCostDerivation } from "@/lib/pricing/derive-ingest-cost";
 import {
   getIngestIdentityRateLimitKey,
   getLoginBackstopKey,
@@ -228,6 +229,15 @@ export async function POST(request: NextRequest) {
       `sourceApp "${SUBSCRIPTION_SOURCE_APP}" is reserved`
     );
   }
+
+  // Default-off LiteLLM cost derivation (INGEST_COST_DERIVATION_ENABLED):
+  // stamps `_derivedCostUsd` into metadata for unpriced token events whose
+  // keyRef resolves in the bundled pricing snapshot. Metadata only —
+  // `costUsd` stays null, so pushed-cash and priced/unpriced coverage
+  // semantics are untouched. Placed after the reserved-sourceApp guard and
+  // before receipt classification: receipt-shaped events are metricType
+  // "cost"/unit "usd", which the derivation never matches by construction.
+  applyIngestCostDerivation(events);
 
   const receiptLikeEvents = events.filter(looksLikeReceiptCashEvent);
   if (receiptLikeEvents.length > 0) {
