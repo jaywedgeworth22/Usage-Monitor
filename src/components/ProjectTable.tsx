@@ -1,4 +1,5 @@
 import { type Project } from "@/components/AddProjectModal";
+import { formatCurrency } from "@/lib/format";
 
 interface ProjectTableProps {
   projects: Project[];
@@ -21,14 +22,7 @@ export default function ProjectTable({
   onDelete,
   onAddProject,
 }: ProjectTableProps) {
-  const formatUsd = (amount: number | null | undefined) => {
-    if (amount == null) return "--";
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      maximumFractionDigits: 2,
-    }).format(amount);
-  };
+  const formatUsd = (amount: number | null | undefined) => formatCurrency(amount);
 
   if (projects.length === 0) {
     return (

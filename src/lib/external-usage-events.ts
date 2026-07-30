@@ -14,11 +14,14 @@ import {
   receiptCashProviderId,
 } from "@/lib/receipt-cash";
 import { SUBSCRIPTION_SOURCE_APP } from "@/lib/subscription-charge-identity";
+import { ingestCostDerivationEnabled } from "@/lib/pricing/derive-ingest-cost";
 import {
   MTD_SCAN_MEMO_TTL_MS,
   clearMtdScanMemo,
   getMtdScanMemo,
+  getUsageEventsSummaryMemo,
   setMtdScanMemo,
+  setUsageEventsSummaryMemo,
 } from "@/lib/mtd-scan-memo";
 
 export const STATUS_METRIC_TYPES = new Set(["quota_sync", "credit_balance"]);
@@ -457,125 +460,234 @@ function summaryGroupKey(group: {
   ].join("|");
 }
 
-function mergeSummaryGroup(
-  target: Map<string, ExternalUsageEventSummaryGroup>,
-  group: ExternalUsageEventSummaryGroup
+// Internal accumulator for summarizeExternalUsageEvents. The two *SourceAt
+// fields track provenance for limit/limitWindow so each can come from the
+// latest contributing entry (by occurredAt) that actually has a non-null
+// value - the exact semantics the old per-event fold produced, which a plain
+// "latest entry wins" merge does not reproduce once SQL pre-aggregates rows.
+interface SummaryAccumulator extends ExternalUsageEventSummaryGroup {
+  limitSourceAt: string | null;
+  limitWindowSourceAt: string | null;
+}
+
+interface SummaryContribution {
+  sourceApp: string;
+  environment: string | null;
+  provider: string;
+  service: string | null;
+  projectId: string | null;
+  metricType: string;
+  unit: string | null;
+  eventCount: number;
+  pricedEventCount: number;
+  unpricedEventCount: number;
+  unclassifiedCostEventCount: number;
+  totalCostUsd: number;
+  receiptCashPaidUsd: number;
+  estimatedApiEquivalentUsd: number;
+  totalRequests: number;
+  totalQuantity: number;
+  limit: number | null;
+  limitWindow: string | null;
+  latestAt: string;
+}
+
+function addSummaryContribution(
+  target: Map<string, SummaryAccumulator>,
+  contribution: SummaryContribution
 ): void {
-  const key = summaryGroupKey(group);
+  const key = summaryGroupKey(contribution);
   const existing = target.get(key);
   if (!existing) {
-    target.set(key, group);
+    target.set(key, {
+      ...contribution,
+      canonicalProvider: canonicalProviderKey(contribution.provider),
+      costCoverage: classifyCostCoverage(contribution),
+      limitSourceAt: contribution.limit != null ? contribution.latestAt : null,
+      limitWindowSourceAt:
+        contribution.limitWindow != null ? contribution.latestAt : null,
+    });
     return;
   }
 
-  existing.eventCount += group.eventCount;
-  existing.pricedEventCount += group.pricedEventCount;
-  existing.unpricedEventCount += group.unpricedEventCount;
-  existing.unclassifiedCostEventCount += group.unclassifiedCostEventCount;
+  existing.eventCount += contribution.eventCount;
+  existing.pricedEventCount += contribution.pricedEventCount;
+  existing.unpricedEventCount += contribution.unpricedEventCount;
+  existing.unclassifiedCostEventCount += contribution.unclassifiedCostEventCount;
   existing.costCoverage = classifyCostCoverage(existing);
-  existing.totalCostUsd += group.totalCostUsd;
-  existing.receiptCashPaidUsd += group.receiptCashPaidUsd;
-  existing.estimatedApiEquivalentUsd += group.estimatedApiEquivalentUsd;
-  existing.totalRequests += group.totalRequests;
-  existing.totalQuantity += group.totalQuantity;
-  if (group.latestAt > existing.latestAt) {
-    existing.latestAt = group.latestAt;
-    existing.limit = group.limit ?? existing.limit;
-    existing.limitWindow = group.limitWindow ?? existing.limitWindow;
-  } else {
-    existing.limit = existing.limit ?? group.limit;
-    existing.limitWindow = existing.limitWindow ?? group.limitWindow;
+  existing.totalCostUsd += contribution.totalCostUsd;
+  existing.receiptCashPaidUsd += contribution.receiptCashPaidUsd;
+  existing.estimatedApiEquivalentUsd += contribution.estimatedApiEquivalentUsd;
+  existing.totalRequests += contribution.totalRequests;
+  existing.totalQuantity += contribution.totalQuantity;
+  if (contribution.latestAt > existing.latestAt) {
+    existing.latestAt = contribution.latestAt;
   }
+  if (
+    contribution.limit != null &&
+    (existing.limitSourceAt == null ||
+      contribution.latestAt >= existing.limitSourceAt)
+  ) {
+    existing.limit = contribution.limit;
+    existing.limitSourceAt = contribution.latestAt;
+  }
+  if (
+    contribution.limitWindow != null &&
+    (existing.limitWindowSourceAt == null ||
+      contribution.latestAt >= existing.limitWindowSourceAt)
+  ) {
+    existing.limitWindow = contribution.limitWindow;
+    existing.limitWindowSourceAt = contribution.latestAt;
+  }
+}
+
+export interface ExternalUsageEventSummary {
+  eventCount: number;
+  groups: ExternalUsageEventSummaryGroup[];
+  /** Monitor-computed token x LiteLLM cost estimates (metadata-only
+   * `_derivedCostUsd` stamps from pricing/derive-ingest-cost.ts). Never cash,
+   * never counted as priced — surfaced separately so unpriced-coverage gaps
+   * can be sized without distorting the producer-reported cost pool. Zero
+   * when INGEST_COST_DERIVATION_ENABLED is off. */
+  derivedCostEstimateUsd: number;
+  derivedCostEstimateEventCount: number;
+}
+
+/**
+ * Sum server-stamped derived cost estimates over the RAW window. One bounded
+ * aggregate query (json_extract over metadata), called only when the
+ * derivation flag is enabled so default-off deployments pay zero query cost.
+ * Derived stamps exist only on metricType="usage"/unit="token" rows, so
+ * receipt-cash and status-metric shapes are excluded by construction — no
+ * receipt-candidate where-clause replication needed here.
+ */
+async function sumDerivedCostEstimates(
+  rawSince: Date
+): Promise<{ totalUsd: number; eventCount: number }> {
+  const rows = await prisma.$queryRaw<Array<{ totalUsd: unknown; eventCount: unknown }>>`
+    SELECT
+      COALESCE(SUM(json_extract("metadata", '$._derivedCostUsd')), 0) AS "totalUsd",
+      COUNT(*) AS "eventCount"
+    FROM "ExternalUsageEvent"
+    WHERE "occurredAt" >= ${rawSince}
+      AND json_extract("metadata", '$._derivedCostUsd') IS NOT NULL
+  `;
+  const row = rows[0];
+  return {
+    totalUsd: Number(row?.totalUsd ?? 0),
+    eventCount: Number(row?.eventCount ?? 0),
+  };
+}
+
+// The dashboard portfolio panel polls this every 60s. The SQL groupBy below
+// already collapsed ~336 cursor round trips to one aggregate query; this
+// short process-local memo additionally dedupes back-to-back polls, matching
+// the accepted staleness of the budget-status SWR cache (also 60s). Disabled
+// under vitest like the MTD scan memo; invalidated post-ingest through the
+// same clearMtdScanMemo() path budget-status already calls.
+const USAGE_EVENTS_SUMMARY_MEMO_DEFAULT_TTL_MS = 60_000;
+
+function usageEventsSummaryMemoTtlMs(): number {
+  const raw = process.env.USAGE_EVENTS_SUMMARY_MEMO_TTL_MS?.trim();
+  if (!raw) return USAGE_EVENTS_SUMMARY_MEMO_DEFAULT_TTL_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return USAGE_EVENTS_SUMMARY_MEMO_DEFAULT_TTL_MS;
+  }
+  return parsed;
 }
 
 export async function summarizeExternalUsageEvents(
   since: Date,
   rawCutoff: Date
-): Promise<{
-  eventCount: number;
-  groups: ExternalUsageEventSummaryGroup[];
-}> {
-  const groups = new Map<string, ExternalUsageEventSummaryGroup>();
-  const rawSince = since > rawCutoff ? since : rawCutoff;
-  let rawEventCount = 0;
-  const pageSize = 1_000;
-  let cursor: string | undefined;
-  while (true) {
-    const page = await prisma.externalUsageEvent.findMany({
-      where: { 
-        occurredAt: { gte: rawSince },
-        metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
-      },
-      orderBy: { id: "asc" },
-      take: pageSize,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      select: {
-        id: true,
-        sourceApp: true,
-        environment: true,
-        provider: true,
-        service: true,
-        label: true,
-        keyRef: true,
-        billingMode: true,
-        projectId: true,
-        metricType: true,
-        unit: true,
-        confidence: true,
-        quantity: true,
-        costUsd: true,
-        requests: true,
-        limit: true,
-        limitWindow: true,
-        occurredAt: true,
-      },
-    });
-
-    // Fold each page into the summary immediately. The endpoint may span the
-    // entire raw-retention window, so retaining every row until the final
-    // reduction makes its peak memory grow linearly with event volume.
-    for (const event of page) {
-      const isClaudeCodeAnalytics = isClaudeCodeAnalyticsTelemetry(event);
-      const isReceiptCash = isReceiptCashEvent(event);
-      mergeSummaryGroup(groups, {
-        sourceApp: event.sourceApp,
-        environment: event.environment,
-        provider: event.provider,
-        canonicalProvider: canonicalProviderKey(event.provider),
-        service: event.service,
-        projectId: event.projectId,
-        metricType: event.metricType,
-        unit: event.unit,
-        eventCount: 1,
-        pricedEventCount:
-          isClaudeCodeAnalytics || isReceiptCash || event.costUsd == null ? 0 : 1,
-        unpricedEventCount:
-          isClaudeCodeAnalytics || isReceiptCash || event.costUsd != null ? 0 : 1,
-        unclassifiedCostEventCount: 0,
-        costCoverage:
-          !isClaudeCodeAnalytics && !isReceiptCash && event.costUsd != null
-            ? "complete"
-            : "unknown",
-        totalCostUsd:
-          isClaudeCodeAnalytics || isReceiptCash ? 0 : event.costUsd ?? 0,
-        receiptCashPaidUsd: isReceiptCash ? event.costUsd ?? 0 : 0,
-        estimatedApiEquivalentUsd: isClaudeCodeAnalytics ? event.costUsd ?? 0 : 0,
-        totalRequests: event.requests ?? 0,
-        totalQuantity: event.quantity ?? 0,
-        limit: event.limit,
-        limitWindow: event.limitWindow,
-        latestAt: event.occurredAt.toISOString(),
-      });
+): Promise<ExternalUsageEventSummary> {
+  // Under vitest, skip the process memo so mocked query sequences and
+  // per-test fixtures never observe cross-call contamination (same rule as
+  // the MTD cost material memo below).
+  const memoEnabled = process.env.VITEST !== "true";
+  // Day-granularity key (same shape as mtdScanKey): sequential same-day
+  // default-window dashboard calls share one memo entry. The derivation-flag
+  // bit keeps a same-day flag flip from serving the other mode's cached
+  // derived-estimate totals.
+  const key = `${since.toISOString().slice(0, 10)}|${rawCutoff.toISOString().slice(0, 10)}|${ingestCostDerivationEnabled() ? 1 : 0}`;
+  if (memoEnabled) {
+    const hit = getUsageEventsSummaryMemo<ExternalUsageEventSummary>();
+    if (hit && hit.key === key && hit.expiresAt > Date.now()) {
+      return hit.value;
     }
-    rawEventCount += page.length;
-
-    if (page.length < pageSize) break;
-    cursor = page[page.length - 1].id;
   }
 
-  const rollups =
+  // Share the exclusive-aggregation lease with the MTD cost scans: the
+  // groupBy result set for a summary window can be as large as theirs, and
+  // on the 512 MB instance two concurrent in-flight aggregations are enough
+  // to kill the process.
+  return withExclusiveExternalUsageCostAggregation(async () => {
+    if (memoEnabled) {
+      const again = getUsageEventsSummaryMemo<ExternalUsageEventSummary>();
+      if (again && again.key === key && again.expiresAt > Date.now()) {
+        return again.value;
+      }
+    }
+    const summary = await summarizeExternalUsageEventsUnserialized(
+      since,
+      rawCutoff
+    );
+    if (memoEnabled) {
+      setUsageEventsSummaryMemo({
+        key,
+        value: summary,
+        expiresAt: Date.now() + usageEventsSummaryMemoTtlMs(),
+      });
+    }
+    return summary;
+  });
+}
+
+/**
+ * E1: SQL-groupBy rewrite of the old cursor-paginated JS fold. The raw side
+ * is ONE aggregate query grouped by every summary dimension (plus limit /
+ * limitWindow so their latest-non-null semantics survive pre-aggregation)
+ * instead of ~336 findMany round trips folding 1,000-row pages in JS.
+ *
+ * Receipt-cash rows keep their exact per-row identity validation: the
+ * groupBy excludes the fixed-shape receipt candidate superset
+ * (NON_RECEIPT_CANDIDATE_WHERE) and candidates are folded individually, so
+ * validated receipts land in receiptCashPaidUsd and malformed receipt-shaped
+ * rows fall back to ordinary cost - identical to the MTD cost aggregate and
+ * to the old fold.
+ */
+async function summarizeExternalUsageEventsUnserialized(
+  since: Date,
+  rawCutoff: Date
+): Promise<ExternalUsageEventSummary> {
+  const groups = new Map<string, SummaryAccumulator>();
+  const rawSince = since > rawCutoff ? since : rawCutoff;
+
+  const receiptCandidates = await rawReceiptCashCandidates(rawSince);
+  const [rawGroups, rollups, derivedCostEstimates] = await Promise.all([
+    prisma.externalUsageEvent.groupBy({
+      by: [
+        "sourceApp",
+        "environment",
+        "provider",
+        "service",
+        "projectId",
+        "metricType",
+        "unit",
+        "limit",
+        "limitWindow",
+      ],
+      where: {
+        occurredAt: { gte: rawSince },
+        metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
+        ...NON_RECEIPT_CANDIDATE_WHERE,
+      },
+      _sum: { costUsd: true, requests: true, quantity: true },
+      _count: { _all: true, costUsd: true },
+      _max: { occurredAt: true },
+    }),
     since < rawCutoff
-      ? await prisma.externalUsageEventDailyRollup.findMany({
+      ? prisma.externalUsageEventDailyRollup.findMany({
           where: {
             day: {
               gte: new Date(Date.UTC(since.getUTCFullYear(), since.getUTCMonth(), since.getUTCDate())),
@@ -607,7 +719,88 @@ export async function summarizeExternalUsageEvents(
             latestOccurredAt: true,
           },
         })
-      : [];
+      : Promise.resolve([]),
+    // Flag-gated: default-off deployments skip the json_extract scan entirely.
+    ingestCostDerivationEnabled()
+      ? sumDerivedCostEstimates(rawSince)
+      : Promise.resolve({ totalUsd: 0, eventCount: 0 }),
+  ]);
+
+  let rawEventCount = receiptCandidates.length;
+
+  for (const row of rawGroups) {
+    // occurredAt is a non-nullable column and every group has at least one
+    // row, so _max.occurredAt is always set; skip defensively if a future
+    // engine ever returns null.
+    if (!row._max.occurredAt) continue;
+    rawEventCount += row._count._all;
+    const isClaudeCodeAnalytics = isClaudeCodeAnalyticsTelemetry({
+      sourceApp: row.sourceApp,
+      service: row.service,
+    });
+    addSummaryContribution(groups, {
+      sourceApp: row.sourceApp,
+      environment: row.environment,
+      provider: row.provider,
+      service: row.service,
+      projectId: row.projectId,
+      metricType: row.metricType,
+      unit: row.unit,
+      eventCount: row._count._all,
+      pricedEventCount: isClaudeCodeAnalytics ? 0 : row._count.costUsd,
+      unpricedEventCount: isClaudeCodeAnalytics
+        ? 0
+        : row._count._all - row._count.costUsd,
+      unclassifiedCostEventCount: 0,
+      totalCostUsd: isClaudeCodeAnalytics ? 0 : row._sum.costUsd ?? 0,
+      receiptCashPaidUsd: 0,
+      estimatedApiEquivalentUsd: isClaudeCodeAnalytics
+        ? row._sum.costUsd ?? 0
+        : 0,
+      totalRequests: row._sum.requests ?? 0,
+      totalQuantity: row._sum.quantity ?? 0,
+      limit: row.limit,
+      limitWindow: row.limitWindow,
+      latestAt: row._max.occurredAt.toISOString(),
+    });
+  }
+
+  // Receipt candidates are rare (only exact receipt-shaped rows); folding
+  // them per-row preserves the old fold's validated-receipt semantics.
+  for (const candidate of receiptCandidates) {
+    const isClaudeCodeAnalytics = isClaudeCodeAnalyticsTelemetry(candidate);
+    const isReceiptCash = isReceiptCashEvent(candidate);
+    addSummaryContribution(groups, {
+      sourceApp: candidate.sourceApp,
+      environment: candidate.environment ?? null,
+      provider: candidate.provider,
+      service: candidate.service,
+      projectId: candidate.projectId,
+      metricType: candidate.metricType,
+      unit: candidate.unit,
+      eventCount: 1,
+      pricedEventCount:
+        isClaudeCodeAnalytics || isReceiptCash || candidate.costUsd == null
+          ? 0
+          : 1,
+      unpricedEventCount:
+        isClaudeCodeAnalytics || isReceiptCash || candidate.costUsd != null
+          ? 0
+          : 1,
+      unclassifiedCostEventCount: 0,
+      totalCostUsd:
+        isClaudeCodeAnalytics || isReceiptCash ? 0 : candidate.costUsd ?? 0,
+      receiptCashPaidUsd: isReceiptCash ? candidate.costUsd ?? 0 : 0,
+      estimatedApiEquivalentUsd: isClaudeCodeAnalytics
+        ? candidate.costUsd ?? 0
+        : 0,
+      totalRequests: candidate.requests ?? 0,
+      totalQuantity: candidate.quantity ?? 0,
+      limit: candidate.limit,
+      limitWindow: candidate.limitWindow,
+      latestAt: candidate.occurredAt.toISOString(),
+    });
+  }
 
   for (const rollup of rollups) {
     const isClaudeCodeAnalytics = isClaudeCodeAnalyticsTelemetry(rollup);
@@ -629,18 +822,16 @@ export async function summarizeExternalUsageEvents(
             ? rollup.unclassifiedCostEventCount ?? 0
             : rollup.eventCount,
         };
-    mergeSummaryGroup(groups, {
+    addSummaryContribution(groups, {
       sourceApp: rollup.sourceApp,
       environment: rollup.environment,
       provider: rollup.provider,
-      canonicalProvider: canonicalProviderKey(rollup.provider),
       service: rollup.service,
       projectId: rollup.projectId,
       metricType: rollup.metricType,
       unit: rollup.unit,
       eventCount: rollup.eventCount,
       ...costCounts,
-      costCoverage: classifyCostCoverage(costCounts),
       totalCostUsd:
         isClaudeCodeAnalytics || isReceiptCash ? 0 : rollup.totalCostUsd,
       receiptCashPaidUsd: isReceiptCash ? rollup.totalCostUsd : 0,
@@ -655,14 +846,24 @@ export async function summarizeExternalUsageEvents(
     });
   }
 
-  const summaries = Array.from(groups.values()).sort(
-    (left, right) => Date.parse(right.latestAt) - Date.parse(left.latestAt)
-  );
+  const summaries = Array.from(groups.values())
+    .map(
+      ({
+        limitSourceAt: _limitSourceAt,
+        limitWindowSourceAt: _limitWindowSourceAt,
+        ...group
+      }) => group
+    )
+    .sort(
+      (left, right) => Date.parse(right.latestAt) - Date.parse(left.latestAt)
+    );
 
   return {
     eventCount:
       rawEventCount + rollups.reduce((sum, rollup) => sum + rollup.eventCount, 0),
     groups: summaries,
+    derivedCostEstimateUsd: derivedCostEstimates.totalUsd,
+    derivedCostEstimateEventCount: derivedCostEstimates.eventCount,
   };
 }
 
@@ -884,6 +1085,7 @@ async function rawReceiptCashCandidates(rawSince: Date) {
       id: true,
       idempotencyKey: true,
       sourceApp: true,
+      environment: true,
       provider: true,
       service: true,
       projectId: true,
@@ -894,6 +1096,10 @@ async function rawReceiptCashCandidates(rawSince: Date) {
       unit: true,
       confidence: true,
       costUsd: true,
+      quantity: true,
+      requests: true,
+      limit: true,
+      limitWindow: true,
       occurredAt: true,
       metadata: true,
     },

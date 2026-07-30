@@ -92,8 +92,23 @@ describe("middleware matcher — /api/subscriptions collection-only exclusion (s
   });
 });
 
-describe("middleware public install assets", () => {
-  it("serves the PWA shell without a dashboard session", () => {
+describe("middleware matcher — /api/export/daily-rollups exclusion (bearer read-token access)", () => {
+  it("does NOT session-gate the exact collection path, so the route's own auth (session cookie OR read token) governs", () => {
+    // Same pattern as /api/subscriptions: the route self-authenticates via
+    // isUsageReadAuthorized; without the exclusion, bearer tokens 401 here.
+    expect(isSessionGated("/api/export/daily-rollups")).toBe(false);
+    expect(isSessionGated("/api/export/daily-rollups/")).toBe(false);
+  });
+
+  it("still session-gates other export paths and prefix collisions (anchoring holds)", () => {
+    expect(isSessionGated("/api/export")).toBe(true);
+    expect(isSessionGated("/api/export/other")).toBe(true);
+    expect(isSessionGated("/api/export/daily-rollups-foo")).toBe(true);
+    expect(isSessionGated("/api/export/daily-rollupsfoo")).toBe(true);
+  });
+});
+
+describe("middleware public install assets", () => {  it("serves the PWA shell without a dashboard session", () => {
     for (const path of [
       "/manifest.webmanifest",
       "/sw.js",

@@ -1,11 +1,13 @@
 import XCTest
+import Foundation
 @testable import Models
 @testable import Providers
 import DesignSystem
 
 /// Providers-lane tests: the pure query (search/filter/sort) transform, the
-/// money/percent/status presentation derivations, key masking, and the list
-/// view-model. All run against `PreviewFixtures` sample data — no network.
+/// money/percent/status presentation derivations, server `projectedStatus`
+/// decoding, and the list view-model. All run against `PreviewFixtures`
+/// sample data — no network.
 ///
 /// NOTE FOR ASSEMBLE: the `UsageMonitorKitTests` target must depend on
 /// `"Providers"` for `@testable import Providers` to resolve. Add it to that
@@ -140,18 +142,34 @@ final class ProviderPresentationTests: XCTestCase {
     }
 }
 
-final class KeyMaskTests: XCTestCase {
-    func testLongIdentifierShowsFirst6Last4() {
-        XCTAssertEqual(KeyMask.preview("prov_openrouter"), "prov_o…uter")
+final class ProjectedStatusPreferenceTests: XCTestCase {
+    /// The budget-detail projection badge must prefer the server's
+    /// `projectedStatus` over locally recomputed thresholds (L5), so the two
+    /// UIs can never disagree on the same payload.
+    func testServerProjectedStatusDecodes() throws {
+        let json: [String: Any] = [
+            "id": "p1", "name": "openai", "displayName": "OpenAI",
+            "monthlyBudgetUsd": 100, "spentUsd": 40, "projectedEomUsd": 95,
+            "status": "ok", "projectedStatus": "warning", "alerts": [],
+        ]
+        let provider = try JSONDecoder().decode(
+            ProviderBudgetStatus.self,
+            from: JSONSerialization.data(withJSONObject: json)
+        )
+        XCTAssertEqual(provider.projectedStatus, .warning)
     }
 
-    func testShortIdentifierIsMaskedNotRevealed() {
-        XCTAssertEqual(KeyMask.preview("abcd"), "••••")
-        XCTAssertEqual(KeyMask.preview("abcdefg"), "ab•••••")
-    }
-
-    func testEmptyIdentifier() {
-        XCTAssertEqual(KeyMask.preview("   "), "—")
+    func testMissingProjectedStatusDecodesToNil() throws {
+        let json: [String: Any] = [
+            "id": "p1", "name": "openai", "displayName": "OpenAI",
+            "spentUsd": 40, "projectedEomUsd": 95,
+            "status": "ok", "alerts": [],
+        ]
+        let provider = try JSONDecoder().decode(
+            ProviderBudgetStatus.self,
+            from: JSONSerialization.data(withJSONObject: json)
+        )
+        XCTAssertNil(provider.projectedStatus)
     }
 }
 

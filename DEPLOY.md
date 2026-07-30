@@ -1,82 +1,92 @@
 # Deployment Guide
 
-## Prerequisites
-- Render workspace with a Starter web service (persistent disks are not a free-tier feature)
-- Cloudflare account managing `jays.services` zone
-- Git repository pushed to GitHub
+**Production is the Oracle Cloud `VM.Standard.A1.Flex` host** running Docker +
+Caddy behind Cloudflare at `usage.jays.services`. The authoritative runbook —
+installation, the auto-deploy timer, preflight gates, deploy-transaction
+acceptance, backup monitoring, and rollback rules — is
+**[`deploy/oracle/README.md`](deploy/oracle/README.md)**. This file records the
+operational invariants every operator and agent must know, plus the
+environment variable reference.
 
-## Step 1: Deploy to Render
-1. Go to https://dashboard.render.com
-2. Click "New +" > "Blueprint"
-3. Connect your GitHub repo
-4. Render will read `render.yaml` and create a single resource:
-   - `api-usage-monitor` web service, with a 1GB persistent disk mounted at
-     `/data` holding a SQLite database file. Usage polling that used to run
-     as a separate `fetch-all-usage` cron job now runs in-process inside
-     this web service on a 15-minute interval (see
-     `src/instrumentation.ts` / `src/lib/usage-recorder.ts`).
-5. Sync the Blueprint and confirm the service settings match `render.yaml`:
-   Node `24.14.1`, `npm ci` build, `scripts/start-with-litestream.sh` start,
-   `/api/health` liveness check, and auto-deploy only after CI checks pass.
-   Strict database/scheduler/backup diagnostics remain at `/api/ready`, but
-   must not be the process restart trigger: restarting during an exclusive
-   SQLite operation can repeat the operation and livelock the sole instance.
-6. Wait for the first deploy. At runtime, the startup wrapper optionally
-   restores a missing database, creates a transaction-consistent SQLite Online
-   Backup API snapshot of any existing database, verifies it with
-   `PRAGMA integrity_check`, and only then runs `scripts/migrate-safe.mjs`.
-   Backup or verification failure stops startup before schema changes. The
-   migration applies additive changes and refuses destructive drift; there is
-   no `--accept-data-loss` startup path.
+The former Render deployment is **retired and suspended as a rollback host
+only**; its historical runbook lives in
+[`deploy/render/RETIRED-rollback.md`](deploy/render/RETIRED-rollback.md) and
+`render.yaml` is kept functional solely so that host can be revived in a
+deliberate rollback.
 
-## Step 2: Add Custom Domain on Render
-1. Go to the `api-usage-monitor` service in Render Dashboard
-2. Click "Settings" > "Custom Domain"
-3. Add: `usage.jays.services`
-4. Render will give you a verification value (e.g., `render-verify=abc123`)
+## Operational invariants
 
-## Step 3: Add DNS CNAME Record on Cloudflare
-1. Go to Cloudflare Dashboard > `jays.services` > DNS > Records
-2. Add record:
-   - Type: CNAME
-   - Name: usage
-   - Target: api-usage-monitor.onrender.com
-   - Proxy status: **Proxied (orange cloud)**
-   - TTL: Auto
-3. Wait for DNS propagation (~1-5 minutes)
+1. **Sole writer.** Exactly one app container may run against the SQLite
+   database at any time. Only `usage-monitor.service` starts the app (the
+   container's Docker restart policy is permanently `no` so the daemon can
+   never start a writer before the `/data` block volume mounts), and the
+   deploy transaction stops the old writer before accepting the new one.
+   Never run a second instance — including a Render resume — against
+   production data.
+2. **Secrets live only on the host.** Runtime secrets exist solely in
+   `/etc/usage-monitor/usage-monitor.env` (root-owned, mode 0600). Non-secret
+   host settings live in `/etc/usage-monitor/host.env`. No production SSH key
+   or cloud credential is stored in GitHub; the deploy model is pull-based.
+3. **Backups replicate to the Garage bucket `usage-monitor-prod-v3`.**
+   Litestream continuously replicates `/data/prod.db` there; the deploy
+   preflight hard-fails if any other bucket is configured. Layered backup
+   story: same-disk pre-migration snapshots → deploy-time offline snapshots
+   (up to five retained) → Litestream/Garage PITR with 15-minute external
+   verification and weekly restore drills.
+4. **Deploys are automatic and gated.** The
+   `usage-monitor-auto-deploy.timer` polls GitHub once per minute and deploys
+   only when all preflight gates pass: exact `main` SHA with valid signature,
+   merged-PR provenance, green GitHub Actions (`verify`, `gitleaks`,
+   `Analyze JavaScript and TypeScript`), healthy current database / sole
+   scheduler / Garage replica / `/data` headroom / public readiness, and the
+   Render retirement proof (service user-suspended, auto-deploy disabled,
+   `USAGE_SCHEDULER_ENABLED=false`, verified live through Render's API).
+   `/etc/usage-monitor/auto-deploy.paused` freezes deployments while present.
+5. **Rollback never restores an old database over new writes.** Automatic
+   rollback changes code/image only. A full host rollback requires quiescing
+   Oracle and restoring the latest verified Garage lineage before
+   transferring writer authority — never just re-point DNS at Render's stale
+   database.
 
-Cloudflare terminates the public connection and uses Render as the HTTPS
-origin. Keep Cloudflare SSL/TLS mode at **Full (strict)**. The current live
-hostname is proxied; changing this should be an explicit networking decision,
-not copied from the obsolete gray-cloud setup.
+## Verify a deployment
 
-## Step 4: Verify
-1. `curl -fsS https://usage.jays.services/api/health | jq` and confirm the
+1. `curl -fsS https://usage.jays.services/api/health | jq` — confirm the
    expected `revision`.
-2. `curl -fsS https://usage.jays.services/api/ready | jq` and confirm database,
-   scheduler, startup, and backup checks. A non-ready dependency returns 503.
-3. Visit https://usage.jays.services
-4. You'll be redirected to `/login`. Go to the `api-usage-monitor` service in Render Dashboard > Environment, copy the auto-generated `DASHBOARD_PASSWORD` value, and use it to log in.
-5. Confirm the dashboard, Settings, provider detail, subscription, and budget
-   views load and show the same combined month-to-date spend.
+2. `curl -fsS "https://usage.jays.services/api/ready?strict=1" | jq` —
+   confirm database, scheduler, startup, and backup checks; observability
+   blocks (`disk`, `budgetControls`, `admission`, `usageReadToken`) never
+   gate `ok`. A non-ready dependency returns 503 with `strict=1`.
+3. On the host: `sudo cat /var/lib/usage-monitor-deploy/current.json` for the
+   deployment receipt, and
+   `sudo journalctl -u usage-monitor-auto-deploy.service --since today` for
+   gate decisions.
+4. Visit https://usage.jays.services and log in at `/login` with
+   `DASHBOARD_PASSWORD` from `/etc/usage-monitor/usage-monitor.env`.
 
-## Environment Variables
-- `DATABASE_URL` set to a static path on the service's Render disk
-  (`file:/data/prod.db`) - not a secret, just a file path
+## Environment variables
+
+All of these are set in `/etc/usage-monitor/usage-monitor.env` (or
+`host.env` for the non-secret hostname/revision). `.env.example` documents
+defaults and valid values.
+
+- `DATABASE_URL` — `file:/data/prod.db` on the dedicated block volume (not a
+  secret, just a file path)
 - `SQLITE_PRE_MIGRATION_BACKUP_RETENTION` (defaults to `3`, valid `1`-`10`;
   newest verified local snapshots retained under
   `/data/.pre-migration-backups` before startup schema synchronization)
-- `ENCRYPTION_KEY` (auto-generated 64-char hex)
-- `CRON_SECRET` (auto-generated; the `/api/cron/fetch-all` route still checks
-  this, kept as an authenticated manual-trigger/debug endpoint even though
-  nothing calls it on a schedule anymore)
-- `USAGE_INGEST_TOKEN` (auto-generated; copy this into reporting apps as their usage monitor ingest
-  token — this is also the token Claude Code's OTLP exporter authenticates with against
-  `POST /api/otlp/v1/metrics`, see AGENTS.md's "Claude Code OTLP ingest" section)
-- `USAGE_READ_TOKEN` (optional distinct read-only token for `/api/budget-status`;
-  falls back to `USAGE_INGEST_TOKEN`)
-- `DASHBOARD_PASSWORD` (auto-generated; after the first deploy, copy this value from Render's Environment tab to log in at `/login`)
-- `SESSION_SECRET` (auto-generated; session cookies are HKDF-derived from this instead
+- `ENCRYPTION_KEY` (64-char hex)
+- `CRON_SECRET` (the `/api/cron/fetch-all` route still checks this, kept as
+  an authenticated manual-trigger/debug endpoint even though nothing calls it
+  on a schedule anymore)
+- `USAGE_INGEST_TOKEN` (copy this into reporting apps as their usage monitor
+  ingest token — this is also the token Claude Code's OTLP exporter
+  authenticates with against `POST /api/otlp/v1/metrics`, see AGENTS.md's
+  "Claude Code OTLP ingest" section)
+- `USAGE_READ_TOKEN` (**required in production** — the deploy preflight
+  hard-fails without it; read-only token for `/api/budget-status` and
+  `GET /api/subscriptions`)
+- `DASHBOARD_PASSWORD` (gates `/login` and all non-ingest routes)
+- `SESSION_SECRET` (session cookies are HKDF-derived from this instead
   of `DASHBOARD_PASSWORD`, so a leaked session token can't be used to verify password guesses and the
   password can be rotated without invalidating existing sessions. Setting or changing it invalidates
   all existing sessions at once (the owner just re-logs in); it does not revoke individual sessions.)
@@ -109,6 +119,13 @@ not copied from the obsolete gray-cloud setup.
   opt-in compaction above)
 - `ADAPTER_HTTP_TIMEOUT_MS` / `ADAPTER_PROVIDER_TIMEOUT_MS` (optional bounded
   upstream-request and per-provider polling budgets)
+- `READY_DISK_WARN_FREE_BYTES` (optional; free-bytes warn threshold for the
+  observability-only `checks.disk` block in `/api/ready`, default 5 GiB —
+  aligned with the deploy preflight's `MIN_DATA_FREE_BYTES`)
+- `STARTUP_WRAPPER_REQUIRED` (optional opt-out; in production,
+  `/api/ready?strict=1` fails unless the process booted through
+  `scripts/start-with-litestream.sh`. Set `false` only for disposable
+  throwaway containers that never write to SQLite)
 - `INFISICAL_ST_GEMINI_BOOTSTRAP_ENABLED` (optional, defaults to `false`;
   one-time create-only bootstrap for the fixed current SocraticTrade.com Gemini
   provider into the fixed ST `prod` `/` `GEMINI_API_KEY`). It never updates or
@@ -132,119 +149,45 @@ not copied from the obsolete gray-cloud setup.
   requests receive `429` with the same backoff. Generic `/api/ingest/usage`
   remains available. Restore `true` only after the database stays healthy and a
   controlled OTLP ingest/replay succeeds.
-- `LITESTREAM_S3_*` (optional replica credentials; set all four required values
-  together or none—partial configuration fails startup)
-- `LITESTREAM_REQUIRED` (`false` initially; set `true` only after credentials are
-  installed and a restore drill succeeds; then readiness fails if replication is absent)
+- `LITESTREAM_S3_*` (Garage replica credentials; set all four required values
+  together or none—partial configuration fails startup. Production targets
+  bucket `usage-monitor-prod-v3`; see `litestream.yml` and `docs/litestream.md`)
+- `LITESTREAM_REQUIRED` (production: `true`; readiness fails if replication
+  is absent or the replica side-channel is unhealthy)
 
 ## SSL/TLS
 - Cloudflare proxy: enabled for `usage.jays.services`
-- Cloudflare mode: **Full (strict)**
-- Render origin certificate: enabled
+- Cloudflare terminates public TLS; Caddy renews its origin certificate via
+  HTTP-01 (TLS-ALPN disabled) and keeps ports 80/443 reachable
 - HTTP is redirected to HTTPS; application responses also set HSTS, CSP,
   framing, MIME-sniffing, referrer, and permissions headers
 
-## Migrating from the old Postgres + cron setup
-
-This app used to run as 3 billed Render resources (web service + a separate
-Postgres database + a separate cron job). It now runs as a single web
-service with a SQLite database on a Render disk, to cut hosting cost. If
-you're moving an existing deployment from the old architecture to this one,
-follow these steps IN ORDER - this involves real production data, so don't
-skip the verification step before deleting anything.
-
-1. **Land a fully verified change and sync the Blueprint.** Render will read
-   `render.yaml` and provision the new disk for the `api-usage-monitor` web
-   service. **Render Blueprint sync does NOT auto-delete resources that were
-   removed from `render.yaml`** - the old `databases:` and `cron:` entries
-   are gone from the file, but the actual `api-usage-monitor-db` Postgres
-   database and `fetch-all-usage` cron job resources keep existing (and keep
-   running/billing) in your Render dashboard until you manually delete/suspend
-   them. The runtime's safe migration wrapper creates/synchronizes a fresh
-   SQLite database on a new disk; it never accepts destructive data loss.
-2. **Immediately suspend the old `fetch-all-usage` cron job** (Render
-   dashboard -> select the cron job -> Settings -> Suspend, or delete it
-   outright). Do this right after step 1, before doing anything else below.
-   Until you do, the old cron keeps firing on its own schedule against the
-   old Postgres database at the same time the new web service's in-process
-   scheduler (see `src/instrumentation.ts` / `src/lib/usage-recorder.ts`)
-   starts polling providers from SQLite - two independent pollers hitting
-   the same provider APIs concurrently, causing duplicate external API calls
-   and, once you cut over, duplicate/conflicting usage data. Do not skip
-   this step or delay it until after the migration.
-3. **Before deleting the old Postgres database**, run the one-time migration
-   script once to copy every row over. Open the Render dashboard's **Shell**
-   tab for the `api-usage-monitor` web service and run:
-   ```
-   SOURCE_DATABASE_URL="<copy the old Postgres connection string from Render's dashboard for api-usage-monitor-db>" node scripts/migrate-postgres-to-sqlite.mjs
-   ```
-   `DATABASE_URL` is already set correctly in that shell's environment, so
-   you only need to supply `SOURCE_DATABASE_URL`. This must be run from
-   Render's Shell for the web service - the destination SQLite file lives on
-   a disk that's only reachable from that Render instance itself, so this
-   cannot be run from a local machine or CI. The script writes to SQLite
-   inside a single transaction, so if it fails partway through it's safe to
-   just fix the underlying issue and re-run it from the top (see
-   "Migration script failure/resume" below).
-4. **Verify in the dashboard UI** that providers, plans, and usage history
-   all look correct (visit https://usage.jays.services and check Settings
-   and the provider detail pages).
-5. **Only after confirming step 4**, delete the `api-usage-monitor-db`
-   Postgres database in Render's dashboard (Databases -> select it ->
-   Delete) to actually stop that recurring charge. If you haven't already
-   deleted the `fetch-all-usage` cron resource itself (as opposed to just
-   suspending it in step 2), delete it now too.
-
-### Migration script failure/resume
-
-`scripts/migrate-postgres-to-sqlite.mjs` writes all destination rows inside
-a single `prisma.$transaction`. If it fails partway through (network blip,
-a bad row, etc.), Prisma rolls back every row written so far, so the
-destination SQLite database is left exactly as it was before that run (empty,
-on a first attempt) - there's no partially-migrated state to clean up.
-
-To retry after a failed run, just fix whatever caused the failure (check the
-error output) and re-run the same command again from the top:
-```
-SOURCE_DATABASE_URL="..." node scripts/migrate-postgres-to-sqlite.mjs
-```
-
-### SQLite backup layers
+## SQLite backup layers
 
 Every startup with an existing DB runs
 `scripts/backup-sqlite-before-migrate.mjs` before `migrate-safe.mjs`. It opens
 the source read-only, uses SQLite's Online Backup API (safe with WAL), checks
 the destination with `PRAGMA integrity_check`, atomically promotes only a
 verified file, and retains the newest
-`SQLITE_PRE_MIGRATION_BACKUP_RETENTION` snapshots. The default three files live
-under `/data/.pre-migration-backups`. Failure to create, verify, or bound the
+`SQLITE_PRE_MIGRATION_BACKUP_RETENTION` snapshots under
+`/data/.pre-migration-backups`. Failure to create, verify, or bound the
 backup stops production startup before migration. These same-disk snapshots
 are schema rollback protection, not protection from disk loss.
 
-Render automatically takes an encrypted disk snapshot every 24 hours and keeps
-snapshots for at least seven days. Render also warns against restoring a disk
-snapshot for a custom database because the filesystem image might not be
-transaction-consistent. Treat those snapshots as last-resort infrastructure
-recovery, not a SQLite logical/PITR backup. [Litestream](https://litestream.io/)
-continuously replicates `/data/prod.db` to Cloudflare R2 with transaction-aware
-restore points. It is opt-in until credentials and a restore drill exist. With
-all replica vars unset and `LITESTREAM_REQUIRED=false`, the wrapper still takes
-the verified local pre-migration snapshot, then runs the safe migration and app
-without Litestream. Partial credentials or a configured replica with no
-verified binary fail closed.
+Every deploy transaction additionally keeps the previous full-SHA image and
+up to five verified offline SQLite snapshots for automatic code rollback.
 
-To enable it: create an R2 bucket + token and set the `LITESTREAM_S3_*`
-vars in the Render dashboard's Environment tab (they already exist in
-`render.yaml` with `sync: false` so Render won't prompt for or generate
-them). The four of `LITESTREAM_S3_BUCKET` / `_ENDPOINT` / `_ACCESS_KEY_ID` /
-`_SECRET_ACCESS_KEY` must all be set to enable replication;
-`LITESTREAM_S3_REGION` is optional (an empty region is fine for R2). After a
-successful restore drill, set `LITESTREAM_REQUIRED=true`. Full setup,
-verification, and disaster-recovery restore steps
-(including a restore-drill runbook) live in `docs/litestream.md`. Relevant
-files: `scripts/fetch-litestream.sh` (build-time binary download),
-`litestream.yml` (replica config), `scripts/start-with-litestream.sh` (the
-new `startCommand`), `scripts/litestream-restore.sh` (manual restore).
+[Litestream](https://litestream.io/) continuously replicates `/data/prod.db`
+to the Garage bucket `usage-monitor-prod-v3` with transaction-aware restore
+points (7-day snapshot retention, 24 h snapshot interval — see
+`litestream.yml`). The external singleton at
+`/Users/jay/apps/fleet-sentry-monitor/monitor.py` verifies replica freshness
+and restorability every 15 minutes and runs a weekly full-integrity restore
+drill (see "Backup monitoring" in `deploy/oracle/README.md`). Full setup,
+verification, and disaster-recovery restore steps live in
+`docs/litestream.md`. Relevant files: `scripts/fetch-litestream.sh`
+(build-time binary download), `scripts/start-with-litestream.sh` (startup
+wrapper), `scripts/litestream-restore.sh` (manual restore).
 
 ## Release-time data maintenance
 

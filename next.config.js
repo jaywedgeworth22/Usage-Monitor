@@ -34,3 +34,22 @@ const nextConfig = {
 };
 
 module.exports = nextConfig;
+
+// Self error-reporting (review finding O4). withSentryConfig is applied ONLY
+// when a DSN is configured, so CI/dev builds with no Sentry env never load
+// the Sentry build plugin at all. Sourcemap upload additionally requires
+// SENTRY_AUTH_TOKEN; without it the upload is disabled explicitly (silent,
+// never a build failure). Every existing option and header above is passed
+// through untouched.
+if (process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN) {
+  const { withSentryConfig } = require("@sentry/nextjs");
+  module.exports = withSentryConfig(nextConfig, {
+    org: process.env.SENTRY_ORG,
+    project: process.env.SENTRY_SELF_PROJECT || "usage-monitor",
+    authToken: process.env.SENTRY_AUTH_TOKEN,
+    silent: true,
+    sourcemaps: {
+      disable: !process.env.SENTRY_AUTH_TOKEN,
+    },
+  });
+}

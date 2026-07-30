@@ -6,6 +6,23 @@ import { NextRequest } from "next/server";
 import protobuf from "protobufjs";
 import { setupPrismaSqliteTestDb } from "@/lib/__tests__/setup-test-db";
 import { tryAcquireIngestAdmission } from "@/lib/ingest-admission";
+import { getNamedRateLimiter } from "@/lib/rate-limit";
+
+// Wrap the persistence module so one test can simulate an unexpected
+// (non-collision) persistence failure without touching the real database.
+const persistenceControl = vi.hoisted(() => ({ failNext: { value: false } }));
+vi.mock("@/lib/otlp/cumulative-state", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/otlp/cumulative-state")>();
+  return {
+    ...actual,
+    persistOtlpUsageEvents: (
+      ...args: Parameters<typeof actual.persistOtlpUsageEvents>
+    ) =>
+      persistenceControl.failNext.value
+        ? Promise.reject(new Error("simulated persistence failure"))
+        : actual.persistOtlpUsageEvents(...args),
+  };
+});
 
 // This test exercises the real POST /api/otlp/v1/metrics route handler
 // against a throwaway SQLite file (never the dev `data`/`dev.db`), following
@@ -37,6 +54,11 @@ afterAll(async () => {
 
 beforeEach(async () => {
   vi.unstubAllEnvs();
+  persistenceControl.failNext.value = false;
+  // Process-wide named rate limiters (keyed on the token hash / backstop
+  // identity since X1, not the per-test rotating IP) — reset between tests.
+  getNamedRateLimiter("otlp-metrics-identity", 1_000, 10).reset();
+  getNamedRateLimiter("otlp-metrics-unauthenticated", 1_000, 10).reset();
   await prisma.otlpMetricState.deleteMany();
   await prisma.externalUsageEvent.deleteMany({ where: { sourceApp: "claude-code" } });
   await prisma.provider.deleteMany({ where: { name: { in: ["anthropic", "Anthropic"] } } });
@@ -596,5 +618,73 @@ describe("POST /api/otlp/v1/metrics", () => {
     expect(res.status).toBe(202);
     const body = await res.json();
     expect(body.accepted).toBe(1);
+  });
+});
+
+describe("POST /api/otlp/v1/metrics rate limiting (X1) and typed 500 (X6)", () => {
+  it("limits authenticated traffic per token, not per source IP", async () => {
+    // One credential from many distinct source IPs: the 11th request within
+    // the window 429s — the bucket follows the authenticated identity.
+    for (let index = 1; index <= 10; index += 1) {
+      const res = await POST(
+        jsonRequest(samplePayload, {
+          authorization: "Bearer test-token-123",
+          "x-forwarded-for": `10.8.0.${index}`,
+        })
+      );
+      expect(res.status).toBe(202);
+    }
+    const limited = await POST(
+      jsonRequest(samplePayload, {
+        authorization: "Bearer test-token-123",
+        "x-forwarded-for": "10.8.0.11",
+      })
+    );
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("30");
+  });
+
+  it("does not let unauthenticated hammering through the shared Cloudflare egress IP drain the producer bucket", async () => {
+    for (let index = 1; index <= 15; index += 1) {
+      const res = await POST(
+        jsonRequest(samplePayload, {
+          authorization: "Bearer wrong-token",
+          "x-forwarded-for": "173.245.48.1",
+          "cf-connecting-ip": `198.51.100.${index}`,
+        })
+      );
+      expect(res.status).toBe(401);
+    }
+    const producer = await POST(
+      jsonRequest(samplePayload, {
+        authorization: "Bearer test-token-123",
+        "x-forwarded-for": "173.245.48.1",
+        "cf-connecting-ip": "198.51.100.1",
+      })
+    );
+    expect(producer.status).toBe(202);
+  });
+
+  it("returns a typed retryable internal_error body when persistence fails unexpectedly (X6)", async () => {
+    persistenceControl.failNext.value = true;
+    const res = await POST(
+      jsonRequest(samplePayload, { authorization: "Bearer test-token-123" })
+    );
+    expect(res.status).toBe(500);
+    expect(res.headers.get("retry-after")).toBe("30");
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(await res.json()).toEqual({
+      ok: false,
+      schemaVersion: 2,
+      error: {
+        code: "internal_error",
+        message: "Internal error",
+        retryable: true,
+        retryAfterSeconds: 30,
+      },
+    });
+    expect(
+      await prisma.externalUsageEvent.count({ where: { sourceApp: "claude-code" } })
+    ).toBe(0);
   });
 });

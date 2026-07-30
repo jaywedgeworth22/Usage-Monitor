@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   MAX_NEGATIVE_SUBSCRIPTION_COST_USD,
+  MAX_V2_BATCH_REJECTIONS_REPORTED,
   parseUsageTelemetryBatch,
   parseUsageTelemetryV2Batch,
 } from "../usage-telemetry";
@@ -17,7 +18,7 @@ const HEX_PATTERN = /^[0-9a-f]{64}$/;
 
 describe("usage telemetry v2 shared contract", () => {
   it("maps producer/account identity and uses the shared canonical event key", async () => {
-    const [event] = await parseUsageTelemetryV2Batch({
+    const { events: [event], rejected, rejections } = await parseUsageTelemetryV2Batch({
       schemaVersion: 2,
       producerId: "socratic-trade",
       producerInstanceId: "prod-a",
@@ -37,6 +38,8 @@ describe("usage telemetry v2 shared contract", () => {
       }],
     });
 
+    expect(rejected).toBe(0);
+    expect(rejections).toEqual([]);
     expect(event.sourceApp).toBe("socratic-trade");
     expect(event.keyRef).toBe("configured-openai-primary");
     expect(event.idempotencyKey).toBe(
@@ -56,7 +59,7 @@ describe("usage telemetry v2 shared contract", () => {
   });
 
   it("reserves persisted coverage authority from arbitrary producer metadata", async () => {
-    const [event] = await parseUsageTelemetryV2Batch({
+    const { events: [event] } = await parseUsageTelemetryV2Batch({
       schemaVersion: 2,
       producerId: "congress-trade",
       events: [{
@@ -83,13 +86,22 @@ describe("usage telemetry v2 shared contract", () => {
     expect(event.metadata).not.toHaveProperty("_coverageRelationship");
   });
 
-  it("rejects a missing event identity and ambiguous account scope", async () => {
-    await expect(parseUsageTelemetryV2Batch({
+  it("rejects invalid events per-event instead of failing the whole batch (X5)", async () => {
+    // A missing eventId and an ambiguous coverage scope are EVENT-level
+    // failures: the batch parses, the bad events land in `rejections`.
+    const missingIdentity = await parseUsageTelemetryV2Batch({
       schemaVersion: 2,
       producerId: "socratic-trade",
       events: [{ provider: "openai" }],
-    })).rejects.toThrow();
-    await expect(parseUsageTelemetryV2Batch({
+    });
+    expect(missingIdentity.events).toEqual([]);
+    expect(missingIdentity.rejected).toBe(1);
+    expect(missingIdentity.rejections).toEqual([
+      expect.objectContaining({ index: 0, issues: expect.any(Array) }),
+    ]);
+    expect(missingIdentity.rejections[0].issues[0]).toContain("eventId");
+
+    const ambiguousScope = await parseUsageTelemetryV2Batch({
       schemaVersion: 2,
       producerId: "socratic-trade",
       events: [{
@@ -97,7 +109,80 @@ describe("usage telemetry v2 shared contract", () => {
         provider: "openai",
         coverage: { scope: "account", mode: "point" },
       }],
+    });
+    expect(ambiguousScope.events).toEqual([]);
+    expect(ambiguousScope.rejected).toBe(1);
+    expect(ambiguousScope.rejections[0]).toEqual(
+      expect.objectContaining({ index: 0, eventId: "event-1" })
+    );
+  });
+
+  it("persists valid events alongside a poison event in the same batch (X5)", async () => {
+    const parsed = await parseUsageTelemetryV2Batch({
+      schemaVersion: 2,
+      producerId: "socratic-trade",
+      events: [
+        { eventId: "good-1", provider: "openai" },
+        { provider: "openai" }, // poison: no eventId
+        { eventId: "good-2", provider: "anthropic" },
+      ],
+    });
+
+    expect(parsed.events.map((event) => event.metadata?._producerEventId)).toEqual([
+      "good-1",
+      "good-2",
+    ]);
+    expect(parsed.rejected).toBe(1);
+    expect(parsed.rejections).toEqual([
+      expect.objectContaining({ index: 1, issues: expect.any(Array) }),
+    ]);
+    // Valid events still get the canonical shared idempotency key.
+    for (const event of parsed.events) {
+      expect(event.idempotencyKey).toMatch(/^[0-9a-f]{64}$/);
+      expect(event.sourceApp).toBe("socratic-trade");
+    }
+  });
+
+  it("bounds the rejection detail array while keeping the rejected count exact", async () => {
+    const parsed = await parseUsageTelemetryV2Batch({
+      schemaVersion: 2,
+      producerId: "socratic-trade",
+      events: Array.from({ length: MAX_V2_BATCH_REJECTIONS_REPORTED + 5 }, (_, index) => ({
+        provider: `provider-${index}`, // every event missing eventId
+      })),
+    });
+
+    expect(parsed.events).toEqual([]);
+    expect(parsed.rejected).toBe(MAX_V2_BATCH_REJECTIONS_REPORTED + 5);
+    expect(parsed.rejections).toHaveLength(MAX_V2_BATCH_REJECTIONS_REPORTED);
+    expect(parsed.rejections.map((rejection) => rejection.index)).toEqual(
+      Array.from({ length: MAX_V2_BATCH_REJECTIONS_REPORTED }, (_, index) => index)
+    );
+  });
+
+  it("still throws for envelope-level failures (producerId, schemaVersion, events shape)", async () => {
+    await expect(parseUsageTelemetryV2Batch({
+      schemaVersion: 2,
+      producerId: "",
+      events: [{ eventId: "e", provider: "openai" }],
     })).rejects.toThrow();
+    await expect(parseUsageTelemetryV2Batch({
+      schemaVersion: 1,
+      producerId: "socratic-trade",
+      events: [{ eventId: "e", provider: "openai" }],
+    })).rejects.toThrow();
+    await expect(parseUsageTelemetryV2Batch({
+      schemaVersion: 2,
+      producerId: "socratic-trade",
+      events: [],
+    })).rejects.toThrow();
+    await expect(parseUsageTelemetryV2Batch({
+      schemaVersion: 2,
+      producerId: "socratic-trade",
+      events: [{ eventId: "e", provider: "openai" }],
+      unknownTopLevelKey: true,
+    })).rejects.toThrow();
+    await expect(parseUsageTelemetryV2Batch("not an object")).rejects.toThrow();
   });
 });
 
@@ -745,5 +830,25 @@ describe("parseUsageTelemetryBatch reserved sourceApp", () => {
       occurredAt: "2026-06-16T00:00:00.000Z",
     });
     expect(events[0].sourceApp).toBe("subscription");
+  });
+});
+
+describe("reserved derived-cost metadata keys", () => {
+  it("strips producer-supplied _derivedCost* keys so a monitor-computed estimate cannot be forged (v1)", () => {
+    const events = parseUsageTelemetryBatch({
+      sourceApp: "evil-producer",
+      provider: "openai",
+      metricType: "usage",
+      unit: "token",
+      quantity: 1000,
+      metadata: {
+        _derivedCostUsd: 999.99,
+        _derivedCostPricingKey: "gpt-4o",
+        _derivedCostSnapshot: "2020-01-01",
+        _derivedCostIncomplete: false,
+        legitimate: "kept",
+      },
+    });
+    expect(events[0].metadata).toEqual({ legitimate: "kept" });
   });
 });

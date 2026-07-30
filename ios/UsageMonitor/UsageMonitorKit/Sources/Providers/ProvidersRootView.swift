@@ -8,9 +8,10 @@ import Networking
 ///
 /// A searchable, sortable, filterable list of every tracked provider with
 /// status pills and compact rows, pushing a rich per-provider budget detail.
-/// All data comes from the shared `BudgetStore` (`GET /api/budget-status`) —
-/// there is no per-provider fetch (`GET /api/providers/{id}` is session-gated
-/// and unreachable by the app's bearer token; see the architecture contract).
+/// List and detail budget data come from the shared `BudgetStore`
+/// (`GET /api/budget-status`); the detail additionally loads recorded history
+/// and external billing through session-gated routes when a dashboard session
+/// is active (see `ProviderDepthStore`).
 public struct ProvidersRootView: View {
     @Environment(BudgetStore.self) private var store
     /// Optional so previews (store-only) don't trap; the app injects it.

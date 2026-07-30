@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
   externalUsageEvent: { findMany: vi.fn(), groupBy: vi.fn() },
   externalUsageEventDailyRollup: { findMany: vi.fn() },
+  $queryRaw: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
@@ -20,9 +21,11 @@ describe("summarizeExternalUsageEvents", () => {
     prismaMock.externalUsageEvent.findMany.mockResolvedValue([]);
   });
 
-  it("merges each raw page directly into the summary and preserves rollup totals", async () => {
-    const firstPage = Array.from({ length: 1_000 }, (_, index) => ({
-      id: `raw-${String(index).padStart(4, "0")}`,
+  it("aggregates the raw month via one SQL groupBy and preserves rollup totals", async () => {
+    // E1: the 1,002 raw events below used to arrive as two cursor-paginated
+    // findMany pages; they now arrive as three pre-aggregated groupBy rows
+    // (split by the limit dimension) with identical folded output.
+    const rawGroup = {
       sourceApp: "socratic-trade",
       environment: "prod",
       provider: "openai",
@@ -30,31 +33,31 @@ describe("summarizeExternalUsageEvents", () => {
       projectId: "project-a",
       metricType: "usage",
       unit: "token",
-      quantity: 2,
-      costUsd: 1,
-      requests: 1,
-      limit: 100,
       limitWindow: "month",
-      occurredAt: new Date("2026-07-02T00:00:00.000Z"),
-    }));
-    const finalPage = [
+    };
+    prismaMock.externalUsageEvent.groupBy.mockResolvedValueOnce([
       {
-        ...firstPage[0],
-        id: "raw-1000",
-        occurredAt: new Date("2026-07-03T00:00:00.000Z"),
+        ...rawGroup,
+        limit: 100,
+        _sum: { costUsd: 1_000, requests: 1_000, quantity: 2_000 },
+        _count: { _all: 1_000, costUsd: 1_000 },
+        _max: { occurredAt: new Date("2026-07-02T00:00:00.000Z") },
+      },
+      {
+        ...rawGroup,
         limit: 150,
+        _sum: { costUsd: 1, requests: 1, quantity: 2 },
+        _count: { _all: 1, costUsd: 1 },
+        _max: { occurredAt: new Date("2026-07-03T00:00:00.000Z") },
       },
       {
-        ...firstPage[0],
-        id: "raw-1001",
-        occurredAt: new Date("2026-07-04T00:00:00.000Z"),
+        ...rawGroup,
         limit: 200,
+        _sum: { costUsd: 1, requests: 1, quantity: 2 },
+        _count: { _all: 1, costUsd: 1 },
+        _max: { occurredAt: new Date("2026-07-04T00:00:00.000Z") },
       },
-    ];
-
-    prismaMock.externalUsageEvent.findMany
-      .mockResolvedValueOnce(firstPage)
-      .mockResolvedValueOnce(finalPage);
+    ]);
     prismaMock.externalUsageEventDailyRollup.findMany.mockResolvedValue([
       {
         sourceApp: "socratic-trade",
@@ -79,13 +82,38 @@ describe("summarizeExternalUsageEvents", () => {
       new Date("2026-07-01T00:00:00.000Z")
     );
 
-    expect(prismaMock.externalUsageEvent.findMany).toHaveBeenCalledTimes(2);
-    expect(prismaMock.externalUsageEvent.findMany).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ cursor: { id: "raw-0999" }, skip: 1 })
+    expect(prismaMock.externalUsageEvent.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: [
+          "sourceApp",
+          "environment",
+          "provider",
+          "service",
+          "projectId",
+          "metricType",
+          "unit",
+          "limit",
+          "limitWindow",
+        ],
+        where: expect.objectContaining({
+          occurredAt: { gte: new Date("2026-07-01T00:00:00.000Z") },
+        }),
+      })
+    );
+    // The only raw findMany left is the receipt-candidate superset query -
+    // the cursor-paginated full-month scan is gone.
+    expect(prismaMock.externalUsageEvent.findMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.externalUsageEvent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          sourceApp: "billing-receipt-import",
+        }),
+      })
     );
     expect(result).toEqual({
       eventCount: 1_007,
+      derivedCostEstimateUsd: 0,
+      derivedCostEstimateEventCount: 0,
       groups: [
         expect.objectContaining({
           eventCount: 1_007,
@@ -104,38 +132,31 @@ describe("summarizeExternalUsageEvents", () => {
   });
 
   it("keeps metric units in separate quota groups", async () => {
-    prismaMock.externalUsageEvent.findMany.mockResolvedValueOnce([
+    const rawGroup = {
+      sourceApp: "socratic-trade",
+      environment: "prod",
+      provider: "openai",
+      service: "responses",
+      projectId: null,
+      metricType: "usage",
+      limitWindow: "month",
+    };
+    prismaMock.externalUsageEvent.groupBy.mockResolvedValueOnce([
       {
-        id: "tokens",
-        sourceApp: "socratic-trade",
-        environment: "prod",
-        provider: "openai",
-        service: "responses",
-        projectId: null,
-        metricType: "usage",
+        ...rawGroup,
         unit: "token",
-        quantity: 10_000,
-        costUsd: null,
-        requests: 0,
         limit: 20_000,
-        limitWindow: "month",
-        occurredAt: new Date("2026-07-12T00:00:00.000Z"),
+        _sum: { costUsd: null, requests: 0, quantity: 10_000 },
+        _count: { _all: 1, costUsd: 0 },
+        _max: { occurredAt: new Date("2026-07-12T00:00:00.000Z") },
       },
       {
-        id: "requests",
-        sourceApp: "socratic-trade",
-        environment: "prod",
-        provider: "openai",
-        service: "responses",
-        projectId: null,
-        metricType: "usage",
+        ...rawGroup,
         unit: "request",
-        quantity: 0,
-        costUsd: null,
-        requests: 10,
         limit: 100,
-        limitWindow: "month",
-        occurredAt: new Date("2026-07-12T00:00:00.000Z"),
+        _sum: { costUsd: null, requests: 10, quantity: 0 },
+        _count: { _all: 1, costUsd: 0 },
+        _max: { occurredAt: new Date("2026-07-12T00:00:00.000Z") },
       },
     ]);
     prismaMock.externalUsageEventDailyRollup.findMany.mockResolvedValue([]);
@@ -161,9 +182,8 @@ describe("summarizeExternalUsageEvents", () => {
   });
 
   it("treats explicit zero as priced while preserving legacy rollups as unclassified", async () => {
-    prismaMock.externalUsageEvent.findMany.mockResolvedValueOnce([
+    prismaMock.externalUsageEvent.groupBy.mockResolvedValueOnce([
       {
-        id: "zero-cost",
         sourceApp: "congress-trade",
         environment: "prod",
         provider: "gemini",
@@ -171,12 +191,11 @@ describe("summarizeExternalUsageEvents", () => {
         projectId: null,
         metricType: "request",
         unit: "request",
-        quantity: 1,
-        costUsd: 0,
-        requests: 1,
         limit: null,
         limitWindow: null,
-        occurredAt: new Date("2026-07-13T00:00:00.000Z"),
+        _sum: { costUsd: 0, requests: 1, quantity: 1 },
+        _count: { _all: 1, costUsd: 1 },
+        _max: { occurredAt: new Date("2026-07-13T00:00:00.000Z") },
       },
     ]);
     prismaMock.externalUsageEventDailyRollup.findMany.mockResolvedValue([
@@ -220,9 +239,8 @@ describe("summarizeExternalUsageEvents", () => {
   });
 
   it("separates Claude API-equivalent estimates across raw rows and historical rollups", async () => {
-    prismaMock.externalUsageEvent.findMany.mockResolvedValueOnce([
+    prismaMock.externalUsageEvent.groupBy.mockResolvedValueOnce([
       {
-        id: "raw-cash",
         sourceApp: "socratic-trade",
         environment: "prod",
         provider: "anthropic",
@@ -230,15 +248,13 @@ describe("summarizeExternalUsageEvents", () => {
         projectId: "project-a",
         metricType: "cost",
         unit: "usd",
-        quantity: 0,
-        costUsd: 10,
-        requests: 1,
         limit: null,
         limitWindow: null,
-        occurredAt: new Date("2026-07-03T00:00:00.000Z"),
+        _sum: { costUsd: 10, requests: 1, quantity: 0 },
+        _count: { _all: 1, costUsd: 1 },
+        _max: { occurredAt: new Date("2026-07-03T00:00:00.000Z") },
       },
       {
-        id: "raw-claude-estimate",
         sourceApp: "claude-code",
         environment: "prod",
         provider: "anthropic",
@@ -246,12 +262,11 @@ describe("summarizeExternalUsageEvents", () => {
         projectId: "project-a",
         metricType: "cost",
         unit: "usd",
-        quantity: 0,
-        costUsd: 5_000,
-        requests: 0,
         limit: null,
         limitWindow: null,
-        occurredAt: new Date("2026-07-03T00:00:00.000Z"),
+        _sum: { costUsd: 5_000, requests: 0, quantity: 0 },
+        _count: { _all: 1, costUsd: 1 },
+        _max: { occurredAt: new Date("2026-07-03T00:00:00.000Z") },
       },
     ]);
     prismaMock.externalUsageEventDailyRollup.findMany.mockResolvedValueOnce([
@@ -746,6 +761,9 @@ describe("summarizeExternalUsageEvents", () => {
         ...receipt("a"),
       },
     ]);
+    // The groupBy carries the non-receipt rows; receipt candidates arrive
+    // through the findMany above and are folded per-row.
+    prismaMock.externalUsageEvent.groupBy.mockResolvedValueOnce([]);
     prismaMock.externalUsageEventDailyRollup.findMany.mockResolvedValueOnce([
       {
         provider: "anthropic",
@@ -775,5 +793,43 @@ describe("summarizeExternalUsageEvents", () => {
         estimatedApiEquivalentUsd: 0,
       }),
     ]);
+  });
+});
+
+describe("summarizeExternalUsageEvents derived cost estimates", () => {
+  const FLAG = "INGEST_COST_DERIVATION_ENABLED";
+
+  beforeEach(() => {
+    prismaMock.externalUsageEvent.findMany.mockResolvedValue([]);
+    prismaMock.externalUsageEvent.groupBy.mockResolvedValue([]);
+    prismaMock.externalUsageEventDailyRollup.findMany.mockResolvedValue([]);
+    prismaMock.$queryRaw.mockResolvedValue([{ totalUsd: 12.5, eventCount: 7 }]);
+  });
+
+  afterEach(() => {
+    delete process.env[FLAG];
+  });
+
+  it("skips the json_extract scan entirely when the flag is off (default)", async () => {
+    const summary = await summarizeExternalUsageEvents(
+      new Date("2026-06-01T00:00:00.000Z"),
+      new Date("2026-07-01T00:00:00.000Z")
+    );
+    expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+    expect(summary.derivedCostEstimateUsd).toBe(0);
+    expect(summary.derivedCostEstimateEventCount).toBe(0);
+  });
+
+  it("surfaces monitor-estimated totals separately when the flag is on", async () => {
+    process.env[FLAG] = "true";
+    const summary = await summarizeExternalUsageEvents(
+      new Date("2026-06-01T00:00:00.000Z"),
+      new Date("2026-07-01T00:00:00.000Z")
+    );
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(summary.derivedCostEstimateUsd).toBe(12.5);
+    expect(summary.derivedCostEstimateEventCount).toBe(7);
+    // Derived estimates never leak into the producer-reported cost pool.
+    expect(summary.groups).toEqual([]);
   });
 });

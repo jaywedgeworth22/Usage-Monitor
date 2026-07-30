@@ -104,7 +104,7 @@ struct FullAccessSection: View {
         } header: {
             Text("Full Access")
         } footer: {
-            Text("The dashboard password is sent once over HTTPS and never stored. Full access persists only as the monitor's HttpOnly session cookie. Complex provider credentials and subscription purchase/resume flows remain server-validated on the web.")
+            Text("The dashboard password is sent once over HTTPS and never stored. Full access persists only as the monitor's HttpOnly session cookie. Complex provider credentials and subscription purchase/link flows remain server-validated on the web.")
         }
         .confirmationDialog(
             "Sign out of full access?",
@@ -136,8 +136,11 @@ struct FullAccessSection: View {
     }
 
     private var managementDetail: String {
-        guard let count = store.capabilities.sessionManagement.providerCount else {
+        guard store.capabilities.sessionManagement.isActive else {
             return "Signed out"
+        }
+        guard let count = store.capabilities.sessionManagement.providerCount else {
+            return "Full access"
         }
         return "Full access · \(count) provider\(count == 1 ? "" : "s")"
     }

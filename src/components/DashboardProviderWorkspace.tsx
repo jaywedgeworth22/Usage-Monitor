@@ -19,10 +19,18 @@ import type {
 import type { SubscriptionRow } from "@/components/SubscriptionsPanel";
 import SortHeader, { type SortDirection } from "@/components/table/SortHeader";
 import { costCoverageHelpText } from "@/lib/cost-coverage-help";
+import {
+  formatBudgetRunout,
+  formatCurrency,
+  formatDate,
+  formatNumber,
+  formatShortDate,
+  projectedStatusLabel,
+  type ProviderBudgetIntel,
+} from "@/lib/format";
 import { providerFinancialSemantics } from "@/lib/provider-financial-semantics";
 import { aggregateProviderFamilyMoney } from "@/lib/provider-money-aggregation";
 import { canonicalProviderKey } from "@/lib/provider-identity";
-import { type DisplayDensity } from "@/lib/display-density";
 
 interface WorkspaceProvider {
   id: string;
@@ -143,6 +151,11 @@ interface ProviderFamily {
   costCoverageCaveatMessage: string | null;
   nextRenewalAt: string | null;
   latestFetchedAt: string | null;
+  // S9/S10: family-level projection intelligence (worst member pace + earliest
+  // runout) from the budget-status DTO; null when unconfigured/unknown.
+  paceLabel: string | null;
+  paceExceeded: boolean;
+  runoutLabel: string | null;
 }
 
 interface FamilyExternalBillingRecord {
@@ -156,6 +169,8 @@ interface DashboardProviderWorkspaceProps {
   providers: WorkspaceProvider[];
   subscriptions: SubscriptionRow[];
   initiallyExpanded?: boolean;
+  /** S9/S10: projection intelligence keyed by provider id (from /api/budget-status). */
+  budgetIntelByProviderId?: Record<string, ProviderBudgetIntel>;
 }
 
 export type WorkspaceSortField =
@@ -273,54 +288,9 @@ function earliestFutureDate(
   return earliest;
 }
 
-function formatCurrency(amount: number | null, currency = "USD"): string {
-  if (amount == null) return "--";
-  const normalizedCurrency = currency.trim().toUpperCase() || "UNKNOWN";
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: normalizedCurrency,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${normalizedCurrency}`;
-  }
-}
+export { formatShortDate };
 
-function formatNumber(amount: number | null): string {
-  if (amount == null) return "--";
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(amount);
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return "--";
-  const time = Date.parse(value);
-  if (!Number.isFinite(time)) return "--";
-  return new Date(time).toLocaleDateString(undefined, { timeZone: "UTC" });
-}
-
-/**
- * Short absolute date for a NON-relative context (e.g. a future renewal).
- * Never route a renewal or any future-dated value through
- * `formatRelativeTime` — its future/negative clamp collapses to "just now",
- * which is silently wrong for a renewal date.
- */
-export function formatShortDate(value: string, nowMs: number): string {
-  const time = Date.parse(value);
-  if (!Number.isFinite(time)) return "--";
-  const date = new Date(time);
-  const now = new Date(nowMs);
-  const formatted = date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-  return date.getUTCFullYear() === now.getUTCFullYear()
-    ? formatted
-    : `${formatted}, ${date.getUTCFullYear()}`;
-}
-
-/** "Last sync" relative-time formatter ONLY — see `formatShortDate` above. */
+/** "Last sync" relative-time formatter ONLY — see `formatShortDate` in `@/lib/format`. */
 export function formatRelativeTime(value: string | null, nowMs: number): string {
   if (!value) return "--";
   const time = Date.parse(value);
@@ -551,7 +521,7 @@ export function emptyStateMessage(query: string, chip: FilterChip): string {
 }
 
 function toggleButtonClass(active: boolean): string {
-  return `rounded-lg px-3 py-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 ${
+  return `min-h-11 rounded-lg px-3 py-2 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:focus-visible:ring-blue-400 ${
     active
       ? "bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900"
       : "border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
@@ -564,10 +534,6 @@ function isWorkspaceSortField(value: unknown): value is WorkspaceSortField {
 
 function isSortDirection(value: unknown): value is SortDirection {
   return value === "asc" || value === "desc";
-}
-
-function isDensity(value: unknown): value is DisplayDensity {
-  return value === "compact" || value === "comfortable";
 }
 
 function coverageDotClass(family: ProviderFamily): string {
@@ -678,6 +644,22 @@ function CompactFamilyCells({
                   : "Projection unavailable"}
               {" · "}{costCoverageLabel(family)} coverage
             </p>
+            {family.paceLabel && (
+              <p
+                className={`mt-0.5 text-[11px] font-medium ${
+                  family.paceExceeded
+                    ? "text-red-600 dark:text-red-300"
+                    : "text-amber-600 dark:text-amber-300"
+                }`}
+              >
+                {family.paceLabel}
+              </p>
+            )}
+            {family.runoutLabel && (
+              <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                {family.runoutLabel}
+              </p>
+            )}
           </div>
         ) : (
           <span className="block">
@@ -769,6 +751,7 @@ export default function DashboardProviderWorkspace({
   providers,
   subscriptions,
   initiallyExpanded = false,
+  budgetIntelByProviderId,
 }: DashboardProviderWorkspaceProps) {
   const [query, setQuery] = useState("");
   const [filterChip, setFilterChip] = useState<FilterChip>("all");
@@ -887,6 +870,29 @@ export default function DashboardProviderWorkspace({
       const orderedProviders = groupProviders.toSorted((a, b) =>
         a.displayName.localeCompare(b.displayName)
       );
+      // S9/S10: family-level projection intelligence — the worst member pace
+      // badge and the earliest member runout, so multi-account families
+      // surface the member that runs out first.
+      const memberIntels = groupProviders
+        .map((provider) => budgetIntelByProviderId?.[provider.id])
+        .filter((intel): intel is ProviderBudgetIntel => intel != null);
+      const paceLabel =
+        memberIntels.some((intel) => intel.projectedStatus === "exceeded")
+          ? projectedStatusLabel("exceeded")
+          : memberIntels.some((intel) => intel.projectedStatus === "warning")
+            ? projectedStatusLabel("warning")
+            : null;
+      const paceExceeded = memberIntels.some(
+        (intel) => intel.projectedStatus === "exceeded"
+      );
+      const runoutIntel = memberIntels
+        .filter((intel) => intel.daysUntilBudgetExhausted != null)
+        .toSorted(
+          (a, b) =>
+            (a.daysUntilBudgetExhausted ?? Number.POSITIVE_INFINITY) -
+            (b.daysUntilBudgetExhausted ?? Number.POSITIVE_INFINITY)
+        )[0];
+      const runoutLabel = runoutIntel ? formatBudgetRunout(runoutIntel, referenceNow) : null;
       // Override each member's spentUsd with the coverage-aware value (null,
       // not a literal 0, when spendCoverage is unknown/legacy_unknown) so an
       // untrustworthy reading can never surface as an authoritative "$0.00"
@@ -975,9 +981,12 @@ export default function DashboardProviderWorkspace({
           referenceNow
         ),
         latestFetchedAt: latestDate(groupProviders.map((provider) => provider.latestSnapshot?.fetchedAt)),
+        paceLabel,
+        paceExceeded,
+        runoutLabel,
       };
     });
-  }, [providers, referenceNow, subscriptions]);
+  }, [providers, referenceNow, subscriptions, budgetIntelByProviderId]);
 
   const visibleFamilies = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -1084,7 +1093,7 @@ export default function DashboardProviderWorkspace({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search providers, accounts, keys, services"
-            className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:focus:ring-blue-950"
+            className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-base sm:text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:focus:ring-blue-950"
           />
         </label>
         <div className="flex flex-wrap items-center gap-2">
@@ -1252,7 +1261,7 @@ export default function DashboardProviderWorkspace({
                                 </span>
                                 <span className="shrink-0 text-right">
                                   <span className="block text-sm font-semibold text-blue-950 dark:text-blue-100">
-                                    {formatCurrency(subscription.costUsd, subscription.currency)}
+                                    {formatCurrency(subscription.costUsd, { currency: subscription.currency })}
                                   </span>
                                   <span className="block text-xs text-blue-700 dark:text-blue-300">
                                     {subscriptionDateSummary(subscription, referenceNow)}
@@ -1279,7 +1288,7 @@ export default function DashboardProviderWorkspace({
                               </span>
                               <span className="shrink-0 text-right">
                                 <span className="block text-sm font-semibold text-violet-950 dark:text-violet-100">
-                                  {formatCurrency(record.amountUsd, record.currency ?? "USD")}
+                                  {formatCurrency(record.amountUsd, { currency: record.currency ?? "USD" })}
                                   {record.billingInterval ? ` / ${record.billingInterval}` : ""}
                                 </span>
                                 <span className="block text-xs text-violet-700 dark:text-violet-300">

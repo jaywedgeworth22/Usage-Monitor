@@ -3,13 +3,20 @@ import { createHash, randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import {
   buildProviderAlertState,
+  buildProjectBudgetAlerts,
+  PROVIDER_ALERT_CODES,
   providerSnapshotStaleAt,
   type AlertSeverity,
+  type BudgetAlertTier,
   type ProviderAlert,
+  type ProviderAlertCode,
 } from "@/lib/provider-alerts";
-import { computeBudgetStatus } from "@/lib/budget-status";
+import { computeBudgetStatus, computeProjectBudgetStatus } from "@/lib/budget-status";
 import { providerPollSnapshotExpected } from "@/lib/anthropic-credentials";
 import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
+import { resolveAnomalyConfig } from "@/lib/anomaly-detection";
+import { loadSpendAnomaliesByProjectId } from "@/lib/anomaly-loader";
+import { loadSubscriptionInsightAlerts } from "@/lib/subscription-insights";
 
 export type AlertDeliveryChannel =
   | { kind: "slack"; url: string }
@@ -27,6 +34,20 @@ export interface AlertDeliveryConfig {
   maxAttempts?: number;
   /** Exponential retry base. Defaults to 250ms; individual waits cap at 5s. */
   retryBaseMs?: number;
+  /**
+   * S12: per-alert-code severity overrides (env ALERT_CODE_SEVERITY_OVERRIDES,
+   * e.g. '{"stale_snapshot":"info"}'). Applied to both the persisted incident
+   * and delivery eligibility so the incident, its text, and policy agree.
+   */
+  severityOverrides?: Partial<Record<ProviderAlertCode, AlertSeverity>>;
+  /**
+   * S12: per-alert-code channel-kind routing (env ALERT_CODE_CHANNEL_ROUTING,
+   * e.g. '{"budget_exceeded":["slack","pagerduty"],"stale_snapshot":[]}').
+   * Trigger-side only: an open incident always RESOLVES on the channel it
+   * originally triggered on, so re-routing never strands a PagerDuty incident.
+   * An empty array suppresses external delivery for that code entirely.
+   */
+  channelRouting?: Partial<Record<ProviderAlertCode, AlertDeliveryChannel["kind"][]>>;
 }
 
 export interface AlertDeliveryResult {
@@ -169,6 +190,71 @@ const SEVERITY_RANK: Record<AlertSeverity, number> = {
   critical: 2,
 };
 
+// --- S1: project budget/anomaly alerts -------------------------------------
+// ProviderAlertNotification.providerId is a REQUIRED foreign key to Provider,
+// so project-scoped alerts cannot persist (and therefore cannot dedup,
+// hysteresis, remind, or resolve) without a real Provider row. This dedicated
+// inactive system row — same pattern as the self-seeded "Agent Sync Relay"
+// catalog row (ensure-agent-sync-provider.ts) — carries every per-project
+// incident with `scope` = project id, reusing the machinery unchanged.
+const PROJECT_ALERTS_PROVIDER_NAME = "project-budgets";
+const PROJECT_ALERTS_PROVIDER_DISPLAY_NAME = "Project Budgets";
+// S1c: unassigned-spend info alerts only fire above this default floor (and
+// only once at least one project exists — with zero projects, ALL spend is
+// unassigned by definition and alerting would be pure noise).
+const DEFAULT_UNASSIGNED_SPEND_FLOOR_USD = 25;
+const MAX_UNASSIGNED_SPEND_FLOOR_USD = 1_000_000;
+
+// Shared select for alert-evaluation provider rows so the project-budgets
+// system provider can be fetched with the exact same shape as the main query.
+const ALERT_EVALUATION_PROVIDER_SELECT = {
+  id: true,
+  name: true,
+  type: true,
+  displayName: true,
+  apiKey: true,
+  config: true,
+  secretConfig: true,
+  isActive: true,
+  alertConfigGeneration: true,
+  refreshIntervalMin: true,
+  plan: {
+    select: {
+      billingMode: true,
+      fixedMonthlyCostUsd: true,
+      monthlyBudgetUsd: true,
+      monthlyRequestLimit: true,
+      lowBalanceUsd: true,
+      lowCredits: true,
+      renewalDate: true,
+      billingInterval: true,
+      mustKeepFunded: true,
+    },
+  },
+  snapshots: {
+    orderBy: { fetchedAt: "desc" as const },
+    take: 1,
+    select: { balance: true, totalCost: true, totalRequests: true, credits: true, fetchedAt: true },
+  },
+  usageReconciliations: {
+    orderBy: { createdAt: "desc" as const },
+    take: 1,
+    select: { deltaUsd: true, status: true },
+  },
+} satisfies Prisma.ProviderSelect;
+
+type AlertEvaluationProvider = Prisma.ProviderGetPayload<{
+  select: typeof ALERT_EVALUATION_PROVIDER_SELECT;
+}>;
+
+function readBoolEnvValue(env: NodeJS.ProcessEnv, name: string, fallback: boolean): boolean {
+  const raw = env[name]?.trim().toLowerCase();
+  if (raw == null || raw === "") return fallback;
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return fallback;
+}
+
 export function readAlertDeliveryConfig(env: NodeJS.ProcessEnv = process.env): AlertDeliveryConfig {
   const channels: AlertDeliveryChannel[] = [];
   const slackUrl = env.ALERT_SLACK_WEBHOOK_URL?.trim();
@@ -206,7 +292,108 @@ export function readAlertDeliveryConfig(env: NodeJS.ProcessEnv = process.env): A
     DEFAULT_RETRY_BASE_MS,
     MAX_RETRY_BASE_MS
   );
-  return { channels, minSeverity, reminderHours, timeoutMs, maxAttempts, retryBaseMs };
+  const severityOverrides = parseCodeSeverityOverrides(env.ALERT_CODE_SEVERITY_OVERRIDES);
+  const channelRouting = parseCodeChannelRouting(env.ALERT_CODE_CHANNEL_ROUTING);
+  return {
+    channels,
+    minSeverity,
+    reminderHours,
+    timeoutMs,
+    maxAttempts,
+    retryBaseMs,
+    ...(severityOverrides ? { severityOverrides } : {}),
+    ...(channelRouting ? { channelRouting } : {}),
+  };
+}
+
+const PROVIDER_ALERT_CODE_SET: ReadonlySet<string> = new Set(PROVIDER_ALERT_CODES);
+const ALERT_CHANNEL_KIND_SET: ReadonlySet<string> = new Set([
+  "slack",
+  "webhook",
+  "email",
+  "pagerduty",
+]);
+
+function parseJsonObjectEnv(raw: string | undefined, envName: string): Record<string, unknown> | null {
+  if (!raw?.trim()) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    console.warn(`[alert-delivery] ${envName} is not valid JSON; ignoring it`, error);
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    console.warn(`[alert-delivery] ${envName} must be a JSON object; ignoring it`);
+    return null;
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/**
+ * S12: parse ALERT_CODE_SEVERITY_OVERRIDES ('{"stale_snapshot":"info"}').
+ * Unknown codes and invalid severities are dropped with a warning so a typo
+ * can never silently change unrelated alert behavior.
+ */
+function parseCodeSeverityOverrides(
+  raw: string | undefined
+): Partial<Record<ProviderAlertCode, AlertSeverity>> | undefined {
+  const parsed = parseJsonObjectEnv(raw, "ALERT_CODE_SEVERITY_OVERRIDES");
+  if (!parsed) return undefined;
+  const overrides: Partial<Record<ProviderAlertCode, AlertSeverity>> = {};
+  for (const [code, value] of Object.entries(parsed)) {
+    if (!PROVIDER_ALERT_CODE_SET.has(code)) {
+      console.warn(`[alert-delivery] ALERT_CODE_SEVERITY_OVERRIDES: unknown alert code "${code}"; ignoring`);
+      continue;
+    }
+    const severity = normalizeSeverity(typeof value === "string" ? value : undefined);
+    if (!severity) {
+      console.warn(
+        `[alert-delivery] ALERT_CODE_SEVERITY_OVERRIDES: invalid severity for "${code}" (want info|warning|critical); ignoring`
+      );
+      continue;
+    }
+    overrides[code as ProviderAlertCode] = severity;
+  }
+  return Object.keys(overrides).length > 0 ? overrides : undefined;
+}
+
+/**
+ * S12: parse ALERT_CODE_CHANNEL_ROUTING ('{"budget_exceeded":["pagerduty"]}').
+ * Values must be arrays of known channel kinds; an empty array is meaningful
+ * (suppresses external delivery for that code) and is preserved.
+ */
+function parseCodeChannelRouting(
+  raw: string | undefined
+): Partial<Record<ProviderAlertCode, AlertDeliveryChannel["kind"][]>> | undefined {
+  const parsed = parseJsonObjectEnv(raw, "ALERT_CODE_CHANNEL_ROUTING");
+  if (!parsed) return undefined;
+  const routing: Partial<Record<ProviderAlertCode, AlertDeliveryChannel["kind"][]>> = {};
+  for (const [code, value] of Object.entries(parsed)) {
+    if (!PROVIDER_ALERT_CODE_SET.has(code)) {
+      console.warn(`[alert-delivery] ALERT_CODE_CHANNEL_ROUTING: unknown alert code "${code}"; ignoring`);
+      continue;
+    }
+    if (!Array.isArray(value)) {
+      console.warn(`[alert-delivery] ALERT_CODE_CHANNEL_ROUTING: value for "${code}" must be an array; ignoring`);
+      continue;
+    }
+    const kinds = new Set<AlertDeliveryChannel["kind"]>();
+    for (const entry of value) {
+      if (typeof entry !== "string" || !ALERT_CHANNEL_KIND_SET.has(entry)) {
+        console.warn(
+          `[alert-delivery] ALERT_CODE_CHANNEL_ROUTING: unknown channel kind "${String(entry)}" for "${code}"; ignoring that entry`
+        );
+        continue;
+      }
+      kinds.add(entry as AlertDeliveryChannel["kind"]);
+    }
+    // A non-empty array whose entries were ALL invalid is a misconfiguration,
+    // not a deliberate suppress-all — skip it rather than muting the code.
+    if (value.length > 0 && kinds.size === 0) continue;
+    routing[code as ProviderAlertCode] = [...kinds];
+  }
+  return Object.keys(routing).length > 0 ? routing : undefined;
 }
 
 export function hasAlertDeliveryChannels(config = readAlertDeliveryConfig()): boolean {
@@ -248,7 +435,27 @@ function shouldDeliverSeverity(severity: AlertSeverity, minSeverity: AlertSeveri
 }
 
 function stateKey(providerId: string, alert: ProviderAlert): string {
-  return `${providerId}:${alert.code}`;
+  // Scoped alerts (per-project on the project-budgets provider, per-
+  // subscription insights) get one durable incident EACH; unscoped alerts
+  // keep the legacy `providerId:code` key byte-for-byte.
+  return alert.scope
+    ? `${providerId}:${alert.code}:${alert.scope}`
+    : `${providerId}:${alert.code}`;
+}
+
+/**
+ * Recover a persisted notification's scope segment (the inverse of stateKey).
+ * Needed on the resolve path, where only the notification row is available.
+ */
+function notificationAlertScope(notification: {
+  providerId: string;
+  alertCode: string;
+  stateKey: string;
+}): string | undefined {
+  const prefix = `${notification.providerId}:${notification.alertCode}:`;
+  return notification.stateKey.startsWith(prefix)
+    ? notification.stateKey.slice(prefix.length)
+    : undefined;
 }
 
 const SNAPSHOT_EVIDENCE_ALERT_CODES = new Set<ProviderAlert["code"]>([
@@ -447,9 +654,13 @@ function pagerDutyDedupKey(
   providerId: string,
   alertCode: string,
   incidentGeneration: number,
-  auditState: string
+  auditState: string,
+  scope?: string
 ): string {
-  const base = `api-usage-monitor:${providerId}:${alertCode}`;
+  // Scope distinguishes otherwise-identical incidents (e.g. two projects over
+  // budget on the shared project-budgets provider) so PagerDuty never
+  // dedupes one project's incident into another's.
+  const base = `api-usage-monitor:${providerId}:${alertCode}${scope ? `:${scope}` : ""}`;
   return auditState === "legacy_unknown"
     ? base
     : `${base}:incident-${incidentGeneration}`;
@@ -2024,42 +2235,148 @@ export async function deliverProviderAlerts(options: {
       ],
     },
     orderBy: { name: "asc" },
-    select: {
-      id: true,
-      name: true,
-      type: true,
-      displayName: true,
-      apiKey: true,
-      config: true,
-      secretConfig: true,
-      isActive: true,
-      alertConfigGeneration: true,
-      refreshIntervalMin: true,
-      plan: {
-        select: {
-          billingMode: true,
-          fixedMonthlyCostUsd: true,
-          monthlyBudgetUsd: true,
-          monthlyRequestLimit: true,
-          lowBalanceUsd: true,
-          lowCredits: true,
-          renewalDate: true,
-          billingInterval: true,
-          mustKeepFunded: true,
-        },
-      },
-      snapshots: {
-        orderBy: { fetchedAt: "desc" },
-        take: 1,
-        select: { balance: true, totalCost: true, totalRequests: true, credits: true, fetchedAt: true },
-      },
-      usageReconciliations: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: { deltaUsd: true, status: true },
-      },
-    },
+    select: ALERT_EVALUATION_PROVIDER_SELECT,
   });
+
+  // --- S1: project budget/anomaly alert evaluation (production path only) ---
+  // Injected test DBs skip this entirely (same precedent as computeBudgetStatus
+  // above); the real-DB test suite exercises it end to end.
+  let projectAlertsProvider: AlertEvaluationProvider | null = null;
+  let projectAlerts: ProviderAlert[] = [];
+  // False when evaluation was skipped legitimately (feature disabled or zero
+  // projects — both yield an intentionally empty alert set so previously-open
+  // project incidents resolve) OR when it FAILED (then the project-budgets
+  // provider is excluded from targets so open incidents are preserved, not
+  // falsely resolved by a transient error).
+  let projectAlertsEvaluated = false;
+  if (!options.db) {
+    const existingProjectProvider = await db.provider.findFirst({
+      where: { name: PROJECT_ALERTS_PROVIDER_NAME },
+      select: ALERT_EVALUATION_PROVIDER_SELECT,
+    });
+    if (!readBoolEnvValue(process.env, "ALERT_PROJECT_BUDGETS_ENABLED", true)) {
+      // Disabled: evaluate as empty so any previously-open incidents resolve.
+      projectAlertsProvider = existingProjectProvider;
+      projectAlertsEvaluated = true;
+    } else {
+      const projects = await prisma.project.findMany({
+        select: { id: true, name: true, monthlyBudgetUsd: true },
+      });
+      if (projects.length === 0) {
+        // No projects configured: nothing to alert on (and unassigned spend is
+        // meaningless — ALL spend is unassigned by definition). Resolve any
+        // stale incidents from a since-deleted project setup.
+        projectAlertsProvider = existingProjectProvider;
+        projectAlertsEvaluated = true;
+      } else {
+        projectAlertsProvider =
+          existingProjectProvider ??
+          (await db.provider.create({
+            data: {
+              name: PROJECT_ALERTS_PROVIDER_NAME,
+              displayName: PROJECT_ALERTS_PROVIDER_DISPLAY_NAME,
+              type: "builtin",
+              // Never a poll target; it exists only to carry project incidents.
+              isActive: false,
+              refreshIntervalMin: 1440,
+            },
+            select: ALERT_EVALUATION_PROVIDER_SELECT,
+          }));
+        try {
+          const anomalyConfig = resolveAnomalyConfig();
+          const [projectStatus, anomaliesByProjectId, openProjectAlerts] =
+            await Promise.all([
+              computeProjectBudgetStatus(now),
+              loadSpendAnomaliesByProjectId(now, anomalyConfig, projects),
+              db.providerAlertNotification.findMany({
+                where: {
+                  providerId: projectAlertsProvider.id,
+                  resolvedAt: null,
+                  alertCode: { in: ["project_budget_exceeded", "project_budget_warning"] },
+                },
+                select: { alertCode: true, stateKey: true },
+              }),
+            ]);
+          // Per-project prior tier for budget hysteresis (C9 semantics).
+          const previousTierByProjectId = new Map<string, BudgetAlertTier>();
+          for (const row of openProjectAlerts) {
+            const scope = notificationAlertScope({
+              providerId: projectAlertsProvider.id,
+              alertCode: row.alertCode,
+              stateKey: row.stateKey,
+            });
+            if (!scope) continue;
+            const tier: BudgetAlertTier =
+              row.alertCode === "project_budget_exceeded" ? "exceeded" : "warning";
+            if (previousTierByProjectId.get(scope) !== "exceeded") {
+              previousTierByProjectId.set(scope, tier);
+            }
+          }
+          projectAlerts = buildProjectBudgetAlerts({
+            projects: projectStatus.projects,
+            previousTierByProjectId,
+            anomaliesByProjectId,
+            unassignedSpentUsd: projectStatus.summary.unassignedSpentUsd,
+            unassignedSpentFloorUsd: boundedNonNegativeNumber(
+              process.env.ALERT_UNASSIGNED_SPEND_FLOOR_USD,
+              DEFAULT_UNASSIGNED_SPEND_FLOOR_USD,
+              MAX_UNASSIGNED_SPEND_FLOOR_USD
+            ),
+          });
+          projectAlertsEvaluated = true;
+        } catch (error) {
+          // Transient status/anomaly failure: keep open incidents untouched by
+          // excluding the project-budgets provider from this pass entirely.
+          console.warn(
+            "[alert-delivery] project alert evaluation failed; preserving existing project incidents this pass",
+            error
+          );
+          projectAlerts = [];
+          projectAlertsEvaluated = false;
+        }
+      }
+    }
+  }
+
+  // --- S14: subscription & billing insight alerts (production path only) ---
+  let subscriptionInsightAlerts = new Map<string, ProviderAlert[]>();
+  if (
+    !options.db &&
+    readBoolEnvValue(process.env, "ALERT_SUBSCRIPTION_INSIGHTS_ENABLED", true)
+  ) {
+    try {
+      subscriptionInsightAlerts = await loadSubscriptionInsightAlerts(now);
+    } catch (error) {
+      console.warn(
+        "[alert-delivery] subscription insight evaluation failed; skipping insight alerts this pass",
+        error
+      );
+    }
+  }
+
+  // Alert targets: the evaluated providers, plus the project-budgets system
+  // provider when it has alerts to deliver. When project evaluation failed,
+  // the system provider is EXCLUDED so its open incidents survive the pass.
+  const alertTargets: AlertEvaluationProvider[] = [];
+  for (const provider of providers) {
+    if (
+      projectAlertsProvider &&
+      provider.id === projectAlertsProvider.id &&
+      !projectAlertsEvaluated
+    ) {
+      continue;
+    }
+    alertTargets.push(provider);
+  }
+  if (
+    projectAlertsEvaluated &&
+    projectAlertsProvider &&
+    projectAlerts.length > 0 &&
+    !alertTargets.some((provider) => provider.id === projectAlertsProvider!.id)
+  ) {
+    alertTargets.push(projectAlertsProvider);
+  }
+
   // Production delivery uses the same canonical poll+pushed+subscription
   // computation as /api/budget-status. Tests/callers that inject a partial DB
   // retain the legacy snapshot-only path because that DB may not expose the
@@ -2070,9 +2387,20 @@ export async function deliverProviderAlerts(options: {
         (await computeBudgetStatus(now)).providers.map((status) => [status.id, status])
       );
 
-  result.evaluatedProviders = providers.length;
+  result.evaluatedProviders = alertTargets.length;
 
-  for (const provider of providers) {
+  for (const provider of alertTargets) {
+    const isProjectAlertsTarget =
+      projectAlertsEvaluated &&
+      projectAlertsProvider != null &&
+      provider.id === projectAlertsProvider.id;
+    let rawAlerts: ProviderAlert[];
+    if (isProjectAlertsTarget) {
+      // S1: the project-budgets system provider carries the precomputed
+      // per-project alerts (budget tiers with hysteresis, spend anomalies,
+      // unassigned-spend info) — nothing provider-level applies to it.
+      rawAlerts = projectAlerts;
+    } else {
     // Budget hysteresis needs the prior open tier before we re-evaluate (C9).
     const openBudgetCodes = await db.providerAlertNotification.findMany({
       where: {
@@ -2153,16 +2481,31 @@ export async function deliverProviderAlerts(options: {
         ...hystereticBudget,
       ];
     }
-    const rawAlerts = alertState.alerts;
-    const deliverableAlerts = rawAlerts.filter((alert) =>
+    rawAlerts = [
+      ...alertState.alerts,
+      // S14: subscription & billing insights for this provider (info severity).
+      ...(subscriptionInsightAlerts.get(provider.id) ?? []),
+    ];
+    }
+    // S12: per-code severity overrides apply to BOTH the persisted incident
+    // and delivery eligibility so the incident, its text, and policy agree.
+    const effectiveAlerts = config.severityOverrides
+      ? rawAlerts.map((alert) => {
+          const override = config.severityOverrides?.[alert.code];
+          return override && override !== alert.severity
+            ? { ...alert, severity: override }
+            : alert;
+        })
+      : rawAlerts;
+    const deliverableAlerts = effectiveAlerts.filter((alert) =>
       shouldDeliverSeverity(alert.severity, config.minSeverity)
     );
-    result.activeAlerts += rawAlerts.length;
+    result.activeAlerts += effectiveAlerts.length;
 
     // Severity policy controls external delivery eligibility, not whether the
     // underlying condition remains active. Otherwise raising the policy would
     // falsely resolve already-open warning incidents.
-    const activeKeys = new Set(rawAlerts.map((alert) => stateKey(provider.id, alert)));
+    const activeKeys = new Set(effectiveAlerts.map((alert) => stateKey(provider.id, alert)));
     const openNotifications = await db.providerAlertNotification.findMany({
       where: { providerId: provider.id, resolvedAt: null },
       select: {
@@ -2366,14 +2709,24 @@ export async function deliverProviderAlerts(options: {
               provider.id,
               notification.alertCode,
               notification.incidentGeneration,
-              "legacy_unknown"
+              "legacy_unknown",
+              notificationAlertScope({
+                providerId: provider.id,
+                alertCode: notification.alertCode,
+                stateKey: notification.stateKey,
+              })
             )
           : state?.pagerDutyDedupKey ??
             pagerDutyDedupKey(
               provider.id,
               notification.alertCode,
               notification.incidentGeneration,
-              notification.pagerDutyAuditState
+              notification.pagerDutyAuditState,
+              notificationAlertScope({
+                providerId: provider.id,
+                alertCode: notification.alertCode,
+                stateKey: notification.stateKey,
+              })
             );
         const claim = await claimResolveDelivery(
           db,
@@ -2591,6 +2944,20 @@ export async function deliverProviderAlerts(options: {
         await releaseNotificationOperation(db, notification.id, operationClaim);
         continue;
       }
+      // S12: per-code channel routing narrows which configured channels may
+      // TRIGGER this code. The resolve path deliberately does NOT apply
+      // routing: an open incident always resolves on the channel it
+      // originally triggered on, so re-routing a code mid-incident can never
+      // strand a PagerDuty incident.
+      const channelRouting = config.channelRouting?.[alert.code];
+      const routedChannels = channelRouting
+        ? channels.filter((channel) => channelRouting.includes(channel.kind))
+        : channels;
+      if (routedChannels.length === 0) {
+        result.skipped += 1;
+        await releaseNotificationOperation(db, notification.id, operationClaim);
+        continue;
+      }
       try {
 
       const channelStates = await db.providerAlertChannelDelivery.findMany({
@@ -2612,7 +2979,7 @@ export async function deliverProviderAlerts(options: {
         channelStates.map((state) => [state.channelKey, state])
       );
       let hasDeferredDueChannel = false;
-      const dueChannels = channels.filter((channel) => {
+      const dueChannels = routedChannels.filter((channel) => {
         const persisted = stateByChannelKey.get(channelKey(channel));
         if (
           persisted?.triggerClaimToken &&
@@ -2676,7 +3043,7 @@ export async function deliverProviderAlerts(options: {
       });
 
       if (dueChannels.length === 0) {
-        const successfulStates = channels.map((channel) =>
+        const successfulStates = routedChannels.map((channel) =>
           stateByChannelKey.get(channelKey(channel))
         );
         const hasCompleteDurableSuccess =
@@ -2735,7 +3102,8 @@ export async function deliverProviderAlerts(options: {
                 provider.id,
                 alert.code,
                 notification.incidentGeneration,
-                notification.pagerDutyAuditState
+                notification.pagerDutyAuditState,
+                alert.scope
               )
             : null,
           operationClaim,

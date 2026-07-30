@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { formatCurrency } from "@/lib/format";
+import { STATUS_SORT_ORDER, statusBadgeStyle } from "@/lib/status-vocab";
 
 export interface SubscriptionRow {
   id: string;
@@ -42,31 +44,12 @@ interface SubscriptionsPanelProps {
   actionLoading: string | null;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  active: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
-  paused: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
-  canceled: "bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-400",
-  considering: "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300",
-  expired: "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300",
-};
-const STATUS_ORDER: Record<string, number> = {
-  active: 0,
-  considering: 1,
-  paused: 2,
-  canceled: 3,
-  expired: 4,
-};
-
 function displayStatus(subscription: SubscriptionRow): string {
   return subscription.effectiveStatus ?? subscription.status;
 }
 
 function formatUsd(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${currency}`;
-  }
+  return formatCurrency(amount, { currency });
 }
 
 function formatCadence(intervalCount: number, interval: string): string {
@@ -113,8 +96,8 @@ export default function SubscriptionsPanel({
 
   const orderedSubscriptions = [...filteredSubscriptions].sort((left, right) => {
     const statusDifference =
-      (STATUS_ORDER[displayStatus(left)] ?? 99) -
-      (STATUS_ORDER[displayStatus(right)] ?? 99);
+      (STATUS_SORT_ORDER[displayStatus(left)] ?? 99) -
+      (STATUS_SORT_ORDER[displayStatus(right)] ?? 99);
     return statusDifference || left.nextRenewalAt.localeCompare(right.nextRenewalAt) || left.name.localeCompare(right.name);
   });
 
@@ -126,7 +109,7 @@ export default function SubscriptionsPanel({
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Filter subscriptions by name, provider, or project..."
-          className="w-full rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500"
+          className="w-full rounded-lg border border-gray-200 bg-white px-4 py-2 text-base sm:text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500"
         />
         {searchQuery && (
           <button
@@ -202,9 +185,7 @@ export default function SubscriptionsPanel({
               </td>
               <td data-label="Status" className="px-6 py-4">
                 <span
-                  className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                    STATUS_STYLES[effectiveStatus] ?? "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"
-                  }`}
+                  className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${statusBadgeStyle(effectiveStatus)}`}
                 >
                   {effectiveStatus}
                 </span>

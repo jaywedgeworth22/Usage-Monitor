@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatCompactNumber, formatCurrency } from "@/lib/format";
 
 interface ModelCostCheck {
   model: string;
@@ -33,8 +34,8 @@ interface ClaudeCostCheckResponse {
   };
 }
 
-const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+const usd = (amount: number) => formatCurrency(amount);
+const compact = (value: number) => formatCompactNumber(value);
 
 function totalTokens(model: ModelCostCheck): number {
   return (
@@ -180,17 +181,17 @@ export default function ClaudeCostCheckCard() {
                   </td>
                   <td className="px-6 py-3 text-right" data-label="Tokens">
                     <p className="text-sm text-gray-900 dark:text-gray-100">
-                      {compact.format(totalTokens(model))}
+                      {compact(totalTokens(model))}
                     </p>
                   </td>
                   <td className="px-6 py-3 text-right" data-label="Derived">
                     <p className="text-sm text-gray-900 dark:text-gray-100">
-                      {usd.format(model.derivedCostUsd)}
+                      {usd(model.derivedCostUsd)}
                     </p>
                   </td>
                   <td className="px-6 py-3 text-right" data-label="Reported">
                     <p className="text-sm text-gray-900 dark:text-gray-100">
-                      {usd.format(model.reportedCostUsd)}
+                      {usd(model.reportedCostUsd)}
                     </p>
                   </td>
                   <td className="px-6 py-3 text-right" data-label="Drift">

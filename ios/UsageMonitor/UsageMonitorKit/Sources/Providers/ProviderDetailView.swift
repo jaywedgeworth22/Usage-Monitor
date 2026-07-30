@@ -10,13 +10,19 @@ struct ProviderRoute: Hashable {
     let id: String
 }
 
-/// Per-provider budget detail. Built entirely from the `ProviderBudgetStatus`
-/// already present in the shared `BudgetStore` response — there is no
-/// per-provider fetch (`GET /api/providers/{id}` is session-gated and not
-/// reachable by the app's bearer token; see the architecture contract).
+/// Per-provider budget detail. Budget data comes from the
+/// `ProviderBudgetStatus` already present in the shared `BudgetStore`
+/// response. When a dashboard session is active, the view additionally loads
+/// recorded snapshot history (`GET /api/snapshots`) and provider-reported
+/// external billing (`GET /api/providers/:id`) through `ProviderDepthStore` —
+/// both session-gated routes, degrading gracefully (labeled estimate +
+/// sign-in hint) when no session is available.
 struct ProviderDetailView: View {
     let route: ProviderRoute
     @Environment(BudgetStore.self) private var store
+    /// Optional so previews (store-only) don't trap; the app injects it.
+    @Environment(AppEnvironment.self) private var env: AppEnvironment?
+    @State private var depthStore = ProviderDepthStore()
 
     /// Always resolve from the live store so a pull-to-refresh updates the
     /// numbers in place.
@@ -41,11 +47,21 @@ struct ProviderDetailView: View {
         .navigationTitle(provider?.title ?? "Provider")
         .navigationBarTitleDisplayMode(.inline)
         .task { await store.loadIfNeeded() }
+        .task(id: route.id) { [apiClient = env?.apiClient] in
+            if let apiClient {
+                await depthStore.loadIfNeeded(providerID: route.id, using: apiClient)
+            }
+        }
     }
 
     @ViewBuilder
     private func content(for provider: ProviderBudgetStatus) -> some View {
-        RefreshableScrollView(onRefresh: { await store.refresh() }) {
+        RefreshableScrollView(onRefresh: { [apiClient = env?.apiClient] in
+            await store.refresh()
+            if let apiClient {
+                await depthStore.refresh(providerID: route.id, using: apiClient)
+            }
+        }) {
             header(provider)
             if store.lastError != nil {
                 refreshBanner
@@ -55,12 +71,18 @@ struct ProviderDetailView: View {
             if !provider.spendComponents.isEmpty {
                 compositionCard(provider)
             }
-            paceCard(provider)
+            historySection(provider)
+            if !depthStore.billingRecords.isEmpty {
+                ExternalBillingCard(records: depthStore.billingRecords)
+            }
             if provider.hasRenewalContext {
                 renewalCard(provider)
             }
             dataQualityCard(provider)
             identifierCard(provider)
+            if depthStore.requiresSession {
+                sessionHintCard
+            }
             if !provider.alerts.isEmpty {
                 alertsSection(provider)
             }
@@ -194,8 +216,14 @@ struct ProviderDetailView: View {
         }
     }
 
-    /// Warn when the run-rate projects meaningfully past budget.
+    /// Prefer the server's `projectedStatus` (computed from the same
+    /// `projectedEomUsd`-vs-budget thresholds the web uses) so the two UIs
+    /// cannot disagree; fall back to local projection math for payloads that
+    /// predate the field.
     private func projectionStatus(_ provider: ProviderBudgetStatus) -> Theme.SemanticStatus {
+        if let projected = provider.projectedStatus {
+            return Theme.SemanticStatus(projected)
+        }
         guard let budget = provider.monthlyBudgetUsd, budget > 0 else { return .neutral }
         if provider.projectedEomUsd > budget { return .danger }
         if provider.projectedEomUsd > budget * 0.9 { return .warning }
@@ -213,7 +241,27 @@ struct ProviderDetailView: View {
         .dsCard()
     }
 
-    // MARK: - Pace / projection
+    // MARK: - History / pace
+
+    /// The money-history chart. When recorded snapshot history loads (session
+    /// required), this is the real reported-spend series; otherwise it falls
+    /// back to the synthesized linear pace curve, explicitly labeled as an
+    /// estimate so it can never be mistaken for billed history.
+    @ViewBuilder
+    private func historySection(_ provider: ProviderBudgetStatus) -> some View {
+        if let points = depthStore.spendHistoryPoints,
+           let latest = depthStore.latestRecordedSpend {
+            SparklineCard(
+                title: "Reported spend history",
+                value: CurrencyFormat.usd(latest),
+                caption: "\(depthStore.snapshotPointCount) readings · 30 days",
+                points: points,
+                status: projectionStatus(provider)
+            )
+        } else {
+            paceCard(provider)
+        }
+    }
 
     private func paceCard(_ provider: ProviderBudgetStatus) -> some View {
         let points = pacePoints(spent: provider.spentUsd, projected: provider.projectedEomUsd)
@@ -223,7 +271,7 @@ struct ProviderDetailView: View {
             return "+\(CurrencyFormat.percent(pct)) to EOM"
         }()
         return SparklineCard(
-            title: "Pace to month-end",
+            title: "Pace to month-end — estimated",
             value: CurrencyFormat.usd(provider.projectedEomUsd),
             caption: deltaCaption,
             points: points,
@@ -234,7 +282,8 @@ struct ProviderDetailView: View {
     /// Synthesise a cumulative-spend pace curve for the current month: linear to
     /// today at the observed run-rate, then extrapolated to the projected
     /// end-of-month figure. There is no per-day series in the model, so this is
-    /// an at-pace illustration, not billed history.
+    /// an at-pace illustration, not billed history — only shown as the fallback
+    /// when no recorded history is available, and labeled as an estimate.
     private func pacePoints(spent: Double, projected: Double) -> [Double] {
         let calendar = Calendar.current
         let now = Date()
@@ -305,30 +354,52 @@ struct ProviderDetailView: View {
         .dsCard()
     }
 
-    // MARK: - Identifier (masked key preview)
+    // MARK: - Identifier
 
+    /// The budget-status payload carries no key material, so this card shows
+    /// the provider slug only. It must NEVER mask the provider's database id
+    /// and present it as a credential preview — the real masked key preview
+    /// lives in Settings → Provider inventory (full access), decoded from the
+    /// management DTO's `keyPreview`.
     private func identifierCard(_ provider: ProviderBudgetStatus) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             SectionHeader("Identifier")
             DetailStatRow(label: "Slug", value: provider.name, monospaced: false)
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.md) {
-                Text("Key preview")
-                    .font(Theme.Typography.callout)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                Spacer(minLength: Theme.Spacing.sm)
-                Text(KeyMask.preview(provider.id))
-                    .font(.system(.callout, design: .monospaced))
-                    .foregroundStyle(Theme.Colors.primaryText)
-                    .textSelection(.enabled)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Key preview, \(KeyMask.preview(provider.id))")
-            Text("Masked as first-6…last-4. The full key is never exposed to the app.")
+            Text("The masked credential preview is available in Settings → Provider inventory when full access is enabled.")
                 .font(Theme.Typography.caption)
                 .foregroundStyle(Theme.Colors.tertiaryText)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dsCard()
+    }
+
+    // MARK: - Session hint
+
+    /// Shown when the depth reads were rejected for lack of a dashboard
+    /// session: explains what full access unlocks and offers a jump to
+    /// Settings, so the section is never a dead end.
+    private var sessionHintCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Label("History & provider billing", systemImage: "lock.shield")
+                .font(Theme.Typography.callout.weight(.semibold))
+                .foregroundStyle(Theme.Colors.primaryText)
+            Text("Recorded usage history and provider-reported billing need full access. Sign in with the dashboard password from Settings.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                Haptics.tap()
+                env?.selectTab?(.settings)
+            } label: {
+                Text("Open Settings")
+                    .font(Theme.Typography.captionEmphasis)
+                    .foregroundStyle(Theme.Colors.accent)
+            }
+            .accessibilityHint("Jumps to the Settings tab to sign in for full access")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dsCard()
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: - Alerts
