@@ -9,7 +9,11 @@ services:
     image: usage-monitor:${USAGE_MONITOR_REVISION:?USAGE_MONITOR_REVISION is required}
     pull_policy: never
     env_file:
-      - /etc/usage-monitor/usage-monitor.env
+      # Synced from Infisical into tmpfs by usage-monitor-env-sync; never a
+      # disk-backed .env. docker compose fails if this file is missing, so the
+      # sync unit is Requires/Before usage-monitor.service and the deploy
+      # transaction re-syncs (with a bounded stale fallback) before preflight.
+      - /run/usage-monitor/usage-monitor.env
     environment:
       DATABASE_URL: file:/data/prod.db
       GIT_COMMIT_SHA: ${USAGE_MONITOR_REVISION}
@@ -34,6 +38,9 @@ services:
     image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     pull_policy: never
     environment:
+      # Interpolated from the compose project env (the synced tmpfs env file in
+      # Infisical mode, host.env in legacy mode) so Caddy receives exactly this
+      # one value and never the app's secret env_file.
       USAGE_MONITOR_HOSTNAME: ${USAGE_MONITOR_HOSTNAME:?USAGE_MONITOR_HOSTNAME is required}
     ports:
       - "80:80"

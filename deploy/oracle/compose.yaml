@@ -5,7 +5,9 @@ services:
       dockerfile: Dockerfile
     image: usage-monitor:${USAGE_MONITOR_REVISION:-local}
     env_file:
-      - /etc/usage-monitor/usage-monitor.env
+      # Synced from Infisical into tmpfs by usage-monitor-env-sync (see
+      # deploy/oracle/README.md "Runtime env: Infisical is the source of truth").
+      - /run/usage-monitor/usage-monitor.env
     environment:
       DATABASE_URL: file:/data/prod.db
       GIT_COMMIT_SHA: ${USAGE_MONITOR_REVISION:-unknown}
