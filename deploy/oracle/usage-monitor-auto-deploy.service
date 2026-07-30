@@ -1,7 +1,10 @@
 [Unit]
 Description=Deploy verified Usage Monitor main revisions to Oracle production
-After=docker.service network-online.target usage-monitor.service
-Wants=network-online.target
+# Wants+After (not Requires): the deploy transaction re-runs the Infisical
+# sync itself and may legitimately continue from a <25h stale tmpfs env when
+# Infisical is unreachable, so a failed sync unit must not block deployments.
+After=docker.service network-online.target usage-monitor.service usage-monitor-env-sync.service
+Wants=network-online.target usage-monitor-env-sync.service
 Requires=docker.service
 ConditionPathIsMountPoint=/data
 

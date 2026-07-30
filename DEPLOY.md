@@ -23,10 +23,18 @@ deliberate rollback.
    deploy transaction stops the old writer before accepting the new one.
    Never run a second instance — including a Render resume — against
    production data.
-2. **Secrets live only on the host.** Runtime secrets exist solely in
-   `/etc/usage-monitor/usage-monitor.env` (root-owned, mode 0600). Non-secret
-   host settings live in `/etc/usage-monitor/host.env`. No production SSH key
-   or cloud credential is stored in GitHub; the deploy model is pull-based.
+2. **Infisical is the source of truth for runtime config; secrets materialize
+   only to tmpfs.** All runtime secrets and non-secret runtime config live in
+   the Infisical `usage-monitor` project (env `prod`, path `/`) and are synced
+   to `/run/usage-monitor/usage-monitor.env` (tmpfs, root-only, mode 0600) by
+   `usage-monitor-env-sync`. The only secret kept on disk is the Infisical
+   machine-identity bootstrap at
+   `/etc/usage-monitor/infisical-bootstrap.env` (root-owned, mode 0600). The
+   legacy `/etc/usage-monitor/usage-monitor.env` remains only as the
+   pre-migration fallback/rollback path (see "Runtime env" below).
+   `/etc/usage-monitor/host.env` holds only deploy-written host state
+   (`USAGE_MONITOR_REVISION`). No production SSH key or cloud credential is
+   stored in GitHub; the deploy model is pull-based.
 3. **Backups replicate to the Garage bucket `usage-monitor-prod-v3`.**
    Litestream continuously replicates `/data/prod.db` there; the deploy
    preflight hard-fails if any other bucket is configured. Layered backup
@@ -61,13 +69,68 @@ deliberate rollback.
    `sudo journalctl -u usage-monitor-auto-deploy.service --since today` for
    gate decisions.
 4. Visit https://usage.jays.services and log in at `/login` with
-   `DASHBOARD_PASSWORD` from `/etc/usage-monitor/usage-monitor.env`.
+   `DASHBOARD_PASSWORD` (sourced from the Infisical `usage-monitor` project,
+   synced to `/run/usage-monitor/usage-monitor.env` on the host).
+
+## Runtime env: Infisical is the source of truth
+
+All production runtime config — secrets **and** non-secrets — lives in the
+Infisical `usage-monitor` project, environment `prod`, path `/`. The host
+never edits a runtime `.env` file; it materializes one:
+
+- `/usr/local/sbin/usage-monitor-env-sync` (source:
+  `deploy/oracle/infisical-env-sync.sh`) logs in with the `automation`
+  universal-auth machine identity, exports the project as JSON, validates the
+  required keys, and atomically writes
+  `/run/usage-monitor/usage-monitor.env` (tmpfs, root-owned, mode 0600, raw
+  `KEY=value` lines) plus `/run/usage-monitor/sync-metadata.json` (counts and
+  scope only, never values). `/run` is tmpfs, so no secret ever persists on
+  disk and every boot starts from a fresh sync.
+- **The one on-disk secret** is `/etc/usage-monitor/infisical-bootstrap.env`
+  (root-owned, mode 0600): the machine identity's client ID/secret, the
+  project ID, and optional `INFISICAL_BASE_URL` / `INFISICAL_UM_SECRET_PATH` /
+  `INFISICAL_ENV` overrides. A single shared machine identity is used because
+  of the owner's Infisical machine-identity cap; it is read-only on this one
+  project/path/env.
+- **Boot wiring:** `usage-monitor-env-sync.service` (oneshot) is
+  `Requires`/`Before` `usage-monitor.service`, so Docker Compose never
+  evaluates `env_file` against a missing tmpfs file. A 15-minute
+  `usage-monitor-env-sync.timer` keeps the file fresh between deploys. The
+  auto-deploy service is only `Wants`/`After` the sync unit because the
+  deploy transaction re-runs the sync itself (see fallback below). On hosts
+  without the bootstrap file the sync unit is condition-skipped and the
+  legacy flow is untouched.
+- **Fallback semantics:** if the sync fails during a deploy, the transaction
+  continues only when a previous `/run/usage-monitor/usage-monitor.env` exists
+  and is younger than 25 hours (so container restarts between deploys survive
+  an Infisical outage); otherwise it fails closed before any preflight. A
+  failed boot-time sync stops `usage-monitor.service` rather than starting
+  the app on stale or missing config.
+- **Adding or changing a variable:** edit it in the Infisical project (env
+  `prod`, path `/`), then either run
+  `sudo /usr/local/sbin/usage-monitor-env-sync` or wait for the 15-minute
+  timer. Changed values reach the app only on the next container recreate
+  (next deploy, or `sudo systemctl restart usage-monitor` for an immediate
+  pickup of non-image changes).
+- **`USAGE_MONITOR_REVISION` stays host-side.** It is deploy-written state
+  (the accepted exact-SHA reboot pointer), not configuration, so it is never
+  in Infisical; `host.env` now holds only that key.
+- **Rollback:** point `env_file` back at the legacy disk file and restore the
+  previous systemd units (all in git history), or simply remove
+  `/etc/usage-monitor/infisical-bootstrap.env` — its absence makes the deploy
+  transaction and the sync unit fall back to
+  `/etc/usage-monitor/usage-monitor.env` with no other changes. Keep that
+  legacy file (renamed `usage-monitor.env.legacy`, root-owned mode 0600)
+  until the Infisical path has survived several deploys.
 
 ## Environment variables
 
-All of these are set in `/etc/usage-monitor/usage-monitor.env` (or
-`host.env` for the non-secret hostname/revision). `.env.example` documents
-defaults and valid values.
+All of these are set in the Infisical `usage-monitor` project (env `prod`,
+path `/`) and synced to `/run/usage-monitor/usage-monitor.env`; on
+unmigrated hosts they live in `/etc/usage-monitor/usage-monitor.env`.
+`USAGE_MONITOR_REVISION` is the exception: it stays in `host.env` as
+deploy-written state. `.env.example` documents
+defaults and valid values for local development.
 
 - `DATABASE_URL` — `file:/data/prod.db` on the dedicated block volume (not a
   secret, just a file path)

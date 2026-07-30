@@ -18,7 +18,22 @@ readonly RELEASES_DIR="${STATE_DIR}/releases"
 readonly RECEIPT_FILE="${STATE_DIR}/current.json"
 readonly LOCK_FILE="/run/lock/usage-monitor-deploy.lock"
 readonly HOST_ENV="/etc/usage-monitor/host.env"
-readonly RUNTIME_ENV="/etc/usage-monitor/usage-monitor.env"
+readonly LEGACY_RUNTIME_ENV="/etc/usage-monitor/usage-monitor.env"
+readonly INFISICAL_RUNTIME_ENV="/run/usage-monitor/usage-monitor.env"
+readonly INFISICAL_BOOTSTRAP="/etc/usage-monitor/infisical-bootstrap.env"
+readonly INFISICAL_SYNC_SCRIPT="/usr/local/sbin/usage-monitor-env-sync"
+# Upper bound on accepting a previously synced tmpfs env when a fresh Infisical
+# sync fails (25 hours), so container restarts between deploys keep working
+# through an Infisical outage without ever trusting an arbitrarily stale file.
+readonly INFISICAL_STALE_FALLBACK_SECONDS=90000
+# RUNTIME_ENV points at the legacy disk file unless the Infisical bootstrap is
+# present; the sync block immediately after locking below flips it to the
+# freshly synced tmpfs file. COMPOSE_INTERPOLATION_ENV follows the same mode:
+# Caddy's USAGE_MONITOR_HOSTNAME compose interpolation must resolve from
+# wherever the runtime env actually lives.
+RUNTIME_ENV="${LEGACY_RUNTIME_ENV}"
+RUNTIME_ENV_SOURCE="legacy"
+COMPOSE_INTERPOLATION_ENV="${HOST_ENV}"
 readonly COMPOSE_FILE="/etc/usage-monitor/compose.yaml"
 readonly RENDER_RETIREMENT_PROOF="/etc/usage-monitor/render-retired.json"
 readonly RENDER_CURL_CONFIG="/etc/usage-monitor/render-api.curl.conf"
@@ -178,7 +193,7 @@ compose_for_revision() {
     env USAGE_MONITOR_REVISION="${revision}" \
       docker compose \
       --project-name oracle \
-      --env-file "${HOST_ENV}" \
+      --env-file "${COMPOSE_INTERPOLATION_ENV}" \
       --file "${COMPOSE_FILE}" \
       "$@"
 }
@@ -795,16 +810,17 @@ write_host_revision() {
   fi
 }
 
-# Production Caddy receives USAGE_MONITOR_HOSTNAME from host.env. Old bootstrap
-# copies still encode the deleted sslip.io IP hostname; refuse/migrate those
-# before cutover so ACME cannot renew the wrong certificate. When the value
-# changes, recreate the running Caddy container so it picks up the new env.
+# Production Caddy receives USAGE_MONITOR_HOSTNAME through compose variable
+# interpolation from COMPOSE_INTERPOLATION_ENV (the synced tmpfs env in
+# Infisical mode, host.env in legacy mode). Old bootstrap copies still encode
+# the deleted sslip.io IP hostname; refuse/migrate those before cutover so
+# ACME cannot renew the wrong certificate.
 reload_caddy_proxy() {
   log "recreating Caddy so it loads the migrated USAGE_MONITOR_HOSTNAME."
   # Use PREVIOUS_SHA image/env path — Caddy does not depend on the app image.
   if ! timeout "${COMPOSE_TIMEOUT_SECONDS}" docker compose \
     --project-name oracle \
-    --env-file "${HOST_ENV}" \
+    --env-file "${COMPOSE_INTERPOLATION_ENV}" \
     --file "${COMPOSE_FILE}" \
     up --detach --no-deps --no-build --force-recreate caddy >/dev/null; then
     return 1
@@ -813,6 +829,20 @@ reload_caddy_proxy() {
 
 ensure_public_caddy_hostname() {
   local configured rewritten temporary migrated=false
+  if [[ "${RUNTIME_ENV_SOURCE}" == "infisical" ]]; then
+    # Infisical owns USAGE_MONITOR_HOSTNAME now; the deploy transaction only
+    # validates it and never mutates host.env or the synced tmpfs file. A bad
+    # value is fixed in the Infisical project, then re-synced.
+    configured="$(read_env_value "${RUNTIME_ENV}" USAGE_MONITOR_HOSTNAME)"
+    [[ -n "${configured}" ]] || \
+      die "USAGE_MONITOR_HOSTNAME is missing from the Infisical-synced runtime env; set it in the Infisical usage-monitor project (env prod) and re-sync"
+    if [[ "${configured}" == *sslip.io* || "${configured}" == *132.226.90.164* ]]; then
+      die "USAGE_MONITOR_HOSTNAME in Infisical still contains a deleted sslip/IP label; update the Infisical secret and re-sync"
+    fi
+    [[ "${configured}" == *"${PUBLIC_HOST}"* ]] || \
+      die "USAGE_MONITOR_HOSTNAME must include ${PUBLIC_HOST} (Infisical value does not)"
+    return 0
+  fi
   configured="$(read_env_value "${HOST_ENV}" USAGE_MONITOR_HOSTNAME)"
   if [[ -z "${configured}" ]]; then
     log "USAGE_MONITOR_HOSTNAME unset; writing ${PUBLIC_HOST}."
@@ -1014,6 +1044,38 @@ exec 9>"${LOCK_FILE}"
 if ! flock -w 10 9; then
   log "deployment lock is already held."
   exit 75
+fi
+
+# Runtime-env mode selection. When the Infisical bootstrap exists, Infisical
+# is the sole source of truth and the runtime env is a fresh tmpfs sync; when
+# it is absent, the legacy root-owned disk file is used unchanged.
+if [[ -f "${INFISICAL_BOOTSTRAP}" && ! -L "${INFISICAL_BOOTSTRAP}" ]]; then
+  RUNTIME_ENV_SOURCE="infisical"
+  RUNTIME_ENV="${INFISICAL_RUNTIME_ENV}"
+  COMPOSE_INTERPOLATION_ENV="${RUNTIME_ENV}"
+  log "Infisical bootstrap present; syncing the runtime env from Infisical."
+  sync_ok=false
+  if [[ ! -x "${INFISICAL_SYNC_SCRIPT}" ]]; then
+    log "ERROR: ${INFISICAL_SYNC_SCRIPT} is not installed; see deploy/oracle/README.md install steps."
+  elif "${INFISICAL_SYNC_SCRIPT}"; then
+    sync_ok=true
+  fi
+  if [[ "${sync_ok}" != "true" && -f "${RUNTIME_ENV}" && ! -L "${RUNTIME_ENV}" ]]; then
+    # Container restarts between deploys must keep working during an Infisical
+    # outage: continue only from a previous tmpfs sync younger than 25 hours,
+    # never silently from a stale or unverified file.
+    env_mtime="$(stat -c '%Y' "${RUNTIME_ENV}")"
+    env_age=$(( $(date -u +%s) - env_mtime ))
+    if (( env_age >= 0 && env_age < INFISICAL_STALE_FALLBACK_SECONDS )); then
+      log "WARNING: Infisical sync failed; continuing with the previous tmpfs env (${env_age}s old, limit ${INFISICAL_STALE_FALLBACK_SECONDS}s)."
+      sync_ok=true
+    fi
+  fi
+  if [[ "${sync_ok}" != "true" ]]; then
+    die "Infisical runtime-env sync failed and no fresh (<25h) tmpfs env exists"
+  fi
+else
+  printf '[usage-monitor-deploy] %s\n' "Infisical bootstrap absent; using legacy ${RUNTIME_ENV}." >&2
 fi
 
 for command in awk curl cut date docker find findmnt flock git grep install ionice jq mountpoint nice sqlite3 stat sync timeout; do
