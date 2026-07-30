@@ -5,6 +5,7 @@ import { ChevronRight } from "lucide-react";
 import PaidServicesPanel from "@/components/PaidServicesPanel";
 import ExternalTelemetryPanel, { type ExternalUsageSummary } from "@/components/ExternalTelemetryPanel";
 import ClaudeCostCheckCard from "@/components/ClaudeCostCheckCard";
+import LlmBurnCard from "@/components/LlmBurnCard";
 import ProjectsPanel, { type ProjectBudgetStatus } from "@/components/ProjectsPanel";
 import SentryHealthCard from "@/components/SentryHealthCard";
 import type { SubscriptionRow } from "@/components/SubscriptionsPanel";
@@ -87,6 +88,8 @@ export default function DashboardPortfolioSection({
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-8">
               {usageSummary && <ExternalTelemetryPanel usageSummary={usageSummary} />}
+
+              <LlmBurnCard />
 
               <ClaudeCostCheckCard />
 

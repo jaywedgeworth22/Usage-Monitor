@@ -115,6 +115,18 @@ SQLite datasource — match provider names case-insensitively in JS (`.toLowerCa
   surfaces separately as `derivedCostEstimateUsd` in `GET /api/usage-events`
   and the dashboard telemetry panel. The four `_derivedCost*` metadata keys
   are reserved in `usage-telemetry.ts` (producer spoof-proof).
+- `GET /api/llm-burn?hours=5` (dashboard-session gated) is the ccusage
+  5-hour-block lesson generalized to **every** LLM platform in
+  `ExternalUsageEvent`, not just Claude (`src/lib/llm-burn.ts`, card
+  `src/components/LlmBurnCard.tsx`). Per provider: trailing-window token/cost
+  burn, elapsed-activity burn rate (clamped ≥ 15 min), and month-to-date
+  budget pace vs `ProviderPlan.monthlyBudgetUsd` (UTC month fractions, JS
+  case-insensitive name match) with a linear month-end projection that is
+  withheld in the first ~2% of a month. Cost basis is recorded-wins
+  `max(reported, derived-from-LiteLLM-tokens)`; both sides are
+  analytics-only estimates and never feed budget/cash math. Unknown token
+  types price at the input-rate floor (same contract as
+  `derive-ingest-cost.ts`). See `docs/rollouts/2026-07-30-llm-burn-windows.md`.
 - `OTLP_METRICS_INGEST_ENABLED` is a default-on emergency switch for the
   database-writing metrics route only. Explicit `false` returns authenticated
   requests admitted by the IP limiter `503` plus `Retry-After: 300` before body
