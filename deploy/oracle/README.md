@@ -7,24 +7,95 @@ unit also sets the mount root to UID/GID `1000:1000`, matching the unprivileged
 `node` user in the official Node image; Oracle's Ubuntu login user is normally
 UID 1001 and must not own the container's SQLite directory.
 
-Application secrets live in Infisical (`usage-monitor` / `prod` / `/`).
-The host keeps only Infisical bootstrap credentials in
-`/etc/usage-monitor/infisical-bootstrap.env` (mode 0600). Before each start,
-`/usr/local/sbin/usage-monitor-sync-env` materializes
-`/etc/usage-monitor/usage-monitor.env` from Infisical (generated file — do not
-edit by hand). Non-secret host settings live in `/etc/usage-monitor/host.env`:
+Runtime config — secrets **and** non-secrets — lives in the Infisical
+`usage-monitor` project (env `prod`, path `/`) as the sole source of truth and
+is materialized to tmpfs at `/run/usage-monitor/usage-monitor.env` (mode 0600)
+by `usage-monitor-env-sync`; see "Runtime env: Infisical is the source of
+truth" below. The legacy disk file `/etc/usage-monitor/usage-monitor.env`
+(mode 0600) is kept only as the pre-migration fallback and rollback path.
+`/etc/usage-monitor/host.env` now holds exactly one deploy-written state key:
 
 ```dotenv
-USAGE_MONITOR_HOSTNAME=usage.jays.services
 USAGE_MONITOR_REVISION=<exact-main-sha>
 ```
 
-`usage.jays.services` is the public Cloudflare-proxied hostname. Caddy keeps
-ports 80 and 443 reachable for its public ACME certificate and disables the
-TLS-ALPN challenge because Cloudflare terminates public TLS; renewal therefore
-uses HTTP-01. Do not restore the deleted IP-derived fallback. If a direct-origin
-alias is also configured, separate the Caddy site addresses with spaces, not
-commas: `USAGE_MONITOR_HOSTNAME="usage-oracle-origin.jays.services usage.jays.services"`.
+`USAGE_MONITOR_HOSTNAME` moved into Infisical (set there as
+`USAGE_MONITOR_HOSTNAME=usage.jays.services`) and reaches Caddy from the
+synced tmpfs env via compose interpolation; `host.env` must never carry it
+again. `usage.jays.services` is the public Cloudflare-proxied hostname. Caddy
+keeps ports 80 and 443 reachable for its public ACME certificate and disables
+the TLS-ALPN challenge because Cloudflare terminates public TLS; renewal
+therefore uses HTTP-01. Do not restore the deleted IP-derived fallback. If a
+direct-origin alias is also configured, separate the Caddy site addresses
+with spaces, not commas, in the Infisical value:
+`usage-oracle-origin.jays.services usage.jays.services`.
+
+## Runtime env: Infisical is the source of truth
+
+The host materializes its runtime env from Infisical; it never edits a runtime
+`.env` file:
+
+1. **Bootstrap (the one on-disk secret).** Create
+   `/etc/usage-monitor/infisical-bootstrap.env`, root-owned mode 0600:
+
+   ```dotenv
+   INFISICAL_AUTOMATION_CLIENT_ID=<automation machine identity client id>
+   INFISICAL_AUTOMATION_CLIENT_SECRET=<automation machine identity client secret>
+   INFISICAL_UM_PROJECT_ID=<usage-monitor project id>
+   # Optional overrides (defaults shown):
+   # INFISICAL_BASE_URL=https://app.infisical.com
+   # INFISICAL_UM_SECRET_PATH=/
+   # INFISICAL_ENV=prod
+   ```
+
+   The shared `automation` universal-auth machine identity is used because of
+   the owner's Infisical machine-identity cap; scope it read-only to this
+   project, env `prod`, path `/`.
+
+2. **Sync.** `usage-monitor-env-sync` (installed from
+   `deploy/oracle/infisical-env-sync.sh`) performs universal-auth login
+   (credentials passed via environment, never argv), exports the project as
+   JSON with the JWT passed explicitly via `--token` (the CLI's in-export
+   auto-login fails with "Unable to parse domain url"), validates the required
+   keys — reporting only missing key NAMES on failure — and atomically writes
+   raw `KEY=value` lines to `/run/usage-monitor/usage-monitor.env` plus a
+   value-free `/run/usage-monitor/sync-metadata.json`. Raw unquoted lines are
+   deliberate: `docker run --env-file` treats quotes literally, and compose
+   `env_file` never executes shell, so spaces, `$`, quotes, and backslashes
+   survive verbatim; multi-line values are rejected. `/run` is tmpfs: nothing
+   secret touches disk, and every boot starts from a fresh sync.
+
+3. **Boot wiring.** `usage-monitor-env-sync.service` is `Requires`/`Before`
+   `usage-monitor.service` (compose `env_file` fails against a missing file,
+   so the app must never start before a sync succeeds) and
+   `Wants`/`After` for `usage-monitor-auto-deploy.service` (the deploy
+   transaction re-syncs itself with a bounded fallback, so a failed sync unit
+   must not block deployments). `usage-monitor-env-sync.timer` re-syncs every
+   15 minutes so a container restart between deploys sees recent config. On
+   hosts without the bootstrap file the sync unit is condition-skipped and
+   every unit behaves exactly as before.
+
+4. **Fallback.** During a deploy, a failed sync falls back to the previous
+   tmpfs file only when it is younger than 25 hours — container restarts
+   between deploys survive an Infisical outage, but an arbitrarily stale file
+   is never trusted; otherwise the transaction fails closed before preflight.
+   A failed boot-time sync stops `usage-monitor.service` instead of booting
+   the app on stale/missing config.
+
+5. **Changing config.** Edit the value in Infisical, then run
+   `sudo /usr/local/sbin/usage-monitor-env-sync` (or wait for the timer), then
+   recreate the container (`sudo systemctl restart usage-monitor`) or let the
+   next deploy pick it up. `USAGE_MONITOR_REVISION` is deploy-written host
+   state and stays in `host.env`, never in Infisical.
+
+6. **Rollback.** Remove `/etc/usage-monitor/infisical-bootstrap.env`: the
+   deploy transaction and the sync unit immediately fall back to the legacy
+   `/etc/usage-monitor/usage-monitor.env` with no other change. Keep that
+   legacy file (renamed `usage-monitor.env.legacy`, root-owned mode 0600)
+   until the Infisical path has survived several deploys, and keep the
+   previous release's systemd units and compose file in git history for a
+   full revert.
+
 
 ## Automatic production deployment
 
@@ -66,13 +137,31 @@ sudo install -o root -g root -m 0644 deploy/oracle/compose.production.yaml /etc/
 sudo install -o root -g root -m 0644 deploy/oracle/Caddyfile /etc/usage-monitor/Caddyfile
 sudo install -o root -g root -m 0600 deploy/oracle/render-retired.production.json /etc/usage-monitor/render-retired.json
 sudo install -o root -g root -m 0755 deploy/oracle/deploy-production.sh /usr/local/sbin/usage-monitor-deploy
+sudo install -o root -g root -m 0755 deploy/oracle/infisical-env-sync.sh /usr/local/sbin/usage-monitor-env-sync
 sudo install -o root -g root -m 0755 deploy/oracle/auto-deploy.sh /usr/local/sbin/usage-monitor-auto-deploy
 sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor.service /etc/systemd/system/usage-monitor.service
+sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-env-sync.service /etc/systemd/system/usage-monitor-env-sync.service
+sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-env-sync.timer /etc/systemd/system/usage-monitor-env-sync.timer
 sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-auto-deploy.service /etc/systemd/system/usage-monitor-auto-deploy.service
 sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-auto-deploy.timer /etc/systemd/system/usage-monitor-auto-deploy.timer
 sudo systemctl daemon-reload
+sudo systemctl enable --now usage-monitor-env-sync.timer
 sudo systemctl enable --now usage-monitor-auto-deploy.timer
 ```
+
+**Infisical cutover sequencing:** the installed root-owned copies are
+authoritative, never the fetched revision. To migrate an existing host,
+preserve the legacy file first
+(`sudo cp -a /etc/usage-monitor/usage-monitor.env /etc/usage-monitor/usage-monitor.env.legacy`),
+create `/etc/usage-monitor/infisical-bootstrap.env`, run
+`sudo /usr/local/sbin/usage-monitor-env-sync` once by hand to populate the
+tmpfs env, and only then install the updated compose file and systemd units
+above and `systemctl daemon-reload` before restarting
+`usage-monitor.service`. Ordering matters: the updated compose file and
+`usage-monitor.service` reference the tmpfs env file, which exists only after
+a successful sync. The deploy transaction and the sync unit themselves are
+safe to install at any time — without the bootstrap file they follow the
+legacy disk-env path exactly.
 
 `/etc/usage-monitor/render-api.curl.conf` is a root-owned mode-0600 curl config
 containing the Render authorization header. Provision it through the protected
