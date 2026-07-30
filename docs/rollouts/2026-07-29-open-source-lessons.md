@@ -146,9 +146,10 @@ The one deferred Langfuse pattern, implemented behind **default-off**
    `model-pricing.ts`).
 2. **Per-event ingest error detail** in the v2 ACK — belongs in
    `congress-trading-shared`, not here.
-3. **5-hour billing-block windows** (ccusage's headline feature for Max-plan
-   users) — useful projection UX, but orthogonal to cost attribution;
-   candidate for a follow-up.
+3. ~~**5-hour billing-block windows**~~ — **SHIPPED 2026-07-30**, generalized
+   to every LLM platform per owner directive: `GET /api/llm-burn` +
+   `LlmBurnCard` (trailing-window burn, live burn rate, MTD budget pace +
+   linear projection). See `docs/rollouts/2026-07-30-llm-burn-windows.md`.
 
 ## Ops
 
