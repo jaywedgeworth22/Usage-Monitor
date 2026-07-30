@@ -29,7 +29,7 @@ import {
   splitProviderConfig,
 } from "@/lib/provider-secret-config";
 
-export type InfisicalCredentialScope = "st" | "ct" | "shared" | "st-primary";
+export type InfisicalCredentialScope = "st" | "ct" | "shared" | "st-primary" | "um";
 
 export interface InfisicalCredentialSyncSourceResult {
   source: InfisicalCredentialScope;
@@ -261,10 +261,18 @@ const SOURCE_DEFINITIONS: readonly SourceDefinition[] = [
     pathEnv: "INFISICAL_SHARED_SECRET_PATH",
     defaultProjectId: "18f563a3-9c88-454c-96eb-28fc9678f3ba",
   },
+  {
+    source: "um",
+    clientIdEnv: "INFISICAL_UM_CLIENT_ID",
+    clientSecretEnv: "INFISICAL_UM_CLIENT_SECRET",
+    projectIdEnv: "INFISICAL_UM_PROJECT_ID",
+    pathEnv: "INFISICAL_UM_SECRET_PATH",
+    defaultProjectId: "86e35e51-91bc-4dfd-a045-4484726b9c40",
+  },
 ] as const;
 
 function appAttempts(
-  source: "st" | "ct",
+  source: "st" | "ct" | "um",
   required: readonly string[],
   sharedFallback = false,
   optional?: readonly string[]
@@ -643,10 +651,12 @@ function cleanEnv(name: string): string | undefined {
 
 function configuredSources(): SourceConfig[] {
   const environment = cleanEnv("INFISICAL_ENV") ?? DEFAULT_ENVIRONMENT;
+  const automationClientId = cleanEnv("INFISICAL_AUTOMATION_CLIENT_ID");
+  const automationClientSecret = cleanEnv("INFISICAL_AUTOMATION_CLIENT_SECRET");
   return SOURCE_DEFINITIONS.map((definition) => ({
     ...definition,
-    clientId: cleanEnv(definition.clientIdEnv),
-    clientSecret: cleanEnv(definition.clientSecretEnv),
+    clientId: cleanEnv(definition.clientIdEnv) ?? automationClientId,
+    clientSecret: cleanEnv(definition.clientSecretEnv) ?? automationClientSecret,
     projectId: cleanEnv(definition.projectIdEnv) ?? definition.defaultProjectId,
     environment,
     secretPath: cleanEnv(definition.pathEnv) ?? DEFAULT_SECRET_PATH,
@@ -1274,8 +1284,8 @@ function readStoredBinding(provider: ProviderRecord): StoredBindingRead {
       if (!primary.readable || !primary.binding) return { readable: false };
       return { readable: true, binding: primary.binding };
     } else if (
-      (value.scope !== "st" && value.scope !== "ct" && value.scope !== "shared") ||
-      (value.source !== "st" && value.source !== "ct" && value.source !== "shared")
+      (value.scope !== "st" && value.scope !== "ct" && value.scope !== "shared" && value.scope !== "um") ||
+      (value.source !== "st" && value.source !== "ct" && value.source !== "shared" && value.source !== "um")
     ) {
       return { readable: false };
     }
