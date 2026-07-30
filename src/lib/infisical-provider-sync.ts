@@ -640,6 +640,7 @@ const SCOPE_LABELS: Readonly<Record<InfisicalCredentialScope, string>> = {
   ct: "Congress.Trade",
   shared: "Shared",
   "st-primary": ST_PRIMARY_MANAGED_LABEL,
+  um: "Usage-Monitor",
 };
 
 let syncInFlight: Promise<InfisicalCredentialSyncResult> | null = null;
