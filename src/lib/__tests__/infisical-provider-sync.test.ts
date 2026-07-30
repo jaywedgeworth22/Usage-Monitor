@@ -16,7 +16,7 @@ import {
 import { geminiApiKeyFingerprint } from "../gemini-key-status";
 import { setupPrismaSqliteTestDb } from "./setup-test-db";
 
-type Scope = "st" | "ct" | "shared" | "st-primary";
+type Scope = "st" | "ct" | "shared" | "st-primary" | "um";
 
 const ENCRYPTION_KEY = "57".repeat(32);
 const ST_GEMINI_PROVIDER_ID = "4a888d41-3988-4774-86d8-67d7aa14d7e2";
@@ -73,6 +73,16 @@ const SOURCE_ENV: Record<
     pathEnv: "INFISICAL_ST_PRIMARY_UNUSED_PATH",
     projectId: ST_INFISICAL_PROJECT_ID,
     secretPath: "/usage-monitor/st-primary/v1",
+  },
+  um: {
+    clientId: "test-client-um",
+    clientSecret: "test-bootstrap-um",
+    clientIdEnv: "INFISICAL_UM_CLIENT_ID",
+    clientSecretEnv: "INFISICAL_UM_CLIENT_SECRET",
+    projectIdEnv: "INFISICAL_UM_PROJECT_ID",
+    pathEnv: "INFISICAL_UM_SECRET_PATH",
+    projectId: "86e35e51-91bc-4dfd-a045-4484726b9c40",
+    secretPath: "/um-scope",
   },
 };
 
@@ -139,6 +149,7 @@ const ALLOWLIST: Record<Scope, readonly string[]> = {
     "XAI_TEAM_ID",
   ],
   "st-primary": ["BRIDGE_MANIFEST_V1", "GEMINI_API_KEY", "DEEPSEEK_API_KEY"],
+  um: [],
 };
 
 interface SecretRead {
@@ -2139,5 +2150,22 @@ describe("one-time ST Gemini Infisical bootstrap", () => {
     expect(capture.oversizedCreateBodyCanceled).toBe(true);
     expectRedacted(result, [key!, SOURCE_ENV.st.clientSecret]);
     expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toContain(key);
+  });
+
+  it("supports the um scope and falls back to INFISICAL_AUTOMATION_CLIENT_ID credentials", async () => {
+    vi.stubEnv("INFISICAL_PROVIDER_SYNC_ENABLED", "true");
+    vi.stubEnv("INFISICAL_AUTOMATION_CLIENT_ID", SOURCE_ENV.um.clientId);
+    vi.stubEnv("INFISICAL_AUTOMATION_CLIENT_SECRET", SOURCE_ENV.um.clientSecret);
+    vi.stubEnv("INFISICAL_UM_PROJECT_ID", SOURCE_ENV.um.projectId);
+
+    const capture = installInfisicalMock({ um: {} });
+
+    const result = await syncProviderCredentialsFromInfisical();
+
+    expect(result.enabled).toBe(true);
+    const umSource = result.sources.find((s) => s.source === "um");
+    expect(umSource).toBeDefined();
+    expect(umSource?.configured).toBe(true);
+    expect(capture.loginSources).toContain("um");
   });
 });

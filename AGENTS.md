@@ -295,6 +295,13 @@ production** (the deploy preflight hard-fails without it): the
 secret-free `checks.usageReadToken` observability block (never part of `ok`).
 Optional `SENTRY_READ_TOKEN`/`SENTRY_ORG` configure the Sentry Health card above.
 
+### Infisical project and secret runner
+
+The Infisical project `usage-monitor` (ID: `86e35e51-91bc-4dfd-a045-4484726b9c40`) is configured for project-specific secrets/variables under the shared automation machine identity (`INFISICAL_AUTOMATION_CLIENT_ID` / `INFISICAL_AUTOMATION_CLIENT_SECRET`). `scripts/infisical-run.mjs` executes arbitrary commands with Infisical secrets injected into `process.env`:
+- `node scripts/infisical-run.mjs --check` verifies project secret access.
+- `node scripts/infisical-run.mjs -- npm run start` runs the application with Infisical secrets.
+- `src/lib/infisical-provider-sync.ts` supports the `"um"` scope (`86e35e51-91bc-4dfd-a045-4484726b9c40`) and falls back to `INFISICAL_AUTOMATION_CLIENT_ID` / `INFISICAL_AUTOMATION_CLIENT_SECRET` when scope-specific client credentials are omitted.
+
 `SQLITE_PRE_MIGRATION_BACKUP_RETENTION` controls how many verified local SQLite
 Online Backup API snapshots are retained beside the production DB (default `3`,
 valid `1`-`10`). `start-with-litestream.sh` creates and integrity-checks one
