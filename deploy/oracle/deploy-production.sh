@@ -18,7 +18,10 @@ readonly RELEASES_DIR="${STATE_DIR}/releases"
 readonly RECEIPT_FILE="${STATE_DIR}/current.json"
 readonly LOCK_FILE="/run/lock/usage-monitor-deploy.lock"
 readonly HOST_ENV="/etc/usage-monitor/host.env"
+# Materialized from Infisical by usage-monitor-sync-env (do not hand-edit).
 readonly RUNTIME_ENV="/etc/usage-monitor/usage-monitor.env"
+readonly INFISICAL_BOOTSTRAP_ENV="/etc/usage-monitor/infisical-bootstrap.env"
+readonly SYNC_ENV_BIN="/usr/local/sbin/usage-monitor-sync-env"
 readonly COMPOSE_FILE="/etc/usage-monitor/compose.yaml"
 readonly RENDER_RETIREMENT_PROOF="/etc/usage-monitor/render-retired.json"
 readonly RENDER_CURL_CONFIG="/etc/usage-monitor/render-api.curl.conf"
@@ -1021,6 +1024,10 @@ for command in awk curl cut date docker find findmnt flock git grep install ioni
 done
 install -d -o root -g root -m 0750 "${STATE_DIR}"
 require_secure_root_file "${HOST_ENV}" 600
+require_secure_root_file "${INFISICAL_BOOTSTRAP_ENV}" 600
+require_secure_root_file "${SYNC_ENV_BIN}" 755
+# Refresh runtime env from Infisical before any secret-dependent preflight.
+"${SYNC_ENV_BIN}"
 require_secure_root_file "${RUNTIME_ENV}" 600
 require_secure_root_file "${COMPOSE_FILE}" 644
 require_secure_root_file "${RENDER_RETIREMENT_PROOF}" 600

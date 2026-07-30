@@ -23,10 +23,15 @@ deliberate rollback.
    deploy transaction stops the old writer before accepting the new one.
    Never run a second instance — including a Render resume — against
    production data.
-2. **Secrets live only on the host.** Runtime secrets exist solely in
-   `/etc/usage-monitor/usage-monitor.env` (root-owned, mode 0600). Non-secret
-   host settings live in `/etc/usage-monitor/host.env`. No production SSH key
-   or cloud credential is stored in GitHub; the deploy model is pull-based.
+2. **Secrets live in Infisical (sole source of truth).** Project
+   `usage-monitor` / env `prod` / path `/` holds application secrets. The host
+   keeps only Infisical bootstrap credentials in
+   `/etc/usage-monitor/infisical-bootstrap.env` (root-owned, mode 0600).
+   `usage-monitor-sync-env` materializes `/etc/usage-monitor/usage-monitor.env`
+   from Infisical before each compose start (do not edit that file by hand).
+   Non-secret host settings live in `/etc/usage-monitor/host.env`. No production
+   SSH key or cloud credential is stored in GitHub; the deploy model is
+   pull-based.
 3. **Backups replicate to the Garage bucket `usage-monitor-prod-v3`.**
    Litestream continuously replicates `/data/prod.db` there; the deploy
    preflight hard-fails if any other bucket is configured. Layered backup
@@ -61,12 +66,18 @@ deliberate rollback.
    `sudo journalctl -u usage-monitor-auto-deploy.service --since today` for
    gate decisions.
 4. Visit https://usage.jays.services and log in at `/login` with
-   `DASHBOARD_PASSWORD` from `/etc/usage-monitor/usage-monitor.env`.
+   `DASHBOARD_PASSWORD` (from Infisical prod, or the materialized host env).
 
 ## Environment variables
 
-All of these are set in `/etc/usage-monitor/usage-monitor.env` (or
-`host.env` for the non-secret hostname/revision). `.env.example` documents
+**Source of truth:** Infisical project `usage-monitor` (`86e35e51-91bc-4dfd-a045-4484726b9c40`),
+environment `prod`, path `/`. Host bootstrap template:
+`deploy/oracle/infisical-bootstrap.env.example`. Sync script:
+`deploy/oracle/usage-monitor-sync-env.sh` (install as
+`/usr/local/sbin/usage-monitor-sync-env`).
+
+Materialized runtime values land in `/etc/usage-monitor/usage-monitor.env`
+(or `host.env` for the non-secret hostname/revision). `.env.example` documents
 defaults and valid values.
 
 - `DATABASE_URL` — `file:/data/prod.db` on the dedicated block volume (not a

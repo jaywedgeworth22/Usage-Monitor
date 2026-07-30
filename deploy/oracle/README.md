@@ -7,8 +7,12 @@ unit also sets the mount root to UID/GID `1000:1000`, matching the unprivileged
 `node` user in the official Node image; Oracle's Ubuntu login user is normally
 UID 1001 and must not own the container's SQLite directory.
 
-Runtime secrets live only in `/etc/usage-monitor/usage-monitor.env` (mode 0600).
-Non-secret host settings live in `/etc/usage-monitor/host.env`:
+Application secrets live in Infisical (`usage-monitor` / `prod` / `/`).
+The host keeps only Infisical bootstrap credentials in
+`/etc/usage-monitor/infisical-bootstrap.env` (mode 0600). Before each start,
+`/usr/local/sbin/usage-monitor-sync-env` materializes
+`/etc/usage-monitor/usage-monitor.env` from Infisical (generated file — do not
+edit by hand). Non-secret host settings live in `/etc/usage-monitor/host.env`:
 
 ```dotenv
 USAGE_MONITOR_HOSTNAME=usage.jays.services
