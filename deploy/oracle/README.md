@@ -19,7 +19,8 @@ truth" below. The legacy disk file `/etc/usage-monitor/usage-monitor.env`
 USAGE_MONITOR_REVISION=<exact-main-sha>
 ```
 
-`USAGE_MONITOR_HOSTNAME` moved into Infisical and reaches Caddy from the
+`USAGE_MONITOR_HOSTNAME` moved into Infisical (set there as
+`USAGE_MONITOR_HOSTNAME=usage.jays.services`) and reaches Caddy from the
 synced tmpfs env via compose interpolation; `host.env` must never carry it
 again. `usage.jays.services` is the public Cloudflare-proxied hostname. Caddy
 keeps ports 80 and 443 reachable for its public ACME certificate and disables
