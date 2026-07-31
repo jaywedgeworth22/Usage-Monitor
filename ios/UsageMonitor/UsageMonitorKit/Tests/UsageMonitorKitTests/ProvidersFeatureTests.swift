@@ -81,6 +81,17 @@ final class ProvidersQueryTests: XCTestCase {
     }
 }
 
+final class SnapshotHistoryRangeTests: XCTestCase {
+    func testWebParityDayWindows() {
+        XCTAssertEqual(SnapshotHistoryRange.allCases.map(\.days), [7, 30, 90, 365])
+        XCTAssertEqual(SnapshotHistoryRange.default, .thirtyDays)
+        XCTAssertEqual(SnapshotHistoryRange.sevenDays.shortLabel, "7d")
+        XCTAssertEqual(SnapshotHistoryRange.thirtyDays.displayLabel, "30 days")
+        XCTAssertEqual(SnapshotHistoryRange.oneYear.shortLabel, "1y")
+        XCTAssertEqual(SnapshotHistoryRange.oneYear.displayLabel, "1 year")
+    }
+}
+
 final class ProviderPresentationTests: XCTestCase {
 
     func testRowValueCaption() {

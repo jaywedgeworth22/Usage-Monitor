@@ -1,5 +1,41 @@
 import Foundation
 
+/// Snapshot history window options for `GET /api/snapshots?days=`, matching
+/// the website provider-detail range control (7 / 30 / 90 / 365 days).
+public enum SnapshotHistoryRange: Int, CaseIterable, Identifiable, Sendable, Hashable {
+    case sevenDays = 7
+    case thirtyDays = 30
+    case ninetyDays = 90
+    case oneYear = 365
+
+    public var id: Int { rawValue }
+
+    /// Query parameter value for `/api/snapshots?days=`.
+    public var days: Int { rawValue }
+
+    /// Compact segmented-control label (e.g. "7d", "1y").
+    public var shortLabel: String {
+        switch self {
+        case .sevenDays: return "7d"
+        case .thirtyDays: return "30d"
+        case .ninetyDays: return "90d"
+        case .oneYear: return "1y"
+        }
+    }
+
+    /// Full label for captions and accessibility (e.g. "7 days", "1 year").
+    public var displayLabel: String {
+        switch self {
+        case .sevenDays: return "7 days"
+        case .thirtyDays: return "30 days"
+        case .ninetyDays: return "90 days"
+        case .oneYear: return "1 year"
+        }
+    }
+
+    public static let `default`: SnapshotHistoryRange = .thirtyDays
+}
+
 /// One point from `GET /api/snapshots` — either a raw `UsageSnapshot` row or a
 /// daily rollup synthesized server-side (older history past the raw-retention
 /// cutoff arrives as `rollup: true` rows carrying the day's latest values).

@@ -24,6 +24,11 @@ public final class ProviderDepthStore {
     public private(set) var historyState: LoadState<[UsageSnapshotPoint]> = .idle
     /// Provider-reported external billing records.
     public private(set) var billingState: LoadState<[ExternalBillingRecord]> = .idle
+    /// Active snapshot history window (web parity: 7 / 30 / 90 / 365 days).
+    public private(set) var historyRange: SnapshotHistoryRange = .default
+    /// True while a range change is reloading history over still-visible
+    /// points so the chart can show a non-blocking refresh indicator.
+    public private(set) var isReloadingHistory = false
     /// Set when the server rejected a depth read for lack of a session — the
     /// view surfaces a sign-in hint instead of an error.
     public private(set) var requiresSession = false
@@ -40,6 +45,21 @@ public final class ProviderDepthStore {
 
     public func refresh(providerID: String, using client: APIClient) async {
         await load(providerID: providerID, using: client)
+    }
+
+    /// Updates the history window and reloads snapshot points only (billing is
+    /// independent of the range). No-ops when the range is already selected.
+    /// When `client` is nil (previews without a live environment), only the
+    /// selection updates — no network call.
+    public func selectHistoryRange(
+        _ range: SnapshotHistoryRange,
+        providerID: String,
+        using client: APIClient?
+    ) async {
+        guard historyRange != range else { return }
+        historyRange = range
+        guard let client else { return }
+        await loadHistory(providerID: providerID, using: client, isRangeChange: true)
     }
 
     /// Chronological reported-spend series for the history chart, or `nil`
@@ -59,6 +79,11 @@ public final class ProviderDepthStore {
         historyState.value?.count ?? 0
     }
 
+    /// Caption for the history card: `"12 readings · 30 days"`.
+    public var historyCaption: String {
+        "\(snapshotPointCount) readings · \(historyRange.displayLabel)"
+    }
+
     public var billingRecords: [ExternalBillingRecord] {
         billingState.value ?? []
     }
@@ -67,21 +92,7 @@ public final class ProviderDepthStore {
         if historyState.value == nil { historyState = .loading }
         if billingState.value == nil { billingState = .loading }
 
-        do {
-            let snapshots = try await client.usageSnapshots(providerID: providerID)
-            historyState = .loaded(snapshots)
-        } catch is CancellationError {
-            return
-        } catch let error as APIError {
-            if error == .unauthorized { requiresSession = true }
-            // Keep stale points on a refresh failure; fail the state only when
-            // there is nothing to show.
-            if historyState.value == nil { historyState = .failed(error) }
-        } catch {
-            if historyState.value == nil {
-                historyState = .failed(.transport(error.localizedDescription))
-            }
-        }
+        await loadHistory(providerID: providerID, using: client, isRangeChange: false)
 
         do {
             let detail = try await client.providerDetail(id: providerID)
@@ -94,6 +105,40 @@ public final class ProviderDepthStore {
         } catch {
             if billingState.value == nil {
                 billingState = .failed(.transport(error.localizedDescription))
+            }
+        }
+    }
+
+    private func loadHistory(
+        providerID: String,
+        using client: APIClient,
+        isRangeChange: Bool
+    ) async {
+        let hadPoints = historyState.value != nil
+        if hadPoints && isRangeChange {
+            isReloadingHistory = true
+        } else if historyState.value == nil {
+            historyState = .loading
+        }
+
+        defer { isReloadingHistory = false }
+
+        do {
+            let snapshots = try await client.usageSnapshots(
+                providerID: providerID,
+                days: historyRange.days
+            )
+            historyState = .loaded(snapshots)
+        } catch is CancellationError {
+            return
+        } catch let error as APIError {
+            if error == .unauthorized { requiresSession = true }
+            // Keep stale points on a refresh / range-change failure; fail the
+            // state only when there is nothing to show.
+            if historyState.value == nil { historyState = .failed(error) }
+        } catch {
+            if historyState.value == nil {
+                historyState = .failed(.transport(error.localizedDescription))
             }
         }
     }

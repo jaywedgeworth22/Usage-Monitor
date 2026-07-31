@@ -89,7 +89,7 @@ session or the expected `USAGE_READ_TOKEN` (falling back to
 | `POST /api/projects` | **Session only** | Create project; 400/409 on duplicate/case-equivalent name. |
 | `PUT /api/projects/{id}` | **Session only** | Blank `description` clears; `monthlyBudgetUsd: null` clears the budget. |
 | `DELETE /api/projects/{id}` | **Session only** | Usage history survives (`projectId` set-null server-side). |
-| `GET /api/snapshots?providerId=&days=` | **Session only** | Recorded history: raw points + server daily rollups, chronological. |
+| `GET /api/snapshots?providerId=&days=` | **Session only** | Recorded history: raw points + server daily rollups, chronological. Native provider detail exposes a 7/30/90/365-day range picker (web parity); default 30. |
 | `GET /api/providers/{id}` | **Session only** | Bounded detail read; native consumes only `externalBilling` records. |
 
 **Consequence for lanes:** `budgetStatus()` remains the sole daily-driver money

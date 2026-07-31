@@ -403,16 +403,19 @@ public actor APIClient {
     /// (raw points plus server-synthesized daily rollups past the raw
     /// retention cutoff), chronological. Session-gated by the middleware
     /// allow-list, so this throws `APIError.unauthorized` (401) when no
-    /// dashboard session is active.
+    /// dashboard session is active. `days` defaults to the web-parity
+    /// 30-day window; callers pass `SnapshotHistoryRange.days` for the
+    /// 7 / 30 / 90 / 365 control.
     public func usageSnapshots(
         providerID: String,
-        days: Int = 30
+        days: Int = SnapshotHistoryRange.default.days
     ) async throws -> [UsageSnapshotPoint] {
-        try await get(
+        let clampedDays = min(max(days, 1), 3_650)
+        return try await get(
             "/api/snapshots",
             queryItems: [
                 URLQueryItem(name: "providerId", value: providerID),
-                URLQueryItem(name: "days", value: String(days)),
+                URLQueryItem(name: "days", value: String(clampedDays)),
             ],
             authorization: .session
         )

@@ -463,6 +463,21 @@ final class ManagementAPIClientTests: XCTestCase {
         XCTAssertNotNil(snapshots[0].fetchedDate)
     }
 
+    func testUsageSnapshotsHonorsExplicitDayWindow() async throws {
+        let harness = makeHarness()
+        installSessionCookie(in: harness)
+        ManagementURLProtocol.handler = { request in
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.query
+            XCTAssertEqual(query, "providerId=provider-1&days=365")
+            return .json(Self.snapshotsJSON)
+        }
+
+        _ = try await harness.client.usageSnapshots(
+            providerID: "provider-1",
+            days: SnapshotHistoryRange.oneYear.days
+        )
+    }
+
     func testProviderDetailDecodesExternalBilling() async throws {
         let harness = makeHarness()
         installSessionCookie(in: harness)
