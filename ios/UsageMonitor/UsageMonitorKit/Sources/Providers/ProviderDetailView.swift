@@ -246,21 +246,98 @@ struct ProviderDetailView: View {
     /// The money-history chart. When recorded snapshot history loads (session
     /// required), this is the real reported-spend series; otherwise it falls
     /// back to the synthesized linear pace curve, explicitly labeled as an
-    /// estimate so it can never be mistaken for billed history.
+    /// estimate so it can never be mistaken for billed history. Range options
+    /// match the website provider-detail control (7 / 30 / 90 / 365 days).
     @ViewBuilder
     private func historySection(_ provider: ProviderBudgetStatus) -> some View {
-        if let points = depthStore.spendHistoryPoints,
-           let latest = depthStore.latestRecordedSpend {
-            SparklineCard(
-                title: "Reported spend history",
-                value: CurrencyFormat.usd(latest),
-                caption: "\(depthStore.snapshotPointCount) readings · 30 days",
-                points: points,
-                status: projectionStatus(provider)
-            )
-        } else {
-            paceCard(provider)
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            // Range control only when full-access history is available or
+            // loading — without a session the pace estimate is not windowed.
+            if showsHistoryRangeControl {
+                historyRangePicker
+            }
+
+            if let points = depthStore.spendHistoryPoints,
+               let latest = depthStore.latestRecordedSpend {
+                SparklineCard(
+                    title: "Reported spend history",
+                    value: CurrencyFormat.usd(latest),
+                    caption: depthStore.historyCaption,
+                    points: points,
+                    status: projectionStatus(provider)
+                )
+                .opacity(depthStore.isReloadingHistory ? 0.55 : 1)
+                .overlay(alignment: .topTrailing) {
+                    if depthStore.isReloadingHistory {
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(Theme.Spacing.sm)
+                    }
+                }
+                .accessibilityHint(
+                    depthStore.isReloadingHistory
+                        ? "Reloading history for \(depthStore.historyRange.displayLabel)"
+                        : "History window \(depthStore.historyRange.displayLabel)"
+                )
+            } else if depthStore.historyState.isLoading {
+                SkeletonBlock(height: 120, radius: Theme.Radius.lg)
+                    .accessibilityLabel("Loading reported spend history")
+            } else {
+                // Estimated pace when history is unavailable (no session, empty
+                // window, or load failure). Session sign-in hint is separate.
+                paceCard(provider)
+            }
         }
+    }
+
+    /// True once a session-gated history read is in flight or has settled, so
+    /// the range control is not shown above the no-session pace fallback alone.
+    private var showsHistoryRangeControl: Bool {
+        if depthStore.isReloadingHistory { return true }
+        switch depthStore.historyState {
+        case .loading, .loaded:
+            return true
+        case .idle, .failed:
+            return false
+        }
+    }
+
+    /// Segmented control for the snapshot history window — same four options
+    /// as the website's Range select (7 days / 30 days / 90 days / 1 year).
+    private var historyRangePicker: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            Text("History range")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
+            Picker("History range", selection: historyRangeBinding) {
+                ForEach(SnapshotHistoryRange.allCases) { range in
+                    Text(range.shortLabel).tag(range)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(depthStore.isReloadingHistory)
+            .accessibilityLabel("Snapshot history range")
+            .accessibilityValue(depthStore.historyRange.displayLabel)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dsCard()
+    }
+
+    private var historyRangeBinding: Binding<SnapshotHistoryRange> {
+        Binding(
+            get: { depthStore.historyRange },
+            set: { newRange in
+                guard newRange != depthStore.historyRange else { return }
+                Haptics.tap()
+                Task {
+                    await depthStore.selectHistoryRange(
+                        newRange,
+                        providerID: route.id,
+                        using: env?.apiClient
+                    )
+                }
+            }
+        )
     }
 
     private func paceCard(_ provider: ProviderBudgetStatus) -> some View {

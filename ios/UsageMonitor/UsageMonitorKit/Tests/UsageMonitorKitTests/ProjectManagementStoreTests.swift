@@ -341,6 +341,48 @@ final class ProviderDepthStoreTests: XCTestCase {
         XCTAssertTrue(store.billingRecords.isEmpty)
     }
 
+    func testSelectHistoryRangeReloadsSnapshotsWithSelectedDays() async throws {
+        let harness = makeHarness()
+        harness.installSessionCookie()
+        var requestedDays: [String] = []
+        ManagementStoreURLProtocol.handler = { request in
+            switch request.url?.path {
+            case "/api/snapshots":
+                let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+                let days = query?.first(where: { $0.name == "days" })?.value ?? ""
+                requestedDays.append(days)
+                return .json(Self.snapshotsJSON)
+            case "/api/providers/provider-1":
+                return .json(Self.providerDetailJSON)
+            default:
+                return .json(["error": "unexpected"], status: 404)
+            }
+        }
+
+        let store = ProviderDepthStore()
+        await store.loadIfNeeded(providerID: "provider-1", using: harness.client)
+        XCTAssertEqual(store.historyRange, .thirtyDays)
+        XCTAssertEqual(requestedDays, ["30"])
+        XCTAssertEqual(store.historyCaption, "2 readings · 30 days")
+
+        await store.selectHistoryRange(.ninetyDays, providerID: "provider-1", using: harness.client)
+        XCTAssertEqual(store.historyRange, .ninetyDays)
+        XCTAssertEqual(requestedDays, ["30", "90"])
+        XCTAssertEqual(store.historyCaption, "2 readings · 90 days")
+        XCTAssertFalse(store.isReloadingHistory)
+
+        // Same range is a no-op (no extra network call).
+        await store.selectHistoryRange(.ninetyDays, providerID: "provider-1", using: harness.client)
+        XCTAssertEqual(requestedDays, ["30", "90"])
+    }
+
+    func testSelectHistoryRangeWithoutClientUpdatesSelectionOnly() async {
+        let store = ProviderDepthStore()
+        await store.selectHistoryRange(.oneYear, providerID: "provider-1", using: nil)
+        XCTAssertEqual(store.historyRange, .oneYear)
+        XCTAssertNil(store.historyState.value)
+    }
+
     // MARK: - Harness
 
     private struct Harness {
