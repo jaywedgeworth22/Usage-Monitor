@@ -5,10 +5,7 @@ import {
   type UsageResult,
 } from "./helpers";
 
-export async function fetchUsage(
-  apiKey: string,
-  now = new Date()
-): Promise<UsageResult> {
+export async function fetchUsage(apiKey: string): Promise<UsageResult> {
   const headers = { Authorization: `Bearer ${apiKey}` };
   const [limitsResponse, userResponse] = await Promise.all([
     fetchJson("https://api.apify.com/v2/users/me/limits", { headers }),

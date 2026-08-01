@@ -721,11 +721,11 @@ describe("provider key attribution API", () => {
     const now = new Date();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const isEarlyInMonth = (now.getTime() - monthStart.getTime()) < 3 * 86_400_000;
-    const reassignmentAt = isEarlyInMonth
-      ? new Date(now.getTime() - 60_000)
-      : new Date(now.getTime() - 2 * 86_400_000);
+    const reassignmentAt = new Date(
+      Math.max(monthStart.getTime() + 120_000, now.getTime() - (isEarlyInMonth ? 60_000 : 2 * 86_400_000))
+    );
     const before = new Date(reassignmentAt.getTime() - 10_000);
-    const after = new Date(now.getTime() - 5_000);
+    const after = new Date(reassignmentAt.getTime() + 10_000);
     const provider = await prisma.provider.create({
       data: { name: "openai", displayName: "OpenAI", type: "builtin" },
     });
