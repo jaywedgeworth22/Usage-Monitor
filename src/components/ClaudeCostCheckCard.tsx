@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import CardUnavailableNotice from "@/components/CardUnavailableNotice";
 import { formatCompactNumber, formatCurrency } from "@/lib/format";
 
 interface ModelCostCheck {
@@ -81,25 +82,46 @@ function driftTone(model: ModelCostCheck): {
  * independent token x LiteLLM-catalog derivation (the ccusage lesson: never
  * trust one cost signal). Both figures are analytics-only API-equivalent
  * estimates — the card exists to surface DRIFT between them, not to state
- * cash spend. Renders nothing when no Claude Code OTLP data exists.
+ * cash spend. Renders nothing when no Claude Code OTLP data exists — but a
+ * failed request renders an explicit unavailable notice instead, so an outage
+ * never masquerades as "no drift to report".
  */
 export default function ClaudeCostCheckCard() {
   const [data, setData] = useState<ClaudeCostCheckResponse | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [reloadCount, setReloadCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/claude-cost-check?days=30")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((json) => {
-        if (!cancelled) setData(json);
+      .then((res) => {
+        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        return res.json();
+      })
+      .then((json: ClaudeCostCheckResponse) => {
+        if (cancelled) return;
+        setData(json);
+        setFailed(false);
       })
       .catch(() => {
-        if (!cancelled) setData(null);
+        if (cancelled) return;
+        setData(null);
+        setFailed(true);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadCount]);
+
+  if (failed) {
+    return (
+      <CardUnavailableNotice
+        title="Claude cost cross-check unavailable."
+        detail="Drift between the derived and Claude-reported estimates could not be checked."
+        onRetry={() => setReloadCount((count) => count + 1)}
+      />
+    );
+  }
 
   if (!data || !data.ok || data.models.length === 0) return null;
 

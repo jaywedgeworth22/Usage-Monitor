@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import ListLoadErrorPanel from "@/components/ListLoadErrorPanel";
 import { formatCurrency } from "@/lib/format";
 import { STATUS_SORT_ORDER, statusBadgeStyle } from "@/lib/status-vocab";
 
@@ -42,6 +43,9 @@ interface SubscriptionsPanelProps {
   deleteConfirm: string | null;
   setDeleteConfirm: (id: string | null) => void;
   actionLoading: string | null;
+  /** Message from a failed subscription load; suppresses the empty-state CTA. */
+  loadError?: string | null;
+  onRetryLoad?: () => void;
 }
 
 function displayStatus(subscription: SubscriptionRow): string {
@@ -64,10 +68,21 @@ export default function SubscriptionsPanel({
   deleteConfirm,
   setDeleteConfirm,
   actionLoading,
+  loadError,
+  onRetryLoad,
 }: SubscriptionsPanelProps) {
   const [searchQuery, setSearchQuery] = useState("");
 
   if (subscriptions.length === 0) {
+    if (loadError) {
+      return (
+        <ListLoadErrorPanel
+          message="Subscriptions couldn't be loaded."
+          detail={loadError}
+          onRetry={onRetryLoad}
+        />
+      );
+    }
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-gray-200 bg-white py-16 text-center dark:border-gray-700 dark:bg-gray-800">
         <p className="text-gray-500 dark:text-gray-400">No subscriptions tracked yet.</p>

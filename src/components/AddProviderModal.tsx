@@ -180,7 +180,11 @@ export default function AddProviderModal({
     editProvider?.allocations || []
   );
 
+  // Gated on `open` (same convention as the effect below) — this modal is
+  // always mounted by the settings page, so an ungated fetch duplicated the
+  // page's own /api/projects request on every visit.
   useEffect(() => {
+    if (!open) return;
     fetch("/api/projects")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch projects");
@@ -188,7 +192,7 @@ export default function AddProviderModal({
       })
       .then((data) => setProjects(data))
       .catch((err) => console.error("Error fetching projects:", err));
-  }, []);
+  }, [open]);
 
   const [selectedBuiltin, setSelectedBuiltin] = useState(editProvider?.name || "");
   const [builtinDisplayName, setBuiltinDisplayName] = useState(editProvider?.displayName || "");

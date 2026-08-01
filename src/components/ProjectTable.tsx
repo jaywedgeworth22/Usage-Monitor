@@ -1,4 +1,5 @@
 import { type Project } from "@/components/AddProjectModal";
+import ListLoadErrorPanel from "@/components/ListLoadErrorPanel";
 import { formatCurrency } from "@/lib/format";
 
 interface ProjectTableProps {
@@ -10,6 +11,9 @@ interface ProjectTableProps {
   onDeleteConfirmCancel: () => void;
   onDelete: (id: string) => void;
   onAddProject: () => void;
+  /** Message from a failed project load; suppresses the empty-state CTA. */
+  loadError?: string | null;
+  onRetryLoad?: () => void;
 }
 
 export default function ProjectTable({
@@ -21,10 +25,21 @@ export default function ProjectTable({
   onDeleteConfirmCancel,
   onDelete,
   onAddProject,
+  loadError,
+  onRetryLoad,
 }: ProjectTableProps) {
   const formatUsd = (amount: number | null | undefined) => formatCurrency(amount);
 
   if (projects.length === 0) {
+    if (loadError) {
+      return (
+        <ListLoadErrorPanel
+          message="Projects couldn't be loaded."
+          detail={loadError}
+          onRetry={onRetryLoad}
+        />
+      );
+    }
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4 text-center bg-white rounded-xl border border-gray-200 dark:border-gray-700 dark:bg-gray-800">
         <p className="text-gray-500 dark:text-gray-400">No projects configured yet.</p>

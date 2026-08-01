@@ -144,6 +144,9 @@ function SettingsPageContent() {
       const res = await fetch("/api/providers");
       if (!res.ok) throw new Error("Failed to fetch providers");
       const data = await res.json();
+      // A 200 carrying a non-array body (auth/proxy interstitial) must land in
+      // the error path, not be stored as if it were the provider list.
+      if (!Array.isArray(data)) throw new Error("Unexpected providers response");
       setProviders(data);
       providersLoaded.current = true;
     } catch (err) {
@@ -163,6 +166,7 @@ function SettingsPageContent() {
       const res = await fetch("/api/projects");
       if (!res.ok) throw new Error("Failed to fetch projects");
       const data = await res.json();
+      if (!Array.isArray(data)) throw new Error("Unexpected projects response");
       setProjects(data);
       projectsLoaded.current = true;
     } catch (err) {
@@ -182,6 +186,7 @@ function SettingsPageContent() {
       const res = await fetch("/api/subscriptions");
       if (!res.ok) throw new Error("Failed to fetch subscriptions");
       const data = await res.json();
+      if (!Array.isArray(data)) throw new Error("Unexpected subscriptions response");
       setSubscriptions(data);
       subscriptionsLoaded.current = true;
     } catch (err) {
@@ -194,12 +199,21 @@ function SettingsPageContent() {
     }
   }, []);
 
+  // Fetch only what the visible tab renders. Tab links are same-route <Link>s,
+  // so activeTab changes without unmounting and the *Loaded refs keep tab
+  // ping-pong from refetching. A failed load leaves its ref false, so
+  // revisiting the tab retries on its own.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- data fetching on mount
-    fetchProviders();
-    fetchProjects();
-    fetchSubscriptions();
-  }, [fetchProviders, fetchProjects, fetchSubscriptions]);
+    // Connections and services both render provider rows.
+    if (activeTab !== "projects" && !providersLoaded.current) void fetchProviders();
+    if (activeTab === "services" && !subscriptionsLoaded.current) void fetchSubscriptions();
+    if (activeTab === "projects" && !projectsLoaded.current) void fetchProjects();
+  }, [activeTab, fetchProviders, fetchProjects, fetchSubscriptions]);
+
+  // AddSubscriptionModal needs the project list for its allocation dropdown.
+  useEffect(() => {
+    if (subscriptionModalOpen && !projectsLoaded.current) void fetchProjects();
+  }, [subscriptionModalOpen, fetchProjects]);
 
   const handleSave = async (provider: {
     id?: string;
@@ -573,6 +587,8 @@ function SettingsPageContent() {
               }}
               onToggleActive={handleToggleActive}
               onFetchNow={handleFetchNow}
+              loadError={loadErrors.connections ?? null}
+              onRetryLoad={() => void fetchProviders()}
             />
           </div>
         ) : activeTab === "services" ? (
@@ -616,15 +632,38 @@ function SettingsPageContent() {
                 deleteConfirm={deleteSubscriptionConfirm}
                 setDeleteConfirm={setDeleteSubscriptionConfirm}
                 actionLoading={actionLoading}
+                loadError={loadErrors.services ?? null}
+                onRetryLoad={() => void fetchSubscriptions()}
               />
             </div>
 
-            <PaidServicesPanel
-              providers={providers}
-              subscriptions={subscriptions}
-              variant="settings"
-              showCoverage
-            />
+            {/* Never print a recurring-cost total derived from a provider list
+                that failed to load — the figure would silently understate. */}
+            {loadErrors.connections && providers.length === 0 ? (
+              <div
+                role="alert"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-6 py-5 text-sm text-red-600 dark:border-gray-700 dark:bg-gray-800 dark:text-red-300"
+              >
+                <span>
+                  Provider billing rows couldn&apos;t be loaded, so service totals are
+                  unavailable.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void fetchProviders()}
+                  className="font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : (
+              <PaidServicesPanel
+                providers={providers}
+                subscriptions={subscriptions}
+                variant="settings"
+                showCoverage
+              />
+            )}
           </div>
         ) : (
           <ProjectTable
@@ -642,6 +681,8 @@ function SettingsPageContent() {
               setEditProject(null);
               setProjectModalOpen(true);
             }}
+            loadError={loadErrors.projects ?? null}
+            onRetryLoad={() => void fetchProjects()}
           />
         )}
       </section>
