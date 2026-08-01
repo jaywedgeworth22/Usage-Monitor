@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchUsage } from "../apify";
 
 function json(body: unknown): Response {
@@ -22,7 +22,15 @@ function utcMonthCycle(monthOffset = 0): { startAt: string; endAt: string } {
 }
 
 describe("apify adapter", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T12:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
 
   it("combines usage cycle with plan price without retaining proxy credentials", async () => {
     vi.stubGlobal(
