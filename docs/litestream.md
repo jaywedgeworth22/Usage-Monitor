@@ -92,12 +92,11 @@ expands config env vars with Go's `os.Getenv` (not a shell, so `${VAR:-default}`
 supported), and with an S3 endpoint set an empty region falls back to `us-east-1`, which
 R2 accepts for SigV4. Set it to `auto` only if you prefer to be explicit.
 
-For Oracle, put the same variable names in the protected
-`/etc/usage-monitor/usage-monitor.env`, but use the Coolify Garage endpoint,
-`usage-monitor` bucket, and its dedicated key. Use region `garage`. Do not copy
-Render's R2 credentials or replica endpoint onto Oracle: Litestream 0.5 permits
-one replica per database, and a future rollback must not leave two hosts
-publishing divergent SQLite histories to one object prefix.
+For Oracle, Infisical sets both `LITESTREAM_S3_*` and the unified `AWS_*` secret names
+(AWS_S3_ENDPOINT, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET_NAME, AWS_REGION).
+The startup wrapper normalizes `AWS_*` into `LITESTREAM_S3_*` for `litestream.yml` expansion.
+Point `LITESTREAM_S3_ENDPOINT` / `AWS_S3_ENDPOINT` to Cloudflare R2 (`https://<account-id>.r2.cloudflarestorage.com`),
+bucket `usage-monitor-prod-v3`, with region `auto`. Do not use retired Hetzner Garage endpoints.
 
 The S3 uploader is intentionally limited to one multipart part at a time in
 `litestream.yml`. This keeps each minimum-size S3 part within the reverse
