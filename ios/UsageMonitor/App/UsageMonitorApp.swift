@@ -67,13 +67,6 @@ struct UsageMonitorApp: App {
                 await AlertNotifier.activateAccountScope(
                     AlertNotifier.currentAccountScopeID(hostOverride: environment.settings.baseHost)
                 )
-                // Permission is requested only from the contextual Settings
-                // control. On later launches, silently restore APNs registration
-                // only when the user opted in and authorization already exists.
-                guard environment.hasToken, AlertNotifier.isEnabled else { return }
-                let status = await PushScaffold.authorizationStatus()
-                guard status == .authorized || status == .provisional else { return }
-                PushScaffold.registerForRemoteNotifications()
             }
             .task {
                 for await _ in NotificationCenter.default.notifications(
@@ -125,9 +118,10 @@ private extension AppFeatures {
 }
 
 #if canImport(UIKit)
-/// UIKit application delegate — the home for APNs registration callbacks and
-/// the once-per-launch setup that must run before the app finishes launching
-/// (`BGTaskScheduler` registration and the notification-center delegate).
+/// UIKit application delegate — the home for the once-per-launch setup that
+/// must run before the app finishes launching (`BGTaskScheduler` registration
+/// and the notification-center delegate). The app has no remote-push path, so
+/// there are deliberately no APNs registration callbacks here.
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
@@ -159,30 +153,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         PushRouter.shared.attachAsNotificationDelegate()
         PushScaffold.configureNotificationCategories()
         return true
-    }
-
-    func application(
-        _ application: UIApplication,
-        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
-    ) {
-        PushScaffold.setAPNsDeviceToken(deviceToken)
-        // Enroll the token with the backend (gracefully handles 404 until the
-        // endpoint ships).
-        let host = UserDefaults.standard.string(forKey: "settings.baseHost") ?? ""
-        let configuration = APIConfiguration.fromUserInput(host) ?? .production
-        let client = APIClient(configuration: configuration, tokenStore: KeychainTokenStore())
-        Task { await PushScaffold.enrollDeviceToken(client: client) }
-    }
-
-    func application(
-        _ application: UIApplication,
-        didFailToRegisterForRemoteNotificationsWithError error: Error
-    ) {
-        // Registration can legitimately fail (no network, no APNs entitlement in
-        // a dev build). Non-fatal — the app works without remote push.
-        #if DEBUG
-        print("[Push] Remote notification registration failed: \(error.localizedDescription)")
-        #endif
     }
 }
 #endif

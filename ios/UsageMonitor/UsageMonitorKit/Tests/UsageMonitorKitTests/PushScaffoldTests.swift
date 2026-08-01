@@ -3,22 +3,14 @@ import XCTest
 @testable import AppCore
 @testable import PushScaffold
 
-/// PushScaffold-lane tests: the two pieces of pure, testable logic in the lane
-/// — APNs token hex encoding and notification `userInfo` ⇄ `PushDeepLink`
-/// routing — plus the router's pending-link lifecycle. No UI, no network,
-/// no live notification center.
+/// PushScaffold-lane tests: the pure, testable logic in the lane — local
+/// notification identity and notification `userInfo` ⇄ `PushDeepLink` routing —
+/// plus the router's pending-link lifecycle, plus a guard that the app does not
+/// claim remote-push capability it cannot use. No UI, no network, no live
+/// notification center.
 final class PushScaffoldTests: XCTestCase {
 
-    // MARK: - Device token encoding
-
-    func testDeviceTokenHexEncoding() {
-        let token = Data([0x00, 0x0f, 0xa1, 0xff])
-        XCTAssertEqual(PushScaffold.deviceTokenHexString(from: token), "000fa1ff")
-    }
-
-    func testEmptyDeviceTokenEncodesEmpty() {
-        XCTAssertEqual(PushScaffold.deviceTokenHexString(from: Data()), "")
-    }
+    // MARK: - Local notification identity
 
     func testNotificationIdentityIsAccountScoped() {
         let first = PushScaffold.notificationIdentifier(
@@ -111,5 +103,49 @@ final class PushScaffoldTests: XCTestCase {
         router.consume()
         XCTAssertNil(router.pendingLink)
         XCTAssertEqual(router.launchTab, .dashboard)
+    }
+
+    // MARK: - No unbacked remote-push capability
+
+    /// The app target directory, resolved from this file's own location so the
+    /// check does not depend on a bundle, a simulator, or the wall clock.
+    /// `Tests/UsageMonitorKitTests/<file>` → up 4 → `ios/UsageMonitor`.
+    private static var appTargetDirectory: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // UsageMonitorKitTests
+            .deletingLastPathComponent()  // Tests
+            .deletingLastPathComponent()  // UsageMonitorKit
+            .deletingLastPathComponent()  // UsageMonitor
+            .appendingPathComponent("App/Resources")
+    }
+
+    private func plist(named name: String) throws -> [String: Any] {
+        let url = Self.appTargetDirectory.appendingPathComponent(name)
+        let data = try Data(contentsOf: url)
+        let parsed = try PropertyListSerialization.propertyList(from: data, format: nil)
+        return try XCTUnwrap(parsed as? [String: Any], "\(name) is not a plist dictionary")
+    }
+
+    /// There is no server device-enrollment endpoint and no APNs sender, so the
+    /// app must not request the APNs entitlement. Claiming `aps-environment`
+    /// without a sender is App Store review friction and reads as "push works".
+    func testAppDoesNotClaimAPNsEntitlement() throws {
+        let entitlements = try plist(named: "UsageMonitor.entitlements")
+        XCTAssertNil(
+            entitlements["aps-environment"],
+            "aps-environment must stay absent until a server APNs sender exists"
+        )
+        // The app-group entitlement the widget shares must survive.
+        let groups = entitlements["com.apple.security.application-groups"] as? [String]
+        XCTAssertEqual(groups, ["group.services.jays.usage.monitor"])
+    }
+
+    /// `remote-notification` background mode is only legitimate with a server
+    /// pushing silent notifications. `fetch` must remain — BGTaskScheduler
+    /// drives the local alert delivery that actually ships.
+    func testBackgroundModesDeclareFetchOnly() throws {
+        let info = try plist(named: "Info.plist")
+        let modes = try XCTUnwrap(info["UIBackgroundModes"] as? [String])
+        XCTAssertEqual(modes, ["fetch"])
     }
 }

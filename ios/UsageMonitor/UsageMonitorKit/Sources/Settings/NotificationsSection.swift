@@ -112,11 +112,11 @@ final class NotificationsSettingsModel {
     }
 
     /// Request permission the first time the user opts in (the contextual
-    /// prompt). Registers for remote delivery when granted.
+    /// prompt). Alerts are delivered as local notifications from the background
+    /// refresh, so nothing else needs to happen once permission is granted.
     func enableAndRequestIfNeeded() async {
         if authorizationStatus == .notDetermined {
-            let granted = await PushScaffold.requestAuthorization()
-            if granted { PushScaffold.registerForRemoteNotifications() }
+            _ = await PushScaffold.requestAuthorization()
         }
         await refreshStatus()
     }
