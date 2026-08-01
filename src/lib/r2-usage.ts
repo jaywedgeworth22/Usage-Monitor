@@ -226,6 +226,27 @@ export function formatDailyPushoverMessage(
   return { title, body };
 }
 
+let inMemoryEmergencyAlertSent = false;
+
+export function isR2EmergencyAlertSent(): boolean {
+  if (inMemoryEmergencyAlertSent) return true;
+  try {
+    return fs.existsSync(getFlagFilePath("r2-emergency-alert-sent.flag"));
+  } catch {
+    return false;
+  }
+}
+
+export function recordR2EmergencyAlertSent(): void {
+  inMemoryEmergencyAlertSent = true;
+  try {
+    const filePath = getFlagFilePath("r2-emergency-alert-sent.flag");
+    fs.writeFileSync(filePath, `Sent at ${new Date().toISOString()}\n`, "utf8");
+  } catch (err) {
+    console.error("[r2-usage] Failed saving emergency alert sent flag:", err);
+  }
+}
+
 export async function runR2UsageCheck(
   fetchImpl: typeof fetch = fetch,
   now: Date = new Date()
@@ -256,10 +277,14 @@ export async function runR2UsageCheck(
     now
   );
 
+  // Auto-disable R2 replication if projected pace reaches/exceeds 70%
   if (assessment.overallOnTrackToExceed70Pct && !isR2AutoDisabled()) {
     const reason = `Projected pace reached 70% threshold on ${assessment.exceededMetric} metric (${assessment[assessment.exceededMetric || "storage"].projectedPct}% projected)`;
     enforceR2AutoDisable(reason);
+  }
 
+  // Retry priority-1 emergency notification until successfully delivered to Pushover
+  if (isR2AutoDisabled() && !isR2EmergencyAlertSent()) {
     const alertTitle = "🚨 ALERT: Cloudflare R2 Replication Turned OFF";
     const alertBody = [
       `R2 Free Tier usage pace reached 70% threshold!`,
@@ -268,7 +293,10 @@ export async function runR2UsageCheck(
       `Litestream R2 replication has been automatically turned OFF to prevent exceeding free tier.`,
     ].join("\n");
 
-    await sendPushoverNotification(alertTitle, alertBody, 1, fetchImpl);
+    const res = await sendPushoverNotification(alertTitle, alertBody, 1, fetchImpl);
+    if (res.ok) {
+      recordR2EmergencyAlertSent();
+    }
   }
 
   const todayStr = now.toISOString().slice(0, 10);

@@ -26,6 +26,9 @@ describe("R2 usage monitoring & auto-disable", () => {
       if (fs.existsSync("/tmp/r2-last-daily-pushover.json")) {
         fs.unlinkSync("/tmp/r2-last-daily-pushover.json");
       }
+      if (fs.existsSync("/tmp/r2-emergency-alert-sent.flag")) {
+        fs.unlinkSync("/tmp/r2-emergency-alert-sent.flag");
+      }
     } catch {}
   });
 

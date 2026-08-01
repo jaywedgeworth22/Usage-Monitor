@@ -44,6 +44,8 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-15T12:00:00Z"));
   process.env.ATTRIBUTION_IDENTITY_HMAC_KEY = "test-attribution-key-material-longer-than-32-characters";
   delete process.env.ATTRIBUTION_IDENTITY_HMAC_PREVIOUS_KEYS;
   await prisma.providerKeyBinding.deleteMany();
@@ -51,6 +53,10 @@ beforeEach(async () => {
   await prisma.externalUsageEvent.deleteMany();
   await prisma.project.deleteMany();
   await prisma.provider.deleteMany();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("provider key attribution API", () => {
