@@ -26,6 +26,15 @@ export async function register() {
   const { applySqliteNativeMemoryPragmas } = await import("@/lib/prisma");
   await applySqliteNativeMemoryPragmas();
 
+  // Record which device/inode DATABASE_URL resolved to now that Prisma has
+  // opened it (the pragmas above run a query on the single pooled connection),
+  // so /api/ready can later notice the pathname being deleted or swapped out
+  // from under the live writer. `SELECT 1` cannot: an open descriptor on an
+  // unlinked inode answers it. Never throws; the first readiness probe
+  // re-attempts capture if this one could not.
+  const { captureDatabaseFileBaseline } = await import("@/lib/runtime-health");
+  captureDatabaseFileBaseline();
+
   // Keep legacy provider evidence, but prevent the retired/dormant built-ins
   // from making another external request. This is a small idempotent update
   // and intentionally runs even when the scheduler is emergency-disabled.

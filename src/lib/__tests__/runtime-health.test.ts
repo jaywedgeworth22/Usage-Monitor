@@ -1,6 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  captureDatabaseFileBaseline,
   getBackupRuntimeStatus,
+  getDatabaseFileStatus,
   getDiskRuntimeStatus,
   getRuntimeIdentity,
   getSchedulerReadiness,
@@ -98,6 +103,9 @@ describe("runtime health state", () => {
       envOnly: true,
       replicaOk: null,
       replicaAgeSeconds: null,
+      // An env-only claim is never proof the replica is advancing, so the
+      // side-channel is mandatory unless explicitly opted out.
+      verificationRequired: true,
       reason: "env_active_unverified",
     });
     // LITESTREAM_REQUIRED=true also makes the verified startup wrapper
@@ -186,7 +194,21 @@ describe("runtime health state", () => {
       active: true,
       envOnly: false,
       replicaOk: false,
+      verificationRequired: true,
       reason: "replica_status_missing",
+    });
+  });
+
+  it("allows an explicit opt-out from replica verification", () => {
+    vi.stubEnv("LITESTREAM_REQUIRED", "true");
+    vi.stubEnv("LITESTREAM_ACTIVE", "true");
+    vi.stubEnv("LITESTREAM_REPLICA_VERIFICATION_REQUIRED", "false");
+
+    expect(getBackupRuntimeStatus()).toMatchObject({
+      envOnly: true,
+      replicaOk: null,
+      verificationRequired: false,
+      reason: "env_active_unverified",
     });
   });
 
