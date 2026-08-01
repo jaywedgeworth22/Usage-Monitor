@@ -636,10 +636,16 @@ describe("provider key attribution API", () => {
   it("leaves window cost unclassified when the window spans a binding reassignment", async () => {
     const now = new Date();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const reassignmentAt = new Date(Math.max(monthStart.getTime() + 3 * 86_400_000, now.getTime() - 3 * 86_400_000));
-    const windowStart = new Date(reassignmentAt.getTime() - 2 * 86_400_000);
-    const windowEnd = new Date(reassignmentAt.getTime() + 2 * 86_400_000);
-    const eventTime = new Date(Math.min(windowEnd.getTime() - 1_000, now.getTime() - 1_000));
+    const isEarlyInMonth = (now.getTime() - monthStart.getTime()) < 3 * 86_400_000;
+    const reassignmentAt = isEarlyInMonth
+      ? new Date(now.getTime() - 60_000)
+      : new Date(now.getTime() - 3 * 86_400_000);
+    const windowStart = new Date(reassignmentAt.getTime() - 120_000);
+    const windowEnd = isEarlyInMonth
+      ? new Date(now.getTime() - 10_000)
+      : new Date(reassignmentAt.getTime() + 2 * 86_400_000);
+    const eventTime = new Date(windowEnd.getTime() - 1_000);
+    const pointControlTime = new Date(windowEnd.getTime() - 500);
     const provider = await prisma.provider.create({
       data: { name: "openai", displayName: "OpenAI", type: "builtin" },
     });
@@ -693,7 +699,7 @@ describe("provider key attribution API", () => {
         provider: "openai",
         keyRef: "openai-primary",
         costUsd: 1,
-        occurredAt: new Date(reassignmentAt.getTime() + 60_000),
+        occurredAt: pointControlTime,
         metadata: {
           _usageTelemetrySchemaVersion: 2,
           _coverageDeclared: true,
@@ -714,11 +720,12 @@ describe("provider key attribution API", () => {
   it("attributes point costs at each event timestamp across a binding reassignment", async () => {
     const now = new Date();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const reassignmentAt = new Date(
-      Math.max(monthStart.getTime() + 2 * 86_400_000, now.getTime() - 2 * 86_400_000)
-    );
-    const before = new Date(reassignmentAt.getTime() - 60_000);
-    const after = new Date(Math.min(reassignmentAt.getTime() + 60_000, now.getTime() - 1_000));
+    const isEarlyInMonth = (now.getTime() - monthStart.getTime()) < 2 * 86_400_000;
+    const reassignmentAt = isEarlyInMonth
+      ? new Date(now.getTime() - 60_000)
+      : new Date(Math.max(monthStart.getTime() + 60_000, now.getTime() - 2 * 86_400_000));
+    const before = new Date(reassignmentAt.getTime() - 30_000);
+    const after = new Date(Math.min(reassignmentAt.getTime() + 30_000, now.getTime() - 1_000));
     const provider = await prisma.provider.create({
       data: { name: "openai", displayName: "OpenAI", type: "builtin" },
     });

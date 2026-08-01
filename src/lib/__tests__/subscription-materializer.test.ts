@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -82,6 +82,15 @@ beforeAll(async () => {
   ({ geminiBillingConfigFingerprint } = await import("../gemini-key-status"));
   ({ PUT: putSubscription } = await import("@/app/api/subscriptions/[id]/route"));
 }, 60_000);
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 afterAll(async () => {
   await prisma?.$disconnect();
