@@ -75,7 +75,7 @@ describe("apify adapter", () => {
         .mockResolvedValueOnce(
           json({
             data: {
-              monthlyUsageCycle: { startAt: "2026-07-01", endAt: "2026-08-01" },
+              monthlyUsageCycle: utcMonthCycle(),
               current: { monthlyUsageUsd: 15 },
             },
           })
@@ -109,7 +109,7 @@ describe("apify adapter", () => {
         .mockResolvedValueOnce(
           json({
             data: {
-              monthlyUsageCycle: { startAt: "2026-06-01", endAt: "2026-07-01" },
+              monthlyUsageCycle: utcMonthCycle(-1),
               current: { monthlyUsageUsd: 15 },
             },
           })
