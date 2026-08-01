@@ -6,7 +6,11 @@ import { parseProviderUpdateInput, readJsonBody } from "@/lib/provider-input";
 import { isDecommissionedProviderName } from "@/lib/provider-definitions";
 import { buildProviderAlertState } from "@/lib/provider-alerts";
 import { computeBudgetStatus, bustBudgetStatusCache } from "@/lib/budget-status";
-import { toPrismaProviderPlanData } from "@/lib/provider-plan";
+import {
+  PlanSubscriptionExclusivityError,
+  planFixedCostConflicts,
+  toPrismaProviderPlanData,
+} from "@/lib/provider-plan";
 import { canonicalProviderKey } from "@/lib/provider-identity";
 import { buildKeyPreview } from "@/lib/provider-key-preview";
 import { getProviderComplianceSummary } from "@/lib/provider-compliance";
@@ -341,6 +345,9 @@ export async function GET(
   });
 }
 
+const SUBSCRIPTION_EXCLUSIVITY_ERROR =
+  "This provider already has an active/considering Subscription. Clear Plan price / mo or cancel the Subscription — modeling the same fee both ways double-counts spend.";
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -490,13 +497,17 @@ export async function PUT(
   if (input.apiKey !== undefined) {
     updateData.apiKey = input.apiKey === null ? null : encrypt(input.apiKey);
   }
+  // Hoisted so the transaction below can re-derive the effective fixed cost
+  // under the writer lock instead of trusting the pre-parse `existing` read.
+  let planData: Prisma.ProviderPlanCreateWithoutProviderInput | undefined;
   if (input.plan !== undefined) {
-    const planData = toPrismaProviderPlanData(input.plan);
+    planData = toPrismaProviderPlanData(input.plan);
     const nextFixed =
       planData.fixedMonthlyCostUsd === undefined
         ? existing.plan?.fixedMonthlyCostUsd
         : planData.fixedMonthlyCostUsd;
-    if (nextFixed != null && Number(nextFixed) > 0) {
+    // Cheap fast-fail; the authoritative check is inside the transaction.
+    if (planFixedCostConflicts(nextFixed)) {
       const activeSubscription = await prisma.subscription.findFirst({
         where: {
           providerId: id,
@@ -506,10 +517,7 @@ export async function PUT(
       });
       if (activeSubscription) {
         return NextResponse.json(
-          {
-            error:
-              "This provider already has an active/considering Subscription. Clear Plan price / mo or cancel the Subscription — modeling the same fee both ways double-counts spend.",
-          },
+          { error: SUBSCRIPTION_EXCLUSIVITY_ERROR },
           { status: 400 }
         );
       }
@@ -543,28 +551,73 @@ export async function PUT(
     updateData.alertConfigGeneration = { increment: 1 };
   }
 
-  const provider = await prisma.provider.update({
-    where: { id },
-    data: updateData,
-    select: {
-      id: true,
-      name: true,
-      displayName: true,
-      type: true,
-      isActive: true,
-      refreshIntervalMin: true,
-      groupId: true,
-      label: true,
-      allocations: {
+  let provider;
+  try {
+    provider = await prisma.$transaction(async (tx) => {
+      // SQLite begins interactive transactions deferred; this harmless write
+      // takes the one durable writer lock before the exclusivity re-read, the
+      // same trick external-billing-subscription-adoption.ts uses so a
+      // concurrent POST /api/subscriptions cannot land between check and write.
+      await tx.$executeRaw`
+        UPDATE "Provider"
+        SET "name" = "name"
+        WHERE "id" = ${id}
+      `;
+      if (planData) {
+        // Re-read the stored plan under the lock so the "fixedMonthlyCostUsd
+        // omitted" branch no longer relies on the `existing` read taken before
+        // the body was even parsed.
+        const lockedPlan = await tx.providerPlan.findUnique({
+          where: { providerId: id },
+          select: { fixedMonthlyCostUsd: true },
+        });
+        const lockedNextFixed =
+          planData.fixedMonthlyCostUsd === undefined
+            ? lockedPlan?.fixedMonthlyCostUsd
+            : planData.fixedMonthlyCostUsd;
+        if (planFixedCostConflicts(lockedNextFixed)) {
+          const raced = await tx.subscription.findFirst({
+            where: {
+              providerId: id,
+              status: { in: ["active", "considering"] },
+            },
+            select: { id: true },
+          });
+          if (raced) throw new PlanSubscriptionExclusivityError();
+        }
+      }
+      return tx.provider.update({
+        where: { id },
+        data: updateData,
         select: {
-          projectId: true,
-          percentage: true,
+          id: true,
+          name: true,
+          displayName: true,
+          type: true,
+          isActive: true,
+          refreshIntervalMin: true,
+          groupId: true,
+          label: true,
+          allocations: {
+            select: {
+              projectId: true,
+              percentage: true,
+            },
+          },
+          plan: true,
+          createdAt: true,
         },
-      },
-      plan: true,
-      createdAt: true,
-    },
-  });
+      });
+    });
+  } catch (error) {
+    if (error instanceof PlanSubscriptionExclusivityError) {
+      return NextResponse.json(
+        { error: SUBSCRIPTION_EXCLUSIVITY_ERROR },
+        { status: 400 }
+      );
+    }
+    throw error;
+  }
 
   bustBudgetStatusCache();
 
