@@ -5,7 +5,10 @@ import {
   type UsageResult,
 } from "./helpers";
 
-export async function fetchUsage(apiKey: string): Promise<UsageResult> {
+export async function fetchUsage(
+  apiKey: string,
+  now = new Date()
+): Promise<UsageResult> {
   const headers = { Authorization: `Bearer ${apiKey}` };
   const [limitsResponse, userResponse] = await Promise.all([
     fetchJson("https://api.apify.com/v2/users/me/limits", { headers }),
@@ -65,7 +68,6 @@ export async function fetchUsage(apiKey: string): Promise<UsageResult> {
         : null;
   const cycleStart = limitsData.data?.monthlyUsageCycle?.startAt ?? null;
   const cycleEnd = limitsData.data?.monthlyUsageCycle?.endAt ?? null;
-  const now = new Date();
   const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
   const nextMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
   const cycleStartMs = cycleStart ? Date.parse(cycleStart) : Number.NaN;

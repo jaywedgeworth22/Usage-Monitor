@@ -75,7 +75,7 @@ describe("apify adapter", () => {
         .mockResolvedValueOnce(
           json({
             data: {
-              monthlyUsageCycle: utcMonthCycle(),
+              monthlyUsageCycle: { startAt: "2026-07-01", endAt: "2026-08-01" },
               current: { monthlyUsageUsd: 15 },
             },
           })
@@ -93,7 +93,7 @@ describe("apify adapter", () => {
         )
     );
 
-    const result = await fetchUsage("token");
+    const result = await fetchUsage("token", new Date("2026-07-15T12:00:00Z"));
 
     expect(result.totalCost).toBe(25);
     expect(result.balance).toBe(0);
@@ -109,7 +109,7 @@ describe("apify adapter", () => {
         .mockResolvedValueOnce(
           json({
             data: {
-              monthlyUsageCycle: utcMonthCycle(-1),
+              monthlyUsageCycle: { startAt: "2026-06-01", endAt: "2026-07-01" },
               current: { monthlyUsageUsd: 15 },
             },
           })
