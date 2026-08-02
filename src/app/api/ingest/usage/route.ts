@@ -4,6 +4,7 @@ import type { UsageTelemetryErrorCode } from "@jaywedgeworth22/congress-trading-
 import { prisma } from "@/lib/prisma";
 import {
   ExternalUsageIdempotencyCollisionError,
+  NegativeSubscriptionWindowLimitExceededError,
   persistExternalUsageEvents,
 } from "@/lib/external-usage-events";
 import {
@@ -341,6 +342,12 @@ export async function POST(request: NextRequest) {
           const projectId = event.project
             ? projectIdByName.get(canonicalProjectKey(event.project)) ?? null
             : null;
+          // Top-level `project` is authoritative: it is stamped into
+          // metadata.project (overwriting any producer-supplied value) AND
+          // carried separately as authoritativeProject so the persistence
+          // layer's existing-row branch can distinguish an authoritative
+          // attribution overwrite (pre-#887 rows stored the producer's raw
+          // metadata.project) from a genuine producer-metadata conflict.
           const metadata = event.project
             ? { ...(event.metadata ?? {}), project: event.project }
             : event.metadata;
@@ -369,12 +376,19 @@ export async function POST(request: NextRequest) {
             occurredAt: event.occurredAt,
             metadata: metadata as Prisma.InputJsonObject | undefined,
             providerRequestId: event.providerRequestId,
+            authoritativeProject: event.project,
           };
         })
       );
     } catch (error) {
       if (error instanceof ExternalUsageIdempotencyCollisionError) {
         return respondError(409, "idempotency_conflict", error.message);
+      }
+      if (error instanceof NegativeSubscriptionWindowLimitExceededError) {
+        // Cumulative negative-adjustment window bound (see
+        // external-usage-events.ts): a policy rejection of the whole batch,
+        // not a server fault — non-retryable 400 so producers don't loop.
+        return respondError(400, "invalid_request", error.message);
       }
       throw error;
     }

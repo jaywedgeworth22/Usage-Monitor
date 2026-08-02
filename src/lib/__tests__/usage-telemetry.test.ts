@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD,
   MAX_NEGATIVE_SUBSCRIPTION_COST_USD,
   MAX_V2_BATCH_REJECTIONS_REPORTED,
   parseUsageTelemetryBatch,
@@ -814,6 +815,103 @@ describe("parseUsageTelemetryBatch negative subscription costUsd magnitude bound
         `metricType=${metricType}`
       ).toThrow("costUsd must be a non-negative finite number");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Aggregate companion to the per-event bound above (audit finding
+// "negative-adjustment-abuse": PR #884 claimed this bound but never shipped
+// it). A batch of MAX_EVENTS individually-legal -$1000 events must not be
+// able to erase $100,000 in one call. Boundary semantics match the per-event
+// bound: the batch's summed negative subscription magnitude may equal
+// MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD exactly (inclusive); anything
+// more negative rejects the WHOLE batch. Positive amounts and other
+// metricTypes never count toward the sum.
+// ---------------------------------------------------------------------------
+
+describe("parseUsageTelemetryBatch aggregate negative subscription bound", () => {
+  const negativeSubscriptionEvent = (costUsd: number, index: number) => ({
+    idempotencyKey: `aggregate-bound-${index}`,
+    sourceApp: "manual-billing-adjustment",
+    provider: "anthropic",
+    billingMode: "manual",
+    metricType: "subscription",
+    unit: "usd",
+    costUsd,
+    confidence: "estimated",
+    occurredAt: "2026-06-16T00:00:00.000Z",
+  });
+
+  it("rejects a batch of per-event-legal negatives whose magnitudes sum past the batch bound (3 x -700)", () => {
+    expect(() =>
+      parseUsageTelemetryBatch({
+        events: [
+          negativeSubscriptionEvent(-700, 1),
+          negativeSubscriptionEvent(-700, 2),
+          negativeSubscriptionEvent(-700, 3),
+        ],
+      })
+    ).toThrow(
+      `combined negative subscription costUsd magnitude must not exceed ` +
+        `${MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD} per batch`
+    );
+  });
+
+  it("accepts a batch whose negative magnitudes sum to exactly the batch bound (inclusive boundary)", () => {
+    const half = MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD / 2;
+    const events = parseUsageTelemetryBatch({
+      events: [
+        negativeSubscriptionEvent(-half, 1),
+        negativeSubscriptionEvent(-half, 2),
+      ],
+    });
+    expect(events.map((event) => event.costUsd)).toEqual([-half, -half]);
+  });
+
+  it("does not count positive subscription amounts toward the bound (no netting: positives cannot buy negative headroom, and large positive batches still parse)", () => {
+    // Sum of negatives is exactly at the bound (2 x the per-event max); the
+    // large positives must neither offset the negatives (netting would accept
+    // -2100 alongside +10000) nor count toward the bound themselves.
+    const events = parseUsageTelemetryBatch({
+      events: [
+        negativeSubscriptionEvent(10_000, 1),
+        negativeSubscriptionEvent(10_000, 2),
+        negativeSubscriptionEvent(-MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD / 2, 3),
+        negativeSubscriptionEvent(-MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD / 2, 4),
+      ],
+    });
+    expect(events).toHaveLength(4);
+  });
+
+  it("rejects the batch when positives are present but negatives alone exceed the bound (proof of no netting)", () => {
+    expect(() =>
+      parseUsageTelemetryBatch({
+        events: [
+          negativeSubscriptionEvent(10_000, 1),
+          negativeSubscriptionEvent(-700, 2),
+          negativeSubscriptionEvent(-700, 3),
+          negativeSubscriptionEvent(-700, 4),
+        ],
+      })
+    ).toThrow("combined negative subscription costUsd magnitude");
+  });
+
+  it("leaves batches of other metricTypes unaffected by the aggregate bound", () => {
+    // Non-subscription metricTypes cannot carry negatives at all (per-event
+    // rule), so a large batch of ordinary positive cost events far above the
+    // bound's dollar figure must parse untouched.
+    const events = parseUsageTelemetryBatch({
+      events: Array.from({ length: 5 }, (_, index) => ({
+        idempotencyKey: `ordinary-cost-${index}`,
+        sourceApp: "socratic-trade",
+        provider: "openai",
+        metricType: "cost",
+        unit: "usd",
+        costUsd: MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD,
+        occurredAt: "2026-06-16T00:00:00.000Z",
+      })),
+    });
+    expect(events).toHaveLength(5);
   });
 });
 

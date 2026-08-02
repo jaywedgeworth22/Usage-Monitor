@@ -10,6 +10,7 @@ const providerFindMany = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/external-usage-events", () => ({
   ExternalUsageIdempotencyCollisionError: class extends Error {},
+  NegativeSubscriptionWindowLimitExceededError: class extends Error {},
   persistExternalUsageEvents: externalUsageMocks.persist,
   syncStatusToUsageSnapshot: externalUsageMocks.syncStatus,
 }));
@@ -25,6 +26,7 @@ import { tryAcquireIngestAdmission } from "@/lib/ingest-admission";
 import { getNamedRateLimiter } from "@/lib/rate-limit";
 import { signReceiptCashEvent } from "@/lib/receipt-cash";
 import {
+  MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD,
   MAX_NEGATIVE_SUBSCRIPTION_COST_USD,
   MAX_USAGE_TELEMETRY_BODY_BYTES,
 } from "@/lib/usage-telemetry";
@@ -287,6 +289,10 @@ describe("POST /api/ingest/usage admission", () => {
     expect(externalUsageMocks.persist).toHaveBeenCalledWith([
       expect.objectContaining({
         projectId: "proj-alpha-id",
+        // Carried alongside the stamped metadata so the persistence layer can
+        // treat a pre-#887 stored producer metadata.project as an
+        // authoritative overwrite on replay instead of a 409 collision.
+        authoritativeProject: "Alpha",
         metadata: { lane: "rag", project: "Alpha" },
       }),
     ]);
@@ -753,6 +759,81 @@ describe("POST /api/ingest/usage admission", () => {
     );
     expect(response.status).toBe(202);
     expect(externalUsageMocks.persist).toHaveBeenCalled();
+  });
+
+  it("rejects a batch whose combined negative subscription magnitude exceeds the per-batch bound even when each event is individually legal", async () => {
+    const negativeEvent = (index: number) => ({
+      sourceApp: "manual-billing-adjustment",
+      provider: "anthropic",
+      metricType: "subscription",
+      billingMode: "manual",
+      unit: "usd",
+      confidence: "estimated",
+      costUsd: -700,
+      occurredAt: "2026-07-14T00:00:00.000Z",
+      idempotencyKey: `batch-bound-test-${index}`,
+    });
+    // 3 x -700 = -2100, past the -2000 aggregate bound while every event is
+    // comfortably inside the -1000 per-event bound.
+    const response = await POST(
+      nextRequest(
+        { events: [negativeEvent(1), negativeEvent(2), negativeEvent(3)] },
+        USAGE_TOKEN
+      )
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining(
+        `must not exceed ${MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD} per batch`
+      ),
+    });
+    expect(externalUsageMocks.persist).not.toHaveBeenCalled();
+  });
+
+  it("accepts a batch whose combined negative subscription magnitude lands exactly on the per-batch bound", async () => {
+    const negativeEvent = (index: number) => ({
+      sourceApp: "manual-billing-adjustment",
+      provider: "anthropic",
+      metricType: "subscription",
+      billingMode: "manual",
+      unit: "usd",
+      confidence: "estimated",
+      costUsd: -(MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD / 2),
+      occurredAt: "2026-07-14T00:00:00.000Z",
+      idempotencyKey: `batch-bound-boundary-test-${index}`,
+    });
+    const response = await POST(
+      nextRequest({ events: [negativeEvent(1), negativeEvent(2)] }, USAGE_TOKEN)
+    );
+    expect(response.status).toBe(202);
+    expect(externalUsageMocks.persist).toHaveBeenCalled();
+  });
+
+  it("maps the trailing-window cumulative negative-adjustment rejection to a non-retryable 400", async () => {
+    const { NegativeSubscriptionWindowLimitExceededError } = await import(
+      "@/lib/external-usage-events"
+    );
+    externalUsageMocks.persist.mockRejectedValueOnce(
+      new NegativeSubscriptionWindowLimitExceededError(4600, 500)
+    );
+    const response = await POST(
+      nextRequest(
+        {
+          sourceApp: "manual-billing-adjustment",
+          provider: "anthropic",
+          metricType: "subscription",
+          billingMode: "manual",
+          unit: "usd",
+          confidence: "estimated",
+          costUsd: -100,
+          occurredAt: "2026-07-14T00:00:00.000Z",
+          idempotencyKey: "window-bound-route-test",
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(response.status).toBe(400);
+    expect(response.headers.get("content-type")).toContain("application/json");
   });
 
   it("passes providerRequestId through to persistExternalUsageEvents when supplied", async () => {
