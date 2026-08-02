@@ -599,7 +599,8 @@ function usageEventsSummaryMemoTtlMs(): number {
 
 export async function summarizeExternalUsageEvents(
   since: Date,
-  rawCutoff: Date
+  rawCutoff: Date,
+  now = new Date()
 ): Promise<ExternalUsageEventSummary> {
   // Under vitest, skip the process memo so mocked query sequences and
   // per-test fixtures never observe cross-call contamination (same rule as
@@ -630,7 +631,8 @@ export async function summarizeExternalUsageEvents(
     }
     const summary = await summarizeExternalUsageEventsUnserialized(
       since,
-      rawCutoff
+      rawCutoff,
+      now
     );
     if (memoEnabled) {
       setUsageEventsSummaryMemo({
@@ -658,12 +660,13 @@ export async function summarizeExternalUsageEvents(
  */
 async function summarizeExternalUsageEventsUnserialized(
   since: Date,
-  rawCutoff: Date
+  rawCutoff: Date,
+  now: Date
 ): Promise<ExternalUsageEventSummary> {
   const groups = new Map<string, SummaryAccumulator>();
   const rawSince = since > rawCutoff ? since : rawCutoff;
 
-  const receiptCandidates = await rawReceiptCashCandidates(rawSince);
+  const receiptCandidates = await rawReceiptCashCandidates(rawSince, now);
   const [rawGroups, rollups, derivedCostEstimates] = await Promise.all([
     prisma.externalUsageEvent.groupBy({
       by: [
@@ -678,7 +681,7 @@ async function summarizeExternalUsageEventsUnserialized(
         "limitWindow",
       ],
       where: {
-        occurredAt: { gte: rawSince },
+        occurredAt: { gte: rawSince, lte: now },
         metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
         ...NON_RECEIPT_CANDIDATE_WHERE,
       },
@@ -1070,10 +1073,10 @@ export function __resetMonthToDateExternalCostScanMemoForTests(): void {
  * high-cardinality keyRef values therefore made the database return nearly
  * one group per event.
  */
-async function rawReceiptCashCandidates(rawSince: Date) {
+async function rawReceiptCashCandidates(rawSince: Date, now: Date) {
   return prisma.externalUsageEvent.findMany({
     where: {
-      occurredAt: { gte: rawSince },
+      occurredAt: { gte: rawSince, lte: now },
       sourceApp: BILLING_RECEIPT_SOURCE_APP,
       service: API_PREPAID_FUNDING_SERVICE,
       label: RECEIPT_CASH_LABEL,
@@ -1124,9 +1127,10 @@ const NON_RECEIPT_CANDIDATE_WHERE: Prisma.ExternalUsageEventWhereInput = {
 
 export async function sumMonthToDateExternalCostByProvider(
   monthStart: Date,
-  rawCutoff: Date
+  rawCutoff: Date,
+  now = new Date()
 ): Promise<Map<string, ProviderPushedCost>> {
-  const material = await loadMonthToDateExternalCostMaterial(monthStart, rawCutoff);
+  const material = await loadMonthToDateExternalCostMaterial(monthStart, rawCutoff, now);
   return material.byProvider;
 }
 
@@ -1141,9 +1145,10 @@ export async function sumMonthToDateExternalCostByProvider(
 // and sourceApp-keyed aggregations.
 export async function sumMonthToDateExternalCostAttribution(
   monthStart: Date,
-  rawCutoff: Date
+  rawCutoff: Date,
+  now = new Date()
 ): Promise<ExternalCostAttributionRow[]> {
-  const material = await loadMonthToDateExternalCostMaterial(monthStart, rawCutoff);
+  const material = await loadMonthToDateExternalCostMaterial(monthStart, rawCutoff, now);
   return material.attribution;
 }
 
@@ -1154,7 +1159,8 @@ export async function sumMonthToDateExternalCostAttribution(
  */
 async function loadMonthToDateExternalCostMaterial(
   monthStart: Date,
-  rawCutoff: Date
+  rawCutoff: Date,
+  now: Date
 ): Promise<{
   byProvider: Map<string, ProviderPushedCost>;
   attribution: ExternalCostAttributionRow[];
@@ -1188,7 +1194,8 @@ async function loadMonthToDateExternalCostMaterial(
 
     const material = await loadMonthToDateExternalCostMaterialUnserialized(
       monthStart,
-      rawCutoff
+      rawCutoff,
+      now
     );
     if (memoEnabled) {
       setMtdScanMemo({
@@ -1204,7 +1211,8 @@ async function loadMonthToDateExternalCostMaterial(
 
 async function loadMonthToDateExternalCostMaterialUnserialized(
   monthStart: Date,
-  rawCutoff: Date
+  rawCutoff: Date,
+  now: Date
 ): Promise<{
   byProvider: Map<string, ProviderPushedCost>;
   attribution: ExternalCostAttributionRow[];
@@ -1216,7 +1224,7 @@ async function loadMonthToDateExternalCostMaterialUnserialized(
     if (typeof prisma.externalUsageEvent?.count === "function") {
       try {
         prisma.externalUsageEvent
-          .count({ where: { occurredAt: { gte: rawSince } } })
+          .count({ where: { occurredAt: { gte: rawSince, lte: now } } })
           .then((rawSinceRows) => {
             // eslint-disable-next-line no-console -- one-time diagnostic
             console.info(
@@ -1233,12 +1241,12 @@ async function loadMonthToDateExternalCostMaterialUnserialized(
     }
   }
 
-  const receiptCandidates = await rawReceiptCashCandidates(rawSince);
+  const receiptCandidates = await rawReceiptCashCandidates(rawSince, now);
   const [rawGroups, rollups] = await Promise.all([
     prisma.externalUsageEvent.groupBy({
       by: ["provider", "sourceApp", "service", "projectId", "metricType"],
       where: {
-        occurredAt: { gte: rawSince },
+        occurredAt: { gte: rawSince, lte: now },
         metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
         ...NON_RECEIPT_CANDIDATE_WHERE,
       },
@@ -1250,6 +1258,7 @@ async function loadMonthToDateExternalCostMaterialUnserialized(
           where: {
             day: { gte: monthStart, lt: rawCutoff },
             metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
+            latestOccurredAt: { lte: now },
           },
           select: {
             provider: true,

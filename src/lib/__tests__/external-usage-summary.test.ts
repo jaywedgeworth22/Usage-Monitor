@@ -77,9 +77,11 @@ describe("summarizeExternalUsageEvents", () => {
       },
     ]);
 
+    const now = new Date("2026-07-15T00:00:00.000Z");
     const result = await summarizeExternalUsageEvents(
       new Date("2026-06-01T00:00:00.000Z"),
-      new Date("2026-07-01T00:00:00.000Z")
+      new Date("2026-07-01T00:00:00.000Z"),
+      now
     );
 
     expect(prismaMock.externalUsageEvent.groupBy).toHaveBeenCalledWith(
@@ -96,7 +98,9 @@ describe("summarizeExternalUsageEvents", () => {
           "limitWindow",
         ],
         where: expect.objectContaining({
-          occurredAt: { gte: new Date("2026-07-01T00:00:00.000Z") },
+          // Future-dated telemetry fix: the raw scan is bounded to `now` so
+          // phantom future rows can never inflate totals or latestAt.
+          occurredAt: { gte: new Date("2026-07-01T00:00:00.000Z"), lte: now },
         }),
       })
     );

@@ -579,9 +579,82 @@ describe("POST /api/ingest/usage admission", () => {
     );
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({
-      error: expect.stringContaining("reserved"),
+      error: 'sourceApp "subscription" is reserved',
+    });
+  });
+
+  it("rejects ordinary v1 events with future-dated occurredAt beyond 5-minute skew", async () => {
+    const farFutureResponse = await POST(
+      nextRequest(
+        {
+          sourceApp: "socratic-trade",
+          provider: "anthropic",
+          metricType: "usage",
+          costUsd: 5,
+          occurredAt: "2099-01-01T00:00:00.000Z",
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(farFutureResponse.status).toBe(400);
+    expect(await farFutureResponse.json()).toMatchObject({
+      error: "occurredAt cannot be in the future",
     });
     expect(externalUsageMocks.persist).not.toHaveBeenCalled();
+
+    const nearFutureIso = new Date(Date.now() + 4 * 60 * 1_000).toISOString();
+    const nearFutureResponse = await POST(
+      nextRequest(
+        {
+          sourceApp: "socratic-trade",
+          provider: "anthropic",
+          metricType: "usage",
+          costUsd: 5,
+          occurredAt: nearFutureIso,
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(nearFutureResponse.status).toBe(202);
+  });
+
+  it("rejects future-dated events in v2 batches with per-event rejections", async () => {
+    const response = await POST(
+      nextRequest(
+        {
+          schemaVersion: 2,
+          producerId: "congress-trade",
+          events: [
+            {
+              eventId: "valid-event-1",
+              provider: "openai",
+              metricType: "usage",
+              costUsd: 1,
+              occurredAt: new Date().toISOString(),
+            },
+            {
+              eventId: "future-event-2",
+              provider: "openai",
+              metricType: "usage",
+              costUsd: 2,
+              occurredAt: "2099-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(response.status).toBe(202);
+    const body = await response.json();
+    expect(body.persisted).toBe(1);
+    expect(body.rejected).toBe(1);
+    expect(body.rejections).toEqual([
+      {
+        index: 1,
+        eventId: "future-event-2",
+        issues: ["occurredAt cannot be in the future"],
+      },
+    ]);
   });
 
   it("rejects the reserved sourceApp even when it rides alongside ordinary events in a batch", async () => {
