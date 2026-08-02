@@ -122,8 +122,31 @@ validated per event, so one poison event no longer fails the batch.
 `accepted` is newly inserted rows; `received`/`duplicates` make full replays
 visible (additive fields; older receivers omit them).
 
-**Notable statuses:** `400 invalid_request` (malformed body or invalid v2
-envelope), `401 unauthorized`, `409 idempotency_conflict`, `413
+**Negative subscription adjustments (v1 only):** a negative `costUsd` is
+accepted solely for `metricType: "subscription"` (owner-directed manual
+corrections/refunds; the v2 schema rejects all negatives). Three inclusive
+bounds apply — exceeding any of them rejects the WHOLE batch with `400
+invalid_request`:
+
+| Bound | Limit | Scope |
+| --- | --- | --- |
+| Per event | `$1,000` magnitude | one event's `costUsd` |
+| Per batch | `$2,000` summed magnitude | all negative subscription events in one request |
+| Trailing 30 days | `$5,000` summed magnitude | already-persisted negative subscription events (by server receipt time, not producer-supplied `occurredAt`) plus the incoming batch's new ones |
+
+"Inclusive" means landing exactly on a limit is accepted. Positive amounts
+and other metricTypes never count toward any bound. Idempotent replays do
+not double-count against the 30-day window (replayed events insert no new
+rows). On a window rejection, submit smaller corrections or wait for older
+adjustments to age out of the trailing window. Constants:
+`MAX_NEGATIVE_SUBSCRIPTION_COST_USD` /
+`MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD` (`src/lib/usage-telemetry.ts`)
+and `MAX_NEGATIVE_SUBSCRIPTION_WINDOW_COST_USD` /
+`NEGATIVE_SUBSCRIPTION_WINDOW_DAYS` (`src/lib/external-usage-events.ts`).
+
+**Notable statuses:** `400 invalid_request` (malformed body, invalid v2
+envelope, or a negative-subscription-adjustment bound exceeded — see above),
+`401 unauthorized`, `409 idempotency_conflict`, `413
 payload_too_large` (body > 4 MiB), `429 rate_limited` (`Retry-After: 30`),
 `503 receiver_busy` (`Retry-After: 5` — single-writer admission; retry the
 batch), `503 not_configured`.

@@ -47,6 +47,20 @@ export const MAX_USAGE_TELEMETRY_BODY_BYTES = 4 * 1024 * 1024;
 // channel is meant for, while bounding the blast radius of a leaked or
 // misused token to a single ingest call.
 export const MAX_NEGATIVE_SUBSCRIPTION_COST_USD = 1000;
+// Aggregate companion to the per-event bound above: without it a single batch
+// of MAX_EVENTS x -MAX_NEGATIVE_SUBSCRIPTION_COST_USD events (each
+// individually legal) could erase $100,000 of reported spend in one call.
+// Bound the SUM of negative subscription costUsd magnitudes across one parsed
+// batch. Like the per-event bound this is INCLUSIVE: a batch summing to
+// exactly -MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD is accepted, anything
+// more negative rejects the whole batch. $2,000 covers every realistic
+// multi-event manual correction (the largest real one to date summed
+// -$123.31) while capping one call's erasure at 2x the per-event bound.
+// Positive amounts and non-subscription metricTypes (which reject negatives
+// per event anyway) never count toward the sum. A trailing-30-day cumulative
+// bound backed by already-persisted rows lives in external-usage-events.ts
+// (MAX_NEGATIVE_SUBSCRIPTION_WINDOW_COST_USD) — this one is pure parse-time.
+export const MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD = 2000;
 export const MAX_FUTURE_OCCURRED_AT_SKEW_MS = 5 * 60 * 1_000;
 
 const metricTypes = new Set(["usage", "cost", "quota", "tier", "health", "balance", "limit", "quota_sync", "credit_balance", "subscription"]);
@@ -553,5 +567,26 @@ export function parseUsageTelemetryBatch(value: unknown): ParsedUsageTelemetryEv
   if (rawEvents.length > MAX_EVENTS) {
     throw new Error(`events must include ${MAX_EVENTS} or fewer items`);
   }
-  return rawEvents.map(parseEvent);
+  const events = rawEvents.map(parseEvent);
+  // Per-batch aggregate bound on negative subscription costUsd (see
+  // MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD's doc comment above). Enforced
+  // after per-event parsing so every event has already passed the per-event
+  // magnitude bound; rejects the WHOLE batch, same as any other parse error.
+  const negativeSubscriptionUsd = events.reduce(
+    (sum, event) =>
+      event.metricType === "subscription" &&
+      event.costUsd != null &&
+      event.costUsd < 0
+        ? sum + -event.costUsd
+        : sum,
+    0
+  );
+  if (negativeSubscriptionUsd > MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD) {
+    throw new Error(
+      `combined negative subscription costUsd magnitude must not exceed ` +
+        `${MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD} per batch ` +
+        `(batch sums to -${negativeSubscriptionUsd.toFixed(2)})`
+    );
+  }
+  return events;
 }

@@ -26,6 +26,35 @@ import {
 
 export const STATUS_METRIC_TYPES = new Set(["quota_sync", "credit_balance"]);
 
+// Trailing-window cumulative bound on negative subscription adjustments —
+// the DB-backed companion to usage-telemetry.ts's parse-time per-event
+// (MAX_NEGATIVE_SUBSCRIPTION_COST_USD) and per-batch
+// (MAX_NEGATIVE_SUBSCRIPTION_BATCH_COST_USD) bounds. Without it a token
+// holder could repeat maximal per-batch erasures indefinitely. The window is
+// keyed on server-stamped `createdAt`, NOT producer-controlled `occurredAt`:
+// backdating occurredAt must not be able to age prior negative adjustments
+// out of the window. A trailing window (not a calendar month) is used so the
+// bound cannot be straddled at a month boundary. Raw rows are retained 90
+// days (data-retention.ts's DEFAULT_EXTERNAL_EVENT_RETENTION_DAYS), so a
+// 30-day lookback has no retention blind spot. INCLUSIVE like the other two
+// bounds: a total landing exactly on the cap is accepted.
+export const MAX_NEGATIVE_SUBSCRIPTION_WINDOW_COST_USD = 5000;
+export const NEGATIVE_SUBSCRIPTION_WINDOW_DAYS = 30;
+
+export class NegativeSubscriptionWindowLimitExceededError extends Error {
+  constructor(persistedNegativeUsd: number, incomingNegativeUsd: number) {
+    super(
+      `Cumulative negative subscription adjustments over the trailing ` +
+        `${NEGATIVE_SUBSCRIPTION_WINDOW_DAYS} days would exceed ` +
+        `$${MAX_NEGATIVE_SUBSCRIPTION_WINDOW_COST_USD} ` +
+        `(already persisted $${persistedNegativeUsd.toFixed(2)} + incoming ` +
+        `$${incomingNegativeUsd.toFixed(2)}). Submit smaller corrections or ` +
+        `wait for older adjustments to age out of the window.`
+    );
+    this.name = "NegativeSubscriptionWindowLimitExceededError";
+  }
+}
+
 export interface ExternalUsageEventInput {
   idempotencyKey: string;
   sourceApp: string;
@@ -62,6 +91,16 @@ export interface ExternalUsageEventInput {
   // the first attempt) still dedupes rather than being treated as a
   // collision — same category as the idempotency-key basis itself.
   providerRequestId?: string;
+  // The validated TOP-LEVEL `project` field from the ingest wire, when the
+  // producer sent one. The ingest route stamps this same value into
+  // metadata.project (top-level project is authoritative — see AGENTS.md and
+  // route.ts), so carrying it separately lets the existing-row replay branch
+  // below distinguish an authoritative-attribution overwrite from a genuine
+  // producer-metadata conflict: rows ingested before the top-level field
+  // became authoritative (pre-#887) stored the producer's raw
+  // metadata.project verbatim, and their byte-identical replays must dedupe,
+  // not 409. NOT a persisted column and NOT part of comparableEvent.
+  authoritativeProject?: string;
 }
 
 export interface PersistExternalUsageEventsResult {
@@ -397,14 +436,44 @@ export async function persistExternalUsageEventsInTransaction(
     if (existing) {
       const existingProjectName = stringProjectMetadata(existing.metadata);
       const incomingProjectName = stringProjectMetadata(event.metadata);
-      assertCompatibleProjectAttribution(existing, event, event.idempotencyKey);
+      // #887 replay-409 regression fix: a row ingested before the top-level
+      // `project` field became authoritative stored the producer's raw
+      // metadata.project verbatim, while its byte-identical replay now
+      // arrives with the validated top-level project stamped into
+      // metadata.project by the route. When the incoming event carries that
+      // authoritative top-level project and the ONLY divergence is the
+      // stored producer-era metadata.project name, this is an attribution
+      // update — overwrite the stored name with the authoritative value
+      // (mirroring the !existingProjectName backfill below) instead of
+      // throwing. Genuine conflicts still throw: the projectId leg of the
+      // compatibility check runs unconditionally here, and sameEvent below
+      // still compares every other field (costUsd, quantity, remaining
+      // metadata, ...).
+      const authoritativeProjectOverride =
+        !!event.authoritativeProject &&
+        !!incomingProjectName &&
+        !!existingProjectName &&
+        canonicalProjectKey(existingProjectName) !==
+          canonicalProjectKey(incomingProjectName);
+      if (authoritativeProjectOverride) {
+        if (
+          existing.projectId &&
+          event.projectId &&
+          existing.projectId !== event.projectId
+        ) {
+          throw new ExternalUsageIdempotencyCollisionError(event.idempotencyKey);
+        }
+      } else {
+        assertCompatibleProjectAttribution(existing, event, event.idempotencyKey);
+      }
       if (!sameEvent(existing, event)) {
         throw new ExternalUsageIdempotencyCollisionError(event.idempotencyKey);
       }
       const projectId = !existing.projectId && event.projectId
         ? event.projectId
         : undefined;
-      const metadata = !existingProjectName && incomingProjectName
+      const metadata = incomingProjectName &&
+        (!existingProjectName || authoritativeProjectOverride)
         ? {
             ...(
               existing.metadata &&
@@ -428,6 +497,54 @@ export async function persistExternalUsageEventsInTransaction(
       continue;
     }
     newEvents.push(event);
+  }
+
+  // Trailing-window cumulative negative-adjustment bound (see
+  // MAX_NEGATIVE_SUBSCRIPTION_WINDOW_COST_USD's doc comment at the top of
+  // this file). Counts only NEW rows about to be inserted — idempotent
+  // replays are absent from newEvents AND already counted in the persisted
+  // aggregate, so a retry never double-counts. The aggregate runs on `tx`,
+  // the same transaction that performs the insert below: SQLite serializes
+  // write transactions (and HTTP ingest additionally holds the
+  // single-in-flight admission lease, ingest-admission.ts), so two
+  // concurrent batches cannot both pass on a stale read — no residual
+  // TOCTOU race. Batches with no new negative subscription rows (the
+  // entire hot path, including every internal materializer write) skip the
+  // query entirely. Throwing here rolls back the whole transaction, so a
+  // rejected batch persists nothing — including its non-negative events.
+  const incomingNegativeSubscriptionUsd = newEvents.reduce(
+    (sum, event) =>
+      event.metricType === SUBSCRIPTION_METRIC_TYPE &&
+      event.costUsd != null &&
+      event.costUsd < 0
+        ? sum + -event.costUsd
+        : sum,
+    0
+  );
+  if (incomingNegativeSubscriptionUsd > 0) {
+    const windowStart = new Date(
+      Date.now() - NEGATIVE_SUBSCRIPTION_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    );
+    const persistedAggregate = await tx.externalUsageEvent.aggregate({
+      _sum: { costUsd: true },
+      where: {
+        metricType: SUBSCRIPTION_METRIC_TYPE,
+        costUsd: { lt: 0 },
+        // Server-stamped receipt time, deliberately NOT producer-controlled
+        // occurredAt — see the window constant's doc comment.
+        createdAt: { gte: windowStart },
+      },
+    });
+    const persistedNegativeUsd = -(persistedAggregate._sum.costUsd ?? 0);
+    if (
+      persistedNegativeUsd + incomingNegativeSubscriptionUsd >
+      MAX_NEGATIVE_SUBSCRIPTION_WINDOW_COST_USD
+    ) {
+      throw new NegativeSubscriptionWindowLimitExceededError(
+        persistedNegativeUsd,
+        incomingNegativeSubscriptionUsd
+      );
+    }
   }
 
   // Wave G / E15: batch-insert new rows (one SQLite statement) instead of
