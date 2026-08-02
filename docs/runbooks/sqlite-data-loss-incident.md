@@ -65,6 +65,10 @@ suspect. Check `df -h /data` against the database size first.
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
 inc="/data/.incident-${ts}"
 sudo install -d -o root -g root -m 0700 "${inc}/raw"
+# Staging dir for the replica-restore step below: that container runs as
+# uid 1000 and cannot write into the root-owned ${inc}, so give it its own
+# 0700 subdirectory now and move the candidate up after it verifies.
+sudo install -d -o 1000 -g 1000 -m 0700 "${inc}/restore-staging"
 
 # Substitute the fd numbers found in step 3. The kernel serves the full file
 # contents through /proc even though the pathname is gone. Copy the main
@@ -114,10 +118,13 @@ hope:
     -v /data:/data \
     --entrypoint /app/bin/litestream \
     "usage-monitor:${rev}" \
-    restore -config /app/litestream.yml -o "/data/.incident-${ts}/candidate-replica.db" /data/prod.db
+    restore -config /app/litestream.yml -o "/data/.incident-${ts}/restore-staging/candidate-replica.db" /data/prod.db
+  sudo mv "${inc}/restore-staging/candidate-replica.db" "${inc}/candidate-replica.db"
   ```
 
-  (If `/run/usage-monitor/usage-monitor.env` is missing, run
+  (The `-o` path goes through the uid-1000 `restore-staging` dir created in
+  step 4 — the container user cannot write into the root-owned `${inc}`
+  directly. If `/run/usage-monitor/usage-monitor.env` is missing, run
   `sudo /usr/local/sbin/usage-monitor-env-sync` first.)
 - **Pre-migration / deploy backups** already on disk:
   `/data/.deploy-backups/` (offline cutover snapshots) and the
@@ -209,6 +216,17 @@ Bring layers back one at a time, each verified before the next:
    and `sudo rm /etc/usage-monitor/auto-deploy.paused` only after a full
    scheduler tick and fresh replica heartbeat — a deploy re-runs its own
    preflight integrity gates and must never race the recovery.
+
+   **Host prep before the first post-recovery deploy:** current `main`
+   requires the replica heartbeat (`env_active_unverified` fails strict
+   readiness). If the probe + timer + updated compose from
+   `deploy/oracle/` are not installed on the host yet, the first deploy of
+   a heartbeat-gated revision will fail readiness three times — each a full
+   build + writer-stop cutover + rollback — and latch the breaker. Install
+   the probe first and confirm `/data/.litestream-replica-status.json` is
+   fresh, or set `LITESTREAM_REPLICA_VERIFICATION_REQUIRED=false` in
+   Infisical for exactly one deploy (see "Rollout ordering" in
+   `deploy/oracle/README.md`).
 
 ## 10. Afterwards
 
