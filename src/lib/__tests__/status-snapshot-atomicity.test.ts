@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -12,13 +12,11 @@ let syncStatusToUsageSnapshot: typeof import("../external-usage-events").syncSta
 const NOW = new Date("2026-07-15T12:00:00.000Z");
 
 describe("status snapshot atomicity and safe rounding", () => {
-  let dbCleanup: (() => void) | undefined;
-
   beforeAll(async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "usage-snapshot-test-"));
     dbPath = path.join(tmpDir, "test.db");
     process.env.DATABASE_URL = `file:${dbPath}`;
-    dbCleanup = setupPrismaSqliteTestDb(dbPath);
+    setupPrismaSqliteTestDb(dbPath);
 
     const prismaModule = await import("@/lib/prisma");
     prisma = prismaModule.prisma;
@@ -28,7 +26,7 @@ describe("status snapshot atomicity and safe rounding", () => {
   });
 
   afterAll(async () => {
-    dbCleanup?.();
+    await prisma?.$disconnect();
     if (dbPath && fs.existsSync(dbPath)) {
       try {
         fs.rmSync(path.dirname(dbPath), { recursive: true, force: true });
