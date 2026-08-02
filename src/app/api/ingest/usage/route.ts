@@ -341,10 +341,9 @@ export async function POST(request: NextRequest) {
           const projectId = event.project
             ? projectIdByName.get(canonicalProjectKey(event.project)) ?? null
             : null;
-          const metadata =
-            event.project && !(event.metadata && "project" in event.metadata)
-              ? { ...(event.metadata ?? {}), project: event.project }
-              : event.metadata;
+          const metadata = event.project
+            ? { ...(event.metadata ?? {}), project: event.project }
+            : event.metadata;
           return {
             idempotencyKey: event.idempotencyKey,
             sourceApp: event.sourceApp,
