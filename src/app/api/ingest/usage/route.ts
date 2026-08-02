@@ -5,7 +5,6 @@ import { prisma } from "@/lib/prisma";
 import {
   ExternalUsageIdempotencyCollisionError,
   persistExternalUsageEvents,
-  syncStatusToUsageSnapshot,
 } from "@/lib/external-usage-events";
 import {
   MAX_USAGE_TELEMETRY_BODY_BYTES,
@@ -367,9 +366,6 @@ export async function POST(request: NextRequest) {
       }
       throw error;
     }
-
-    // Cross-app status metrics integration: Generate UsageSnapshot rows for absolute metrics.
-    await syncStatusToUsageSnapshot(persistResult.newEvents);
 
     // Wave F / E7: soft-stale budget SWR after new rows (keep last-good; force
     // background refresh). Skip pure idempotent replays with zero inserts.

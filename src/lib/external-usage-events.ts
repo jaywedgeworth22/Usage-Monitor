@@ -203,9 +203,16 @@ export async function persistExternalUsageEvents(
   // retention's tombstone+DELETE transaction. SQLite serializes those writers,
   // closing the old window where a retry could observe no tombstone, then
   // resurrect a row immediately after retention pruned it.
-  return prisma.$transaction((tx) => persistExternalUsageEventsInTransaction(tx, events), {
-    timeout: 30_000,
-  });
+  return prisma.$transaction(
+    async (tx) => {
+      const result = await persistExternalUsageEventsInTransaction(tx, events);
+      await syncStatusToUsageSnapshot(result.newEvents, tx);
+      return result;
+    },
+    {
+      timeout: 30_000,
+    }
+  );
 }
 
 type ExistingExternalUsageEvent = Awaited<
@@ -1507,11 +1514,14 @@ export function resolveStatusSnapshotProvider(
   return null;
 }
 
-export async function syncStatusToUsageSnapshot(events: ExternalUsageEventInput[]): Promise<void> {
+export async function syncStatusToUsageSnapshot(
+  events: ExternalUsageEventInput[],
+  client: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<void> {
   const statusEvents = events.filter((e) => STATUS_METRIC_TYPES.has(e.metricType));
   if (statusEvents.length === 0) return;
 
-  const allProviders = await prisma.provider.findMany({
+  const allProviders = await client.provider.findMany({
     select: {
       id: true,
       name: true,
@@ -1530,14 +1540,15 @@ export async function syncStatusToUsageSnapshot(events: ExternalUsageEventInput[
     };
 
     if (event.metricType === "quota_sync") {
-      if (event.requests != null || event.quantity != null) {
-        data.totalRequests = event.requests ?? event.quantity ?? undefined;
+      const totalRequests = event.requests ?? event.quantity ?? null;
+      if (totalRequests != null && Number.isFinite(totalRequests)) {
+        data.totalRequests = Math.round(totalRequests);
       }
       if (event.costUsd != null) data.totalCost = event.costUsd;
     } else if (event.metricType === "credit_balance") {
       data.credits = event.credits ?? event.quantity ?? undefined;
     }
 
-    await prisma.usageSnapshot.create({ data });
+    await client.usageSnapshot.create({ data });
   }
 }
