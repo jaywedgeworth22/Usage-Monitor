@@ -295,9 +295,12 @@ export async function parseUsageTelemetryV2Batch(
           raw && typeof raw === "object" && !Array.isArray(raw)
             ? (raw as { eventId?: unknown }).eventId
             : undefined;
-        const issues = isFuture
-          ? ["occurredAt cannot be in the future"]
-          : summarizeV2Issues(result.error);
+        // Invert onto the discriminant so TS narrows result.error to ZodError:
+        // isFuture is only ever true when result.success is true, so the two
+        // orderings are equivalent.
+        const issues = !result.success
+          ? summarizeV2Issues(result.error)
+          : ["occurredAt cannot be in the future"];
         rejections.push({
           index,
           ...(typeof rawEventId === "string" && rawEventId

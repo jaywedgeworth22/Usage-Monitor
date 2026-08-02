@@ -631,7 +631,8 @@ export async function summarizeExternalUsageEvents(
     }
     const summary = await summarizeExternalUsageEventsUnserialized(
       since,
-      rawCutoff
+      rawCutoff,
+      now
     );
     if (memoEnabled) {
       setUsageEventsSummaryMemo({
@@ -659,12 +660,13 @@ export async function summarizeExternalUsageEvents(
  */
 async function summarizeExternalUsageEventsUnserialized(
   since: Date,
-  rawCutoff: Date
+  rawCutoff: Date,
+  now: Date
 ): Promise<ExternalUsageEventSummary> {
   const groups = new Map<string, SummaryAccumulator>();
   const rawSince = since > rawCutoff ? since : rawCutoff;
 
-  const receiptCandidates = await rawReceiptCashCandidates(rawSince);
+  const receiptCandidates = await rawReceiptCashCandidates(rawSince, now);
   const [rawGroups, rollups, derivedCostEstimates] = await Promise.all([
     prisma.externalUsageEvent.groupBy({
       by: [
@@ -679,7 +681,7 @@ async function summarizeExternalUsageEventsUnserialized(
         "limitWindow",
       ],
       where: {
-        occurredAt: { gte: rawSince },
+        occurredAt: { gte: rawSince, lte: now },
         metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
         ...NON_RECEIPT_CANDIDATE_WHERE,
       },
