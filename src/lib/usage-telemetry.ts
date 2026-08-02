@@ -47,6 +47,7 @@ export const MAX_USAGE_TELEMETRY_BODY_BYTES = 4 * 1024 * 1024;
 // channel is meant for, while bounding the blast radius of a leaked or
 // misused token to a single ingest call.
 export const MAX_NEGATIVE_SUBSCRIPTION_COST_USD = 1000;
+export const MAX_FUTURE_OCCURRED_AT_SKEW_MS = 5 * 60 * 1_000;
 
 const metricTypes = new Set(["usage", "cost", "quota", "tier", "health", "balance", "limit", "quota_sync", "credit_balance", "subscription"]);
 const units = new Set([
@@ -239,12 +240,19 @@ async function mapV2Event(
  * (bad/missing producerId, wrong schemaVersion, non-array events, unknown
  * top-level keys) still throw, preserving the route's 400 invalid_request.
  */
+function isFutureOccurredAt(occurredAtIso?: string, now = Date.now()): boolean {
+  if (!occurredAtIso) return false;
+  const date = new Date(occurredAtIso);
+  return !Number.isNaN(date.getTime()) && date.getTime() > now + MAX_FUTURE_OCCURRED_AT_SKEW_MS;
+}
+
 export async function parseUsageTelemetryV2Batch(
   value: unknown
 ): Promise<ParsedUsageTelemetryV2Batch> {
+  const now = Date.now();
   // Fast path: the entire batch (envelope + every event) is valid.
   const whole = UsageTelemetryV2BatchSchema.safeParse(value);
-  if (whole.success) {
+  if (whole.success && !whole.data.events.some((e) => isFutureOccurredAt(e.occurredAt, now))) {
     return {
       events: await Promise.all(
         whole.data.events.map((event) => mapV2Event(whole.data, event))
@@ -279,19 +287,23 @@ export async function parseUsageTelemetryV2Batch(
   for (let index = 0; index < rawEvents.length; index += 1) {
     const raw = rawEvents[index];
     const result = UsageTelemetryV2EventSchema.safeParse(raw);
-    if (!result.success) {
+    const isFuture = result.success && isFutureOccurredAt(result.data.occurredAt, now);
+    if (!result.success || isFuture) {
       rejected += 1;
       if (rejections.length < MAX_V2_BATCH_REJECTIONS_REPORTED) {
         const rawEventId =
           raw && typeof raw === "object" && !Array.isArray(raw)
             ? (raw as { eventId?: unknown }).eventId
             : undefined;
+        const issues = isFuture
+          ? ["occurredAt cannot be in the future"]
+          : summarizeV2Issues(result.error);
         rejections.push({
           index,
           ...(typeof rawEventId === "string" && rawEventId
             ? { eventId: rawEventId.slice(0, 200) }
             : {}),
-          issues: summarizeV2Issues(result.error),
+          issues,
         });
       }
       continue;
@@ -451,6 +463,9 @@ function deriveIdempotencyKey(
 function parseEvent(value: unknown): ParsedUsageTelemetryEvent {
   const record = asRecord(value);
   const occurredAt = readDate(record, "occurredAt") ?? new Date();
+  if (occurredAt.getTime() > Date.now() + MAX_FUTURE_OCCURRED_AT_SKEW_MS) {
+    throw new Error("occurredAt cannot be in the future");
+  }
   const sourceApp = readString(record, "sourceApp", { required: true, max: 80 })!;
   const provider = readString(record, "provider", { required: true, max: 80 })!;
   const metricType = readEnum(record, "metricType", metricTypes, "usage");
