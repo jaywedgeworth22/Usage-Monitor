@@ -485,7 +485,14 @@ function databaseDirectory(): string {
 
 export interface DatabaseFileStatus {
   ok: boolean;
-  /** False when DATABASE_URL names no SQLite file, so `ok` is not a claim. */
+  /**
+   * False when `ok` is not a claim: DATABASE_URL names no SQLite file, or no
+   * baseline identity was ever captured because the pathname has never been
+   * openable in this process (mocked-prisma test environments, CI's
+   * never-created test database). Identity checking begins once a baseline
+   * exists - in production that is instrumentation register(), which runs
+   * after the startup wrapper's restore guarantees the file is present.
+   */
   checked: boolean;
   reason:
     | "database_file_unlinked"
@@ -503,8 +510,7 @@ export interface DatabaseFileStatus {
   pathPresent: boolean | null;
   /**
    * False when no startup identity could be recorded (the file was unopenable
-   * at capture time). Replacement/unlink detection is unavailable in that
-   * state; only pathname existence is still authoritative.
+   * at capture time). `checked` is false in that state - see above.
    */
   baselineCaptured: boolean;
   cached: boolean;
@@ -532,9 +538,10 @@ export function captureDatabaseFileBaseline(): void {
     const stats = fstatSync(fd);
     state.databaseFile = { dev: stats.dev, ino: stats.ino, fd };
   } catch {
-    // No baseline: the caller (register(), or the first readiness probe) will
-    // retry. A missing/unreadable file is reported by getDatabaseFileStatus
-    // rather than swallowed here.
+    // No baseline: the caller (register(), or the next readiness probe) will
+    // retry. Until a capture succeeds, getDatabaseFileStatus reports
+    // `checked:false` - identity checking cannot start against a file that
+    // has never been openable in this process.
     if (fd !== null) {
       try {
         closeSync(fd);
@@ -553,10 +560,16 @@ export function captureDatabaseFileBaseline(): void {
  *
  * - `database_file_unlinked` - the open inode has zero links. The live data
  *   exists only as this process's descriptor; restarting destroys it.
- * - `database_file_missing`  - the pathname is gone and no baseline descriptor
- *   is held, so nothing can be recovered from this process.
+ * - `database_file_missing`  - the pathname is gone (e.g. renamed away) while
+ *   the inode this process opened still has a link somewhere else.
  * - `database_file_replaced` - the pathname now resolves to a different
  *   device/inode than the one opened at startup (silent replacement).
+ *
+ * Every failure verdict is relative to the baseline captured at startup. When
+ * no baseline was ever captured - the pathname was never openable in this
+ * process - there is nothing to compare against and no claim is made
+ * (`ok:true, checked:false`), which keeps mocked-prisma test suites and CI
+ * (whose DATABASE_URL file is never created) transparent to this check.
  *
  * The absolute path is deliberately never reported: /api/ready is public.
  */
@@ -582,10 +595,26 @@ export function getDatabaseFileStatus(now = new Date()): DatabaseFileStatus {
 
   captureDatabaseFileBaseline();
   const baseline = state.databaseFile;
+  if (!baseline) {
+    // Never-captured baseline: the pathname has never been openable in this
+    // process, so there is no identity to defend and no claim to make.
+    // Deliberately not cached - every probe retries capture until the file
+    // exists, at which point checking begins.
+    return {
+      ok: true,
+      checked: false,
+      reason: null,
+      linkCount: null,
+      pathPresent: null,
+      baselineCaptured: false,
+      cached: false,
+      checkedAt,
+    };
+  }
 
   let linkCount: number | null = null;
   let baselineStatFailed = false;
-  if (baseline?.fd != null) {
+  if (baseline.fd != null) {
     try {
       linkCount = fstatSync(baseline.fd).nlink;
     } catch {
@@ -610,7 +639,7 @@ export function getDatabaseFileStatus(now = new Date()): DatabaseFileStatus {
           reason: "database_file_stat_failed",
           linkCount,
           pathPresent: null,
-          baselineCaptured: baseline != null,
+          baselineCaptured: true,
           cached: false,
           checkedAt,
         },
@@ -629,8 +658,7 @@ export function getDatabaseFileStatus(now = new Date()): DatabaseFileStatus {
         ? "database_file_missing"
         : baselineStatFailed
           ? "database_file_stat_failed"
-          : baseline &&
-              pathStats &&
+          : pathStats &&
               (pathStats.dev !== baseline.dev || pathStats.ino !== baseline.ino)
             ? "database_file_replaced"
             : null;
@@ -642,7 +670,7 @@ export function getDatabaseFileStatus(now = new Date()): DatabaseFileStatus {
       reason,
       linkCount,
       pathPresent,
-      baselineCaptured: baseline != null,
+      baselineCaptured: true,
       cached: false,
       checkedAt,
     },

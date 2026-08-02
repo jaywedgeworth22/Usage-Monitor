@@ -1,7 +1,7 @@
 import { mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   captureDatabaseFileBaseline,
   getBackupRuntimeStatus,
@@ -199,6 +199,69 @@ describe("runtime health state", () => {
     });
   });
 
+  it("accepts the replica heartbeat JSON contract written by the Oracle probe", () => {
+    const dir = mkdtempSync(join(tmpdir(), "usage-monitor-replica-status-"));
+    const statusPath = join(dir, ".litestream-replica-status.json");
+    const now = new Date("2026-08-01T12:00:00.000Z");
+    try {
+      vi.stubEnv("LITESTREAM_REQUIRED", "true");
+      vi.stubEnv("LITESTREAM_ACTIVE", "true");
+      vi.stubEnv("LITESTREAM_REPLICA_STATUS_PATH", statusPath);
+
+      // Shape written by deploy/oracle/replica-status-probe.sh. It omits
+      // `ageSeconds` ON PURPOSE: the parser prefers ageSeconds over
+      // checkedAt, and a frozen ageSeconds in a file left behind by a dead
+      // probe would pass forever. checkedAt must drive staleness.
+      writeFileSync(
+        statusPath,
+        JSON.stringify({
+          ok: true,
+          checkedAt: "2026-08-01T11:55:00Z",
+          ltxAgeSeconds: 42,
+          reason: null,
+        })
+      );
+      expect(getBackupRuntimeStatus(now)).toMatchObject({
+        envOnly: false,
+        replicaOk: true,
+        replicaAgeSeconds: 300,
+        reason: null,
+      });
+
+      // A probe that stopped running ages out via checkedAt (fail closed).
+      writeFileSync(
+        statusPath,
+        JSON.stringify({
+          ok: true,
+          checkedAt: "2026-08-01T10:00:00Z",
+          ltxAgeSeconds: 42,
+          reason: null,
+        })
+      );
+      expect(getBackupRuntimeStatus(now)).toMatchObject({
+        replicaOk: false,
+        reason: "replica_status_stale",
+      });
+
+      // A fresh but unhealthy verdict fails immediately.
+      writeFileSync(
+        statusPath,
+        JSON.stringify({
+          ok: false,
+          checkedAt: "2026-08-01T11:59:00Z",
+          ltxAgeSeconds: 9000,
+          reason: "ltx_age_exceeds_budget",
+        })
+      );
+      expect(getBackupRuntimeStatus(now)).toMatchObject({
+        replicaOk: false,
+        reason: "replica_status_unhealthy",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("allows an explicit opt-out from replica verification", () => {
     vi.stubEnv("LITESTREAM_REQUIRED", "true");
     vi.stubEnv("LITESTREAM_ACTIVE", "true");
@@ -212,6 +275,171 @@ describe("runtime health state", () => {
     });
   });
 
+  describe("database file identity", () => {
+    // Date-derived probe times, never the wall clock: getDatabaseFileStatus
+    // caches a healthy verdict for 5s keyed on the `now` it is given, so each
+    // probe passes an explicit instant derived from this fixed origin.
+    const T0 = new Date("2026-08-01T12:00:00.000Z");
+    const at = (offsetMs: number) => new Date(T0.getTime() + offsetMs);
+
+    const makeDatabaseFixture = () => {
+      const dir = mkdtempSync(join(tmpdir(), "usage-monitor-dbfile-"));
+      const dbPath = join(dir, "prod.db");
+      writeFileSync(dbPath, "not-actually-sqlite\n");
+      vi.stubEnv("DATABASE_URL", `file:${dbPath}`);
+      return { dir, dbPath };
+    };
+
+    it("makes no claim when DATABASE_URL is absent or not a file: URL", () => {
+      const unchecked = {
+        ok: true,
+        checked: false,
+        reason: null,
+        linkCount: null,
+        pathPresent: null,
+        baselineCaptured: false,
+      };
+      expect(getDatabaseFileStatus(T0)).toMatchObject(unchecked);
+
+      vi.stubEnv("DATABASE_URL", "postgres://example.invalid/usage");
+      expect(getDatabaseFileStatus(at(1))).toMatchObject(unchecked);
+    });
+
+    it("makes no claim when the file was never openable (mocked-prisma CI database)", () => {
+      // CI sets DATABASE_URL=file:$RUNNER_TEMP/api-usage-monitor-ci.db but the
+      // unit suite mocks prisma, so that file never exists. Identity checking
+      // must stay transparent there instead of reporting a false incident.
+      const dir = mkdtempSync(join(tmpdir(), "usage-monitor-dbfile-"));
+      try {
+        vi.stubEnv("DATABASE_URL", `file:${join(dir, "never-created.db")}`);
+        expect(getDatabaseFileStatus(T0)).toMatchObject({
+          ok: true,
+          checked: false,
+          reason: null,
+          baselineCaptured: false,
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("reports a healthy checked verdict and caches it briefly once the baseline exists", () => {
+      const { dir } = makeDatabaseFixture();
+      try {
+        captureDatabaseFileBaseline();
+        expect(getDatabaseFileStatus(T0)).toMatchObject({
+          ok: true,
+          checked: true,
+          reason: null,
+          linkCount: 1,
+          pathPresent: true,
+          baselineCaptured: true,
+          cached: false,
+        });
+        // Within the success TTL the verdict is reused; after it, recomputed.
+        expect(getDatabaseFileStatus(at(4_000))).toMatchObject({
+          ok: true,
+          cached: true,
+        });
+        expect(getDatabaseFileStatus(at(6_000))).toMatchObject({
+          ok: true,
+          cached: false,
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("detects the incident: a deleted-but-open database reports database_file_unlinked", () => {
+      const { dir, dbPath } = makeDatabaseFixture();
+      try {
+        captureDatabaseFileBaseline();
+        expect(getDatabaseFileStatus(T0).ok).toBe(true);
+
+        rmSync(dbPath);
+        // 6s after the healthy probe so the success cache has expired; a
+        // failing verdict is then recomputed live on every later probe.
+        expect(getDatabaseFileStatus(at(6_000))).toMatchObject({
+          ok: false,
+          checked: true,
+          reason: "database_file_unlinked",
+          linkCount: 0,
+          pathPresent: false,
+          baselineCaptured: true,
+          cached: false,
+        });
+        // Failures are never cached: the very next probe stays live.
+        expect(getDatabaseFileStatus(at(6_001))).toMatchObject({
+          ok: false,
+          cached: false,
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("reports database_file_missing when the pathname is renamed away from a still-linked inode", () => {
+      const { dir, dbPath } = makeDatabaseFixture();
+      try {
+        captureDatabaseFileBaseline();
+        renameSync(dbPath, join(dir, "prod.db.moved"));
+        expect(getDatabaseFileStatus(T0)).toMatchObject({
+          ok: false,
+          checked: true,
+          reason: "database_file_missing",
+          linkCount: 1,
+          pathPresent: false,
+          baselineCaptured: true,
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("reports database_file_replaced when the pathname resolves to a different inode", () => {
+      const { dir, dbPath } = makeDatabaseFixture();
+      try {
+        const originalIno = statSync(dbPath).ino;
+        captureDatabaseFileBaseline();
+        // Rename (keeping the original inode linked) then write a new file at
+        // the same pathname, so the failure is purely identity, not deletion.
+        renameSync(dbPath, join(dir, "prod.db.orig"));
+        writeFileSync(dbPath, "a different database\n");
+        expect(statSync(dbPath).ino).not.toBe(originalIno);
+
+        expect(getDatabaseFileStatus(T0)).toMatchObject({
+          ok: false,
+          checked: true,
+          reason: "database_file_replaced",
+          linkCount: 1,
+          pathPresent: true,
+          baselineCaptured: true,
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("clears the baseline and cache via resetRuntimeHealthForTests", () => {
+      const { dir, dbPath } = makeDatabaseFixture();
+      try {
+        captureDatabaseFileBaseline();
+        rmSync(dbPath);
+        expect(getDatabaseFileStatus(T0).ok).toBe(false);
+
+        // After a reset the deleted file can no longer be re-opened, so the
+        // check returns to the no-claim state instead of a stale verdict.
+        resetRuntimeHealthForTests();
+        expect(getDatabaseFileStatus(at(1))).toMatchObject({
+          ok: true,
+          checked: false,
+          baselineCaptured: false,
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
 
   it("tolerates one transient failure but fails repeated, stalled, and stale ticks", () => {
     vi.stubEnv("SCHEDULER_STALE_AFTER_MS", "1000");
