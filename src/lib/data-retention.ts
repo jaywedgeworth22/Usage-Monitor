@@ -2,6 +2,11 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
+import {
+  backfillUnattributedProjectIds,
+  buildCanonicalProjectIdMap,
+  resolveProjectIdsByName,
+} from "@/lib/project-resolver";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_SNAPSHOT_RETENTION_DAYS = 45;
@@ -108,6 +113,7 @@ export interface DataRetentionResult {
   snapshotRetentionDays: number;
   externalEventRetentionDays: number;
   tombstoneRetentionDays: number;
+  projectAttributionBackfill: { scanned: number; updated: number; truncated: boolean };
   usageSnapshots: DataRetentionTableResult;
   externalUsageEvents: DataRetentionTableResult & { tombstonesWritten: number };
   /** Tombstones are retained permanently; this is the live table size (Wave K / E14). */
@@ -930,6 +936,13 @@ export async function runDataRetentionMaintenance(now = new Date()): Promise<Dat
   // new rollups merge with corrected historical buckets.
   await rehashStaleExternalUsageEventDailyRollupGroupKeys({ batchSize });
 
+  let projectAttributionBackfill = { scanned: 0, updated: 0, truncated: false };
+  try {
+    projectAttributionBackfill = await backfillUnattributedProjectIds({ batchSize });
+  } catch (error) {
+    console.warn("[data-retention] project attribution backfill failed (non-fatal):", error);
+  }
+
   const usageSnapshots = await pruneUsageSnapshots(
     getSnapshotRawCutoff(now),
     batchSize,
@@ -990,6 +1003,7 @@ export async function runDataRetentionMaintenance(now = new Date()): Promise<Dat
     snapshotRetentionDays,
     externalEventRetentionDays,
     tombstoneRetentionDays,
+    projectAttributionBackfill,
     usageSnapshots,
     externalUsageEvents,
     tombstoneCount,
