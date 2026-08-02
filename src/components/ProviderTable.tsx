@@ -69,7 +69,7 @@ function providerStatusStyle(provider: Provider): {
 } {
   if (!provider.isActive) {
     return {
-      badge: "bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-400",
+      badge: "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
       dot: "bg-gray-300",
     };
   }
