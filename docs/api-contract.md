@@ -35,10 +35,10 @@ Base URL (production): `https://usage.jays.services`
   clients, the typed body above (code `internal_error`, `retryable: true`) for
   v2 clients and `POST /api/otlp/v1/metrics`. The receiver never intentionally
   returns an untyped HTML 500.
-- **Rate limiting** is per authenticated identity (a hash of the presented
+- **Rate limiting** is per authenticated credential (a hash of the presented
   token), 10 rps, checked after authentication; unauthenticated traffic is
-  throttled separately by a topology-aware IP backstop. One producer bursting
-  cannot consume another producer's budget.
+  throttled separately by a topology-aware IP backstop. Per-producer isolation
+  requires per-producer tokens (`USAGE_INGEST_PRODUCER_TOKENS`).
 
 ## `POST /api/ingest/usage`
 
