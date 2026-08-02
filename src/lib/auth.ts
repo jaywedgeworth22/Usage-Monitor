@@ -88,3 +88,40 @@ export function shouldEnforceDashboardSession(): boolean {
   }
   return Boolean(process.env.SESSION_SECRET?.trim());
 }
+
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * CSRF guard for cookie-authenticated mutators. `dashboard_session` is
+ * SameSite=Lax, but SameSite is scoped per-SITE (jays.services), not
+ * per-origin — a sibling *.jays.services page is "same-site", so the
+ * browser DOES attach the cookie to its cross-origin POSTs. Switching to
+ * "strict" would not help; the origin must be checked explicitly.
+ *
+ * Header-absent requests are allowed deliberately: browsers always send
+ * Origin on unsafe methods, while the iOS client (URLSession, cookie-authed)
+ * sends neither Origin nor Sec-Fetch-Site.
+ */
+export function isCsrfSafeRequest(request: {
+  method: string;
+  headers: { get: (name: string) => string | null };
+}): boolean {
+  if (!UNSAFE_METHODS.has(request.method.toUpperCase())) return true;
+
+  const secFetchSite = request.headers.get("sec-fetch-site");
+  if (secFetchSite && secFetchSite !== "same-origin" && secFetchSite !== "none") {
+    return false; // catches "same-site" (sibling-subdomain) and "cross-site"
+  }
+
+  const origin = request.headers.get("origin");
+  if (!origin) return true; // native client; browsers send Origin on unsafe methods
+  if (origin === "null") return false;
+
+  const host = request.headers.get("host");
+  if (!host) return false;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}

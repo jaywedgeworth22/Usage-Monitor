@@ -1,5 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
+import {
+  SESSION_COOKIE_NAME,
+  isCsrfSafeRequest,
+  verifySessionToken,
+} from "@/lib/auth";
 
 export const config = {
   runtime: "nodejs",
@@ -86,7 +89,12 @@ export function middleware(request: NextRequest) {
   const isAuthenticated = verifySessionToken(token);
 
   let response: NextResponse;
-  if (isAuthenticated || isPublicPath(request.nextUrl.pathname)) {
+  if (token && !isCsrfSafeRequest(request)) {
+    response = NextResponse.json(
+      { error: "Cross-origin request rejected" },
+      { status: 403, headers: requestHeaders }
+    );
+  } else if (isAuthenticated || isPublicPath(request.nextUrl.pathname)) {
     response = NextResponse.next({
       request: {
         headers: requestHeaders,
