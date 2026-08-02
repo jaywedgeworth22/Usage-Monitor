@@ -145,7 +145,7 @@ export function ComplianceSummaryPanel({
           <dt className="text-xs text-gray-500 dark:text-gray-400">Verified coverage</dt>
           <dd className="text-sm tabular-nums text-gray-900 dark:text-gray-100">
             {verifiedCoverage == null ? (
-              <span className="text-gray-400 dark:text-gray-500">n/a</span>
+              <span className="text-gray-500 dark:text-gray-400">n/a</span>
             ) : (
               <>
                 {formatPercent(verifiedCoverage)}{" "}

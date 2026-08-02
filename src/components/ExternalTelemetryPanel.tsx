@@ -287,7 +287,7 @@ export default function ExternalTelemetryPanel({ usageSummary }: ExternalTelemet
                           </p>
                         </div>
                       ) : (
-                        <span className="text-xs text-gray-400 dark:text-gray-500">-</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-400">-</span>
                       )}
                     </td>
                   </tr>
