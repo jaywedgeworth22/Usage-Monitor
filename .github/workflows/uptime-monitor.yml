@@ -345,16 +345,25 @@ jobs:
             exit 0
           fi
 
-          main_committed_at=$(gh api "repos/$GITHUB_REPOSITORY/commits/$main_sha" --jq '.commit.committer.date' 2>/dev/null) || {
-            echo "Could not read main HEAD commit time; skipping drift check."
+          # Age of the OLDEST undeployed commit, not main HEAD: continuous
+          # merge activity keeps resetting HEAD's age, which would suppress
+          # the alert indefinitely on a busy day while production stays
+          # stale. compare lists commits oldest-first, so .commits[0] is the
+          # first commit production is missing.
+          oldest_committed_at=$(gh api "repos/$GITHUB_REPOSITORY/compare/$LIVE_REVISION...$main_sha" --jq '.commits[0].commit.committer.date // empty' 2>/dev/null) || {
+            echo "Could not compare live revision to main; skipping drift check."
             exit 0
           }
-          main_epoch=$(date -u -d "$main_committed_at" +%s 2>/dev/null) || {
-            echo "Could not parse commit time '$main_committed_at'; skipping drift check."
+          if [ -z "$oldest_committed_at" ]; then
+            echo "No undeployed commits found in compare; skipping drift check."
+            exit 0
+          fi
+          oldest_epoch=$(date -u -d "$oldest_committed_at" +%s 2>/dev/null) || {
+            echo "Could not parse commit time '$oldest_committed_at'; skipping drift check."
             exit 0
           }
-          age_minutes=$(( ( $(date -u +%s) - main_epoch ) / 60 ))
-          echo "Live $LIVE_REVISION vs main $main_sha; main HEAD age ${age_minutes}m (grace ${DRIFT_GRACE_MINUTES}m)."
+          age_minutes=$(( ( $(date -u +%s) - oldest_epoch ) / 60 ))
+          echo "Live $LIVE_REVISION vs main $main_sha; oldest undeployed commit age ${age_minutes}m (grace ${DRIFT_GRACE_MINUTES}m)."
           if [ "$age_minutes" -le "$DRIFT_GRACE_MINUTES" ]; then
             echo "Inside the deploy grace window; not flagging."
             exit 0
