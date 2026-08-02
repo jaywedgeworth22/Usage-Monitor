@@ -237,3 +237,24 @@ public contract.
   }
 ]
 ```
+
+## Boundary: `GET /api/usage-events` is not public
+
+`GET /api/usage-events` (summary mode and `?raw=1` per-event mode) is
+**dashboard-session-only by design**. It is deliberately absent from the
+middleware's public-path list, so every request without a valid dashboard
+session cookie gets a `401` from the middleware before the route runs — the
+`USAGE_READ_TOKEN` accepted by `/api/budget-status` and `/api/subscriptions`
+does **not** work here, in any header form.
+
+Rationale: `budget-status` (aggregates) and the daily-rollups export are the
+intended external read paths. Raw per-event telemetry (idempotency keys,
+per-request cost rows, verification status) stays behind the interactive
+dashboard session.
+
+Operational consequence, stated so nobody rediscovers it mid-incident:
+**headless debugging goes through a session cookie or does not happen.**
+Obtain a session via the dashboard login and replay its cookie; do not add a
+bearer/token surface to this route, and do not add it to the middleware
+public-path list. Anyone who believes this boundary should change must change
+this contract first, not the code.

@@ -1,4 +1,6 @@
-node_modules/
+# No trailing slash: agent worktrees symlink node_modules, and `node_modules/`
+# only matches real directories — `git add -A` would commit the symlink itself.
+node_modules
 .next/
 .env
 *.log
