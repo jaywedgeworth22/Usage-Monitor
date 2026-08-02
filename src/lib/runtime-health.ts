@@ -1,4 +1,12 @@
-import { existsSync, readFileSync, statfsSync, statSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  statfsSync,
+  statSync,
+} from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import packageJson from "../../package.json";
 import type { CloudflareLegacyHandoffStatus } from "@/lib/external-billing-subscription-adoption";
@@ -83,8 +91,20 @@ function providerFetchDegradedTickThreshold(): number {
     : DEFAULT_PROVIDER_FETCH_DEGRADED_TICK_THRESHOLD;
 }
 
+// Identity of the SQLite file this process actually serves from: the device
+// and inode the pathname resolved to at capture time, plus a read-only
+// descriptor held open on that same inode so its link count stays observable
+// after the pathname is gone. See getDatabaseFileStatus.
+interface DatabaseFileBaseline {
+  dev: number;
+  ino: number;
+  fd: number | null;
+}
+
 interface RuntimeHealthState {
   scheduler: SchedulerRuntimeStatus;
+  databaseFile: DatabaseFileBaseline | null;
+  databaseFileCache: { status: DatabaseFileStatus; expiresAtMs: number } | null;
 }
 
 const globalForRuntimeHealth = globalThis as typeof globalThis & {
@@ -106,6 +126,8 @@ const state =
       firstProviderFetchDegradedAt: null,
       lastRun: null,
     },
+    databaseFile: null,
+    databaseFileCache: null,
   });
 
 function normalizeSchedulerRunSummary(
@@ -278,6 +300,14 @@ export interface BackupRuntimeStatus {
   /** null = no side-channel configured; false = side-channel says unhealthy/stale. */
   replicaOk: boolean | null;
   replicaAgeSeconds: number | null;
+  /**
+   * True when an env-only backup claim is NOT enough to report ready — i.e. a
+   * required backup must be proved by the replica side-channel. Opt out with
+   * LITESTREAM_REPLICA_VERIFICATION_REQUIRED=false (disposable/rollback hosts
+   * and the single deploy that installs the status-file producer), mirroring
+   * the STARTUP_WRAPPER_REQUIRED escape hatch below.
+   */
+  verificationRequired: boolean;
   reason: string | null;
 }
 
@@ -296,6 +326,12 @@ export interface BackupRuntimeStatus {
 export function getBackupRuntimeStatus(now = new Date()): BackupRuntimeStatus {
   const required = process.env.LITESTREAM_REQUIRED === "true";
   const active = process.env.LITESTREAM_ACTIVE === "true";
+  // LITESTREAM_ACTIVE/APP_STARTUP_WRAPPER are startup-only strings: Litestream
+  // timing out against Garage for hours changes neither, so an env-only claim
+  // is not evidence the replica is advancing. Fail closed by default and make
+  // the side-channel mandatory wherever backup is required.
+  const verificationRequired =
+    process.env.LITESTREAM_REPLICA_VERIFICATION_REQUIRED !== "false";
   const statusPath = process.env.LITESTREAM_REPLICA_STATUS_PATH?.trim() || null;
   const maxAgeRaw = process.env.LITESTREAM_REPLICA_MAX_AGE_SECONDS?.trim();
   const maxAgeSeconds = maxAgeRaw
@@ -311,6 +347,7 @@ export function getBackupRuntimeStatus(now = new Date()): BackupRuntimeStatus {
       envOnly: true,
       replicaOk: null,
       replicaAgeSeconds: null,
+      verificationRequired,
       reason: active ? "env_active_unverified" : null,
     };
   }
@@ -323,6 +360,7 @@ export function getBackupRuntimeStatus(now = new Date()): BackupRuntimeStatus {
         envOnly: false,
         replicaOk: false,
         replicaAgeSeconds: null,
+        verificationRequired,
         reason: "replica_status_missing",
       };
     }
@@ -367,6 +405,7 @@ export function getBackupRuntimeStatus(now = new Date()): BackupRuntimeStatus {
       envOnly: false,
       replicaOk: sideOk,
       replicaAgeSeconds: ageSeconds,
+      verificationRequired,
       reason: sideOk
         ? null
         : ageSeconds != null && ageSeconds > maxAge
@@ -380,6 +419,7 @@ export function getBackupRuntimeStatus(now = new Date()): BackupRuntimeStatus {
       envOnly: false,
       replicaOk: false,
       replicaAgeSeconds: null,
+      verificationRequired,
       reason: "replica_status_unreadable",
     };
   }
@@ -423,18 +463,232 @@ function diskWarnFreeBytes(): number {
     : DEFAULT_DISK_WARN_FREE_BYTES;
 }
 
+// The absolute path of the SQLite file DATABASE_URL names, or null when
+// DATABASE_URL is absent or not a `file:` URL (dev/test against a non-SQLite
+// datasource). Any `?query` suffix Prisma accepts (connection_limit, etc.) is
+// stripped - see withConnectionLimit in prisma.ts.
+function databaseFilePath(): string | null {
+  const url = process.env.DATABASE_URL ?? "";
+  if (!url.startsWith("file:")) return null;
+  const raw = url.slice("file:".length).split("?")[0];
+  if (raw.length === 0) return null;
+  return isAbsolute(raw) ? raw : resolve(process.cwd(), raw);
+}
+
 // The SQLite file's directory is the filesystem whose exhaustion would stop
 // the writer (production: /data on its own block volume). Fall back to the
 // process working directory when DATABASE_URL is absent or not a file: URL.
 function databaseDirectory(): string {
-  const url = process.env.DATABASE_URL ?? "";
-  if (url.startsWith("file:")) {
-    const raw = url.slice("file:".length);
-    if (raw.length > 0) {
-      return dirname(isAbsolute(raw) ? raw : resolve(process.cwd(), raw));
+  const path = databaseFilePath();
+  return path ? dirname(path) : process.cwd();
+}
+
+export interface DatabaseFileStatus {
+  ok: boolean;
+  /**
+   * False when `ok` is not a claim: DATABASE_URL names no SQLite file, or no
+   * baseline identity was ever captured because the pathname has never been
+   * openable in this process (mocked-prisma test environments, CI's
+   * never-created test database). Identity checking begins once a baseline
+   * exists - in production that is instrumentation register(), which runs
+   * after the startup wrapper's restore guarantees the file is present.
+   */
+  checked: boolean;
+  reason:
+    | "database_file_unlinked"
+    | "database_file_missing"
+    | "database_file_replaced"
+    | "database_file_stat_failed"
+    | null;
+  /**
+   * Hard links to the inode this process has open. 0 means the live database
+   * exists ONLY as this process's open descriptor - see
+   * docs/runbooks/sqlite-data-loss-incident.md before restarting anything.
+   */
+  linkCount: number | null;
+  /** Whether the DATABASE_URL pathname currently resolves at all. */
+  pathPresent: boolean | null;
+  /**
+   * False when no startup identity could be recorded (the file was unopenable
+   * at capture time). `checked` is false in that state - see above.
+   */
+  baselineCaptured: boolean;
+  cached: boolean;
+  checkedAt: string;
+}
+
+// Success TTL mirrors /api/ready's own success cache: a healthy verdict is
+// reused briefly to keep the probe path cheap, while every failing verdict is
+// recomputed live so recovery is visible immediately.
+const DATABASE_FILE_STATUS_CACHE_TTL_MS = 5_000;
+
+// Records the device/inode the pathname resolves to and holds a read-only
+// descriptor open on that same inode. The descriptor takes no SQLite lock and
+// keeps nothing alive that unlink would otherwise free; it exists purely so
+// `nlink` of the inode the process serves from stays readable after the
+// pathname is gone. Safe to call repeatedly - it is a no-op once captured, and
+// it never throws.
+export function captureDatabaseFileBaseline(): void {
+  if (state.databaseFile) return;
+  const path = databaseFilePath();
+  if (!path) return;
+  let fd: number | null = null;
+  try {
+    fd = openSync(path, "r");
+    const stats = fstatSync(fd);
+    state.databaseFile = { dev: stats.dev, ino: stats.ino, fd };
+  } catch {
+    // No baseline: the caller (register(), or the next readiness probe) will
+    // retry. Until a capture succeeds, getDatabaseFileStatus reports
+    // `checked:false` - identity checking cannot start against a file that
+    // has never been openable in this process.
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // best effort
+      }
     }
   }
-  return process.cwd();
+}
+
+/**
+ * Whether the SQLite file this process serves from still is the file its
+ * pathname names. `SELECT 1` cannot answer this: an open descriptor on an
+ * unlinked inode answers it happily, and so does a descriptor whose pathname
+ * has since been replaced by a different database. Three distinct failures:
+ *
+ * - `database_file_unlinked` - the open inode has zero links. The live data
+ *   exists only as this process's descriptor; restarting destroys it.
+ * - `database_file_missing`  - the pathname is gone (e.g. renamed away) while
+ *   the inode this process opened still has a link somewhere else.
+ * - `database_file_replaced` - the pathname now resolves to a different
+ *   device/inode than the one opened at startup (silent replacement).
+ *
+ * Every failure verdict is relative to the baseline captured at startup. When
+ * no baseline was ever captured - the pathname was never openable in this
+ * process - there is nothing to compare against and no claim is made
+ * (`ok:true, checked:false`), which keeps mocked-prisma test suites and CI
+ * (whose DATABASE_URL file is never created) transparent to this check.
+ *
+ * The absolute path is deliberately never reported: /api/ready is public.
+ */
+export function getDatabaseFileStatus(now = new Date()): DatabaseFileStatus {
+  const cached = state.databaseFileCache;
+  if (cached && now.getTime() < cached.expiresAtMs) {
+    return { ...cached.status, cached: true };
+  }
+  const checkedAt = now.toISOString();
+  const path = databaseFilePath();
+  if (!path) {
+    return {
+      ok: true,
+      checked: false,
+      reason: null,
+      linkCount: null,
+      pathPresent: null,
+      baselineCaptured: false,
+      cached: false,
+      checkedAt,
+    };
+  }
+
+  captureDatabaseFileBaseline();
+  const baseline = state.databaseFile;
+  if (!baseline) {
+    // Never-captured baseline: the pathname has never been openable in this
+    // process, so there is no identity to defend and no claim to make.
+    // Deliberately not cached - every probe retries capture until the file
+    // exists, at which point checking begins.
+    return {
+      ok: true,
+      checked: false,
+      reason: null,
+      linkCount: null,
+      pathPresent: null,
+      baselineCaptured: false,
+      cached: false,
+      checkedAt,
+    };
+  }
+
+  let linkCount: number | null = null;
+  let baselineStatFailed = false;
+  if (baseline.fd != null) {
+    try {
+      linkCount = fstatSync(baseline.fd).nlink;
+    } catch {
+      baselineStatFailed = true;
+    }
+  }
+
+  let pathPresent: boolean;
+  let pathStats: { dev: number; ino: number } | null = null;
+  try {
+    const stats = statSync(path);
+    pathPresent = true;
+    pathStats = { dev: stats.dev, ino: stats.ino };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+      pathPresent = false;
+    } else {
+      return finalizeDatabaseFileStatus(
+        {
+          ok: false,
+          checked: true,
+          reason: "database_file_stat_failed",
+          linkCount,
+          pathPresent: null,
+          baselineCaptured: true,
+          cached: false,
+          checkedAt,
+        },
+        now
+      );
+    }
+  }
+
+  // Ordered most-actionable first: an unlinked open inode is the state in
+  // which a restart or redeploy permanently destroys the only remaining copy,
+  // so it outranks the pathname-shaped reasons even though both are true.
+  const reason: DatabaseFileStatus["reason"] =
+    linkCount === 0
+      ? "database_file_unlinked"
+      : !pathPresent
+        ? "database_file_missing"
+        : baselineStatFailed
+          ? "database_file_stat_failed"
+          : pathStats &&
+              (pathStats.dev !== baseline.dev || pathStats.ino !== baseline.ino)
+            ? "database_file_replaced"
+            : null;
+
+  return finalizeDatabaseFileStatus(
+    {
+      ok: reason === null,
+      checked: true,
+      reason,
+      linkCount,
+      pathPresent,
+      baselineCaptured: true,
+      cached: false,
+      checkedAt,
+    },
+    now
+  );
+}
+
+function finalizeDatabaseFileStatus(
+  status: DatabaseFileStatus,
+  now: Date
+): DatabaseFileStatus {
+  state.databaseFileCache = status.ok
+    ? {
+        status,
+        expiresAtMs: now.getTime() + DATABASE_FILE_STATUS_CACHE_TTL_MS,
+      }
+    : null;
+  return status;
 }
 
 export function getDiskRuntimeStatus(): {
@@ -490,4 +744,13 @@ export function resetRuntimeHealthForTests(): void {
     firstProviderFetchDegradedAt: null,
     lastRun: null,
   };
+  if (state.databaseFile?.fd != null) {
+    try {
+      closeSync(state.databaseFile.fd);
+    } catch {
+      // best effort - the descriptor is process-local test state
+    }
+  }
+  state.databaseFile = null;
+  state.databaseFileCache = null;
 }
