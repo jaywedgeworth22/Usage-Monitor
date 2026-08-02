@@ -17,7 +17,8 @@ permissions:
 jobs:
   # INVARIANT: this job's conclusion is engineered to equal the readiness-probe
   # outcome and nothing else. Every side-effect step (issue open/close,
-  # PagerDuty trigger/resolve) and the streak counter are continue-on-error, so
+  # PagerDuty trigger/resolve, release-drift detection/alerting) and the streak
+  # counter are continue-on-error, so
   # their failures are logged but can never flip the run's conclusion. The ONLY
   # step permitted to fail the run is the final readiness gate, which fails iff
   # the probe failed. That invariant is what makes counting prior-run
@@ -45,6 +46,17 @@ jobs:
       FAILURE_THRESHOLD: 3
       INCIDENT_TITLE: "[Uptime] Usage Monitor Oracle origin readiness failure"
       PAGERDUTY_DEDUP_KEY: "usage-monitor-oracle-origin-readiness"
+      # Release-drift alerting: a process can be fully "ready" while pinned N
+      # commits behind main (the host poller writes blocked-sha and exits 0,
+      # keeping its systemd timer green; Oracle Production Deploy only fails
+      # once per merge). Drift is flagged only when SUSTAINED: main HEAD must
+      # be older than this many minutes before the live revision counts as
+      # stale. 360 sits comfortably above the 240-minute deploy transaction
+      # ceiling in oracle-production-deploy.yml, so a legitimate in-flight
+      # deploy can never raise the alert — stateless and self-healing, no
+      # cross-run bookkeeping needed.
+      DRIFT_GRACE_MINUTES: 360
+      DRIFT_INCIDENT_TITLE: "[Uptime] Usage Monitor production is stale vs main"
       # GitHub-hosted runner IPs receive Cloudflare 403 bot challenges. Probe
       # the reserved Oracle origin with the public hostname retained for TLS;
       # UptimeRobot independently covers the Cloudflare-proxied public URL.
@@ -91,9 +103,18 @@ jobs:
             status="fail"
           fi
 
-          echo "http_code=$http_code" >> "$GITHUB_OUTPUT"
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          echo "Readiness status=$status http=$http_code"
+          # The same body carries `revision` (GIT_COMMIT_SHA baked into the
+          # production container) — surface it for the release-drift step so
+          # drift detection costs zero extra HTTP requests. Failure to extract
+          # degrades to an empty string, never a nonzero exit.
+          revision=$(jq -r '.revision // ""' "$body_file" 2>/dev/null) || revision=""
+
+          {
+            echo "http_code=$http_code"
+            echo "status=$status"
+            echo "revision=$revision"
+          } >> "$GITHUB_OUTPUT"
+          echo "Readiness status=$status http=$http_code revision=${revision:-unknown}"
 
       # Counts how many of the most recently *completed* prior runs of this
       # workflow+branch failed in a row, +1 for this failing check. Because of
@@ -282,6 +303,137 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$payload") || http_code="000"
           echo "PagerDuty resolve HTTP $http_code"
+
+      # ---- Release drift (stale production vs main) ----
+      # Detects the gap the readiness probe is structurally blind to: a
+      # process that is fully "ready" but serving an old revision. Compares
+      # the live `revision` (already downloaded by the readiness step) to main
+      # HEAD, and flags drift only when main HEAD is older than
+      # DRIFT_GRACE_MINUTES — i.e. every legitimate deploy window has already
+      # elapsed. Also surfaces the only GitHub-visible blocked-deploy receipt:
+      # a failed "Oracle Production Deploy" run on main (the host poller's
+      # blocked-sha state itself is invisible to GitHub by design).
+      # Job invariant applies: continue-on-error, defaults written first, and
+      # every failure path degrades to drift=false (no alert) with exit 0, so
+      # this can never flip the conclusion the streak counter reads.
+      - name: Detect sustained release drift
+        id: drift
+        if: steps.check.outputs.status == 'ok'
+        continue-on-error: true
+        shell: bash
+        run: |
+          # No `set -e`: a gh/parse hiccup must degrade to "no alert", not
+          # abort before outputs are written. A later same-key write wins.
+          set -uo pipefail
+          echo "drift=false" >> "$GITHUB_OUTPUT"
+          echo "receipt_failed=false" >> "$GITHUB_OUTPUT"
+
+          if ! echo "$LIVE_REVISION" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "Live revision missing or malformed ('${LIVE_REVISION}'); skipping drift check."
+            exit 0
+          fi
+
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha' 2>/dev/null) || {
+            echo "Could not resolve main HEAD; skipping drift check."
+            exit 0
+          }
+          echo "live_sha=$LIVE_REVISION" >> "$GITHUB_OUTPUT"
+          echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
+
+          if [ "$LIVE_REVISION" = "$main_sha" ]; then
+            echo "Production is at main HEAD ($main_sha); no drift."
+            exit 0
+          fi
+
+          main_committed_at=$(gh api "repos/$GITHUB_REPOSITORY/commits/$main_sha" --jq '.commit.committer.date' 2>/dev/null) || {
+            echo "Could not read main HEAD commit time; skipping drift check."
+            exit 0
+          }
+          main_epoch=$(date -u -d "$main_committed_at" +%s 2>/dev/null) || {
+            echo "Could not parse commit time '$main_committed_at'; skipping drift check."
+            exit 0
+          }
+          age_minutes=$(( ( $(date -u +%s) - main_epoch ) / 60 ))
+          echo "Live $LIVE_REVISION vs main $main_sha; main HEAD age ${age_minutes}m (grace ${DRIFT_GRACE_MINUTES}m)."
+          if [ "$age_minutes" -le "$DRIFT_GRACE_MINUTES" ]; then
+            echo "Inside the deploy grace window; not flagging."
+            exit 0
+          fi
+
+          last_receipt=$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow "Oracle Production Deploy" \
+            --branch main \
+            --limit 5 \
+            --json status,conclusion \
+            --jq 'first(.[] | select(.status == "completed") | .conclusion) // ""' 2>/dev/null) || last_receipt=""
+          if [ "$last_receipt" = "failure" ]; then
+            echo "receipt_failed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "age_minutes=$age_minutes" >> "$GITHUB_OUTPUT"
+          echo "drift=true" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Passed via env (not inline interpolation) so the remote-derived
+          # value can never be interpreted as shell syntax; it is additionally
+          # validated against ^[0-9a-f]{40}$ above before any use.
+          LIVE_REVISION: ${{ steps.check.outputs.revision }}
+
+      # Same fresh-issue/comment-on-repeat mechanism as the readiness incident
+      # above, keyed on its own title. Drift deliberately does NOT page
+      # PagerDuty: a stale-but-healthy production is warning-severity, not a
+      # 3am page. Readiness paging is unchanged.
+      - name: Open a fresh release-drift issue on sustained drift
+        if: steps.drift.outputs.drift == 'true'
+        # Side-effect: must never flip the run conclusion (see job invariant).
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh label create incident \
+            --repo "$GITHUB_REPOSITORY" \
+            --color B60205 \
+            --description "Production availability incident" \
+            --force
+          issue_number=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --label incident \
+            --limit 100 \
+            --json number,title | jq -r --arg title "$DRIFT_INCIDENT_TITLE" 'first(.[] | select(.title == $title) | .number) // empty')
+          message="Production is ready but stale: serving revision ${{ steps.drift.outputs.live_sha }} while main HEAD is ${{ steps.drift.outputs.main_sha }} (main HEAD is ${{ steps.drift.outputs.age_minutes }} minutes old; grace window ${DRIFT_GRACE_MINUTES}m). Last completed Oracle Production Deploy receipt failed: ${{ steps.drift.outputs.receipt_failed }}. Likely cause: the host poller blocked this revision after repeated failures (it exits 0, so its systemd timer stays green). Operator remedy: sudo /usr/local/sbin/usage-monitor-auto-deploy --retry-blocked (see deploy/oracle/README.md). Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$issue_number" ]; then
+            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "$message"
+          else
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$DRIFT_INCIDENT_TITLE" \
+              --label incident \
+              --body "$message"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve release-drift issue after catching up
+        if: steps.check.outputs.status == 'ok' && steps.drift.outputs.drift == 'false'
+        # Recovery side-effect: isolated from the run conclusion.
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_number=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --label incident \
+            --limit 100 \
+            --json number,title | jq -r --arg title "$DRIFT_INCIDENT_TITLE" 'first(.[] | select(.title == $title) | .number) // empty')
+          if [ -n "$issue_number" ]; then
+            gh issue close "$issue_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --comment "Release drift resolved at $(date -u +'%Y-%m-%dT%H:%M:%SZ'): production revision matches main HEAD (or is within the deploy grace window)."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Runs last and is the SOLE step allowed to fail the run: a bad check
       # always leaves this run red (visible on the Actions tab/badge and to
