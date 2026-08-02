@@ -1,4 +1,4 @@
-import crypto, { createHash, hkdfSync, timingSafeEqual } from "crypto";
+import crypto, { createHash, hkdfSync, scryptSync, timingSafeEqual } from "crypto";
 
 export const SESSION_COOKIE_NAME = "dashboard_session";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // seconds, 30 days
@@ -24,10 +24,22 @@ function safeEqual(left: string, right: string): boolean {
   );
 }
 
+// Password comparison goes through scrypt, not the cheap sha256 in safeEqual:
+// a memory-hard KDF makes each brute-force guess cost real work (and satisfies
+// CodeQL js/insufficient-password-hash, which rightly rejects bare SHA-256 on
+// password material). The fixed app salt is fine for this compare-only use —
+// nothing is stored; it just fixes both digests to equal length so
+// timingSafeEqual stays constant-time with no length signal. Login is the only
+// caller, so the ~100ms scrypt cost is a feature, not a hazard.
+const PASSWORD_COMPARE_SALT = "api-usage-monitor.password-compare.v1";
+
 export function verifyPassword(candidate: string): boolean {
   const expected = process.env.DASHBOARD_PASSWORD?.trim();
   if (!expected) return false;
-  return safeEqual(candidate, expected);
+  return timingSafeEqual(
+    scryptSync(candidate, PASSWORD_COMPARE_SALT, 32),
+    scryptSync(expected, PASSWORD_COMPARE_SALT, 32)
+  );
 }
 
 // Derives the session-signing key via HKDF-SHA256 instead of keying the HMAC
