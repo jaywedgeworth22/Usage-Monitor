@@ -266,7 +266,9 @@ export async function POST(request: NextRequest) {
               costUsd: event.costUsd,
               requests: event.requests,
               occurredAt: event.occurredAt,
-              metadata: event.metadata as Prisma.InputJsonObject,
+              metadata: (event.projectName
+                ? { ...(event.metadata ?? {}), project: event.projectName }
+                : event.metadata) as Prisma.InputJsonObject,
             },
           }))
         );

@@ -266,6 +266,32 @@ describe("POST /api/ingest/usage admission", () => {
     );
   });
 
+  it("overwrites conflicting or null producer metadata.project with top-level event.project", async () => {
+    resolveProjects.mockResolvedValueOnce(new Map([["alpha", "proj-alpha-id"]]));
+
+    const response = await POST(
+      nextRequest(
+        {
+          sourceApp: "socratic-trade",
+          provider: "openai",
+          project: "Alpha",
+          metricType: "usage",
+          costUsd: 1,
+          occurredAt: "2026-07-14T00:00:00.000Z",
+          metadata: { project: "Beta", lane: "rag" },
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(response.status).toBe(202);
+    expect(externalUsageMocks.persist).toHaveBeenCalledWith([
+      expect.objectContaining({
+        projectId: "proj-alpha-id",
+        metadata: { lane: "rag", project: "Alpha" },
+      }),
+    ]);
+  });
+
   it("returns the typed v2 error shape for a headerless invalid v2 envelope", async () => {
     // Missing producerId is an ENVELOPE failure: still a hard 400, unlike
     // per-event rejections (X5).

@@ -487,6 +487,19 @@ describe("POST /api/otlp/v1/metrics", () => {
     expect(row.metadata).not.toMatchObject({ "session.id": expect.anything() });
   });
 
+  it("mirrors dotted project.name resource attribute into metadata.project", async () => {
+    const payload = structuredClone(samplePayload);
+    payload.resourceMetrics[0].resource.attributes.push({
+      key: "project.name",
+      value: { stringValue: "congress-trade" },
+    });
+    await POST(jsonRequest(payload, { authorization: "Bearer test-token-123" }));
+    const row = await prisma.externalUsageEvent.findFirstOrThrow({
+      where: { sourceApp: "claude-code" },
+    });
+    expect(row.metadata).toMatchObject({ project: "congress-trade" });
+  });
+
   it("rejects oversized attribute values during bounded validation", async () => {
     const payload = structuredClone(samplePayload);
     payload.resourceMetrics[0].resource.attributes.push({
