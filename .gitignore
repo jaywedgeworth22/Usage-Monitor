@@ -21,3 +21,4 @@ tsconfig.tsbuildinfo
 
 # Downloaded by scripts/fetch-litestream.sh at build time - never committed.
 /bin/
+coverage/
