@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
 import {
   getBackupRuntimeStatus,
+  getDatabaseFileStatus,
   getDiskRuntimeStatus,
   getRuntimeIdentity,
   getSchedulerReadiness,
@@ -246,15 +247,23 @@ export async function GET(request: Request) {
   // Budget-breach control observability runs inside the same Promise.all as
   // the other probes so it cannot serialize behind a stalled DB check and
   // bypass readiness timeout/cache shapes (owner review F5).
-  const [database, scheduler, backup, startup, disk, budgetControls] =
-    await Promise.all([
-      checkDatabase(),
-      Promise.resolve(getSchedulerRuntimeStatus()),
-      Promise.resolve(getBackupRuntimeStatus()),
-      Promise.resolve(getStartupRuntimeStatus()),
-      Promise.resolve(getDiskRuntimeStatus()),
-      budgetControlsReadiness(),
-    ]);
+  const [
+    database,
+    databaseFile,
+    scheduler,
+    backup,
+    startup,
+    disk,
+    budgetControls,
+  ] = await Promise.all([
+    checkDatabase(),
+    Promise.resolve(getDatabaseFileStatus()),
+    Promise.resolve(getSchedulerRuntimeStatus()),
+    Promise.resolve(getBackupRuntimeStatus()),
+    Promise.resolve(getStartupRuntimeStatus()),
+    Promise.resolve(getDiskRuntimeStatus()),
+    budgetControlsReadiness(),
+  ]);
   const schedulerReadiness = getSchedulerReadiness();
   // A preview/cold-standby host deliberately disables its scheduler to avoid
   // becoming a second SQLite writer. That intentional circuit breaker must not
@@ -265,14 +274,27 @@ export async function GET(request: Request) {
   const schedulerReady = !schedulerRequired || schedulerReadiness.ok;
   // Backup: required implies active env flag. When a replica side-channel is
   // configured (Wave C / C4), replicaOk === false fails ready even if
-  // LITESTREAM_ACTIVE is true so Garage/R2 death is not silent.
+  // LITESTREAM_ACTIVE is true so Garage/R2 death is not silent. An env-only
+  // claim (no side-channel at all) is not proof the replica is advancing, so
+  // it no longer passes either unless verification is explicitly opted out.
   const backupReady =
     !backup.required ||
-    (backup.active && backup.replicaOk !== false);
+    (backup.active &&
+      backup.replicaOk !== false &&
+      !(backup.envOnly && backup.verificationRequired));
   const startupReady = !startup.required || startup.active;
-  const ok = database.ok && schedulerReady && backupReady && startupReady;
+  const ok =
+    database.ok &&
+    databaseFile.ok &&
+    schedulerReady &&
+    backupReady &&
+    startupReady;
   const databaseOnlyFailure =
-    !database.ok && schedulerReady && backupReady && startupReady;
+    !database.ok &&
+    databaseFile.ok &&
+    schedulerReady &&
+    backupReady &&
+    startupReady;
   // A newly-started process gets a bounded window to finish opening a large
   // SQLite/Litestream database before reporting not_ready, so a dependency
   // probe cannot turn the normal open time into a restart loop. The grace
@@ -304,6 +326,12 @@ export async function GET(request: Request) {
         ...database,
         coldStartGraceActive: databaseColdStartGraceActive,
       },
+      // Part of `ok`, and deliberately excluded from the cold-start grace
+      // above: `SELECT 1` is answered happily by a descriptor on an unlinked
+      // or since-replaced inode, so file identity is the only signal that can
+      // see the pathname disappear underneath a live writer. Never reports the
+      // absolute path — this endpoint is public.
+      databaseFile,
       scheduler: {
         ok: schedulerReady,
         required: schedulerRequired,

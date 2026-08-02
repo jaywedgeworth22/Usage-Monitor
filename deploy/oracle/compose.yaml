@@ -11,6 +11,9 @@ services:
     environment:
       DATABASE_URL: file:/data/prod.db
       GIT_COMMIT_SHA: ${USAGE_MONITOR_REVISION:-unknown}
+      # Replica heartbeat side-channel consumed by /api/ready; written by
+      # usage-monitor-replica-status on the host (see compose.production.yaml).
+      LITESTREAM_REPLICA_STATUS_PATH: /data/.litestream-replica-status.json
       PORT: "3000"
     volumes:
       - /data:/data
