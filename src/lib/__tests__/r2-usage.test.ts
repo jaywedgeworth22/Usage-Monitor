@@ -114,10 +114,16 @@ describe("R2 usage monitoring & auto-disable", () => {
       enforceR2AutoDisable("perm check reason");
 
       const flagPath = __getR2FlagFilePathForTests("r2-disabled-70pct.flag");
-      // statSync/readFileSync throw if the flag was never written, so no
-      // separate existsSync probe (CodeQL js/file-system-race).
-      expect(fs.statSync(flagPath).mode & 0o777).toBe(0o600);
-      expect(fs.readFileSync(flagPath, "utf8")).toContain("perm check reason");
+      // Open once and inspect via the fd so mode and content come from the
+      // same file object (CodeQL js/file-system-race); openSync throws if the
+      // flag was never written.
+      const fd = fs.openSync(flagPath, "r");
+      try {
+        expect(fs.fstatSync(fd).mode & 0o777).toBe(0o600);
+        expect(fs.readFileSync(fd, "utf8")).toContain("perm check reason");
+      } finally {
+        fs.closeSync(fd);
+      }
     }
   );
 
