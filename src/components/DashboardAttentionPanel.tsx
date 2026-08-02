@@ -89,7 +89,7 @@ export default function DashboardAttentionPanel({
                     {alert.message}
                   </p>
                   {runoutLabel && (
-                    <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+                    <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                       {runoutLabel}
                     </p>
                   )}

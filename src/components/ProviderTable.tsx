@@ -487,7 +487,7 @@ export default function ProviderTable({
                     />
                     {density === "comfortable" && (
                       <>
-                        <p className="text-xs text-gray-400 dark:text-gray-500">{provider.name}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{provider.name}</p>
                         {provider.label && (
                           <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{provider.label}</p>
                         )}

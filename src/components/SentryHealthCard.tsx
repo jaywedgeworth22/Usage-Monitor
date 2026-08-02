@@ -102,7 +102,7 @@ export default function SentryHealthCard() {
               {project.displayName}
             </span>
             {project.error ? (
-              <span className="text-xs text-gray-400 dark:text-gray-500">unavailable</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">unavailable</span>
             ) : (
               <span
                 className={`text-xs font-medium px-2 py-1 rounded-full ${

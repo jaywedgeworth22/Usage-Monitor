@@ -359,7 +359,7 @@ export default function ProviderCard({
             {resolvedSpendCoverage === "unknown" || resolvedSpendCoverage === "legacy_unknown" ? (
               <>
                 Cost not reported{" "}
-                <span className="font-normal text-gray-400 dark:text-gray-500">
+                <span className="font-normal text-gray-500 dark:text-gray-400">
                   / Projection unavailable
                 </span>
                 {unpricedEventCount > 0 && (
@@ -372,7 +372,7 @@ export default function ProviderCard({
               <>
                 {formatUsd(knownSpendUsd)}
                 {resolvedSpendCoverage === "partial" ? " known" : ""}{" "}
-                <span className="font-normal text-gray-400 dark:text-gray-500">
+                <span className="font-normal text-gray-500 dark:text-gray-400">
                   / {formatUsd(projectedEomUsd)}
                   {resolvedSpendCoverage === "partial" ? " from known costs" : ""}
                 </span>

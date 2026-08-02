@@ -32,7 +32,10 @@ function provider(overrides: Partial<Provider>): Provider {
   };
 }
 
-function renderTable(providers: Provider[]) {
+function renderTable(
+  providers: Provider[],
+  extraProps: { loadError?: string | null; onRetryLoad?: () => void } = {}
+) {
   const noop = vi.fn();
   return renderToStaticMarkup(
     createElement(ProviderTable, {
@@ -46,6 +49,7 @@ function renderTable(providers: Provider[]) {
       onAddProvider: noop,
       onToggleActive: noop,
       onFetchNow: noop,
+      ...extraProps,
     })
   );
 }
@@ -267,5 +271,31 @@ describe("ProviderTable cost coverage", () => {
 
     expect(html).not.toContain("Coverage gap");
     expect(html).not.toContain("Cost coverage gap");
+  });
+});
+
+describe("ProviderTable load error vs genuine empty", () => {
+  it("renders the explicit failure panel with a Retry button when the load failed", () => {
+    const html = renderTable([], {
+      loadError: "Failed to fetch providers",
+      onRetryLoad: vi.fn(),
+    });
+
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Providers couldn&#x27;t be loaded.");
+    expect(html).toContain("Failed to fetch providers");
+    expect(html).toContain("Retry");
+    // An outage must never masquerade as an empty account — no CTA to add a
+    // (potentially duplicate) provider.
+    expect(html).not.toContain("No providers configured yet.");
+    expect(html).not.toContain("Add your first provider");
+  });
+
+  it("renders the empty-state CTA only when the load succeeded with zero providers", () => {
+    const html = renderTable([]);
+
+    expect(html).toContain("No providers configured yet.");
+    expect(html).toContain("Add your first provider");
+    expect(html).not.toContain('role="alert"');
   });
 });

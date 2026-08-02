@@ -530,7 +530,7 @@ export default function ProviderDetailPage() {
             <p className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">{runoutLabel}</p>
           )}
           {density === "comfortable" && (
-            <p className="text-[10px] uppercase text-gray-400 dark:text-gray-500">
+            <p className="text-[10px] uppercase text-gray-500 dark:text-gray-400">
               {spendCoverage === "partial" ? "excludes unpriced usage" : provider.billingMode}
             </p>
           )}
@@ -705,7 +705,7 @@ export default function ProviderDetailPage() {
           </div>
         </div>
         {snapshots.length === 0 ? (
-          <div className="px-6 py-8 text-center text-sm text-gray-400 dark:text-gray-500">
+          <div className="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
             No snapshots recorded yet
           </div>
         ) : (
