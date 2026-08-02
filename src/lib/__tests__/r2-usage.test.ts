@@ -114,7 +114,8 @@ describe("R2 usage monitoring & auto-disable", () => {
       enforceR2AutoDisable("perm check reason");
 
       const flagPath = __getR2FlagFilePathForTests("r2-disabled-70pct.flag");
-      expect(fs.existsSync(flagPath)).toBe(true);
+      // statSync/readFileSync throw if the flag was never written, so no
+      // separate existsSync probe (CodeQL js/file-system-race).
       expect(fs.statSync(flagPath).mode & 0o777).toBe(0o600);
       expect(fs.readFileSync(flagPath, "utf8")).toContain("perm check reason");
     }
