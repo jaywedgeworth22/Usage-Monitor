@@ -475,6 +475,14 @@ describe("pre-authoritative-project replay dedupe (#887 regression)", () => {
   const REPLAY_KEY = "pre887-producer-project-row";
   const OCCURRED_AT = new Date("2026-06-20T00:00:00.000Z");
 
+  // The file-level beforeEach clears events but not Projects; the
+  // live-Project tests below create rows whose names would otherwise leak
+  // into the name-resolution checks of later tests. Events are already gone
+  // when this runs (file-level hook runs first), so the FK is clear.
+  beforeEach(async () => {
+    await prisma.project.deleteMany();
+  });
+
   // A row shaped exactly as pre-#887 ingest persisted it: the producer's own
   // metadata.project ("Beta") stored verbatim even though the wire batch
   // carried top-level project "Alpha".
@@ -558,5 +566,69 @@ describe("pre-authoritative-project replay dedupe (#887 regression)", () => {
         replayInput({ authoritativeProject: undefined }),
       ])
     ).rejects.toBeInstanceOf(ExternalUsageIdempotencyCollisionError);
+  });
+
+  it("still 409s when the stored row already carries a resolved projectId — attributed rows are never reattributed", async () => {
+    const alpha = await prisma.project.create({
+      data: { name: "AttrAlpha", nameKey: "attralpha" },
+    });
+    await seedPreFixRow();
+    await prisma.externalUsageEvent.update({
+      where: { idempotencyKey: REPLAY_KEY },
+      data: { projectId: alpha.id },
+    });
+
+    await expect(
+      persistExternalUsageEvents([replayInput()])
+    ).rejects.toBeInstanceOf(ExternalUsageIdempotencyCollisionError);
+
+    // Neither the FK nor the stored name moved: no contradictory
+    // projectId/metadata.project pair can be produced by a replay.
+    const stored = await prisma.externalUsageEvent.findUniqueOrThrow({
+      where: { idempotencyKey: REPLAY_KEY },
+    });
+    expect(stored.projectId).toBe(alpha.id);
+    expect(stored.metadata).toEqual({ project: "Beta", lane: "rag" });
+  });
+
+  it("still 409s when the stored producer-era name matches a live Project — money is never silently moved between real projects", async () => {
+    await prisma.project.create({
+      data: { name: "Beta", nameKey: "beta" },
+    });
+    await seedPreFixRow();
+
+    await expect(
+      persistExternalUsageEvents([replayInput()])
+    ).rejects.toBeInstanceOf(ExternalUsageIdempotencyCollisionError);
+
+    const stored = await prisma.externalUsageEvent.findUniqueOrThrow({
+      where: { idempotencyKey: REPLAY_KEY },
+    });
+    expect(stored.metadata).toEqual({ project: "Beta", lane: "rag" });
+  });
+
+  it("documents the accepted residual: successive authoritative sends over an unresolved name update last-writer-wins", async () => {
+    // Neither "Beta" (stored) nor "Alpha"/"Gamma" (incoming) resolve to a
+    // Project row, and the stored row has no projectId — so no live
+    // attribution is affected either way. The override deliberately accepts
+    // the newest authoritative name rather than freezing the first one.
+    await seedPreFixRow();
+
+    await persistExternalUsageEvents([replayInput()]);
+    let stored = await prisma.externalUsageEvent.findUniqueOrThrow({
+      where: { idempotencyKey: REPLAY_KEY },
+    });
+    expect(stored.metadata).toEqual({ project: "Alpha", lane: "rag" });
+
+    await persistExternalUsageEvents([
+      replayInput({
+        metadata: { project: "Gamma", lane: "rag" },
+        authoritativeProject: "Gamma",
+      }),
+    ]);
+    stored = await prisma.externalUsageEvent.findUniqueOrThrow({
+      where: { idempotencyKey: REPLAY_KEY },
+    });
+    expect(stored.metadata).toEqual({ project: "Gamma", lane: "rag" });
   });
 });

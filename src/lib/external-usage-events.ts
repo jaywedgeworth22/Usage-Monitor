@@ -440,30 +440,36 @@ export async function persistExternalUsageEventsInTransaction(
       // `project` field became authoritative stored the producer's raw
       // metadata.project verbatim, while its byte-identical replay now
       // arrives with the validated top-level project stamped into
-      // metadata.project by the route. When the incoming event carries that
-      // authoritative top-level project and the ONLY divergence is the
-      // stored producer-era metadata.project name, this is an attribution
-      // update — overwrite the stored name with the authoritative value
-      // (mirroring the !existingProjectName backfill below) instead of
-      // throwing. Genuine conflicts still throw: the projectId leg of the
-      // compatibility check runs unconditionally here, and sameEvent below
-      // still compares every other field (costUsd, quantity, remaining
-      // metadata, ...).
-      const authoritativeProjectOverride =
+      // metadata.project by the route. Overwrite the stored name with the
+      // authoritative value (mirroring the !existingProjectName backfill
+      // below) ONLY for rows that look producer-era on both axes:
+      // no resolved projectId, and a stored name that does not match any
+      // live Project. A row that was already attributed either way was
+      // authoritative itself — replacing it would silently move money
+      // between projects, so that stays a collision. Residuals, both
+      // deliberate: a producer-era name that happens to match a live
+      // Project still 409s on replay (conservative — fail loud rather than
+      // reattribute), and two successive authoritative sends whose names
+      // BOTH resolve to no Project update last-writer-wins (no live
+      // attribution is affected; the covering test documents it).
+      let authoritativeProjectOverride = false;
+      if (
         !!event.authoritativeProject &&
         !!incomingProjectName &&
         !!existingProjectName &&
+        existing.projectId === null &&
         canonicalProjectKey(existingProjectName) !==
-          canonicalProjectKey(incomingProjectName);
-      if (authoritativeProjectOverride) {
-        if (
-          existing.projectId &&
-          event.projectId &&
-          existing.projectId !== event.projectId
-        ) {
-          throw new ExternalUsageIdempotencyCollisionError(event.idempotencyKey);
-        }
-      } else {
+          canonicalProjectKey(incomingProjectName)
+      ) {
+        const storedKey = canonicalProjectKey(existingProjectName);
+        const projects = await tx.project.findMany({
+          select: { name: true },
+        });
+        authoritativeProjectOverride = !projects.some(
+          (project) => canonicalProjectKey(project.name) === storedKey
+        );
+      }
+      if (!authoritativeProjectOverride) {
         assertCompatibleProjectAttribution(existing, event, event.idempotencyKey);
       }
       if (!sameEvent(existing, event)) {
