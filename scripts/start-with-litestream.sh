@@ -81,6 +81,10 @@ if (( configured_keys == ${#REQUIRED_KEYS[@]} )); then
     exit 1
   fi
   litestream_enabled=true
+  if [[ "${LITESTREAM_EMERGENCY_DISABLE:-false}" == "true" || -f "/data/r2-disabled-70pct.flag" ]]; then
+    log "WARNING: Litestream replication disabled via emergency kill switch (70% R2 free tier threshold)."
+    litestream_enabled=false
+  fi
 elif [[ "${LITESTREAM_REQUIRED:-false}" == "true" ]]; then
   log "ERROR: LITESTREAM_REQUIRED=true but no replica credentials are configured."
   exit 1

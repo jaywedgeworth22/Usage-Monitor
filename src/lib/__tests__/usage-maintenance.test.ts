@@ -240,6 +240,7 @@ describe("runUsageMaintenance", () => {
         auditRowsWritten: 0,
         degraded: false,
       },
+      r2UsageCheck: result.r2UsageCheck,
     });
     expect(isUsageMaintenanceHealthy(result)).toBe(false);
     expect(deliverAlerts).toHaveBeenCalledOnce();

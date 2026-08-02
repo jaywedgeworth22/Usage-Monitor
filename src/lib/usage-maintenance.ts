@@ -36,6 +36,7 @@ import {
   applyBudgetControls,
   type BudgetControlsResult,
 } from "@/lib/budget-controls";
+import { runR2UsageCheck, type R2UsageAssessment } from "@/lib/r2-usage";
 
 export interface UsageMaintenanceResult {
   subscriptionAdoption: SubscriptionAdoptionMaintenanceResult;
@@ -50,6 +51,7 @@ export interface UsageMaintenanceResult {
   // deliberately NOT folded into isUsageMaintenanceHealthy — a control-layer
   // problem must never flip scheduler/readiness health.
   budgetControls?: BudgetControlsResult;
+  r2UsageCheck?: R2UsageAssessment;
 }
 
 export interface SubscriptionAdoptionMaintenanceError {
@@ -277,6 +279,13 @@ export async function runUsageMaintenance(
       );
     }
 
+    let r2UsageCheck: R2UsageAssessment | undefined;
+    try {
+      r2UsageCheck = await runR2UsageCheck();
+    } catch (error) {
+      console.error("[usage-maintenance] R2 free tier usage check failed:", error);
+    }
+
     return {
       subscriptionAdoption,
       subscriptions,
@@ -286,6 +295,7 @@ export async function runUsageMaintenance(
       openrouterVerification,
       reconciliation,
       budgetControls,
+      r2UsageCheck,
     };
   })();
 
