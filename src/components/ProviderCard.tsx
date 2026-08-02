@@ -265,7 +265,7 @@ export default function ProviderCard({
                 geminiBillingStatus,
               }}
             />
-            <span className="rounded bg-gray-50 px-2 py-0.5 text-xs font-medium uppercase text-gray-400 dark:bg-gray-700 dark:text-gray-300">
+            <span className="rounded bg-gray-50 px-2 py-0.5 text-xs font-medium uppercase text-gray-600 dark:bg-gray-700 dark:text-gray-300">
               {type}
             </span>
           </div>
