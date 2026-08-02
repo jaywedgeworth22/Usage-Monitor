@@ -51,7 +51,7 @@ WidgetShared    → DesignSystem                  app↔widget snapshot bridge (
 <Feature>       → AppCore, DesignSystem, Networking, Models
 AppLock         → AppCore, DesignSystem
 OfflineCache    → Models, Networking, WidgetShared
-PushScaffold    → AppCore, Models, Networking
+PushScaffold    → AppCore, Models
 ```
 
 `DesignSystem` is deliberately **model-free**. Components take primitives + a
