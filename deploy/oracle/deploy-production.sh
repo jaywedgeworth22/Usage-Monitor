@@ -649,9 +649,10 @@ preflight_current_production() {
   scheduler="$(read_env_value "${RUNTIME_ENV}" USAGE_SCHEDULER_ENABLED)"
   backup_required="$(read_env_value "${RUNTIME_ENV}" LITESTREAM_REQUIRED)"
   backup_bucket="$(read_env_value "${RUNTIME_ENV}" LITESTREAM_S3_BUCKET)"
+  [[ -n "${backup_bucket}" ]] || backup_bucket="$(read_env_value "${RUNTIME_ENV}" AWS_S3_BUCKET_NAME)"
   [[ "${scheduler}" == "true" ]] || die "USAGE_SCHEDULER_ENABLED must be exactly true"
   [[ "${backup_required}" == "true" ]] || die "LITESTREAM_REQUIRED must be exactly true"
-  [[ "${backup_bucket}" == "usage-monitor-prod-v3" ]] || die "production must use Garage bucket usage-monitor-prod-v3"
+  [[ "${backup_bucket}" == "usage-monitor-prod-v3" ]] || die "production must use S3/R2 bucket usage-monitor-prod-v3"
   # Production denies the USAGE_INGEST_TOKEN fallback for bearer reads
   # (src/lib/ingest-auth.ts resolveUsageReadToken), so without a dedicated
   # read token every budget-status / subscriptions GET bearer consumer 503s

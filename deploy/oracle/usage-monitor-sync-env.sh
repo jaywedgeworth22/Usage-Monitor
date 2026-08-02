@@ -116,15 +116,18 @@ required = [
     "DASHBOARD_PASSWORD",
     "CRON_SECRET",
 ]
-missing = [k for k in required if not vals.get(k)]
-if missing:
-    raise SystemExit(f"missing required keys from Infisical: {', '.join(missing)}")
+bucket = vals.get("LITESTREAM_S3_BUCKET") or vals.get("AWS_S3_BUCKET_NAME")
+if not bucket:
+    missing.append("LITESTREAM_S3_BUCKET / AWS_S3_BUCKET_NAME")
+missing_keys = [k for k in required if not vals.get(k) and not (k.startswith("LITESTREAM_S3_") and vals.get("AWS_" + k.replace("LITESTREAM_S3_", "").replace("BUCKET", "S3_BUCKET_NAME").replace("REGION", "REGION").replace("ACCESS_KEY_ID", "ACCESS_KEY_ID").replace("SECRET_ACCESS_KEY", "SECRET_ACCESS_KEY")))]
+if missing_keys and not bucket:
+    raise SystemExit(f"missing required keys from Infisical: {', '.join(missing_keys)}")
 
 errors = []
 if vals.get("LITESTREAM_REQUIRED") != "true":
     errors.append("LITESTREAM_REQUIRED must be true")
-if vals.get("LITESTREAM_S3_BUCKET") != "usage-monitor-prod-v3":
-    errors.append("LITESTREAM_S3_BUCKET must be usage-monitor-prod-v3")
+if bucket != "usage-monitor-prod-v3":
+    errors.append("LITESTREAM_S3_BUCKET/AWS_S3_BUCKET_NAME must be usage-monitor-prod-v3")
 sched = vals.get("USAGE_SCHEDULER_ENABLED")
 if sched not in (None, "", "true"):
     errors.append("USAGE_SCHEDULER_ENABLED must be true when set")
