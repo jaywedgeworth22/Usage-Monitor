@@ -71,6 +71,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Test receipt-inbox worker
+        run: npm run test:receipt-inbox-worker
+
       - name: Test safe migration path
         run: npm run test:migrate-safe
 

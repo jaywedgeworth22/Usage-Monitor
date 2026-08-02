@@ -28,10 +28,13 @@ describe("verifyPassword", () => {
     expect(verifyPassword("anything")).toBe(false);
   });
 
-  it("accepts the exact configured password and rejects others", () => {
+  it("accepts the exact configured password and rejects others of any length", () => {
     process.env.DASHBOARD_PASSWORD = "correct-horse-battery-staple";
     expect(verifyPassword("correct-horse-battery-staple")).toBe(true);
     expect(verifyPassword("wrong")).toBe(false);
+    expect(verifyPassword("")).toBe(false);
+    expect(verifyPassword("c")).toBe(false);
+    expect(verifyPassword("correct-horse-battery-staple-extra")).toBe(false);
   });
 });
 

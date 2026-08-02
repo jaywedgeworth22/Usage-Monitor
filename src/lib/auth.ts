@@ -12,9 +12,9 @@ const SESSION_HKDF_SALT = "api-usage-monitor.session-token.v2";
 const SESSION_HKDF_INFO = "dashboard-session-hmac";
 
 function safeEqual(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+  const leftHash = crypto.createHash("sha256").update(left).digest();
+  const rightHash = crypto.createHash("sha256").update(right).digest();
+  return timingSafeEqual(leftHash, rightHash);
 }
 
 export function verifyPassword(candidate: string): boolean {
