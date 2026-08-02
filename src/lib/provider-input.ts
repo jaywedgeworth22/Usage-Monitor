@@ -1,3 +1,4 @@
+import { readBoundedJsonBody } from "@/lib/bounded-request-body";
 import { SUBSCRIPTION_INTERVALS } from "@/lib/subscriptions";
 
 export interface ProviderInput {
@@ -311,7 +312,7 @@ function parseAllocationsInput(value: unknown): { projectId: string; percentage:
   const seenProjectIds = new Set<string>();
   const allocations = value.map((a, index) => {
     if (!a || typeof a !== "object") throw new Error(`allocations[${index}] must be an object`);
-    
+
     const obj = a as Record<string, unknown>;
     const projectId = cleanOptionalString(obj.projectId);
     if (!projectId) throw new Error(`allocations[${index}].projectId must be a non-empty string`);
@@ -338,7 +339,7 @@ function parseAllocationsInput(value: unknown): { projectId: string; percentage:
 
 export async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
   try {
-    const body = await request.json();
+    const body = await readBoundedJsonBody(request, { label: "Request body" });
     const record = asRecord(body);
     if (!record) throw new Error("Request body must be a JSON object");
     return record;
