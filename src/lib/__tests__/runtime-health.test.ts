@@ -1,4 +1,12 @@
-import { mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  mkdtempSync,
+  openSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -399,13 +407,25 @@ describe("runtime health state", () => {
     it("reports database_file_replaced when the pathname resolves to a different inode", () => {
       const { dir, dbPath } = makeDatabaseFixture();
       try {
-        const originalIno = statSync(dbPath).ino;
+        // Read inodes through fds rather than path-stats so there is no
+        // check-then-use pattern on the pathname (CodeQL js/file-system-race);
+        // the deliberate inode swap below is the subject under test, not a
+        // race hazard.
+        const inodeOf = (path: string): number => {
+          const fd = openSync(path, "r");
+          try {
+            return fstatSync(fd).ino;
+          } finally {
+            closeSync(fd);
+          }
+        };
+        const originalIno = inodeOf(dbPath);
         captureDatabaseFileBaseline();
         // Rename (keeping the original inode linked) then write a new file at
         // the same pathname, so the failure is purely identity, not deletion.
         renameSync(dbPath, join(dir, "prod.db.orig"));
         writeFileSync(dbPath, "a different database\n");
-        expect(statSync(dbPath).ino).not.toBe(originalIno);
+        expect(inodeOf(dbPath)).not.toBe(originalIno);
 
         expect(getDatabaseFileStatus(T0)).toMatchObject({
           ok: false,
