@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 export interface R2UsageLimits {
   storageBytes: number; // 10 GiB = 10 * 1024 * 1024 * 1024
@@ -34,9 +36,42 @@ export interface R2UsageAssessment {
 
 let inMemoryLastDailyPushoverDate = "";
 
+let cachedFallbackFlagDir: string | null = null;
+
+function getFlagDir(): string {
+  if (fs.existsSync("/data")) return "/data";
+  // Fallback for environments without the persistent /data volume: use a
+  // private per-process directory (mkdtemp creates it 0o700 with an
+  // unpredictable suffix) instead of predictable paths directly inside the
+  // shared world-writable os temp dir, which are vulnerable to symlink /
+  // pre-creation attacks (CodeQL js/insecure-temporary-file).
+  if (!cachedFallbackFlagDir) {
+    cachedFallbackFlagDir = fs.mkdtempSync(path.join(os.tmpdir(), "um-r2-"));
+  }
+  return cachedFallbackFlagDir;
+}
+
 function getFlagFilePath(filename: string): string {
-  if (fs.existsSync("/data")) return `/data/${filename}`;
-  return `/tmp/${filename}`;
+  return path.join(getFlagDir(), filename);
+}
+
+/** Test-only: resolve where a flag file would be written. */
+export function __getR2FlagFilePathForTests(filename: string): string {
+  return getFlagFilePath(filename);
+}
+
+/** Test-only: clear in-memory memos and the private fallback flag directory. */
+export function __resetR2UsageStateForTests(): void {
+  inMemoryLastDailyPushoverDate = "";
+  inMemoryEmergencyAlertSent = false;
+  if (cachedFallbackFlagDir) {
+    try {
+      fs.rmSync(cachedFallbackFlagDir, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+    cachedFallbackFlagDir = null;
+  }
 }
 
 export function calculatePaceProjection(
@@ -114,7 +149,7 @@ export function enforceR2AutoDisable(reason: string): void {
     fs.writeFileSync(
       filePath,
       `Disabled at ${new Date().toISOString()}: ${reason}\n`,
-      "utf8"
+      { encoding: "utf8", mode: 0o600 }
     );
   } catch (err) {
     console.error("[r2-usage] Failed writing emergency disable flag file:", err);
@@ -195,7 +230,7 @@ export function recordDailyPushoverSent(dateStr: string): void {
     fs.writeFileSync(
       filePath,
       JSON.stringify({ date: dateStr, sentAt: new Date().toISOString() }),
-      "utf8"
+      { encoding: "utf8", mode: 0o600 }
     );
   } catch (err) {
     console.error("[r2-usage] Failed saving last daily pushover file:", err);
@@ -241,7 +276,10 @@ export function recordR2EmergencyAlertSent(): void {
   inMemoryEmergencyAlertSent = true;
   try {
     const filePath = getFlagFilePath("r2-emergency-alert-sent.flag");
-    fs.writeFileSync(filePath, `Sent at ${new Date().toISOString()}\n`, "utf8");
+    fs.writeFileSync(filePath, `Sent at ${new Date().toISOString()}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   } catch (err) {
     console.error("[r2-usage] Failed saving emergency alert sent flag:", err);
   }

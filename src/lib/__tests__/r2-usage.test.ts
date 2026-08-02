@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   calculatePaceProjection,
   assessR2Usage,
@@ -9,7 +11,14 @@ import {
   formatDailyPushoverMessage,
   runR2UsageCheck,
   DEFAULT_R2_FREE_TIER_LIMITS,
+  __getR2FlagFilePathForTests,
+  __resetR2UsageStateForTests,
 } from "../r2-usage";
+
+// Flag files live under /data when the persistent volume exists (production
+// containers); these tests exercise the private mkdtemp fallback used
+// everywhere else.
+const hasDataVolume = fs.existsSync("/data");
 
 describe("R2 usage monitoring & auto-disable", () => {
   const originalEnv = process.env;
@@ -19,26 +28,12 @@ describe("R2 usage monitoring & auto-disable", () => {
     delete process.env.LITESTREAM_EMERGENCY_DISABLE;
     delete process.env.PUSHOVER_USER_KEY;
     delete process.env.PUSHOVER_API_TOKEN;
-    try {
-      if (fs.existsSync("/tmp/r2-disabled-70pct.flag")) {
-        fs.unlinkSync("/tmp/r2-disabled-70pct.flag");
-      }
-      if (fs.existsSync("/tmp/r2-last-daily-pushover.json")) {
-        fs.unlinkSync("/tmp/r2-last-daily-pushover.json");
-      }
-      if (fs.existsSync("/tmp/r2-emergency-alert-sent.flag")) {
-        fs.unlinkSync("/tmp/r2-emergency-alert-sent.flag");
-      }
-    } catch {}
+    __resetR2UsageStateForTests();
   });
 
   afterEach(() => {
     process.env = originalEnv;
-    try {
-      if (fs.existsSync("/tmp/r2-test-disabled.flag")) {
-        fs.unlinkSync("/tmp/r2-test-disabled.flag");
-      }
-    } catch {}
+    __resetR2UsageStateForTests();
   });
 
   it("calculates linear month pace projection accurately", () => {
@@ -90,6 +85,47 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(isR2AutoDisabled()).toBe(true);
     expect(process.env.LITESTREAM_EMERGENCY_DISABLE).toBe("true");
   });
+
+  it.skipIf(hasDataVolume)(
+    "places fallback flag files in a private per-process mkdtemp directory, not a predictable shared temp path",
+    () => {
+      const flagPath = __getR2FlagFilePathForTests("r2-disabled-70pct.flag");
+
+      // Never the old predictable world-writable location.
+      expect(flagPath).not.toBe(path.join(os.tmpdir(), "r2-disabled-70pct.flag"));
+      expect(flagPath).not.toBe("/tmp/r2-disabled-70pct.flag");
+
+      // Lives in an unpredictable per-process subdirectory of the os temp dir.
+      const flagDir = path.dirname(flagPath);
+      expect(path.dirname(flagDir)).toBe(path.resolve(os.tmpdir()));
+      expect(path.basename(flagDir).startsWith("um-r2-")).toBe(true);
+
+      // Directory is private to the owner (mkdtemp => 0o700).
+      expect(fs.statSync(flagDir).mode & 0o777).toBe(0o700);
+
+      // Path resolution is stable within the process so reads see prior writes.
+      expect(__getR2FlagFilePathForTests("r2-disabled-70pct.flag")).toBe(flagPath);
+    }
+  );
+
+  it.skipIf(hasDataVolume)(
+    "writes flag files with owner-only permissions and the expected content",
+    () => {
+      enforceR2AutoDisable("perm check reason");
+
+      const flagPath = __getR2FlagFilePathForTests("r2-disabled-70pct.flag");
+      // Open once and inspect via the fd so mode and content come from the
+      // same file object (CodeQL js/file-system-race); openSync throws if the
+      // flag was never written.
+      const fd = fs.openSync(flagPath, "r");
+      try {
+        expect(fs.fstatSync(fd).mode & 0o777).toBe(0o600);
+        expect(fs.readFileSync(fd, "utf8")).toContain("perm check reason");
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+  );
 
   it("sends Pushover notifications via HTTP POST to Pushover API", async () => {
     process.env.PUSHOVER_USER_KEY = "test_user_key";
