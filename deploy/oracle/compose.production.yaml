@@ -17,6 +17,13 @@ services:
     environment:
       DATABASE_URL: file:/data/prod.db
       GIT_COMMIT_SHA: ${USAGE_MONITOR_REVISION}
+      # Non-secret replica heartbeat written by usage-monitor-replica-status
+      # (temp+rename, so never torn). /api/ready fails a required backup when
+      # this file is missing/stale/unhealthy instead of trusting the
+      # startup-only LITESTREAM_ACTIVE claim. Freshness budget stays on the
+      # LITESTREAM_REPLICA_MAX_AGE_SECONDS default (3600s), matching the
+      # deploy gate.
+      LITESTREAM_REPLICA_STATUS_PATH: /data/.litestream-replica-status.json
       PORT: "3000"
     user: "1000:1000"
     volumes:

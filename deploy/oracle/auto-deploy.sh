@@ -10,6 +10,7 @@ readonly PAUSE_FILE="/etc/usage-monitor/auto-deploy.paused"
 readonly STATE_DIR="/var/lib/usage-monitor-deploy"
 readonly FAILURE_FILE="${STATE_DIR}/failure-state"
 readonly BLOCKED_FILE="${STATE_DIR}/blocked-sha"
+readonly BLOCKED_REASON_FILE="${STATE_DIR}/blocked-sha.json"
 readonly CHECK_RETRY_FILE="${STATE_DIR}/check-retry-state"
 readonly DEPLOY_COMMAND="/usr/local/sbin/usage-monitor-deploy"
 readonly LOCK_FILE="/run/lock/usage-monitor-deploy.lock"
@@ -55,7 +56,23 @@ write_atomic() {
 clear_failure_state() {
   unlink "${FAILURE_FILE}" 2>/dev/null || true
   unlink "${BLOCKED_FILE}" 2>/dev/null || true
+  unlink "${BLOCKED_REASON_FILE}" 2>/dev/null || true
   unlink "${CHECK_RETRY_FILE}" 2>/dev/null || true
+}
+
+# Latch a revision AND record why: blocked-sha alone told an operator nothing.
+# blocked-sha.json carries {blockedRevision, reason, blockedAt} so recovery
+# starts from the journal-independent state file, not an archaeology dig.
+block_revision() {
+  local revision="$1"
+  local reason="$2"
+  write_atomic "${BLOCKED_FILE}" "${revision}"
+  write_atomic "${BLOCKED_REASON_FILE}" "$(jq -nc \
+    --arg blockedRevision "${revision}" \
+    --arg reason "${reason}" \
+    --arg blockedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{blockedRevision: $blockedRevision, reason: $reason, blockedAt: $blockedAt}')"
+  unlink "${FAILURE_FILE}" 2>/dev/null || true
 }
 
 recover_current_app_if_stopped() {
@@ -181,8 +198,12 @@ fi
 if [[ -f "${BLOCKED_FILE}" ]]; then
   blocked_sha="$(tr -d '[:space:]' <"${BLOCKED_FILE}")"
   if [[ "${blocked_sha}" == "${target_sha}" ]]; then
-    log "revision ${target_sha} is blocked after a terminal eligibility error or ${MAX_FAILURES} failed deploys."
-    exit 0
+    # exit 1, not 0: a latched breaker must keep this unit visibly failed so
+    # `systemctl is-failed usage-monitor-auto-deploy.service` is a reliable
+    # wedge signal. The previous exit 0 let the next timer pass repaint the
+    # unit green ~60s after the latch, hiding the wedge from operators.
+    log "revision ${target_sha} is blocked (see ${BLOCKED_REASON_FILE}); production stays on ${current_sha}. Recover with: usage-monitor-auto-deploy --retry-blocked"
+    exit 1
   fi
   log "main advanced beyond blocked revision ${blocked_sha}; resetting the circuit breaker."
   clear_failure_state
@@ -233,10 +254,18 @@ case "${deploy_status}" in
     exit 0
     ;;
   78)
-    write_atomic "${BLOCKED_FILE}" "${target_sha}"
-    unlink "${FAILURE_FILE}" 2>/dev/null || true
+    block_revision "${target_sha}" "terminal_eligibility"
     log "revision ${target_sha} failed a terminal eligibility guard and is now blocked."
     exit 0
+    ;;
+  79)
+    # Host-environment preflight failure (full disk, unhealthy mount, SQLite
+    # integrity, runtime-env invariants): a property of the box, not of the
+    # revision. Never counts toward the revision circuit breaker; exit 1 keeps
+    # the unit loudly failed until the host condition is fixed, and the timer
+    # keeps retrying every minute.
+    log "revision ${target_sha} deferred by a host-environment preflight failure; not counting it against the revision circuit breaker."
+    exit 1
     ;;
 esac
 
@@ -249,8 +278,7 @@ if [[ -f "${FAILURE_FILE}" ]]; then
 fi
 
 if (( failure_count >= MAX_FAILURES )); then
-  write_atomic "${BLOCKED_FILE}" "${target_sha}"
-  unlink "${FAILURE_FILE}" 2>/dev/null || true
+  block_revision "${target_sha}" "max_failures"
   log "revision ${target_sha} failed ${failure_count} deployment attempts and is now blocked."
   exit 1
 fi
