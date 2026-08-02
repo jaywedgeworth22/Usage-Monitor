@@ -254,26 +254,29 @@ export function useDashboardData() {
     setPortfolioError("");
     const failures: string[] = [];
     try {
-      try {
-        setUsageSummary(
-          await fetchJson<ExternalUsageSummary>(
-            `/api/usage-events?days=${days}`,
-            "app telemetry",
-            unmountAbortRef.current?.signal
-          )
-        );
-      } catch {
-        failures.push("External app telemetry is temporarily unavailable.");
-      }
-      try {
-        const response = await fetchJson<ProjectBudgetResponse>(
+      // Independent endpoints — neither writes state the other reads, so pay
+      // max(latency) rather than the sum. Same pattern as fetchProviders above.
+      const [usageResult, projectsResult] = await Promise.allSettled([
+        fetchJson<ExternalUsageSummary>(
+          `/api/usage-events?days=${days}`,
+          "app telemetry",
+          unmountAbortRef.current?.signal
+        ),
+        fetchJson<ProjectBudgetResponse>(
           "/api/projects?includeSummary=1",
           "projects",
           unmountAbortRef.current?.signal
-        );
-        setProjects(response.projects);
-        setProjectSummary(response.summary);
-      } catch {
+        ),
+      ]);
+      if (usageResult.status === "fulfilled") {
+        setUsageSummary(usageResult.value);
+      } else {
+        failures.push("External app telemetry is temporarily unavailable.");
+      }
+      if (projectsResult.status === "fulfilled") {
+        setProjects(projectsResult.value.projects);
+        setProjectSummary(projectsResult.value.summary);
+      } else {
         failures.push("Project budgets are temporarily unavailable.");
       }
       setPortfolioError(failures.join(" "));
@@ -285,8 +288,12 @@ export function useDashboardData() {
   }, [timeframe]);
 
   const refreshDashboard = useCallback(async () => {
-    await fetchProviders();
-    if (portfolioOpen) await fetchPortfolioData();
+    // Disjoint state, independent in-flight guards, and neither rejects — so
+    // these can overlap instead of stacking two round trips.
+    await Promise.all([
+      fetchProviders(),
+      portfolioOpen ? fetchPortfolioData() : Promise.resolve(),
+    ]);
   }, [fetchPortfolioData, fetchProviders, portfolioOpen]);
 
   // Initial load + abort in-flight work on unmount so a remount cannot inherit

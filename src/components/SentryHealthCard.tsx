@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import CardUnavailableNotice from "@/components/CardUnavailableNotice";
 
 interface SentryProjectHealth {
   projectSlug: string;
@@ -21,24 +22,45 @@ interface SentryHealthResponse {
 // Small read-only card summarizing open Sentry issue counts per tracked
 // project, with deep links back into Sentry. Renders nothing at all when
 // Sentry isn't configured (SENTRY_READ_TOKEN/SENTRY_ORG unset) so this is
-// invisible by default rather than showing an empty/broken card.
+// invisible by default rather than showing an empty/broken card. A failed
+// request is NOT the same state: it renders an explicit unavailable notice,
+// because a health card that disappears reads as "nothing wrong".
 export default function SentryHealthCard() {
   const [data, setData] = useState<SentryHealthResponse | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [reloadCount, setReloadCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/sentry-health")
-      .then((res) => (res.ok ? res.json() : { configured: false }))
-      .then((json) => {
-        if (!cancelled) setData(json);
+      .then((res) => {
+        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        return res.json();
+      })
+      .then((json: SentryHealthResponse) => {
+        if (cancelled) return;
+        setData(json);
+        setFailed(false);
       })
       .catch(() => {
-        if (!cancelled) setData({ configured: false });
+        if (cancelled) return;
+        setData(null);
+        setFailed(true);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadCount]);
+
+  if (failed) {
+    return (
+      <CardUnavailableNotice
+        title="Sentry health unavailable."
+        detail="Open issue counts could not be loaded."
+        onRetry={() => setReloadCount((count) => count + 1)}
+      />
+    );
+  }
 
   if (!data || !data.configured || !data.projects) return null;
 

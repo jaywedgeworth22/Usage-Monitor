@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import {
   formatBudgetRunout,
   type ProviderBudgetIntel,
@@ -26,6 +27,9 @@ const ALERT_CODE_CHIPS: Record<string, string> = {
   price_change_detected: "Price change",
 };
 
+/** Rows rendered before the list collapses behind the "Show all" toggle. */
+const ATTENTION_PREVIEW_LIMIT = 8;
+
 export default function DashboardAttentionPanel({
   attentionItems,
   budgetIntelByProviderId,
@@ -34,6 +38,11 @@ export default function DashboardAttentionPanel({
   /** S9: optional runout intelligence keyed by provider id (from /api/budget-status). */
   budgetIntelByProviderId?: Record<string, ProviderBudgetIntel>;
 }) {
+  const [showAll, setShowAll] = useState(false);
+  const visibleItems = showAll
+    ? attentionItems
+    : attentionItems.slice(0, ATTENTION_PREVIEW_LIMIT);
+
   return (
     <div
       id="attention"
@@ -56,7 +65,7 @@ export default function DashboardAttentionPanel({
         </div>
       ) : (
         <div className="divide-y divide-gray-100 dark:divide-gray-700">
-          {attentionItems.slice(0, 8).map(({ provider, alert }, index) => {
+          {visibleItems.map(({ provider, alert }, index) => {
             const codeChip = alert.code ? ALERT_CODE_CHIPS[alert.code] : undefined;
             const runoutLabel = budgetIntelByProviderId
               ? formatBudgetRunout(budgetIntelByProviderId[provider.id] ?? {})
@@ -111,10 +120,21 @@ export default function DashboardAttentionPanel({
               </div>
             );
           })}
-          {attentionItems.length > 8 && (
-            <div className="px-4 py-3 sm:px-6 text-xs text-gray-500 dark:text-gray-400">
-              +{attentionItems.length - 8} more — open a provider or filter
-              the workspace by Alerts only.
+          {attentionItems.length > ATTENTION_PREVIEW_LIMIT && (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 sm:px-6 text-xs text-gray-500 dark:text-gray-400">
+              <button
+                type="button"
+                onClick={() => setShowAll((expanded) => !expanded)}
+                aria-expanded={showAll}
+                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
+              >
+                {showAll
+                  ? "Show fewer alerts"
+                  : `Show all ${attentionItems.length} alerts`}
+              </button>
+              <span>
+                Or open a provider or filter the workspace by Alerts only.
+              </span>
             </div>
           )}
         </div>
