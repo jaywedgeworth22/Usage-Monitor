@@ -572,10 +572,10 @@ verify_backup_restore() {
   [[ -z "${foreign_key_result}" ]] || \
     die "Garage acceptance restore failed SQLite foreign-key validation"
 
-  live_schema="$(sqlite3 -readonly "${DB_PATH}" \
-    "SELECT coalesce(group_concat(sql, char(10)), '') FROM (SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND name != '_deploy_heartbeat' ORDER BY type, name);")"
-  restored_schema="$(sqlite3 -readonly "${RESTORE_SCRATCH}" \
-    "SELECT coalesce(group_concat(sql, char(10)), '') FROM (SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND name != '_deploy_heartbeat' ORDER BY type, name);")"
+  live_schema="$(timeout 30 sqlite3 -readonly "${DB_PATH}" \
+    "SELECT coalesce(group_concat(sql, char(10)), '') FROM (SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND name != '_deploy_heartbeat' ORDER BY type, name);")" || die "failed to read live schema"
+  restored_schema="$(timeout 30 sqlite3 -readonly "${RESTORE_SCRATCH}" \
+    "SELECT coalesce(group_concat(sql, char(10)), '') FROM (SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND name != '_deploy_heartbeat' ORDER BY type, name);")" || die "failed to read restored schema"
   [[ "${restored_schema}" == "${live_schema}" ]] || die "Garage acceptance restore schema differs from live SQLite"
   cleanup_restore_scratch
   log "Garage post-cutover restore, full integrity, foreign keys, and schema comparison passed."
