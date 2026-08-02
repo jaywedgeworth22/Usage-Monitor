@@ -51,7 +51,7 @@ WidgetShared    → DesignSystem                  app↔widget snapshot bridge (
 <Feature>       → AppCore, DesignSystem, Networking, Models
 AppLock         → AppCore, DesignSystem
 OfflineCache    → Models, Networking, WidgetShared
-PushScaffold    → AppCore, Models
+PushScaffold    → AppCore, Models, Networking
 ```
 
 `DesignSystem` is deliberately **model-free**. Components take primitives + a
@@ -297,7 +297,7 @@ files under `UsageMonitorKitTests` for their own logic.
 | **OfflineCache** | `Sources/OfflineCache/` (`BudgetDiskCache`, `WidgetSnapshotBuilder`) | `BudgetDiskCache` (`save`/`load`/`clear`), `WidgetSnapshotBuilder.snapshot(from:maxMeters:)` | `Models`, `Networking`, `WidgetShared` | Model-free of AppCore. The app's `OfflineCacheSnapshotSink` (in `App/`) adapts it to `BudgetSnapshotSink` — writes disk cache + widget snapshot on each success, feeds offline first paint. | Working starter |
 | **WidgetShared** | `Sources/WidgetShared/` (`WidgetSnapshot`, `AppGroup`, `SharedStore`) | `WidgetSnapshot` (+ `.placeholder`), `AppGroup` (`identifier`, `containerURL`, `defaults`), `SharedStore.shared` (`read`/`write`) | `DesignSystem` | App group id `group.services.jays.usage.monitor` must match both `.entitlements`. Degrade gracefully (no force-unwrap) when the container is absent. | Working |
 | **Widget UI** | `UsageMonitorWidget/UsageMonitorWidgetBundle.swift` (app extension, **not** a Kit target) | `UsageMonitorWidgetBundle` (`@main`), `BudgetSummaryWidget`, `BudgetTimelineProvider` | `WidgetShared`, `DesignSystem` | Reads real cached data via `SharedStore.shared.read() ?? .empty` (zeros when unsigned-in). Gallery may use `.placeholder` curated sample only. | Working (small/medium) |
-| **PushScaffold** | `Sources/PushScaffold/PushScaffold.swift` | `PushScaffold` enum (`requestAuthorization()`, `setAPNsDeviceToken(_:)`) | `AppCore`, `Models` | Called from launch. Extend with categories/actions, APNs registration, local-notification scheduling from `[ProviderAlert]`. `UIBackgroundModes: remote-notification` + `BGTaskSchedulerPermittedIdentifiers` already declared. | Scaffold |
+| **PushScaffold** | `Sources/PushScaffold/PushScaffold.swift` | `PushScaffold` enum (`requestAuthorization()`, `configureNotificationCategories()`, `scheduleAlertNotifications(for:)`) | `AppCore`, `Models`, `Networking` | Called from launch. **Local notifications only — remote push (APNs) is NOT implemented.** There is no server device-enrollment endpoint and no APNs sender, so the app must not claim `aps-environment` or `UIBackgroundModes: remote-notification`; `PushScaffoldTests` enforces both. Delivery is `BGTaskScheduler` (`UIBackgroundModes: fetch` + `BGTaskSchedulerPermittedIdentifiers`) → `AlertNotifier.deliver` → `scheduleAlertNotifications`. Adding remote push means adding the server side first, then the client against that real contract. | Working (local only) |
 
 ---
 

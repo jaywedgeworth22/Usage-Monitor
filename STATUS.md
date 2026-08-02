@@ -31,8 +31,10 @@ Updated: 2026-07-21
 - Native full access lists providers and tracked subscriptions, safely toggles eligible providers,
   edits or explicitly clears monthly budgets while preserving the rest of the plan, and pauses active
   subscriptions after confirmation. Successful mutations refresh the shared budget/widget state.
-- Notification permission is requested only after explicit Settings opt-in; launch only restores APNs
-  registration for an already-authorized user.
+- Notification permission is requested only after explicit Settings opt-in. Alerts are delivered as
+  **local** notifications scheduled on-device by the background refresh; remote push (APNs) is not
+  implemented — there is no server device-enrollment endpoint and no APNs sender, so the app claims
+  neither the `aps-environment` entitlement nor the `remote-notification` background mode.
 
 ## Verification
 
