@@ -51,6 +51,7 @@ export interface UsageMaintenanceResult {
   // deliberately NOT folded into isUsageMaintenanceHealthy — a control-layer
   // problem must never flip scheduler/readiness health.
   budgetControls?: BudgetControlsResult;
+  r2UsageCheck?: R2UsageAssessment;
 }
 
 export interface SubscriptionAdoptionMaintenanceError {
