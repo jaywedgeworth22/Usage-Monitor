@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { ExternalUsageIdempotencyCollisionError } from "@/lib/external-usage-events";
-import { isUsageIngestAuthorized, tokenFromRequest } from "@/lib/ingest-auth";
+import {
+  isUsageIngestAuthorized,
+  resolveUsageIngestCredential,
+  tokenFromRequest,
+} from "@/lib/ingest-auth";
 import {
   getIngestIdentityRateLimitKey,
   getLoginBackstopKey,
@@ -129,11 +133,23 @@ export async function POST(request: NextRequest) {
     );
 
   // Authenticate first, then rate-limit on identity (see limiter comment).
-  if (!isUsageIngestAuthorized(request)) {
+  const credential = resolveUsageIngestCredential(request);
+  if (!credential) {
     if (!otlpMetricsUnauthenticatedRateLimiter.check(getLoginBackstopKey(request))) {
       return rateLimitedResponse();
     }
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (
+    credential.allowedSourceApps &&
+    !credential.allowedSourceApps.has("claude-code") &&
+    !credential.allowedSourceApps.has("system-metrics")
+  ) {
+    return NextResponse.json(
+      { error: "Unauthorized producer for OTLP metrics" },
+      { status: 403 }
+    );
   }
   const presentedToken = tokenFromRequest(request, "x-usage-ingest-token");
   if (!otlpMetricsIdentityRateLimiter.check(getIngestIdentityRateLimitKey(presentedToken))) {

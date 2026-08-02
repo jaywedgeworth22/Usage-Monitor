@@ -22,6 +22,7 @@ import {
 import {
   isBillingReceiptIngestAuthorized,
   isUsageIngestAuthorized,
+  resolveUsageIngestCredential,
   safeEqual,
   tokenFromRequest,
 } from "@/lib/ingest-auth";
@@ -135,7 +136,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const usageAuthorized = isUsageIngestAuthorized(request);
+  const credential = resolveUsageIngestCredential(request);
+  const usageAuthorized = credential !== null;
   const receiptAuthorized = isBillingReceiptIngestAuthorized(request);
   if (!usageAuthorized && !receiptAuthorized) {
     // Unauthenticated traffic: throttle by the topology-aware IP backstop
@@ -227,6 +229,17 @@ export async function POST(request: NextRequest) {
       400,
       "invalid_request",
       `sourceApp "${SUBSCRIPTION_SOURCE_APP}" is reserved`
+    );
+  }
+
+  if (
+    credential?.allowedSourceApps &&
+    events.some((e) => !credential.allowedSourceApps!.has(e.sourceApp))
+  ) {
+    return respondError(
+      403,
+      "unauthorized",
+      "Credential is not authorized for this producer"
     );
   }
 

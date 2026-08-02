@@ -298,7 +298,7 @@ set for the retired rollback host). `BILLING_RECEIPT_INGEST_TOKEN` (must differ 
 receipt importer, alongside the stable 32+ character `BILLING_RECEIPT_IDENTITY_KEY`. The identity
 key must not rotate with the signing key because it derives durable receipt IDs. Receipt
 credentials are manually provisioned and are not used by ordinary
-telemetry. `USAGE_READ_TOKEN` is a separate read-only token for
+telemetry. `USAGE_INGEST_PRODUCER_TOKENS` is an optional comma-separated list of `producerId:token` pairs that provides per-producer token scoping and isolated rate-limit buckets. When `USAGE_INGEST_REQUIRE_SCOPED_TOKENS=true` is set, unscoped `USAGE_INGEST_TOKEN` ingest is denied. `USAGE_READ_TOKEN` is a separate read-only token for
 `/api/budget-status` and `GET /api/subscriptions`. It is **required in
 production** (the deploy preflight hard-fails without it): the
 `USAGE_INGEST_TOKEN` fallback only applies outside production or when
