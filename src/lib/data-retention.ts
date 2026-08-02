@@ -2,11 +2,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
-import {
-  backfillUnattributedProjectIds,
-  buildCanonicalProjectIdMap,
-  resolveProjectIdsByName,
-} from "@/lib/project-resolver";
+import { backfillUnattributedProjectIds } from "@/lib/project-resolver";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_SNAPSHOT_RETENTION_DAYS = 45;

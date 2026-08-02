@@ -141,6 +141,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const presentedToken = tokenFromRequest(request, "x-usage-ingest-token");
+  if (!otlpMetricsIdentityRateLimiter.check(getIngestIdentityRateLimitKey(presentedToken))) {
+    return rateLimitedResponse();
+  }
+
   if (
     credential.allowedSourceApps &&
     !credential.allowedSourceApps.has("claude-code") &&
@@ -150,10 +155,6 @@ export async function POST(request: NextRequest) {
       { error: "Unauthorized producer for OTLP metrics" },
       { status: 403 }
     );
-  }
-  const presentedToken = tokenFromRequest(request, "x-usage-ingest-token");
-  if (!otlpMetricsIdentityRateLimiter.check(getIngestIdentityRateLimitKey(presentedToken))) {
-    return rateLimitedResponse();
   }
 
   if (!ingestEnabled) {
@@ -216,6 +217,18 @@ export async function POST(request: NextRequest) {
     : systemResult.events.length;
 
   const events = [...claudeResult.events, ...systemEvents];
+
+  if (credential.allowedSourceApps) {
+    const unauthorizedEvent = events.find(
+      (e) => !credential.allowedSourceApps!.has(e.sourceApp)
+    );
+    if (unauthorizedEvent) {
+      return NextResponse.json(
+        { error: `Credential is not authorized for sourceApp "${unauthorizedEvent.sourceApp}"` },
+        { status: 403 }
+      );
+    }
+  }
 
   // A metric is only truly "unknown" if neither mapper understood it
   const unknownMetrics = claudeResult.unknownMetrics.filter((claudeUnknown) =>
