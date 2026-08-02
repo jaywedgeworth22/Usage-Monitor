@@ -16,6 +16,7 @@ function sessionRequest(request: Request): {
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseSubscriptionUpdateInput } from "@/lib/subscription-input";
+import { readBoundedJsonBody } from "@/lib/bounded-request-body";
 import {
   canLinkSubscriptionToExternalBilling,
   externalBillingFreshnessWindowMs,
@@ -48,7 +49,9 @@ export async function PUT(
 
   let update;
   try {
-    update = parseSubscriptionUpdateInput(await request.json());
+    update = parseSubscriptionUpdateInput(
+      await readBoundedJsonBody(request, { label: "Subscription body" })
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Invalid request" },

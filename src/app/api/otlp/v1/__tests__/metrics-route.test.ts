@@ -487,6 +487,19 @@ describe("POST /api/otlp/v1/metrics", () => {
     expect(row.metadata).not.toMatchObject({ "session.id": expect.anything() });
   });
 
+  it("mirrors dotted project.name resource attribute into metadata.project", async () => {
+    const payload = structuredClone(samplePayload);
+    payload.resourceMetrics[0].resource.attributes.push({
+      key: "project.name",
+      value: { stringValue: "congress-trade" },
+    });
+    await POST(jsonRequest(payload, { authorization: "Bearer test-token-123" }));
+    const row = await prisma.externalUsageEvent.findFirstOrThrow({
+      where: { sourceApp: "claude-code" },
+    });
+    expect(row.metadata).toMatchObject({ project: "congress-trade" });
+  });
+
   it("rejects oversized attribute values during bounded validation", async () => {
     const payload = structuredClone(samplePayload);
     payload.resourceMetrics[0].resource.attributes.push({
@@ -686,5 +699,24 @@ describe("POST /api/otlp/v1/metrics rate limiting (X1) and typed 500 (X6)", () =
     expect(
       await prisma.externalUsageEvent.count({ where: { sourceApp: "claude-code" } })
     ).toBe(0);
+  });
+
+  it("rejects an OTLP metrics request with 403 when token is scoped to a foreign producer", async () => {
+    vi.stubEnv("USAGE_INGEST_PRODUCER_TOKENS", "socratic-trade:tok-socratic");
+    const res = await POST(
+      jsonRequest(samplePayload, { authorization: "Bearer tok-socratic" })
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: "Unauthorized producer for OTLP metrics",
+    });
+  });
+
+  it("accepts an OTLP metrics request when token is scoped to claude-code", async () => {
+    vi.stubEnv("USAGE_INGEST_PRODUCER_TOKENS", "claude-code:tok-claude");
+    const res = await POST(
+      jsonRequest(samplePayload, { authorization: "Bearer tok-claude" })
+    );
+    expect(res.status).toBe(202);
   });
 });

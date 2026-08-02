@@ -142,7 +142,7 @@ export async function reconcileProviderUsage(
         },
       },
     }),
-    sumMonthToDateExternalCostByProvider(periodStart, rawCutoff),
+    sumMonthToDateExternalCostByProvider(periodStart, rawCutoff, now),
   ]);
 
   // Index the pushed-cost map by canonical provider key so alias spellings

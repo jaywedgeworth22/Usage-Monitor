@@ -266,6 +266,32 @@ describe("POST /api/ingest/usage admission", () => {
     );
   });
 
+  it("overwrites conflicting or null producer metadata.project with top-level event.project", async () => {
+    resolveProjects.mockResolvedValueOnce(new Map([["alpha", "proj-alpha-id"]]));
+
+    const response = await POST(
+      nextRequest(
+        {
+          sourceApp: "socratic-trade",
+          provider: "openai",
+          project: "Alpha",
+          metricType: "usage",
+          costUsd: 1,
+          occurredAt: "2026-07-14T00:00:00.000Z",
+          metadata: { project: "Beta", lane: "rag" },
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(response.status).toBe(202);
+    expect(externalUsageMocks.persist).toHaveBeenCalledWith([
+      expect.objectContaining({
+        projectId: "proj-alpha-id",
+        metadata: { lane: "rag", project: "Alpha" },
+      }),
+    ]);
+  });
+
   it("returns the typed v2 error shape for a headerless invalid v2 envelope", async () => {
     // Missing producerId is an ENVELOPE failure: still a hard 400, unlike
     // per-event rejections (X5).
@@ -553,9 +579,82 @@ describe("POST /api/ingest/usage admission", () => {
     );
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({
-      error: expect.stringContaining("reserved"),
+      error: 'sourceApp "subscription" is reserved',
+    });
+  });
+
+  it("rejects ordinary v1 events with future-dated occurredAt beyond 5-minute skew", async () => {
+    const farFutureResponse = await POST(
+      nextRequest(
+        {
+          sourceApp: "socratic-trade",
+          provider: "anthropic",
+          metricType: "usage",
+          costUsd: 5,
+          occurredAt: "2099-01-01T00:00:00.000Z",
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(farFutureResponse.status).toBe(400);
+    expect(await farFutureResponse.json()).toMatchObject({
+      error: "occurredAt cannot be in the future",
     });
     expect(externalUsageMocks.persist).not.toHaveBeenCalled();
+
+    const nearFutureIso = new Date(Date.now() + 4 * 60 * 1_000).toISOString();
+    const nearFutureResponse = await POST(
+      nextRequest(
+        {
+          sourceApp: "socratic-trade",
+          provider: "anthropic",
+          metricType: "usage",
+          costUsd: 5,
+          occurredAt: nearFutureIso,
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(nearFutureResponse.status).toBe(202);
+  });
+
+  it("rejects future-dated events in v2 batches with per-event rejections", async () => {
+    const response = await POST(
+      nextRequest(
+        {
+          schemaVersion: 2,
+          producerId: "congress-trade",
+          events: [
+            {
+              eventId: "valid-event-1",
+              provider: "openai",
+              metricType: "usage",
+              costUsd: 1,
+              occurredAt: new Date().toISOString(),
+            },
+            {
+              eventId: "future-event-2",
+              provider: "openai",
+              metricType: "usage",
+              costUsd: 2,
+              occurredAt: "2099-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+        USAGE_TOKEN
+      )
+    );
+    expect(response.status).toBe(202);
+    const body = await response.json();
+    expect(body.persisted).toBe(1);
+    expect(body.rejected).toBe(1);
+    expect(body.rejections).toEqual([
+      {
+        index: 1,
+        eventId: "future-event-2",
+        issues: ["occurredAt cannot be in the future"],
+      },
+    ]);
   });
 
   it("rejects the reserved sourceApp even when it rides alongside ordinary events in a batch", async () => {
@@ -831,5 +930,103 @@ describe("POST /api/ingest/usage rate limiting (X1)", () => {
     }));
     expect(limited.status).toBe(429);
     expect(limited.headers.get("retry-after")).toBe("30");
+  });
+});
+
+describe("POST /api/ingest/usage producer scoping", () => {
+  const tokA = "tok-socratic-secret";
+  const tokB = "tok-congress-secret";
+
+  beforeEach(() => {
+    vi.stubEnv(
+      "USAGE_INGEST_PRODUCER_TOKENS",
+      `socratic-trade:${tokA},congress-trade:${tokB}`
+    );
+  });
+
+  it("accepts a scoped token when events match allowedSourceApps", async () => {
+    const response = await POST(
+      nextRequest(
+        {
+          sourceApp: "socratic-trade",
+          provider: "anthropic",
+          metricType: "usage",
+          costUsd: 1,
+          occurredAt: "2026-07-14T00:00:00.000Z",
+        },
+        tokA
+      )
+    );
+    expect(response.status).toBe(202);
+    expect(externalUsageMocks.persist).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a scoped token with 403 when event sourceApp does not match producer scope", async () => {
+    const response = await POST(
+      nextRequest(
+        {
+          sourceApp: "congress-trade",
+          provider: "anthropic",
+          metricType: "usage",
+          costUsd: 1,
+          occurredAt: "2026-07-14T00:00:00.000Z",
+        },
+        tokA
+      )
+    );
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining("Credential is not authorized for this producer"),
+    });
+    expect(externalUsageMocks.persist).not.toHaveBeenCalled();
+  });
+
+  it("gives distinct producer tokens independent 10 rps rate-limit buckets", async () => {
+    // Fill tokA rate limit bucket (10 requests)
+    for (let i = 0; i < 10; i++) {
+      const resA = await POST(
+        nextRequest(
+          {
+            sourceApp: "socratic-trade",
+            provider: "anthropic",
+            metricType: "usage",
+            costUsd: 1,
+            occurredAt: "2026-07-14T00:00:00.000Z",
+          },
+          tokA
+        )
+      );
+      expect(resA.status).toBe(202);
+    }
+
+    // 11th request on tokA should be 429
+    const limitedA = await POST(
+      nextRequest(
+        {
+          sourceApp: "socratic-trade",
+          provider: "anthropic",
+          metricType: "usage",
+          costUsd: 1,
+          occurredAt: "2026-07-14T00:00:00.000Z",
+        },
+        tokA
+      )
+    );
+    expect(limitedA.status).toBe(429);
+
+    // tokB request should still succeed (202) because rate-limit bucket is per-credential
+    const resB = await POST(
+      nextRequest(
+        {
+          sourceApp: "congress-trade",
+          provider: "anthropic",
+          metricType: "usage",
+          costUsd: 1,
+          occurredAt: "2026-07-14T00:00:00.000Z",
+        },
+        tokB
+      )
+    );
+    expect(resB.status).toBe(202);
   });
 });

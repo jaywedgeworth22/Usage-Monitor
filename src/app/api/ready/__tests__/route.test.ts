@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  captureDatabaseFileBaseline,
   markSchedulerStarted,
   markSchedulerTickCompleted,
   resetRuntimeHealthForTests,
@@ -45,9 +49,142 @@ describe("GET /api/ready", () => {
       status: "ready",
       checks: {
         database: { ok: true },
+        // Additive: no SQLite file identity was ever captured in this mocked
+        // environment, so the new check makes no claim and never gates ok.
+        databaseFile: { ok: true, checked: false, reason: null },
         scheduler: { ok: true },
         backup: { ok: true, required: false, active: false },
         startup: { ok: true, required: false, active: false },
+      },
+    });
+  });
+
+  describe("database file identity", () => {
+    let fixtureDir: string | null = null;
+
+    const stubDatabaseFile = () => {
+      fixtureDir = mkdtempSync(join(tmpdir(), "usage-monitor-ready-dbfile-"));
+      const dbPath = join(fixtureDir, "prod.db");
+      writeFileSync(dbPath, "not-actually-sqlite\n");
+      vi.stubEnv("DATABASE_URL", `file:${dbPath}`);
+      return dbPath;
+    };
+
+    afterEach(() => {
+      if (fixtureDir) {
+        rmSync(fixtureDir, { recursive: true, force: true });
+        fixtureDir = null;
+      }
+    });
+
+    it("fails strict readiness when the database file is deleted under a live SELECT 1", async () => {
+      vi.spyOn(process, "uptime").mockReturnValue(301);
+      const dbPath = stubDatabaseFile();
+      captureDatabaseFileBaseline();
+      rmSync(dbPath);
+
+      // The mocked prisma keeps answering SELECT 1 — exactly the incident
+      // shape: only file identity can see the deletion.
+      const strictResponse = await GET(
+        new Request("https://usage.jays.services/api/ready?strict=1")
+      );
+      const strictBody = await strictResponse.json();
+
+      expect(strictResponse.status).toBe(503);
+      expect(strictResponse.headers.get("x-readiness-status")).toBe(
+        "not_ready"
+      );
+      expect(strictBody).toMatchObject({
+        ok: false,
+        status: "not_ready",
+        checks: {
+          database: { ok: true },
+          databaseFile: {
+            ok: false,
+            checked: true,
+            reason: "database_file_unlinked",
+            linkCount: 0,
+            pathPresent: false,
+          },
+        },
+      });
+      // The absolute database path must never leak — /api/ready is public.
+      expect(JSON.stringify(strictBody)).not.toContain(dbPath);
+
+      // Default transport stays liveness-safe HTTP 200 with the same verdict.
+      const plainResponse = await GET(READY_REQUEST);
+      expect(plainResponse.status).toBe(200);
+      await expect(plainResponse.json()).resolves.toMatchObject({
+        ok: false,
+        status: "not_ready",
+      });
+    });
+
+    it("never grants cold-start grace to a database-file failure", async () => {
+      // Well inside the 5-minute cold-start window.
+      vi.spyOn(process, "uptime").mockReturnValue(30);
+      const dbPath = stubDatabaseFile();
+      captureDatabaseFileBaseline();
+      rmSync(dbPath);
+      mocks.queryRawUnsafe.mockRejectedValue(new Error("database still opening"));
+
+      const response = await GET(READY_REQUEST);
+      const body = await response.json();
+
+      // A database-only failure would report "starting" here (see the bounded
+      // cold-start test above); a missing/replaced file must not.
+      expect(response.status).toBe(200);
+      expect(body).toMatchObject({
+        ok: false,
+        status: "not_ready",
+        checks: {
+          database: { ok: false, coldStartGraceActive: false },
+          databaseFile: { ok: false, reason: "database_file_unlinked" },
+        },
+      });
+    });
+  });
+
+  it("fails strict readiness for required env-only backup until verification is opted out", async () => {
+    vi.stubEnv("LITESTREAM_REQUIRED", "true");
+    vi.stubEnv("LITESTREAM_ACTIVE", "true");
+    // LITESTREAM_REQUIRED also mandates the verified startup wrapper; satisfy
+    // it so this test isolates the backup gate.
+    vi.stubEnv("APP_STARTUP_WRAPPER", "start-with-litestream-v2");
+
+    // No replica side-channel configured: an env-only claim is no longer
+    // proof the replica is advancing, so a required backup fails ready.
+    const unverifiedResponse = await GET(
+      new Request("https://usage.jays.services/api/ready?strict=1")
+    );
+    expect(unverifiedResponse.status).toBe(503);
+    await expect(unverifiedResponse.json()).resolves.toMatchObject({
+      ok: false,
+      status: "not_ready",
+      checks: {
+        backup: {
+          ok: false,
+          required: true,
+          active: true,
+          envOnly: true,
+          verificationRequired: true,
+          reason: "env_active_unverified",
+        },
+      },
+    });
+
+    // The explicit escape hatch (rollback hosts; the one deploy that installs
+    // the status-file producer) restores the previous env-only behavior.
+    vi.stubEnv("LITESTREAM_REPLICA_VERIFICATION_REQUIRED", "false");
+    const optedOutResponse = await GET(
+      new Request("https://usage.jays.services/api/ready?strict=1")
+    );
+    expect(optedOutResponse.status).toBe(200);
+    await expect(optedOutResponse.json()).resolves.toMatchObject({
+      ok: true,
+      status: "ready",
+      checks: {
+        backup: { ok: true, envOnly: true, verificationRequired: false },
       },
     });
   });

@@ -83,7 +83,7 @@ let package = Package(
             name: "OfflineCache",
             dependencies: ["Models", "Networking", "WidgetShared"]
         ),
-        .target(name: "PushScaffold", dependencies: ["AppCore", "Models", "Networking"]),
+        .target(name: "PushScaffold", dependencies: ["AppCore", "Models"]),
 
         // ---- Tests (foundation-owned; feature agents add their own) -----
         .testTarget(

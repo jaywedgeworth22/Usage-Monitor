@@ -790,7 +790,7 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
         },
       },
     }),
-    sumMonthToDateExternalCostByProvider(monthStart, rawCutoff),
+    sumMonthToDateExternalCostByProvider(monthStart, rawCutoff, now),
     sumMonthToDateReceiptCashByProviderId(monthStart, rawCutoff, now),
     prisma.usageSnapshot.groupBy({
       by: ["providerId"],
@@ -2113,7 +2113,7 @@ async function computeProjectBudgetStatusUncached(now: Date): Promise<ProjectBud
       },
       orderBy: { name: "asc" }
     }),
-    sumMonthToDateExternalCostAttribution(monthStartUtc(now), getExternalEventRawCutoff(now)),
+    sumMonthToDateExternalCostAttribution(monthStartUtc(now), getExternalEventRawCutoff(now), now),
     prisma.provider.findMany({
       select: {
         id: true,

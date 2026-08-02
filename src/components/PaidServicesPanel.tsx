@@ -49,7 +49,7 @@ const COVERAGE_STYLES: Record<BillingCoverageStatus, string> = {
   tracked: "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300",
   available: "bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
   manual: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
-  "not-applicable": "bg-gray-50 text-gray-500 dark:bg-gray-900 dark:text-gray-500",
+  "not-applicable": "bg-gray-50 text-gray-600 dark:bg-gray-900 dark:text-gray-400",
 };
 
 function formatMoney(amount: number, currency = "USD"): string {
@@ -416,7 +416,7 @@ export default function PaidServicesPanel({
                         {BILLING_PROVENANCE_LABELS[item.provenance]}
                       </span>
                       <p className="mt-1 break-words text-[11px] text-gray-500 dark:text-gray-400">{item.source || "local"}</p>
-                      <p className={`mt-1 text-[11px] ${item.stale ? "font-medium text-amber-700 dark:text-amber-300" : "text-gray-400 dark:text-gray-400"}`}>
+                      <p className={`mt-1 text-[11px] ${item.stale ? "font-medium text-amber-700 dark:text-amber-300" : "text-gray-500 dark:text-gray-400"}`}>
                         {item.stale ? "Sync is stale" : relativeSync(item.syncedAt)}
                       </p>
                     </td>

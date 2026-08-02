@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE_NAME, isCsrfSafeRequest, verifySessionToken } from "@/lib/auth";
 
 export const config = {
   runtime: "nodejs",
@@ -86,7 +86,18 @@ export function middleware(request: NextRequest) {
   const isAuthenticated = verifySessionToken(token);
 
   let response: NextResponse;
-  if (isAuthenticated || isPublicPath(request.nextUrl.pathname)) {
+  // CSRF choke point. Gated on `token &&` so only ambient-cookie authority is
+  // covered: token-authed clients (chrome extension -> /api/ingest/usage, OTLP
+  // collectors, cron, the bearer readers) carry no cookie and are untouched,
+  // and POST /api/auth/login has no cookie yet so login still works. It runs
+  // before the isPublicPath branch so it still covers the cookie-gated
+  // /api/subscriptions collection POST, which isPublicPath marks public.
+  if (token && !isCsrfSafeRequest(request)) {
+    response = NextResponse.json(
+      { error: "Cross-origin request rejected" },
+      { status: 403, headers: requestHeaders }
+    );
+  } else if (isAuthenticated || isPublicPath(request.nextUrl.pathname)) {
     response = NextResponse.next({
       request: {
         headers: requestHeaders,

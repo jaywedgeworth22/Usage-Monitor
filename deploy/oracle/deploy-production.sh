@@ -83,6 +83,19 @@ die() {
   return 1
 }
 
+# Host-environment preflight failures (mount, disk floor, SQLite integrity,
+# runtime-env invariants) are properties of the box, not of the target
+# revision. Exit 79 so the poller retries without spending the revision-keyed
+# circuit-breaker budget on a condition the revision cannot fix. Only used
+# inside preflight_current_production, which runs strictly pre-cutover: an
+# explicit exit skips the ERR trap (no rollback is owed yet) and still runs
+# the cleanup_scratch EXIT trap.
+readonly HOST_PREFLIGHT_STATUS=79
+die_host() {
+  log "ERROR: $*"
+  exit "${HOST_PREFLIGHT_STATUS}"
+}
+
 read_env_value() {
   local file="$1"
   local key="$2"
@@ -572,10 +585,10 @@ verify_backup_restore() {
   [[ -z "${foreign_key_result}" ]] || \
     die "Garage acceptance restore failed SQLite foreign-key validation"
 
-  live_schema="$(sqlite3 -readonly "${DB_PATH}" \
-    "SELECT coalesce(group_concat(sql, char(10)), '') FROM (SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND name != '_deploy_heartbeat' ORDER BY type, name);")"
-  restored_schema="$(sqlite3 -readonly "${RESTORE_SCRATCH}" \
-    "SELECT coalesce(group_concat(sql, char(10)), '') FROM (SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND name != '_deploy_heartbeat' ORDER BY type, name);")"
+  live_schema="$(timeout 30 sqlite3 -readonly "${DB_PATH}" \
+    "SELECT coalesce(group_concat(sql, char(10)), '') FROM (SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND name != '_deploy_heartbeat' ORDER BY type, name);")" || die "failed to read live schema"
+  restored_schema="$(timeout 30 sqlite3 -readonly "${RESTORE_SCRATCH}" \
+    "SELECT coalesce(group_concat(sql, char(10)), '') FROM (SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND name != '_deploy_heartbeat' ORDER BY type, name);")" || die "failed to read restored schema"
   [[ "${restored_schema}" == "${live_schema}" ]] || die "Garage acceptance restore schema differs from live SQLite"
   cleanup_restore_scratch
   log "Garage post-cutover restore, full integrity, foreign keys, and schema comparison passed."
@@ -629,45 +642,51 @@ verify_render_retirement() {
 preflight_current_production() {
   local ready scheduler backup_required backup_bucket running_image expected_image
 
-  mountpoint -q "${DATA_DIR}" || die "${DATA_DIR} is not a mount point"
+  # Every direct failure below is a host/box condition, so it uses die_host
+  # (exit 79) instead of die: the poller must retry it without burning the
+  # revision-keyed circuit breaker on, say, a full disk. The helpers called at
+  # the bottom keep their internal `die` because they also run post-cutover,
+  # where 79 would be wrong.
+  mountpoint -q "${DATA_DIR}" || die_host "${DATA_DIR} is not a mount point"
   [[ "$(findmnt -n -o SOURCE --target "${DATA_DIR}")" == "${EXPECTED_DATA_DEVICE}" ]] || \
-    die "${DATA_DIR} is not mounted from ${EXPECTED_DATA_DEVICE}"
+    die_host "${DATA_DIR} is not mounted from ${EXPECTED_DATA_DEVICE}"
   [[ "$(findmnt -n -o UUID --target "${DATA_DIR}")" == "${EXPECTED_DATA_UUID}" ]] || \
-    die "${DATA_DIR} filesystem UUID does not match the pinned production volume"
+    die_host "${DATA_DIR} filesystem UUID does not match the pinned production volume"
   findmnt -n -o OPTIONS --target "${DATA_DIR}" | tr ',' '\n' | grep -qx rw || \
-    die "${DATA_DIR} is not mounted read-write"
+    die_host "${DATA_DIR} is not mounted read-write"
 
-  [[ -f "${DB_PATH}" && ! -L "${DB_PATH}" ]] || die "production database is missing or not a regular file"
-  [[ "$(stat -c '%u:%g' "${DB_PATH}")" == "1000:1000" ]] || die "production database must be uid/gid 1000"
-  [[ "$(stat -c '%a' "${DB_PATH}")" == "600" ]] || die "production database must have mode 0600"
-  [[ "$(timeout 120 sqlite3 -readonly "${DB_PATH}" 'PRAGMA integrity_check;')" == "ok" ]] || die "production SQLite integrity check failed"
-  [[ -z "$(timeout 120 sqlite3 -readonly "${DB_PATH}" 'PRAGMA foreign_key_check;')" ]] || die "production SQLite foreign-key check failed"
+  [[ -f "${DB_PATH}" && ! -L "${DB_PATH}" ]] || die_host "production database is missing or not a regular file"
+  [[ "$(stat -c '%u:%g' "${DB_PATH}")" == "1000:1000" ]] || die_host "production database must be uid/gid 1000"
+  [[ "$(stat -c '%a' "${DB_PATH}")" == "600" ]] || die_host "production database must have mode 0600"
+  [[ "$(timeout 120 sqlite3 -readonly "${DB_PATH}" 'PRAGMA integrity_check;')" == "ok" ]] || die_host "production SQLite integrity check failed"
+  [[ -z "$(timeout 120 sqlite3 -readonly "${DB_PATH}" 'PRAGMA foreign_key_check;')" ]] || die_host "production SQLite foreign-key check failed"
 
-  (( $(free_bytes /) >= MIN_ROOT_FREE_BYTES )) || die "root/Docker volume has less than 8 GiB free"
-  (( $(free_bytes "${DATA_DIR}") >= MIN_DATA_FREE_BYTES )) || die "data volume has less than 5 GiB free"
+  (( $(free_bytes /) >= MIN_ROOT_FREE_BYTES )) || die_host "root/Docker volume has less than 8 GiB free"
+  (( $(free_bytes "${DATA_DIR}") >= MIN_DATA_FREE_BYTES )) || die_host "data volume has less than 5 GiB free"
 
   scheduler="$(read_env_value "${RUNTIME_ENV}" USAGE_SCHEDULER_ENABLED)"
   backup_required="$(read_env_value "${RUNTIME_ENV}" LITESTREAM_REQUIRED)"
   backup_bucket="$(read_env_value "${RUNTIME_ENV}" LITESTREAM_S3_BUCKET)"
-  [[ "${scheduler}" == "true" ]] || die "USAGE_SCHEDULER_ENABLED must be exactly true"
-  [[ "${backup_required}" == "true" ]] || die "LITESTREAM_REQUIRED must be exactly true"
-  [[ "${backup_bucket}" == "usage-monitor-prod-v3" ]] || die "production must use Garage bucket usage-monitor-prod-v3"
+  [[ -n "${backup_bucket}" ]] || backup_bucket="$(read_env_value "${RUNTIME_ENV}" AWS_S3_BUCKET_NAME)"
+  [[ "${scheduler}" == "true" ]] || die_host "USAGE_SCHEDULER_ENABLED must be exactly true"
+  [[ "${backup_required}" == "true" ]] || die_host "LITESTREAM_REQUIRED must be exactly true"
+  [[ "${backup_bucket}" == "usage-monitor-prod-v3" ]] || die_host "production must use S3/R2 bucket usage-monitor-prod-v3"
   # Production denies the USAGE_INGEST_TOKEN fallback for bearer reads
   # (src/lib/ingest-auth.ts resolveUsageReadToken), so without a dedicated
   # read token every budget-status / subscriptions GET bearer consumer 503s
   # and the only signal is a boot-time console.warn. Gate here like the
   # scheduler/backup invariants above.
   [[ -n "$(read_env_value "${RUNTIME_ENV}" USAGE_READ_TOKEN)" ]] || \
-    die "USAGE_READ_TOKEN must be set in ${RUNTIME_ENV} (production denies the ingest fallback; bearer budget-status/subscriptions reads 503 without it)"
+    die_host "USAGE_READ_TOKEN must be set in ${RUNTIME_ENV} (production denies the ingest fallback; bearer budget-status/subscriptions reads 503 without it)"
 
   require_single_app_container
   expected_image="$(timeout 30 docker image inspect --format '{{.Id}}' \
     "${APP_IMAGE_REPOSITORY}:${PREVIOUS_SHA}")"
   running_image="$(timeout 30 docker inspect --format '{{.Image}}' "${APP_CONTAINER}")"
   [[ "${running_image}" == "${expected_image}" ]] || \
-    die "running app image does not match the accepted ${PREVIOUS_SHA} image"
+    die_host "running app image does not match the accepted ${PREVIOUS_SHA} image"
   ready="$(fetch_public_ready)"
-  ready_matches_revision "${ready}" "${PREVIOUS_SHA}" || die "current public production is not healthy at ${PREVIOUS_SHA}"
+  ready_matches_revision "${ready}" "${PREVIOUS_SHA}" || die_host "current public production is not healthy at ${PREVIOUS_SHA}"
 
   verify_render_retirement
   verify_backup_path

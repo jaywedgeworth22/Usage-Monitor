@@ -21,11 +21,53 @@ export function safeEqual(left: string, right: string): boolean {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-export function isUsageIngestAuthorized(request: NextRequest): boolean {
-  const expected = process.env.USAGE_INGEST_TOKEN?.trim();
-  if (!expected) return false;
+export interface IngestCredential {
+  credentialId: string;
+  token: string;
+  allowedSourceApps: ReadonlySet<string> | null;
+}
+
+export function resolveUsageIngestCredential(request: NextRequest): IngestCredential | null {
   const actual = tokenFromRequest(request, "x-usage-ingest-token");
-  return Boolean(actual) && safeEqual(actual, expected);
+  if (!actual) return null;
+
+  const rawProducerTokens = process.env.USAGE_INGEST_PRODUCER_TOKENS?.trim();
+  if (rawProducerTokens) {
+    const entries = rawProducerTokens
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const entry of entries) {
+      const colonIndex = entry.indexOf(":");
+      if (colonIndex <= 0 || colonIndex === entry.length - 1) continue;
+      const producerId = entry.slice(0, colonIndex).trim();
+      const token = entry.slice(colonIndex + 1).trim();
+      if (!producerId || !token) continue;
+      if (safeEqual(actual, token)) {
+        return {
+          credentialId: producerId,
+          token: actual,
+          allowedSourceApps: new Set([producerId]),
+        };
+      }
+    }
+  }
+
+  const expected = process.env.USAGE_INGEST_TOKEN?.trim();
+  const requireScoped = process.env.USAGE_INGEST_REQUIRE_SCOPED_TOKENS === "true";
+  if (expected && !requireScoped && safeEqual(actual, expected)) {
+    return {
+      credentialId: "unscoped",
+      token: actual,
+      allowedSourceApps: null,
+    };
+  }
+
+  return null;
+}
+
+export function isUsageIngestAuthorized(request: NextRequest): boolean {
+  return resolveUsageIngestCredential(request) !== null;
 }
 
 export function isBillingReceiptIngestAuthorized(request: NextRequest): boolean {

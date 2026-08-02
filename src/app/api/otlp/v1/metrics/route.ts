@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { ExternalUsageIdempotencyCollisionError } from "@/lib/external-usage-events";
-import { isUsageIngestAuthorized, tokenFromRequest } from "@/lib/ingest-auth";
+import {
+  isUsageIngestAuthorized,
+  resolveUsageIngestCredential,
+  tokenFromRequest,
+} from "@/lib/ingest-auth";
 import {
   getIngestIdentityRateLimitKey,
   getLoginBackstopKey,
@@ -129,15 +133,28 @@ export async function POST(request: NextRequest) {
     );
 
   // Authenticate first, then rate-limit on identity (see limiter comment).
-  if (!isUsageIngestAuthorized(request)) {
+  const credential = resolveUsageIngestCredential(request);
+  if (!credential) {
     if (!otlpMetricsUnauthenticatedRateLimiter.check(getLoginBackstopKey(request))) {
       return rateLimitedResponse();
     }
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
   const presentedToken = tokenFromRequest(request, "x-usage-ingest-token");
   if (!otlpMetricsIdentityRateLimiter.check(getIngestIdentityRateLimitKey(presentedToken))) {
     return rateLimitedResponse();
+  }
+
+  if (
+    credential.allowedSourceApps &&
+    !credential.allowedSourceApps.has("claude-code") &&
+    !credential.allowedSourceApps.has("system-metrics")
+  ) {
+    return NextResponse.json(
+      { error: "Unauthorized producer for OTLP metrics" },
+      { status: 403 }
+    );
   }
 
   if (!ingestEnabled) {
@@ -201,6 +218,18 @@ export async function POST(request: NextRequest) {
 
   const events = [...claudeResult.events, ...systemEvents];
 
+  if (credential.allowedSourceApps) {
+    const unauthorizedEvent = events.find(
+      (e) => !credential.allowedSourceApps!.has(e.sourceApp)
+    );
+    if (unauthorizedEvent) {
+      return NextResponse.json(
+        { error: `Credential is not authorized for sourceApp "${unauthorizedEvent.sourceApp}"` },
+        { status: 403 }
+      );
+    }
+  }
+
   // A metric is only truly "unknown" if neither mapper understood it
   const unknownMetrics = claudeResult.unknownMetrics.filter((claudeUnknown) =>
     systemResult.unknownMetrics.some((systemUnknown) => systemUnknown.name === claudeUnknown.name)
@@ -250,7 +279,9 @@ export async function POST(request: NextRequest) {
               costUsd: event.costUsd,
               requests: event.requests,
               occurredAt: event.occurredAt,
-              metadata: event.metadata as Prisma.InputJsonObject,
+              metadata: (event.projectName
+                ? { ...(event.metadata ?? {}), project: event.projectName }
+                : event.metadata) as Prisma.InputJsonObject,
             },
           }))
         );

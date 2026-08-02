@@ -1,6 +1,7 @@
 import { useState, Fragment } from "react";
 import { type Provider } from "@/app/settings/page";
 import { isExternalBillingStale } from "@/components/ExternalBillingDetails";
+import ListLoadErrorPanel from "@/components/ListLoadErrorPanel";
 import ProviderIntegrationInfo, { publicConfigFieldNames } from "@/components/ProviderIntegrationInfo";
 import { getProviderIntegrationProfile } from "@/lib/provider-integration-catalog";
 import SortHeader, { type SortDirection } from "@/components/table/SortHeader";
@@ -31,6 +32,13 @@ interface ProviderTableProps {
    * the table renders exactly as before.
    */
   budgetIntelByProviderId?: Record<string, ProviderBudgetIntel>;
+  /**
+   * Message from a failed provider load. When set and nothing loaded, the
+   * table renders an explicit failure panel instead of the "no providers
+   * configured yet" CTA — an outage is not an empty account.
+   */
+  loadError?: string | null;
+  onRetryLoad?: () => void;
 }
 
 type SortField = "name" | "type" | "status" | "spend" | "alerts" | "credits" | "lastFetched";
@@ -61,7 +69,7 @@ function providerStatusStyle(provider: Provider): {
 } {
   if (!provider.isActive) {
     return {
-      badge: "bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-400",
+      badge: "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
       dot: "bg-gray-300",
     };
   }
@@ -223,6 +231,8 @@ export default function ProviderTable({
   onToggleActive,
   onFetchNow,
   budgetIntelByProviderId,
+  loadError,
+  onRetryLoad,
 }: ProviderTableProps) {
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
@@ -302,6 +312,15 @@ export default function ProviderTable({
   });
 
   if (providers.length === 0) {
+    if (loadError) {
+      return (
+        <ListLoadErrorPanel
+          message="Providers couldn't be loaded."
+          detail={loadError}
+          onRetry={onRetryLoad}
+        />
+      );
+    }
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-gray-200 bg-white py-16 text-center dark:border-gray-700 dark:bg-gray-800">
         <p className="text-gray-500 dark:text-gray-400">No providers configured yet.</p>

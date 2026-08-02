@@ -1,7 +1,7 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createSessionToken } from "@/lib/auth";
 import { setupPrismaSqliteTestDb } from "@/lib/__tests__/setup-test-db";
@@ -44,6 +44,8 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-15T12:00:00Z"));
   process.env.ATTRIBUTION_IDENTITY_HMAC_KEY = "test-attribution-key-material-longer-than-32-characters";
   delete process.env.ATTRIBUTION_IDENTITY_HMAC_PREVIOUS_KEYS;
   await prisma.providerKeyBinding.deleteMany();
@@ -51,6 +53,10 @@ beforeEach(async () => {
   await prisma.externalUsageEvent.deleteMany();
   await prisma.project.deleteMany();
   await prisma.provider.deleteMany();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("provider key attribution API", () => {
@@ -118,7 +124,11 @@ describe("provider key attribution API", () => {
     }));
     expect(identityResponse.status).toBe(201);
     expect(JSON.stringify(await identityResponse.json())).not.toContain(rawProviderKeyId);
-    const storedIdentity = await prisma.providerKeyIdentity.findFirstOrThrow();
+    let storedIdentity = await prisma.providerKeyIdentity.findFirstOrThrow();
+    storedIdentity = await prisma.providerKeyIdentity.update({
+      where: { id: storedIdentity.id },
+      data: { createdAt: monthStart },
+    });
     const directEventTime = new Date();
     expect(storedIdentity.providerReportedKeyIdFingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(storedIdentity)).not.toContain(rawProviderKeyId);
@@ -201,7 +211,7 @@ describe("provider key attribution API", () => {
           provider: "openai",
           keyRef: adminProducerKeyRef,
           costUsd: 4,
-          occurredAt: directEventTime,
+          occurredAt: eventTime,
           metadata: {
             _usageTelemetrySchemaVersion: 2,
             _coverageDeclared: true,
@@ -330,6 +340,8 @@ describe("provider key attribution API", () => {
   });
 
   it("rehashes an identity fingerprint through HMAC rotation so previous keys can be removed", async () => {
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const provider = await prisma.provider.create({
       data: { name: "openai", displayName: "OpenAI", type: "builtin" },
     });
@@ -344,6 +356,10 @@ describe("provider key attribution API", () => {
       providerReportedKeyId: rawProviderKeyId,
     }))).status).toBe(201);
     const identity = await prisma.providerKeyIdentity.findFirstOrThrow();
+    await prisma.providerKeyIdentity.update({
+      where: { id: identity.id },
+      data: { createdAt: monthStart },
+    });
     const oldFingerprint = identity.providerReportedKeyIdFingerprint;
     expect(oldFingerprint).toMatch(/^[a-f0-9]{64}$/);
 

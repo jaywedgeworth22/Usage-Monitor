@@ -1539,4 +1539,153 @@ describe("materializeDueSubscriptions + project attribution (integration)", () =
       })
     ).toBe(0);
   });
+
+  describe("transactional re-check concurrency & race prevention", () => {
+    it("does not charge a subscription that the owner paused mid-run", async () => {
+      const provider = await prisma.provider.create({
+        data: {
+          name: "race-provider-1",
+          displayName: "Race Provider 1",
+          type: "builtin",
+          refreshIntervalMin: 60,
+        },
+      });
+      const subscription = await createSubscription(provider.id, {
+        status: "active",
+        costUsd: 100,
+        startDate: new Date("2026-07-01T00:00:00Z"),
+        currentPeriodStart: new Date("2026-07-01T00:00:00Z"),
+        nextRenewalAt: new Date("2026-08-01T00:00:00Z"),
+        lastChargedPeriodStart: null,
+      });
+
+      const result = await materializeDueSubscriptions(NOW, {
+        beforeTransactionalRecheck: async () => {
+          await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: { status: "paused" },
+          });
+        },
+      });
+
+      expect(result.charged).toBe(0);
+      expect(result.eventsWritten).toBe(0);
+
+      const eventsCount = await prisma.externalUsageEvent.count({
+        where: { provider: provider.name },
+      });
+      expect(eventsCount).toBe(0);
+
+      const dbSub = await prisma.subscription.findUniqueOrThrow({
+        where: { id: subscription.id },
+      });
+      expect(dbSub.status).toBe("paused");
+      expect(dbSub.lastChargedPeriodStart).toBeNull();
+    });
+
+    it("charges at the owner's new price, not the price observed before the lock", async () => {
+      const provider = await prisma.provider.create({
+        data: {
+          name: "race-provider-2",
+          displayName: "Race Provider 2",
+          type: "builtin",
+          refreshIntervalMin: 60,
+        },
+      });
+      const subscription = await createSubscription(provider.id, {
+        status: "active",
+        costUsd: 200,
+        startDate: new Date("2026-07-01T00:00:00Z"),
+        currentPeriodStart: new Date("2026-07-01T00:00:00Z"),
+        nextRenewalAt: new Date("2026-08-01T00:00:00Z"),
+        lastChargedPeriodStart: null,
+      });
+
+      const result = await materializeDueSubscriptions(NOW, {
+        beforeTransactionalRecheck: async () => {
+          await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: { costUsd: 20 },
+          });
+        },
+      });
+
+      expect(result.charged).toBe(1);
+      expect(result.eventsWritten).toBe(1);
+
+      const event = await prisma.externalUsageEvent.findFirstOrThrow({
+        where: { provider: provider.name },
+      });
+      expect(event.costUsd).toBe(20);
+    });
+
+    it("re-plans under the owner's new cadence", async () => {
+      const provider = await prisma.provider.create({
+        data: {
+          name: "race-provider-3",
+          displayName: "Race Provider 3",
+          type: "builtin",
+          refreshIntervalMin: 60,
+        },
+      });
+      const subscription = await createSubscription(provider.id, {
+        status: "active",
+        costUsd: 50,
+        interval: "monthly",
+        startDate: new Date("2026-07-01T00:00:00Z"),
+        currentPeriodStart: new Date("2026-07-01T00:00:00Z"),
+        nextRenewalAt: new Date("2026-08-01T00:00:00Z"),
+        lastChargedPeriodStart: null,
+      });
+
+      const result = await materializeDueSubscriptions(NOW, {
+        beforeTransactionalRecheck: async () => {
+          await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: {
+              interval: "yearly",
+              currentPeriodStart: new Date("2027-01-01T00:00:00Z"),
+              nextRenewalAt: new Date("2028-01-01T00:00:00Z"),
+            },
+          });
+        },
+      });
+
+      expect(result.charged).toBe(0);
+      expect(result.eventsWritten).toBe(0);
+    });
+
+    it("suppresses a row the owner switched to a non-USD currency mid-run", async () => {
+      const provider = await prisma.provider.create({
+        data: {
+          name: "race-provider-4",
+          displayName: "Race Provider 4",
+          type: "builtin",
+          refreshIntervalMin: 60,
+        },
+      });
+      const subscription = await createSubscription(provider.id, {
+        status: "active",
+        costUsd: 50,
+        currency: "USD",
+        startDate: new Date("2026-07-01T00:00:00Z"),
+        currentPeriodStart: new Date("2026-07-01T00:00:00Z"),
+        nextRenewalAt: new Date("2026-08-01T00:00:00Z"),
+        lastChargedPeriodStart: null,
+      });
+
+      const result = await materializeDueSubscriptions(NOW, {
+        beforeTransactionalRecheck: async () => {
+          await prisma.subscription.update({
+            where: { id: subscription.id },
+            data: { currency: "EUR" },
+          });
+        },
+      });
+
+      expect(result.nonUsdSkipped).toBe(1);
+      expect(result.charged).toBe(0);
+      expect(result.eventsWritten).toBe(0);
+    });
+  });
 });

@@ -139,15 +139,51 @@ sudo install -o root -g root -m 0600 deploy/oracle/render-retired.production.jso
 sudo install -o root -g root -m 0755 deploy/oracle/deploy-production.sh /usr/local/sbin/usage-monitor-deploy
 sudo install -o root -g root -m 0755 deploy/oracle/infisical-env-sync.sh /usr/local/sbin/usage-monitor-env-sync
 sudo install -o root -g root -m 0755 deploy/oracle/auto-deploy.sh /usr/local/sbin/usage-monitor-auto-deploy
+sudo install -o root -g root -m 0755 deploy/oracle/replica-status-probe.sh /usr/local/sbin/usage-monitor-replica-status
 sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor.service /etc/systemd/system/usage-monitor.service
 sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-env-sync.service /etc/systemd/system/usage-monitor-env-sync.service
 sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-env-sync.timer /etc/systemd/system/usage-monitor-env-sync.timer
 sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-auto-deploy.service /etc/systemd/system/usage-monitor-auto-deploy.service
 sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-auto-deploy.timer /etc/systemd/system/usage-monitor-auto-deploy.timer
+sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-replica-status.service /etc/systemd/system/usage-monitor-replica-status.service
+sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-replica-status.timer /etc/systemd/system/usage-monitor-replica-status.timer
 sudo systemctl daemon-reload
 sudo systemctl enable --now usage-monitor-env-sync.timer
 sudo systemctl enable --now usage-monitor-auto-deploy.timer
+sudo systemctl enable --now usage-monitor-replica-status.timer
 ```
+
+## Replica heartbeat (backup readiness side-channel)
+
+`/api/ready` fails a **required** backup unless the replica side-channel proves
+the Garage replica is advancing: the startup-only `LITESTREAM_ACTIVE=true` env
+claim is set once at boot and stays true even when Litestream has been timing
+out against Garage for hours. `usage-monitor-replica-status` (installed above,
+driven by its 10-minute timer) lists the newest LTX object through the app
+container's authenticated Litestream binary — same per-level tip strategy as
+the deploy gate, never `-level all` — and atomically writes
+`/data/.litestream-replica-status.json`:
+
+```json
+{"ok": true, "checkedAt": "2026-08-01T12:00:00Z", "ltxAgeSeconds": 42, "reason": null}
+```
+
+The app reads it via `LITESTREAM_REPLICA_STATUS_PATH` (set in the root-owned
+compose file, not Infisical). `ok:false`, a missing file, or `checkedAt` older
+than `LITESTREAM_REPLICA_MAX_AGE_SECONDS` (default 3600s, matching the deploy
+gate's LTX budget) fails strict readiness — so a dead probe fails closed
+instead of freezing a healthy verdict. `ageSeconds` is deliberately not
+written: the app would prefer it over `checkedAt` and a stale file would then
+pass forever.
+
+**Rollout ordering (one-time):** an app revision carrying the strict backup
+gate reports `not_ready` (`env_active_unverified`) until the heartbeat exists.
+Install the probe + timer and the updated compose file, confirm
+`/data/.litestream-replica-status.json` is fresh, and only then deploy that
+revision — or set `LITESTREAM_REPLICA_VERIFICATION_REQUIRED=false` in
+Infisical for exactly one deploy and remove it once the heartbeat is observed.
+That same opt-out is the standing escape hatch for disposable/rollback hosts
+that intentionally run without the probe.
 
 **Infisical cutover sequencing:** the installed root-owned copies are
 authoritative, never the fetched revision. To migrate an existing host,
@@ -172,8 +208,21 @@ or scheduler value other than exactly `false` fails the sole-writer gate.
 Keep `/etc/usage-monitor/auto-deploy.paused` present during bootstrap or a
 planned freeze. Removing it enables the next timer pass. A failed revision is
 retried at most three times, then recorded in
-`/var/lib/usage-monitor-deploy/blocked-sha`; a new main revision resets that
-circuit automatically. A failed required GitHub check is re-evaluated every
+`/var/lib/usage-monitor-deploy/blocked-sha` with a machine-readable
+`blocked-sha.json` beside it (`blockedRevision`, `reason` —
+`max_failures` or `terminal_eligibility` — and `blockedAt`); a new main
+revision resets that circuit automatically. Host-environment preflight
+failures (unmounted or wrong `/data` volume, disk floors, live SQLite
+integrity/foreign-key checks, runtime-env invariants) exit with the dedicated
+status 79 and are retried every timer pass **without** consuming the
+three-strike budget — they are properties of the box, not of the revision, so
+freeing the disk is enough; no `--retry-blocked` is needed for them. While a
+revision is latched, the poller deliberately exits non-zero on every pass so
+`systemctl is-failed usage-monitor-auto-deploy.service` is a reliable wedge
+signal (it previously reported success while latched, which repainted the unit
+green a minute after the wedge). Mount-gated app recovery still runs before
+the breaker check, so a latched deploy pipeline never blocks restarting the
+accepted writer. A failed required GitHub check is re-evaluated every
 five minutes so a successful same-SHA rerun can recover without a new PR. After
 an operator fixes a transient external condition,
 `sudo /usr/local/sbin/usage-monitor-auto-deploy --retry-blocked` explicitly
@@ -213,8 +262,10 @@ writer. Inspect receipts and logs with:
 
 ```bash
 sudo cat /var/lib/usage-monitor-deploy/current.json
+sudo cat /var/lib/usage-monitor-deploy/blocked-sha.json
 sudo journalctl -u usage-monitor-auto-deploy.service --since today
 systemctl list-timers usage-monitor-auto-deploy.timer
+systemctl is-failed usage-monitor-auto-deploy.service
 ```
 
 Oracle and the Coolify backup host are also Tailscale peers. Keep the Garage

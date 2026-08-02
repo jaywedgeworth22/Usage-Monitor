@@ -38,6 +38,14 @@ log() {
   echo "[start-with-litestream] $*"
 }
 
+# Normalize AWS_* unified secret names into LITESTREAM_S3_* for litestream.yml expansion
+: "${LITESTREAM_S3_BUCKET:=${AWS_S3_BUCKET_NAME:-}}"
+: "${LITESTREAM_S3_ENDPOINT:=${AWS_S3_ENDPOINT:-}}"
+: "${LITESTREAM_S3_REGION:=${AWS_REGION:-auto}}"
+: "${LITESTREAM_S3_ACCESS_KEY_ID:=${AWS_ACCESS_KEY_ID:-}}"
+: "${LITESTREAM_S3_SECRET_ACCESS_KEY:=${AWS_SECRET_ACCESS_KEY:-}}"
+export LITESTREAM_S3_BUCKET LITESTREAM_S3_ENDPOINT LITESTREAM_S3_REGION LITESTREAM_S3_ACCESS_KEY_ID LITESTREAM_S3_SECRET_ACCESS_KEY
+
 REQUIRED_KEYS=(
   LITESTREAM_S3_BUCKET
   LITESTREAM_S3_ENDPOINT
@@ -73,6 +81,10 @@ if (( configured_keys == ${#REQUIRED_KEYS[@]} )); then
     exit 1
   fi
   litestream_enabled=true
+  if [[ "${LITESTREAM_EMERGENCY_DISABLE:-false}" == "true" || -f "/data/r2-disabled-70pct.flag" ]]; then
+    log "WARNING: Litestream replication disabled via emergency kill switch (70% R2 free tier threshold)."
+    litestream_enabled=false
+  fi
 elif [[ "${LITESTREAM_REQUIRED:-false}" == "true" ]]; then
   log "ERROR: LITESTREAM_REQUIRED=true but no replica credentials are configured."
   exit 1

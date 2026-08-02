@@ -5,7 +5,6 @@ import { prisma } from "@/lib/prisma";
 import {
   ExternalUsageIdempotencyCollisionError,
   persistExternalUsageEvents,
-  syncStatusToUsageSnapshot,
 } from "@/lib/external-usage-events";
 import {
   MAX_USAGE_TELEMETRY_BODY_BYTES,
@@ -22,6 +21,7 @@ import {
 import {
   isBillingReceiptIngestAuthorized,
   isUsageIngestAuthorized,
+  resolveUsageIngestCredential,
   safeEqual,
   tokenFromRequest,
 } from "@/lib/ingest-auth";
@@ -135,7 +135,8 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const usageAuthorized = isUsageIngestAuthorized(request);
+  const credential = resolveUsageIngestCredential(request);
+  const usageAuthorized = credential !== null;
   const receiptAuthorized = isBillingReceiptIngestAuthorized(request);
   if (!usageAuthorized && !receiptAuthorized) {
     // Unauthenticated traffic: throttle by the topology-aware IP backstop
@@ -227,6 +228,17 @@ export async function POST(request: NextRequest) {
       400,
       "invalid_request",
       `sourceApp "${SUBSCRIPTION_SOURCE_APP}" is reserved`
+    );
+  }
+
+  if (
+    credential?.allowedSourceApps &&
+    events.some((e) => !credential.allowedSourceApps!.has(e.sourceApp))
+  ) {
+    return respondError(
+      403,
+      "unauthorized",
+      "Credential is not authorized for this producer"
     );
   }
 
@@ -329,10 +341,9 @@ export async function POST(request: NextRequest) {
           const projectId = event.project
             ? projectIdByName.get(canonicalProjectKey(event.project)) ?? null
             : null;
-          const metadata =
-            event.project && !(event.metadata && "project" in event.metadata)
-              ? { ...(event.metadata ?? {}), project: event.project }
-              : event.metadata;
+          const metadata = event.project
+            ? { ...(event.metadata ?? {}), project: event.project }
+            : event.metadata;
           return {
             idempotencyKey: event.idempotencyKey,
             sourceApp: event.sourceApp,
@@ -367,9 +378,6 @@ export async function POST(request: NextRequest) {
       }
       throw error;
     }
-
-    // Cross-app status metrics integration: Generate UsageSnapshot rows for absolute metrics.
-    await syncStatusToUsageSnapshot(persistResult.newEvents);
 
     // Wave F / E7: soft-stale budget SWR after new rows (keep last-good; force
     // background refresh). Skip pure idempotent replays with zero inserts.

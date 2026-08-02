@@ -108,6 +108,7 @@ export default function Nav() {
                         key={t}
                         type="button"
                         onClick={() => setTheme(t)}
+                        aria-pressed={active}
                         title={`Set theme to ${label}`}
                         aria-label={`Set theme to ${label}`}
                         className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
@@ -200,7 +201,7 @@ export default function Nav() {
               {mounted && (
                 <>
                   <div className="text-xs font-medium text-gray-500 dark:text-gray-400">Theme</div>
-                  <div className="flex items-center gap-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800/80 p-0.5">
+                  <div className="flex items-center gap-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800/80 p-0.5" role="group" aria-label="Theme selector">
                     {(["light", "dark", "system"] as const).map((t) => {
                       const active = theme === t;
                       const Icon = t === "dark" ? Moon : t === "light" ? Sun : Monitor;
@@ -210,6 +211,7 @@ export default function Nav() {
                           key={t}
                           type="button"
                           onClick={() => setTheme(t)}
+                          aria-pressed={active}
                           className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-all ${
                             active
                               ? "bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm border border-gray-200/80 dark:border-gray-700"

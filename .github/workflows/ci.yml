@@ -71,6 +71,17 @@ jobs:
       - name: Test
         run: npm test
 
+      # The root `npm test` deliberately excludes **/*.workers.test.* (see
+      # vitest.config.ts); this workerd suite is the only coverage of the
+      # receipt-inbox Durable Object alarms, storage-transaction serialization,
+      # and R2 crash-resume. It was in `npm run verify` but missing from CI.
+      # All bindings are inline stubs in workers/receipt-inbox/vitest.config.mjs
+      # (LIFECYCLE_AUDITOR stubbed as a local serviceBinding) — no secrets
+      # needed; workerd itself is installed by `npm ci` via
+      # @cloudflare/workerd-* in the lockfile.
+      - name: Test receipt-inbox worker
+        run: npm run test:receipt-inbox-worker
+
       - name: Test safe migration path
         run: npm run test:migrate-safe
 

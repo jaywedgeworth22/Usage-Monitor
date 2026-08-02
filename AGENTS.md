@@ -144,7 +144,7 @@ SQLite datasource — match provider names case-insensitively in JS (`.toLowerCa
 `ExternalUsageEvent.projectId` (nullable FK → `Project`, `onDelete: SetNull`) is the first-class
 per-project dimension. It is set **at ingest** by resolving a producer-supplied project *name* to a
 `Project.id` (case-insensitive, `src/lib/project-resolver.ts`); unknown names stay null and the raw
-name is preserved in `metadata` so a Project created later can be back-filled.
+name is preserved in `metadata` (where the top-level `project` / `projectName` is authoritative and mirrored into `metadata.project`) so a Project created later can be back-filled.
 
 - **Claude Code / OTLP:** set `OTEL_RESOURCE_ATTRIBUTES=project=<name>` (or `project.name=`), ideally
   per-repo via direnv — Claude Code emits one resource-attribute set per process, so this is constant
@@ -298,7 +298,7 @@ set for the retired rollback host). `BILLING_RECEIPT_INGEST_TOKEN` (must differ 
 receipt importer, alongside the stable 32+ character `BILLING_RECEIPT_IDENTITY_KEY`. The identity
 key must not rotate with the signing key because it derives durable receipt IDs. Receipt
 credentials are manually provisioned and are not used by ordinary
-telemetry. `USAGE_READ_TOKEN` is a separate read-only token for
+telemetry. `USAGE_INGEST_PRODUCER_TOKENS` is an optional comma-separated list of `producerId:token` pairs that provides per-producer token scoping and isolated rate-limit buckets. When `USAGE_INGEST_REQUIRE_SCOPED_TOKENS=true` is set, unscoped `USAGE_INGEST_TOKEN` ingest is denied. `USAGE_READ_TOKEN` is a separate read-only token for
 `/api/budget-status` and `GET /api/subscriptions`. It is **required in
 production** (the deploy preflight hard-fails without it): the
 `USAGE_INGEST_TOKEN` fallback only applies outside production or when

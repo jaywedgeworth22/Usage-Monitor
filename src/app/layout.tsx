@@ -52,8 +52,19 @@ export default async function RootLayout({
           enableSystem
           nonce={nonce}
         >
+          {/* WCAG 2.4.1 bypass block. focus:z-[100] clears the z-50 sticky Nav. */}
+          <a
+            href="#main-content"
+            className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-gray-900 focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:bg-gray-900 dark:focus:text-gray-100"
+          >
+            Skip to main content
+          </a>
           <Nav />
-          <main className="max-w-7xl mx-auto px-3 py-5 sm:px-6 sm:py-8 lg:px-8">
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className="max-w-7xl mx-auto px-3 py-5 sm:px-6 sm:py-8 lg:px-8 focus:outline-none"
+          >
             {children}
           </main>
           <PwaRegistration />

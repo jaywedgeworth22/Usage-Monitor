@@ -141,10 +141,12 @@ defaults and valid values for local development.
 - `CRON_SECRET` (the `/api/cron/fetch-all` route still checks this, kept as
   an authenticated manual-trigger/debug endpoint even though nothing calls it
   on a schedule anymore)
-- `USAGE_INGEST_TOKEN` (copy this into reporting apps as their usage monitor
-  ingest token — this is also the token Claude Code's OTLP exporter
-  authenticates with against `POST /api/otlp/v1/metrics`, see AGENTS.md's
-  "Claude Code OTLP ingest" section)
+- `USAGE_INGEST_TOKEN` (legacy shared ingest token — used by default unless
+  scoped producer tokens are configured)
+- `USAGE_INGEST_PRODUCER_TOKENS` (optional comma-separated `producerId:token` pairs
+  for per-producer isolation and dedicated rate-limit buckets)
+- `USAGE_INGEST_REQUIRE_SCOPED_TOKENS` (optional `true`/`false`; when `true`, denies
+  unscoped `USAGE_INGEST_TOKEN` ingest)
 - `USAGE_READ_TOKEN` (**required in production** — the deploy preflight
   hard-fails without it; read-only token for `/api/budget-status` and
   `GET /api/subscriptions`)
