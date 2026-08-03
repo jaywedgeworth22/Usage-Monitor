@@ -66,7 +66,7 @@
     "@vitest/coverage-v8": "^4.1.10",
     "autoprefixer": "^10.5.4",
     "dotenv": "^17.4.2",
-    "eslint": "^8.57.1",
+    "eslint": "^10.8.0",
     "eslint-config-next": "^15.5.19",
     "postcss": "^8.5.18",
     "prisma": "^6.0.0",
