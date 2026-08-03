@@ -44,7 +44,7 @@
   },
   "dependencies": {
     "@jaywedgeworth22/congress-trading-shared": "git+https://github.com/jaywedgeworth22/congress-trading-shared.git#v2.4.0",
-    "@prisma/client": "^6.0.0",
+    "@prisma/client": "^7.9.1",
     "@sentry/nextjs": "^10.69.0",
     "lucide-react": "^1.27.0",
     "next": "15.5.21",
