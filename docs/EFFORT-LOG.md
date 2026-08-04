@@ -1100,6 +1100,7 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
   _2026-07-15 (MONET): moved to Completed — stale duplicate row; work already merged (PR #58, squash `dfdb39e`, per this row's own trailing annotation) and docs/EFFORT-LOG.md mirror already corrected by PR #299 on 2026-07-15; the live board simply hadn't caught up. No further action needed._
 
 ## In Progress
+- **[GROK] Deploy preflight SQLite integrity timeout 120→900s (2026-08-04) — IN PROGRESS.** branch `grok/deploy-integrity-timeout`.
 - **[API-usage-monitor][GROK] Docs: R2 primary (not Garage) + R2 free-tier spike analysis (2026-08-04) — MERGED PR #916.** Correct DEPLOY/litestream/oracle README after PR #869 R2 switch. GraphQL: bucket empty until Aug 2 seed; Aug 4 00:00–01:50Z storage 4.05→10.45 GiB multipart burst (Litestream snapshot/compaction). Branch: `grok/docs-r2-not-garage`.
 - **[API-usage-monitor][GROK] R2 free-tier 70% auto-shutoff fix (2026-08-03) — MERGED PR #911 / awaiting deploy + Infisical R2 analytics creds + empty usage-monitor-bucket.** Live GraphQL: storage **9.33 GiB / 10 GiB (93.3%)** almost all in `usage-monitor-bucket` (active litestream-class Put/List). Root cause: `runR2UsageCheck` used local DB size + fake Class A/B so kill switch never fired. Fix: real GraphQL metrics, R2-only litestream kill (Garage preserved), runtime watcher, readiness reason `r2_free_tier_disabled`, tests. Branch: `grok/r2-free-tier-shutoff`.
 
