@@ -123,13 +123,10 @@ recover_current_app_if_stopped() {
     return 1
   fi
   for _ in {1..60}; do
-    if body="$(curl -fsS --max-time 5 "${PUBLIC_READY_URL}" 2>/dev/null)" && \
-      jq -e --arg revision "${revision}" '
-        .status == "ready" and .revision == $revision and
-        .checks.database.ok == true and .checks.backup.ok == true and
-        .checks.backup.required == true and .checks.scheduler.ok == true and
-        .checks.scheduler.required == true
-      ' >/dev/null <<<"${body}"; then
+    # No curl -f: strict ready returns HTTP 503 when not_ready, but the JSON
+    # body is still the gate signal (R2 free-tier kill switch is intentional).
+    if body="$(curl -sS --max-time 15 "${PUBLIC_READY_URL}" 2>/dev/null)" && \
+      public_ready_matches_revision "${body}" "${revision}"; then
       log "mount-gated recovery restored accepted revision ${revision}."
       return 0
     fi
@@ -137,6 +134,30 @@ recover_current_app_if_stopped() {
   done
   log "ERROR: recovered app did not become ready at ${revision} within ten minutes."
   return 1
+}
+
+# Public readiness gate shared by recovery and the already-current short-circuit.
+# When /data/r2-disabled-70pct.flag is present, backup.active is intentionally
+# false and status is not_ready — require only live revision + DB + scheduler.
+public_ready_matches_revision() {
+  local body="$1"
+  local revision="$2"
+  if [[ -f /data/r2-disabled-70pct.flag ]]; then
+    jq -e --arg revision "${revision}" '
+      .revision == $revision and
+      .checks.database.ok == true and
+      .checks.scheduler.ok == true and
+      .checks.scheduler.required == true and
+      .checks.scheduler.lastTickSucceeded == true
+    ' >/dev/null <<<"${body}"
+    return $?
+  fi
+  jq -e --arg revision "${revision}" '
+    .status == "ready" and .revision == $revision and
+    .checks.database.ok == true and .checks.backup.ok == true and
+    .checks.backup.required == true and .checks.scheduler.ok == true and
+    .checks.scheduler.required == true
+  ' >/dev/null <<<"${body}"
 }
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -220,10 +241,8 @@ if [[ -f "${CHECK_RETRY_FILE}" ]]; then
 fi
 
 if [[ "${current_sha}" == "${target_sha}" ]]; then
-  if curl -fsS --max-time 15 "${PUBLIC_READY_URL}" \
-    | jq -e --arg revision "${target_sha}" \
-      '.status == "ready" and .revision == $revision and .checks.database.ok == true and .checks.backup.ok == true and .checks.scheduler.ok == true' \
-      >/dev/null; then
+  if body="$(curl -sS --max-time 15 "${PUBLIC_READY_URL}" 2>/dev/null)" && \
+    public_ready_matches_revision "${body}" "${target_sha}"; then
     clear_failure_state
     log "production is already healthy at ${target_sha}."
     exit 0
