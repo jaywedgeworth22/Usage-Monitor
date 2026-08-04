@@ -69,7 +69,7 @@
     "eslint": "^8.57.1",
     "eslint-config-next": "^15.5.19",
     "postcss": "^8.5.18",
-    "prisma": "^6.0.0",
+    "prisma": "^7.9.1",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10",
