@@ -19,7 +19,8 @@ import type {
 } from "@/components/ProviderCard";
 
 export type BillingMode = "actual" | "estimated" | "manual";
-type SettingsTab = "connections" | "services" | "projects";
+type SettingsTab = "connections" | "services" | "projects" | "notifications";
+import NotificationsSettingsPanel from "@/components/NotificationsSettingsPanel";
 
 export interface ProviderPlan {
   billingMode: BillingMode;
@@ -107,6 +108,7 @@ export interface Provider {
 }
 
 function parseSettingsTab(value: string | null): SettingsTab {
+  if (value === "notifications" || value === "alerts") return "notifications";
   if (value === "projects") return "projects";
   if (value === "services" || value === "billing") return "services";
   return "connections";
@@ -461,6 +463,18 @@ function SettingsPageContent() {
           >
             Projects
           </Link>
+          <Link
+            href="/settings?tab=notifications"
+            id="settings-tab-notifications"
+            aria-current={activeTab === "notifications" ? "page" : undefined}
+            className={`pb-2.5 px-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeTab === "notifications"
+                ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            }`}
+          >
+            Notifications & Alerts
+          </Link>
         </nav>
         <div className="flex-shrink-0 pb-2">
           {activeTab === "connections" ? (
@@ -665,25 +679,29 @@ function SettingsPageContent() {
               />
             )}
           </div>
+        ) : activeTab === "projects" ? (
+          <div className="space-y-4">
+            <ProjectTable
+              projects={projects}
+              actionLoading={actionLoading}
+              deleteProjectConfirm={deleteProjectConfirm}
+              onEdit={(project) => {
+                setEditProject(project);
+                setProjectModalOpen(true);
+              }}
+              onDeleteConfirmStart={setDeleteProjectConfirm}
+              onDeleteConfirmCancel={() => setDeleteProjectConfirm(null)}
+              onDelete={handleDeleteProject}
+              onAddProject={() => {
+                setEditProject(null);
+                setProjectModalOpen(true);
+              }}
+              loadError={loadErrors.projects ?? null}
+              onRetryLoad={() => void fetchProjects()}
+            />
+          </div>
         ) : (
-          <ProjectTable
-            projects={projects}
-            actionLoading={actionLoading}
-            deleteProjectConfirm={deleteProjectConfirm}
-            onEdit={(project) => {
-              setEditProject(project);
-              setProjectModalOpen(true);
-            }}
-            onDeleteConfirmStart={setDeleteProjectConfirm}
-            onDeleteConfirmCancel={() => setDeleteProjectConfirm(null)}
-            onDelete={handleDeleteProject}
-            onAddProject={() => {
-              setEditProject(null);
-              setProjectModalOpen(true);
-            }}
-            loadError={loadErrors.projects ?? null}
-            onRetryLoad={() => void fetchProjects()}
-          />
+          <NotificationsSettingsPanel />
         )}
       </section>
 

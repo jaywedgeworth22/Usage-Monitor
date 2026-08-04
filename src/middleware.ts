@@ -24,6 +24,8 @@ export const isPublicPath = (pathname: string) => {
     "/api/cron",
     "/api/ingest",
     "/api/otlp",
+    "/api/apns",
+    "/api/settings",
     "/api/budget-status",
     "/api/health",
     "/api/ready",

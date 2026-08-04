@@ -403,6 +403,28 @@ public actor APIClient {
         try await get("/api/providers/\(id)", authorization: .session)
     }
 
+    /// `POST /api/apns/device-tokens` — upload native APNs device token for push notifications.
+    public func registerApnsDeviceToken(
+        deviceToken: String,
+        deviceModel: String? = nil,
+        osVersion: String? = nil
+    ) async throws {
+        struct RegisterPayload: Encodable {
+            let deviceToken: String
+            let deviceModel: String?
+            let osVersion: String?
+        }
+        struct RegisterResponse: Decodable {
+            let ok: Bool
+        }
+        let _: RegisterResponse = try await send(
+            "/api/apns/device-tokens",
+            method: .post,
+            authorization: .session,
+            body: RegisterPayload(deviceToken: deviceToken, deviceModel: deviceModel, osVersion: osVersion)
+        )
+    }
+
     // MARK: - Request plumbing
 
     private func get<T: Decodable>(
