@@ -328,14 +328,24 @@ function litestreamEndpointIsR2(): boolean {
     process.env.LITESTREAM_S3_ENDPOINT ||
     process.env.AWS_S3_ENDPOINT ||
     ""
-  )
-    .trim()
-    .toLowerCase();
+  ).trim();
   if (!endpoint) return false;
-  return (
-    endpoint.includes("r2.cloudflarestorage.com") ||
-    endpoint.includes(".r2.cloudflare.com")
-  );
+  try {
+    // Hostname-only check via URL parser (not a substring match) so path /
+    // userinfo cannot spoof R2 vs Garage (CodeQL js/incomplete-url-substring-sanitization).
+    const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(endpoint)
+      ? endpoint
+      : `https://${endpoint}`;
+    const host = new URL(withScheme).hostname.toLowerCase();
+    return (
+      host === "r2.cloudflarestorage.com" ||
+      host.endsWith(".r2.cloudflarestorage.com") ||
+      host === "r2.cloudflare.com" ||
+      host.endsWith(".r2.cloudflare.com")
+    );
+  } catch {
+    return false;
+  }
 }
 
 function r2FreeTierKillEngaged(): boolean {

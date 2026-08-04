@@ -190,18 +190,32 @@ export function __resetR2UsageStateForTests(): void {
  * True when the configured Litestream S3 endpoint is Cloudflare R2.
  * Garage / MinIO / other S3 endpoints return false so free-tier kill never
  * takes down non-R2 backup paths.
+ *
+ * Hostname is parsed with the URL API (not a substring match) so an attacker
+ * cannot spoof "not R2" / "is R2" via path/query/userinfo tricks
+ * (CodeQL js/incomplete-url-substring-sanitization).
  */
 export function isLitestreamR2Endpoint(
   endpoint: string | undefined | null = process.env.LITESTREAM_S3_ENDPOINT ??
     process.env.AWS_S3_ENDPOINT
 ): boolean {
   if (!endpoint || typeof endpoint !== "string") return false;
-  const normalized = endpoint.trim().toLowerCase();
-  if (!normalized) return false;
-  return (
-    normalized.includes("r2.cloudflarestorage.com") ||
-    normalized.includes(".r2.cloudflare.com")
-  );
+  const trimmed = endpoint.trim();
+  if (!trimmed) return false;
+  try {
+    const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)
+      ? trimmed
+      : `https://${trimmed}`;
+    const host = new URL(withScheme).hostname.toLowerCase();
+    return (
+      host === "r2.cloudflarestorage.com" ||
+      host.endsWith(".r2.cloudflarestorage.com") ||
+      host === "r2.cloudflare.com" ||
+      host.endsWith(".r2.cloudflare.com")
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function resolveR2UsageCredentials(

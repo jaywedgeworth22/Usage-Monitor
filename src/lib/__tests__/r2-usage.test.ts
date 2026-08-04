@@ -120,7 +120,21 @@ describe("R2 usage monitoring & auto-disable", () => {
       )
     ).toBe(true);
     expect(
+      isLitestreamR2Endpoint("https://abc123.r2.cloudflarestorage.com/path")
+    ).toBe(true);
+    expect(
       isLitestreamR2Endpoint("https://garage.example.com:9443")
+    ).toBe(false);
+    // Substring spoofs must not count as R2 (hostname is parsed).
+    expect(
+      isLitestreamR2Endpoint(
+        "https://evil.example/r2.cloudflarestorage.com"
+      )
+    ).toBe(false);
+    expect(
+      isLitestreamR2Endpoint(
+        "https://r2.cloudflarestorage.com.evil.example"
+      )
     ).toBe(false);
     expect(isLitestreamR2Endpoint("")).toBe(false);
     expect(isLitestreamR2Endpoint(undefined)).toBe(false);
