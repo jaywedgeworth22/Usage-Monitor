@@ -34,6 +34,8 @@ describe("R2 usage monitoring & auto-disable", () => {
     delete process.env.R2_WRITES_DISABLED;
     delete process.env.PUSHOVER_USER_KEY;
     delete process.env.PUSHOVER_API_TOKEN;
+    delete process.env.PUSHOVER_USAGE_API_TOKEN;
+    delete process.env.PUSHOVER_APP_TOKEN;
     delete process.env.R2_USAGE_ACCOUNT_ID;
     delete process.env.R2_USAGE_API_TOKEN;
     delete process.env.CLOUDFLARE_JAY_ACCOUNT_ID;
@@ -272,6 +274,7 @@ describe("R2 usage monitoring & auto-disable", () => {
 
   it("sends Pushover notifications via HTTP POST to Pushover API", async () => {
     process.env.PUSHOVER_USER_KEY = "test_user_key";
+    process.env.PUSHOVER_USAGE_API_TOKEN = "test_usage_api_token";
     process.env.PUSHOVER_API_TOKEN = "test_api_token";
 
     const mockFetch = vi.fn().mockResolvedValue({
@@ -292,6 +295,10 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(mockFetch.mock.calls[0][0]).toBe(
       "https://api.pushover.net/1/messages.json"
     );
+    const body = String(mockFetch.mock.calls[0][1]?.body ?? "");
+    // Prefer PUSHOVER_USAGE_API_TOKEN over generic PUSHOVER_API_TOKEN.
+    expect(body).toContain("token=test_usage_api_token");
+    expect(body).not.toContain("token=test_api_token");
   });
 
   it("formats daily Pushover summary message cleanly", () => {
@@ -313,6 +320,7 @@ describe("R2 usage monitoring & auto-disable", () => {
 
   it("does not auto-disable when GraphQL credentials are missing", async () => {
     process.env.PUSHOVER_USER_KEY = "test_user_key";
+    process.env.PUSHOVER_USAGE_API_TOKEN = "test_usage_api_token";
     process.env.PUSHOVER_API_TOKEN = "test_api_token";
 
     const mockFetch = vi.fn().mockResolvedValue({
@@ -341,6 +349,7 @@ describe("R2 usage monitoring & auto-disable", () => {
     process.env.R2_USAGE_ACCOUNT_ID = "acct-test";
     process.env.R2_USAGE_API_TOKEN = "tok-test";
     process.env.PUSHOVER_USER_KEY = "test_user_key";
+    process.env.PUSHOVER_USAGE_API_TOKEN = "test_usage_api_token";
     process.env.PUSHOVER_API_TOKEN = "test_api_token";
     process.env.LITESTREAM_S3_ENDPOINT =
       "https://acct.r2.cloudflarestorage.com";

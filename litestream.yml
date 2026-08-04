@@ -14,15 +14,17 @@
 #     S3 endpoint set (R2 always sets one) Litestream falls back to us-east-1 and
 #     R2 accepts any region for SigV4.
 
-# Point-in-time retention: keep 7 days of snapshot history, a fresh snapshot
-# every 24h. Was 720h (30d) — too large for the shared Hetzner Garage volume
-# (~14 GiB in ~3 days of LTX at prod write rate). 168h still covers weekly
-# restore drills; operator can raise later if Garage moves off the 75G box.
-# Litestream 0.5.x stores LTX files and GCs snapshots older than `retention`;
-# the finer-grained LTX/WAL window is governed by the default l0-retention.
+# Point-in-time retention: keep 48h of snapshot history, a fresh snapshot
+# every 24h. History:
+#   - 720h (30d) was too large for the retired Coolify-hosted Garage volume
+#   - 168h (7d) still blew the Cloudflare R2 free tier (10 GiB) on 2026-08-04
+#     when full-DB LTX levels (~0.37 GiB each) re-uploaded many times in hours
+# 48h matches Socratic.Trade's free-tier-safe retention; raise only with a
+# paid R2 plan or a non-R2 replica. Litestream 0.5.x GCs LTX older than
+# `retention`; l0 retention still uses litestream defaults.
 snapshot:
   interval: 24h
-  retention: 168h
+  retention: 48h
 
 dbs:
   - path: /data/prod.db

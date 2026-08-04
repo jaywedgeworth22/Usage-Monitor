@@ -35,26 +35,27 @@ deliberate rollback.
    `/etc/usage-monitor/host.env` holds only deploy-written host state
    (`USAGE_MONITOR_REVISION`). No production SSH key or cloud credential is
    stored in GitHub; the deploy model is pull-based.
-3. **Backups replicate to the Garage bucket `usage-monitor-prod-v3`.**
-   Litestream continuously replicates `/data/prod.db` there; the deploy
-   preflight hard-fails if any other bucket is configured. Layered backup
-   story: same-disk pre-migration snapshots → deploy-time offline snapshots
-   (up to five retained) → Litestream/Garage PITR with 15-minute external
-   verification and weekly restore drills.
+3. **Backups replicate to Cloudflare R2 `usage-monitor-bucket` (Jay account).**
+   Litestream continuously replicates `/data/prod.db` there (prefix
+   `api-usage-monitor/prod.db/`). The former **Coolify-hosted Garage** bucket
+   (`usage-monitor-prod-v3`) is **retired/deleted** — do not configure Garage
+   endpoints. Layered backup story: same-disk pre-migration snapshots →
+   deploy-time offline snapshots (up to five retained) → Litestream/R2 PITR
+   (48h snapshot retention, free-tier kill-switch at 70%) with external
+   verification and restore drills. See `docs/litestream.md`.
 4. **Deploys are automatic and gated.** The
    `usage-monitor-auto-deploy.timer` polls GitHub once per minute and deploys
    only when all preflight gates pass: exact `main` SHA with valid signature,
    merged-PR provenance, green GitHub Actions (`verify`, `gitleaks`,
    `Analyze JavaScript and TypeScript`), healthy current database / sole
-   scheduler / Garage replica / `/data` headroom / public readiness, and the
+   scheduler / R2 replica health / `/data` headroom / public readiness, and the
    Render retirement proof (service user-suspended, auto-deploy disabled,
    `USAGE_SCHEDULER_ENABLED=false`, verified live through Render's API).
    `/etc/usage-monitor/auto-deploy.paused` freezes deployments while present.
 5. **Rollback never restores an old database over new writes.** Automatic
    rollback changes code/image only. A full host rollback requires quiescing
-   Oracle and restoring the latest verified Garage lineage before
-   transferring writer authority — never just re-point DNS at Render's stale
-   database.
+   Oracle and restoring the latest verified R2 lineage before transferring
+   writer authority — never just re-point DNS at Render's stale database.
 
 ## Verify a deployment
 
@@ -214,7 +215,7 @@ defaults and valid values for local development.
   requests receive `429` with the same backoff. Generic `/api/ingest/usage`
   remains available. Restore `true` only after the database stays healthy and a
   controlled OTLP ingest/replay succeeds.
-- `LITESTREAM_S3_*` (Garage replica credentials; set all four required values
+- `LITESTREAM_S3_*` (Cloudflare R2 replica credentials; set all four required values
   together or none—partial configuration fails startup. Production targets
   bucket `usage-monitor-prod-v3`; see `litestream.yml` and `docs/litestream.md`)
 - `LITESTREAM_REQUIRED` (production: `true`; readiness fails if replication
@@ -243,16 +244,16 @@ Every deploy transaction additionally keeps the previous full-SHA image and
 up to five verified offline SQLite snapshots for automatic code rollback.
 
 [Litestream](https://litestream.io/) continuously replicates `/data/prod.db`
-to the Garage bucket `usage-monitor-prod-v3` with transaction-aware restore
-points (7-day snapshot retention, 24 h snapshot interval — see
-`litestream.yml`). The external singleton at
-`/Users/jay/apps/fleet-sentry-monitor/monitor.py` verifies replica freshness
-and restorability every 15 minutes and runs a weekly full-integrity restore
-drill (see "Backup monitoring" in `deploy/oracle/README.md`). Full setup,
-verification, and disaster-recovery restore steps live in
-`docs/litestream.md`. Relevant files: `scripts/fetch-litestream.sh`
-(build-time binary download), `scripts/start-with-litestream.sh` (startup
-wrapper), `scripts/litestream-restore.sh` (manual restore).
+to Cloudflare R2 bucket `usage-monitor-bucket` (Jay account; Coolify Garage
+is retired) with transaction-aware restore points (**48h** snapshot retention,
+24h snapshot interval — see `litestream.yml`). Free-tier kill-switch at 70%
+is owned by this app (`src/lib/r2-usage.ts` + `PUSHOVER_USAGE_API_TOKEN`).
+The external singleton at `/Users/jay/apps/fleet-sentry-monitor/monitor.py`
+verifies replica freshness and restorability every 15 minutes and runs a
+weekly full-integrity restore drill (see "Backup monitoring" in
+`deploy/oracle/README.md`). Full setup, verification, and DR restore steps
+live in `docs/litestream.md`. Relevant files: `scripts/fetch-litestream.sh`,
+`scripts/start-with-litestream.sh`, `scripts/litestream-restore.sh`.
 
 ## Release-time data maintenance
 

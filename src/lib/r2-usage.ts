@@ -13,13 +13,23 @@ import path from "node:path";
  * When any metric's MTD share or linear month-end projection reaches
  * {@link R2_THRESHOLD_PCT} (70%), we:
  *   1. Persist `/data/r2-disabled-70pct.flag` (and set env)
- *   2. Alert via Pushover (priority 1, retried until delivered)
+ *   2. Alert via Pushover using the Usage Monitor app token
+ *      (`PUSHOVER_USAGE_API_TOKEN`, then generic fallbacks) — this app owns
+ *      its own free-tier alerts; peer apps (Socratic.Trade) must not be the
+ *      only notifier.
  *   3. Stop *R2-backed* Litestream writes (startup gate + runtime watcher).
- *      Garage / non-R2 S3 replicas are intentionally left alone — free tier
- *      only applies to Cloudflare R2.
+ *      Production backups target Cloudflare R2 only. The former Coolify-hosted
+ *      Garage replica is retired/gone — free-tier limits apply to R2.
  *
  * Metrics come from Cloudflare GraphQL analytics (same source as the R2
  * dashboard). Local SQLite size and day-of-month stubs are never used.
+ *
+ * Required credentials (either pair):
+ *   - `R2_USAGE_ACCOUNT_ID` + `R2_USAGE_API_TOKEN`, or
+ *   - `CLOUDFLARE_JAY_ACCOUNT_ID` / `CLOUDFLARE_ACCOUNT_ID` +
+ *     `CLOUDFLARE_JAY_API_TOKEN` / `CLOUDFLARE_API_TOKEN`
+ * Without analytics credentials the check logs `metricsSource: unavailable`
+ * and will NOT auto-disable (it refuses to fake local DB size as R2 usage).
  */
 
 export interface R2UsageLimits {
@@ -338,11 +348,15 @@ export function isR2AutoDisabled(): boolean {
 export function enforceR2AutoDisable(reason: string): void {
   process.env.LITESTREAM_EMERGENCY_DISABLE = "true";
   process.env.R2_WRITES_DISABLED = "true";
+  // Also clear the "active" claim so readiness/runtime-health immediately
+  // report backup as stopped (start-with-litestream only sets this at boot).
+  process.env.LITESTREAM_ACTIVE = "false";
   try {
     const filePath = getFlagFilePath(R2_DISABLED_FLAG_FILENAME);
     fs.writeFileSync(
       filePath,
-      `Disabled at ${new Date().toISOString()}: ${reason}\n`,
+      `Disabled at ${new Date().toISOString()}: ${reason}\n` +
+        `Resume: delete this file and clear LITESTREAM_EMERGENCY_DISABLE / R2_WRITES_DISABLED, then restart the container.\n`,
       { encoding: "utf8", mode: 0o600 }
     );
   } catch (err) {
@@ -352,8 +366,24 @@ export function enforceR2AutoDisable(reason: string): void {
     `[r2-usage] R2 free-tier auto-disable engaged: ${reason}` +
       (isLitestreamR2Endpoint()
         ? " (Litestream endpoint is R2 — replication will stop)"
-        : " (Litestream endpoint is not R2 — Garage/other replica left running)")
+        : " (Litestream endpoint is not R2 — non-R2 replica left running; unexpected in production)")
   );
+}
+
+/** Clear the free-tier kill switch so the next container start can resume R2 litestream. */
+export function clearR2AutoDisable(): boolean {
+  process.env.LITESTREAM_EMERGENCY_DISABLE = "false";
+  process.env.R2_WRITES_DISABLED = "false";
+  try {
+    const filePath = getFlagFilePath(R2_DISABLED_FLAG_FILENAME);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const alertPath = getFlagFilePath(R2_EMERGENCY_ALERT_FLAG_FILENAME);
+    if (fs.existsSync(alertPath)) fs.unlinkSync(alertPath);
+    return true;
+  } catch (err) {
+    console.error("[r2-usage] Failed clearing emergency disable flag:", err);
+    return false;
+  }
 }
 
 export async function sendPushoverNotification(
@@ -363,15 +393,21 @@ export async function sendPushoverNotification(
   fetchImpl: typeof fetch = fetch
 ): Promise<{ ok: boolean; status?: number; error?: string }> {
   const userKey = process.env.PUSHOVER_USER_KEY;
+  // Prefer the Usage Monitor-owned app token so R2 free-tier alerts are
+  // attributed to this product, not Socratic/Congress tokens that may also
+  // exist on a shared host env.
   const apiToken =
+    process.env.PUSHOVER_USAGE_API_TOKEN ||
     process.env.PUSHOVER_API_TOKEN ||
+    process.env.PUSHOVER_APP_TOKEN ||
     process.env.PUSHOVER_ST_API_TOKEN ||
     process.env.PUSHOVER_CT_API_TOKEN;
 
   if (!userKey || !apiToken) {
     return {
       ok: false,
-      error: "Pushover credentials (PUSHOVER_USER_KEY / PUSHOVER_API_TOKEN) not configured",
+      error:
+        "Pushover credentials not configured (need PUSHOVER_USER_KEY + PUSHOVER_USAGE_API_TOKEN or PUSHOVER_API_TOKEN)",
     };
   }
 
@@ -750,8 +786,9 @@ export async function runR2UsageCheck(
       `Class A: ${assessment.classA.actual.toLocaleString()} / 1,000,000`,
       `Class B: ${assessment.classB.actual.toLocaleString()} / 10,000,000`,
       `Source: ${assessment.metricsSource}`,
-      `Litestream→R2: ${assessment.litestreamUsesR2 ? "yes (replication stopped/blocked)" : "no (Garage/other left running)"}`,
+      `Litestream→R2: ${assessment.litestreamUsesR2 ? "yes (replication stopped/blocked)" : "no (endpoint not detected as R2)"}`,
       `Flag: /data/${R2_DISABLED_FLAG_FILENAME}`,
+      `This alert is from Usage Monitor (PUSHOVER_USAGE_API_TOKEN), not a peer app.`,
     ].join("\n");
 
     const res = await sendPushoverNotification(

@@ -1,3 +1,4 @@
+- **[GROK] R2 free-tier breach response (2026-08-04) — IN PR.** Pruned usage-monitor-bucket LTX ~10.5→0.74 GiB; retention 168h→48h; PUSHOVER_USAGE_API_TOKEN preference; Infisical analytics tokens for kill-switch; docs: Coolify Garage retired, prod is CF R2. Rollout: `docs/rollouts/2026-08-04-r2-free-tier-prune-and-killswitch.md`.
 # API-usage-monitor Effort Log — cross-agent board
 Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this file
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
