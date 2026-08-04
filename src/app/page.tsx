@@ -10,6 +10,9 @@ import OperationsOverview from "@/components/OperationsOverview";
 import {
   shouldShowDashboardSkeleton,
   useDashboardData,
+  generateMonthOptions,
+  generateYearOptions,
+  spendPeriodLabel as computeSpendPeriodLabel,
 } from "@/hooks/useDashboardData";
 import { sumProviderFunds } from "@/lib/provider-financial-semantics";
 import { canonicalProviderKey } from "@/lib/provider-identity";
@@ -119,6 +122,15 @@ export default function DashboardPage() {
     ambiguousCostFamilyCount,
     incompleteCostFamilyCount,
   } = portfolioMoney;
+
+  // The spend card header: always the current calendar month name since
+  // budget-status is always MTD. The period label updates when the user
+  // selects a named calendar month (it still says the same month).
+  const spendLabel = useMemo(() => computeSpendPeriodLabel(timeframe), [timeframe]);
+
+  // Picker option lists — computed once per render (stable month/year based on now).
+  const monthOptions = useMemo(() => generateMonthOptions(13), []);
+  const yearOptions = useMemo(() => generateYearOptions(3), []);
 
   const incompleteCostProviderCount = useMemo(
     () =>
@@ -248,12 +260,24 @@ export default function DashboardPage() {
               onChange={(e) => setTimeframe(e.target.value as any)}
               className="min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
             >
-              <option value="1d">Past 24 Hours</option>
-              <option value="7d">Past Week</option>
-              <option value="30d">Past Month</option>
-              <option value="90d">Past 3 Months</option>
-              <option value="180d">Past 6 Months</option>
-              <option value="all">All Time</option>
+              <optgroup label="Rolling Periods">
+                <option value="1d">Past 24 Hours</option>
+                <option value="7d">Past Week</option>
+                <option value="30d">Past 30 Days</option>
+                <option value="90d">Past 3 Months</option>
+                <option value="180d">Past 6 Months</option>
+                <option value="all">All Time</option>
+              </optgroup>
+              <optgroup label="Calendar Months">
+                {monthOptions.map(({ token, label }) => (
+                  <option key={token as string} value={token as string}>{label}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Calendar Years">
+                {yearOptions.map(({ token, label }) => (
+                  <option key={token as string} value={token as string}>{label}</option>
+                ))}
+              </optgroup>
             </select>
           </div>
           <button
@@ -283,6 +307,7 @@ export default function DashboardPage() {
         ambiguousCostFamilyCount={ambiguousCostFamilyCount}
         attentionItemsCount={attentionItems.length}
         criticalCount={criticalCount}
+        spendPeriodLabel={spendLabel}
         onAlertsNavigate={openAttentionPanel}
       />
 

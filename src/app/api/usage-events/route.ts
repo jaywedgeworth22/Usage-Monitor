@@ -22,15 +22,37 @@ const DEFAULT_RAW_LIMIT = 50;
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const rawDaysParam = searchParams.get("days");
-  const isAllTime = rawDaysParam === "all" || rawDaysParam === "all_time";
-  const requestedDays = Number(rawDaysParam ?? 30);
-  const days = isAllTime
-    ? 3650
-    : Number.isFinite(requestedDays)
-    ? Math.min(Math.max(Math.trunc(requestedDays), 1), 3650)
-    : 30;
+  const rawFrom = searchParams.get("from");
+  const rawTo = searchParams.get("to");
+
+  // Calendar-range mode: `from` and/or `to` take priority over `days`.
+  // `from` / `to` are interpreted as UTC calendar days (inclusive).
+  const hasRangeParams = rawFrom != null || rawTo != null;
+
+  let since: Date;
+  let until: Date | undefined;
+  let days: number;
+
+  if (hasRangeParams) {
+    since = rawFrom ? new Date(rawFrom + "T00:00:00.000Z") : new Date(0);
+    until = rawTo ? new Date(rawTo + "T23:59:59.999Z") : undefined;
+    // Approximate `days` for the response metadata (rolling equiv in whole days).
+    const sinceMs = since.getTime();
+    const untilMs = (until ?? new Date()).getTime();
+    days = Math.max(1, Math.ceil((untilMs - sinceMs) / 86_400_000));
+  } else {
+    const isAllTime = rawDaysParam === "all" || rawDaysParam === "all_time";
+    const requestedDays = Number(rawDaysParam ?? 30);
+    days = isAllTime
+      ? 3650
+      : Number.isFinite(requestedDays)
+      ? Math.min(Math.max(Math.trunc(requestedDays), 1), 3650)
+      : 30;
+    since = isAllTime || days >= 3650 ? new Date(0) : new Date(Date.now() - days * 86_400_000);
+    until = undefined;
+  }
+
   const projectFilter = searchParams.get("projectId");
-  const since = isAllTime || days >= 3650 ? new Date(0) : new Date(Date.now() - days * 86_400_000);
 
   const rawMode =
     searchParams.get("raw") === "1" ||
@@ -48,7 +70,10 @@ export async function GET(request: NextRequest) {
       searchParams.get("order") === "asc" ? ("asc" as const) : ("desc" as const);
 
     const where = {
-      occurredAt: { gte: since },
+      occurredAt: {
+        gte: since,
+        ...(until != null ? { lte: until } : {}),
+      },
       ...(projectFilter
         ? projectFilter === "none"
           ? { projectId: null }
@@ -101,7 +126,7 @@ export async function GET(request: NextRequest) {
   }
 
   const [summary, projects, providers] = await Promise.all([
-    summarizeExternalUsageEvents(since, getExternalEventRawCutoff()),
+    summarizeExternalUsageEvents(since, getExternalEventRawCutoff(), new Date(), until),
     prisma.project.findMany({ select: { id: true, name: true } }),
     prisma.provider.findMany({
       select: { id: true, name: true, displayName: true },

@@ -74,6 +74,20 @@ if (( configured_keys > 0 && configured_keys < ${#REQUIRED_KEYS[@]} )); then
   exit 1
 fi
 
+# Cloudflare R2 free-tier kill switch applies when the replica endpoint is R2
+# (production). The Coolify-hosted Garage replica is retired/gone — production
+# litestream targets R2 only. Detect R2 by endpoint hostname.
+litestream_endpoint_is_r2=false
+endpoint_lc="$(printf '%s' "${LITESTREAM_S3_ENDPOINT:-}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${endpoint_lc}" == *"r2.cloudflarestorage.com"* || "${endpoint_lc}" == *".r2.cloudflare.com"* ]]; then
+  litestream_endpoint_is_r2=true
+fi
+
+r2_free_tier_kill=false
+if [[ "${LITESTREAM_EMERGENCY_DISABLE:-false}" == "true" || "${R2_WRITES_DISABLED:-false}" == "true" || -f "/data/r2-disabled-70pct.flag" ]]; then
+  r2_free_tier_kill=true
+fi
+
 litestream_enabled=false
 if (( configured_keys == ${#REQUIRED_KEYS[@]} )); then
   if [[ ! -x "${LITESTREAM_BIN}" ]]; then
@@ -81,9 +95,13 @@ if (( configured_keys == ${#REQUIRED_KEYS[@]} )); then
     exit 1
   fi
   litestream_enabled=true
-  if [[ "${LITESTREAM_EMERGENCY_DISABLE:-false}" == "true" || -f "/data/r2-disabled-70pct.flag" ]]; then
-    log "WARNING: Litestream replication disabled via emergency kill switch (70% R2 free tier threshold)."
+  if [[ "${r2_free_tier_kill}" == "true" && "${litestream_endpoint_is_r2}" == "true" ]]; then
+    log "WARNING: Litestream replication disabled via R2 free-tier kill switch (70% threshold)."
+    log "Delete /data/r2-disabled-70pct.flag and clear LITESTREAM_EMERGENCY_DISABLE to resume after pruning R2."
     litestream_enabled=false
+  elif [[ "${r2_free_tier_kill}" == "true" && "${litestream_endpoint_is_r2}" != "true" ]]; then
+    log "R2 free-tier kill switch is set, but Litestream endpoint is not R2 — leaving replication ENABLED."
+    log "Production should use Cloudflare R2 (Coolify Garage is retired)."
   fi
 elif [[ "${LITESTREAM_REQUIRED:-false}" == "true" ]]; then
   log "ERROR: LITESTREAM_REQUIRED=true but no replica credentials are configured."
@@ -91,16 +109,16 @@ elif [[ "${LITESTREAM_REQUIRED:-false}" == "true" ]]; then
 fi
 
 if [[ "${STARTUP_PREFLIGHT_ONLY:-false}" == "true" ]]; then
-  log "preflight OK (replication ${litestream_enabled})."
+  log "preflight OK (replication ${litestream_enabled}; r2_endpoint=${litestream_endpoint_is_r2}; r2_kill=${r2_free_tier_kill})."
   exit 0
 fi
 
 if [[ "${litestream_enabled}" == "true" ]]; then
   export LITESTREAM_ACTIVE=true
-  log "replication ENABLED (LITESTREAM_S3_* set, bin/litestream present)."
+  log "replication ENABLED (LITESTREAM_S3_* set, bin/litestream present, r2_endpoint=${litestream_endpoint_is_r2})."
 
   if [[ ! -f "${DB_PATH}" ]]; then
-    log "no local DB at ${DB_PATH} — attempting restore from R2 replica (no-op if none exists yet)."
+    log "no local DB at ${DB_PATH} — attempting restore from replica (no-op if none exists yet)."
     "${LITESTREAM_BIN}" restore -config "${LITESTREAM_CONFIG}" -if-db-not-exists -if-replica-exists "${DB_PATH}"
   else
     log "local DB already present at ${DB_PATH} — skipping restore."
@@ -131,8 +149,46 @@ node "${REPO_ROOT}/scripts/ensure-subscription-link-unique-index.mjs"
 
 node "${REPO_ROOT}/scripts/migrate-safe.mjs"
 
+if [[ "${litestream_enabled}" == "true" && "${litestream_endpoint_is_r2}" == "true" ]]; then
+  # R2 path: run litestream as a sibling of npm so the free-tier kill switch can
+  # stop replication mid-cycle without taking the app down. A watcher polls the
+  # flag file every 30s and SIGTERMs litestream when it appears (Node maintenance
+  # writes it when GraphQL metrics hit 70% free tier).
+  log "starting litestream replicate (R2) as supervised sibling of npm start."
+  "${LITESTREAM_BIN}" replicate -config "${LITESTREAM_CONFIG}" &
+  LITESTREAM_PID=$!
+  (
+    while kill -0 "${LITESTREAM_PID}" 2>/dev/null; do
+      if [[ "${LITESTREAM_EMERGENCY_DISABLE:-false}" == "true" || "${R2_WRITES_DISABLED:-false}" == "true" || -f "/data/r2-disabled-70pct.flag" ]]; then
+        log "R2 free-tier kill switch tripped — stopping litestream pid=${LITESTREAM_PID}."
+        kill "${LITESTREAM_PID}" 2>/dev/null || true
+        wait "${LITESTREAM_PID}" 2>/dev/null || true
+        log "litestream stopped; app continues without R2 replication."
+        exit 0
+      fi
+      sleep 30
+    done
+  ) &
+  R2_WATCH_PID=$!
+  cleanup_r2_litestream() {
+    log "shutting down R2 litestream sibling (pid=${LITESTREAM_PID}) and watcher."
+    kill "${R2_WATCH_PID}" 2>/dev/null || true
+    kill "${LITESTREAM_PID}" 2>/dev/null || true
+    wait "${LITESTREAM_PID}" 2>/dev/null || true
+  }
+  trap cleanup_r2_litestream SIGTERM SIGINT EXIT
+  # npm start as the foreground process (receives container SIGTERM via trap).
+  npm start
+  app_status=$?
+  cleanup_r2_litestream
+  trap - SIGTERM SIGINT EXIT
+  exit "${app_status}"
+fi
+
 if [[ "${litestream_enabled}" == "true" ]]; then
-  log "starting litestream replicate (wraps npm start as its supervised process)."
+  # Non-R2 (Garage etc.): keep litestream as PID 1 with -exec so the replica
+  # process owns signal routing. Free-tier kill never applies here.
+  log "starting litestream replicate (non-R2) wrapping npm start as supervised child."
   exec "${LITESTREAM_BIN}" replicate -config "${LITESTREAM_CONFIG}" -exec "npm start"
 fi
 
