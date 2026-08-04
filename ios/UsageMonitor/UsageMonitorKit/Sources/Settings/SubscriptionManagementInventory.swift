@@ -362,6 +362,9 @@ private struct SubscriptionManagementDetailView: View {
 
                 if subscription.effectiveStatus == "active" {
                     Section {
+                        if subscription.isExternalBillingManaged || subscription.isExternalBillingLinked {
+                            managedPauseBanner(subscription)
+                        }
                         Button(role: .destructive) {
                             showPauseConfirmation = true
                         } label: {
@@ -376,7 +379,7 @@ private struct SubscriptionManagementDetailView: View {
                         }
                         .disabled(store.actionSubscriptionID != nil)
                     } footer: {
-                        Text("Pausing prevents future synthetic subscription charges. Existing usage and charge history remain intact.")
+                        Text(pauseSectionFooter(for: subscription))
                     }
                 } else {
                     reactivationSection(subscription)
@@ -438,6 +441,41 @@ private struct SubscriptionManagementDetailView: View {
             return "This plan is linked to the provider's billing records. If it is auto-managed, pausing permanently converts it to owner-managed. Future charges stop until the plan is reactivated through a validated resume or repurchase flow."
         }
         return "The server will stop materializing future recurring charges until the plan is reactivated through a validated resume or repurchase flow."
+    }
+
+    /// In-form banner so managed-row pause is never a silent action — the
+    /// confirmation dialog repeats the same consequence.
+    @ViewBuilder
+    private func managedPauseBanner(_ subscription: SubscriptionSummary) -> some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Theme.Colors.warning)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                Text(subscription.isExternalBillingManaged
+                     ? "Auto-managed plan"
+                     : "Linked to external billing")
+                    .font(Theme.Typography.captionEmphasis)
+                    .foregroundStyle(Theme.Colors.primaryText)
+                Text(subscription.isExternalBillingManaged
+                     ? "Pausing permanently converts this plan to owner-managed. Billing sync will stop reconciling it."
+                     : "If this plan is auto-managed, pausing permanently converts it to owner-managed.")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func pauseSectionFooter(for subscription: SubscriptionSummary) -> String {
+        if subscription.isExternalBillingManaged {
+            return "Pausing stops future charges and permanently relinquishes auto-management. Existing usage and charge history remain intact."
+        }
+        if subscription.isExternalBillingLinked {
+            return "Pausing stops future charges. Linked or auto-managed plans permanently convert to owner-managed on pause. Existing history remains intact."
+        }
+        return "Pausing prevents future synthetic subscription charges. Existing usage and charge history remain intact."
     }
 
     @ViewBuilder

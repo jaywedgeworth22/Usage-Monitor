@@ -30,7 +30,7 @@ public struct ProviderRow: View {
 
     public var body: some View {
         HStack(spacing: Theme.Spacing.md) {
-            monogram
+            ProviderMonogram(title: title, status: status)
 
             VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                 Text(title)
@@ -70,17 +70,6 @@ public struct ProviderRow: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(title), \(value)\(valueCaption.map { ", \($0)" } ?? "")")
-    }
-
-    private var monogram: some View {
-        Text(title.prefix(1).uppercased())
-            .font(.subheadline.weight(.bold))
-            .foregroundStyle(status == .neutral ? Theme.Colors.accent : status.tint)
-            .frame(width: 34, height: 34)
-            .background(
-                (status == .neutral ? Theme.Colors.accentSoft : status.wash),
-                in: RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
-            )
     }
 }
 

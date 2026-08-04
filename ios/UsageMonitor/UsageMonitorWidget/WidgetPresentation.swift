@@ -11,6 +11,10 @@ import WidgetShared
 /// than via AppCore's `Theme.SemanticStatus(_ level:)` bridge (which lives in a
 /// layer the widget must not depend on).
 enum WidgetPresentation {
+    /// Age past which the widget treats cached spend as stale (1 hour). Longer
+    /// than the in-app 15-minute threshold because widgets refresh less often.
+    static let staleThreshold: TimeInterval = 60 * 60
+
     /// Map a raw `WidgetSnapshot.Meter.status` string onto the design system's
     /// semantic status. The raw values mirror the server's `BudgetLevel`:
     /// `"ok" | "warning" | "exceeded" | "unconfigured"`. Anything unexpected
@@ -74,5 +78,66 @@ enum WidgetPresentation {
     /// shows its real `generatedAt` so days-old data is visibly stale.
     static func showsUpdatedAt(for snapshot: WidgetSnapshot) -> Bool {
         !snapshot.month.isEmpty && snapshot.generatedAt.timeIntervalSince1970 > 0
+    }
+
+    /// Whether the snapshot is older than ``staleThreshold``. Empty/placeholder
+    /// snapshots without a real timestamp are never treated as stale.
+    static func isStale(for snapshot: WidgetSnapshot, asOf now: Date = Date()) -> Bool {
+        guard showsUpdatedAt(for: snapshot) else { return false }
+        return now.timeIntervalSince(snapshot.generatedAt) >= staleThreshold
+    }
+
+    /// Caption under the hero: "Updated …" when fresh, "Stale · …" when old.
+    /// Returns `nil` for empty snapshots that must not show an age.
+    static func updatedCaption(for snapshot: WidgetSnapshot, asOf now: Date = Date()) -> String? {
+        guard showsUpdatedAt(for: snapshot) else { return nil }
+        let relative = relativeAge(since: snapshot.generatedAt, asOf: now)
+        if isStale(for: snapshot, asOf: now) {
+            return "Stale · \(relative)"
+        }
+        return "Updated \(relative)"
+    }
+
+    /// Compact relative age phrase for widget chrome.
+    static func relativeAge(since date: Date, asOf now: Date = Date()) -> String {
+        let seconds = max(0, now.timeIntervalSince(date))
+        if seconds < 45 { return "just now" }
+        if seconds < 90 { return "1 min ago" }
+        if seconds < 3600 {
+            let mins = Int((seconds / 60).rounded())
+            return "\(mins) min ago"
+        }
+        if seconds < 90 * 60 { return "1 hr ago" }
+        if seconds < 36 * 3600 {
+            let hours = Int((seconds / 3600).rounded())
+            return "\(hours) hr ago"
+        }
+        let days = max(1, Int((seconds / 86_400).rounded()))
+        return days == 1 ? "1 day ago" : "\(days) days ago"
+    }
+
+    // TODO: AppSettings.appLockEnabled lives in standard UserDefaults, not the
+    // app-group store. To redact amounts when the device lock is enabled, the
+    // main app should mirror `settings.appLockEnabled` into AppGroup.defaults
+    // on change, and this helper should return true when that shared flag is
+    // set (and optionally when the app process is backgrounded/locked). Until
+    // that handoff exists, the widget always shows amounts — do not invent a
+    // second lock source of truth here.
+    static func shouldRedactAmounts(appGroupDefaults: UserDefaults = AppGroup.defaults) -> Bool {
+        // Prefer a shared lock flag if the main app ever mirrors it.
+        let key = "settings.appLockEnabled"
+        guard appGroupDefaults.object(forKey: key) != nil else { return false }
+        return appGroupDefaults.bool(forKey: key)
+    }
+
+    /// Display string for a USD amount, or a redacted placeholder when privacy
+    /// redaction is active.
+    static func displayAmount(_ usd: Double, redacted: Bool) -> String {
+        redacted ? "••••" : CurrencyFormat.compactUSD(usd)
+    }
+
+    static func displayMeterDetail(spent: Double, budget: Double?, redacted: Bool) -> String {
+        if redacted { return "••••" }
+        return meterDetail(spent: spent, budget: budget)
     }
 }

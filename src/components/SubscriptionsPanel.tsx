@@ -24,6 +24,7 @@ export interface SubscriptionRow {
   notes: string | null;
   externalBillingSource: string | null;
   externalBillingId: string | null;
+  externalBillingManaged?: boolean | null;
   // Effective knobEnv (this subscription's own override if set, else the
   // provider's free-tier ProviderPlan.knobEnv) and the provider's free-tier
   // map on its own (always present when the provider has one, regardless of

@@ -18,11 +18,14 @@ public struct ProvidersRootView: View {
     @Environment(AppEnvironment.self) private var env: AppEnvironment?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model = ProvidersListModel()
+    /// Owned path so cross-tab deep links (Dashboard attention rows, push) can
+    /// push a provider detail without Dashboard importing this module.
+    @State private var path = NavigationPath()
 
     public init() {}
 
     public var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .navigationTitle(AppTab.providers.title)
                 .navigationBarTitleDisplayMode(.large)
@@ -31,7 +34,20 @@ public struct ProvidersRootView: View {
                 }
                 .toolbar { sortMenu }
                 .task { await store.loadIfNeeded() }
+                // Re-run when a cross-tab deep link lands a new pending id.
+                .task(id: env?.pendingProviderID) {
+                    consumePendingProviderRoute()
+                }
         }
+    }
+
+    /// Drain `AppEnvironment.pendingProviderID` into the local navigation path.
+    private func consumePendingProviderRoute() {
+        guard let env, let id = env.pendingProviderID, !id.isEmpty else { return }
+        env.pendingProviderID = nil
+        // Avoid stacking the same provider if already on top.
+        path.append(ProviderRoute(id: id))
+        Haptics.tap()
     }
 
     // MARK: - Phase routing

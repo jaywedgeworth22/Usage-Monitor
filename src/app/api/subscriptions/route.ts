@@ -93,6 +93,7 @@ export async function GET(request: NextRequest) {
         notes: sub.notes,
         externalBillingSource: sub.externalBillingSource,
         externalBillingId: sub.externalBillingId,
+        externalBillingManaged: sub.externalBillingManaged,
         // Effective knobEnv: this subscription's own override if set, else the
         // provider's free-tier ProviderPlan.knobEnv. freeTierKnobEnv is always
         // the provider's free-tier map (may be null), regardless of override,

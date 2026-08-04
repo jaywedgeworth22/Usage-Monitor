@@ -29,6 +29,7 @@ struct DashboardHeroCard: View {
 
             if data.hasBudget {
                 budgetSection
+                budgetBasisCaption
             } else {
                 noBudgetSection
             }
@@ -106,6 +107,20 @@ struct DashboardHeroCard: View {
         data.remaining < 0
             ? "\(CurrencyFormat.usd(abs(data.remaining))) over budget"
             : "\(CurrencyFormat.usd(data.remaining)) remaining"
+    }
+
+    /// Clarifies that the hero total is the sum of configured provider budgets
+    /// (not project budgets or a server-side account cap).
+    private var budgetBasisCaption: some View {
+        let count = data.configuredProviderCount
+        return Text(count == 1
+                    ? "Across 1 provider budget"
+                    : "Across \(count) provider budgets")
+            .font(Theme.Typography.caption)
+            .foregroundStyle(Theme.Colors.tertiaryText)
+            .accessibilityLabel(count == 1
+                                ? "Across 1 provider budget"
+                                : "Across \(count) provider budgets")
     }
 
     // MARK: - Unconfigured presentation

@@ -117,6 +117,7 @@ function parseSettingsTab(value: string | null): SettingsTab {
 function SettingsPageContent() {
   const searchParams = useSearchParams();
   const activeTab = parseSettingsTab(searchParams.get("tab"));
+  const editProviderId = searchParams.get("edit");
   const [providers, setProviders] = useState<Provider[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRow[]>([]);
@@ -138,6 +139,7 @@ function SettingsPageContent() {
   const providersLoaded = useRef(false);
   const projectsLoaded = useRef(false);
   const subscriptionsLoaded = useRef(false);
+  const deepLinkEditConsumed = useRef<string | null>(null);
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -211,6 +213,18 @@ function SettingsPageContent() {
     if (activeTab === "services" && !subscriptionsLoaded.current) void fetchSubscriptions();
     if (activeTab === "projects" && !projectsLoaded.current) void fetchProjects();
   }, [activeTab, fetchProviders, fetchProjects, fetchSubscriptions]);
+
+  // Deep-link: /settings?tab=connections&edit=<providerId> opens the edit modal.
+  useEffect(() => {
+    if (!editProviderId || activeTab !== "connections") return;
+    if (deepLinkEditConsumed.current === editProviderId) return;
+    if (providers.length === 0) return;
+    const match = providers.find((provider) => provider.id === editProviderId);
+    if (!match) return;
+    deepLinkEditConsumed.current = editProviderId;
+    setEditProvider(match);
+    setModalOpen(true);
+  }, [editProviderId, activeTab, providers]);
 
   // AddSubscriptionModal needs the project list for its allocation dropdown.
   useEffect(() => {
@@ -639,6 +653,7 @@ function SettingsPageContent() {
                     notes: sub.notes,
                     externalBillingSource: sub.externalBillingSource,
                     externalBillingId: sub.externalBillingId,
+                    externalBillingManaged: sub.externalBillingManaged ?? false,
                   });
                   setSubscriptionModalOpen(true);
                 }}

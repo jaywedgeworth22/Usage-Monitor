@@ -17,6 +17,7 @@ import type {
   ProviderCostCoverageCaveat,
 } from "@/components/ProviderCard";
 import type { SubscriptionRow } from "@/components/SubscriptionsPanel";
+import ProviderMonogram from "@/components/ProviderMonogram";
 import SortHeader, { type SortDirection } from "@/components/table/SortHeader";
 import { costCoverageHelpText } from "@/lib/cost-coverage-help";
 import {
@@ -610,6 +611,7 @@ function CompactFamilyCells({
           ) : (
             <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
           )}
+          <ProviderMonogram name={family.displayName} />
           <span
             className="block max-w-[16rem] truncate text-sm font-semibold text-gray-900 dark:text-gray-100"
             title={family.displayName}
@@ -779,12 +781,40 @@ export default function DashboardProviderWorkspace({
           }
         }
       }
+      // Shareable filter views: ?filter=alerts|active|incomplete
+      const params = new URLSearchParams(window.location.search);
+      const filterParam = params.get("filter");
+      if (
+        filterParam === "alerts" ||
+        filterParam === "active" ||
+        filterParam === "incomplete" ||
+        filterParam === "all"
+      ) {
+        setFilterChip(filterParam);
+      }
+      const qParam = params.get("q");
+      if (qParam) setQuery(qParam);
     } catch {
       // Ignore corrupted/unavailable storage — fall back to defaults.
     } finally {
       setHydratedFromStorage(true);
     }
   }, []);
+
+  // Keep filter + search in the URL so views are shareable / restorable.
+  useEffect(() => {
+    if (!hydratedFromStorage || typeof window === "undefined") return;
+    try {
+      const url = new URL(window.location.href);
+      if (filterChip === "all") url.searchParams.delete("filter");
+      else url.searchParams.set("filter", filterChip);
+      if (!query.trim()) url.searchParams.delete("q");
+      else url.searchParams.set("q", query.trim());
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      // History API unavailable — ignore.
+    }
+  }, [filterChip, query, hydratedFromStorage]);
 
   // Write is gated on the read above so mount doesn't clobber stored values.
   useEffect(() => {
@@ -1149,7 +1179,7 @@ export default function DashboardProviderWorkspace({
                 setCollapsed((current) => ({ ...current, [family.key]: !isCollapsed }));
               return (
                 <Fragment key={family.key}>
-                  <tr className="border-b border-gray-100 align-middle hover:bg-gray-50/70 dark:border-gray-700 dark:hover:bg-gray-700/40">
+                  <tr className="provider-workspace-row border-b border-gray-100 align-middle hover:bg-gray-50/70 dark:border-gray-700 dark:hover:bg-gray-700/40">
                       <CompactFamilyCells
                         family={family}
                         isCollapsed={isCollapsed}

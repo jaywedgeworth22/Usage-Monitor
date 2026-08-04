@@ -12,6 +12,9 @@ struct DashboardContentView: View {
     /// Portfolio telemetry timeframe — forwarded to telemetry sub-views.
     /// Hero / stat tiles always show current-calendar-month data from budget-status.
     var timeframe: TimeframeOption = .currentMonth
+    /// Cross-tab open of a provider detail (wired by `DashboardRootView` via
+    /// `AppEnvironment.openProvider`). Optional so previews stay standalone.
+    var onSelectProvider: ((String) -> Void)? = nil
 
     private let columns = [
         GridItem(.flexible(), spacing: Theme.Spacing.md),
@@ -28,11 +31,15 @@ struct DashboardContentView: View {
         }
 
         if !attentionProviders.isEmpty {
-            AttentionCard(providers: attentionProviders)
+            AttentionCard(providers: attentionProviders, onSelectProvider: onSelectProvider)
         }
 
         if !topProviders.isEmpty {
-            TopProvidersCard(providers: topProviders, totalCount: data.providers.count)
+            TopProvidersCard(
+                providers: topProviders,
+                totalCount: data.providers.count,
+                onSelectProvider: onSelectProvider
+            )
         }
     }
 
@@ -129,6 +136,7 @@ struct DashboardContentView: View {
 /// approaching their budget, with their most severe alert reason.
 private struct AttentionCard: View {
     let providers: [ProviderBudgetStatus]
+    var onSelectProvider: ((String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
@@ -136,33 +144,49 @@ private struct AttentionCard: View {
 
             VStack(spacing: Theme.Spacing.sm) {
                 ForEach(providers) { provider in
-                    HStack(spacing: Theme.Spacing.sm) {
-                        Image(systemName: provider.mostSevereAlert?.symbolName ?? "exclamationmark.circle")
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(Theme.SemanticStatus(provider.status).tint)
-                            .frame(width: 22)
+                    Button {
+                        Haptics.tap()
+                        onSelectProvider?(provider.id)
+                    } label: {
+                        HStack(spacing: Theme.Spacing.sm) {
+                            ProviderMonogram(
+                                title: provider.title,
+                                status: .init(provider.status),
+                                size: 28
+                            )
 
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(provider.title)
-                                .font(Theme.Typography.callout.weight(.medium))
-                                .foregroundStyle(Theme.Colors.primaryText)
-                                .lineLimit(1)
-                            if let reason = provider.mostSevereAlert?.message ?? attentionFallback(provider) {
-                                Text(reason)
-                                    .font(Theme.Typography.caption)
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                                    .lineLimit(2)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(provider.title)
+                                    .font(Theme.Typography.callout.weight(.medium))
+                                    .foregroundStyle(Theme.Colors.primaryText)
+                                    .lineLimit(1)
+                                if let reason = provider.mostSevereAlert?.message ?? attentionFallback(provider) {
+                                    Text(reason)
+                                        .font(Theme.Typography.caption)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                }
+                            }
+                            Spacer(minLength: Theme.Spacing.sm)
+                            if let percent = provider.percentUsed {
+                                Text(CurrencyFormat.percent(percent))
+                                    .font(Theme.Typography.captionEmphasis)
+                                    .monospacedDigit()
+                                    .foregroundStyle(Theme.SemanticStatus(provider.status).tint)
+                            }
+                            if onSelectProvider != nil {
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.Colors.tertiaryText)
                             }
                         }
-                        Spacer(minLength: Theme.Spacing.sm)
-                        if let percent = provider.percentUsed {
-                            Text(CurrencyFormat.percent(percent))
-                                .font(Theme.Typography.captionEmphasis)
-                                .monospacedDigit()
-                                .foregroundStyle(Theme.SemanticStatus(provider.status).tint)
-                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .disabled(onSelectProvider == nil)
                     .accessibilityElement(children: .combine)
+                    .accessibilityHint(onSelectProvider == nil ? "" : "Opens provider detail")
                 }
             }
         }

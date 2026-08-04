@@ -45,7 +45,7 @@ export default async function RootLayout({
           }}
         />
       </head>
-      <body className="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 antialiased min-h-screen">
+      <body className="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 antialiased min-h-screen pb-[env(safe-area-inset-bottom)]">
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
@@ -55,7 +55,7 @@ export default async function RootLayout({
           {/* WCAG 2.4.1 bypass block. focus:z-[100] clears the z-50 sticky Nav. */}
           <a
             href="#main-content"
-            className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-gray-900 focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:bg-gray-900 dark:focus:text-gray-100"
+            className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-gray-900 focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:bg-gray-900 dark:focus:text-gray-100"
           >
             Skip to main content
           </a>
@@ -63,7 +63,7 @@ export default async function RootLayout({
           <main
             id="main-content"
             tabIndex={-1}
-            className="max-w-7xl mx-auto px-3 py-5 sm:px-6 sm:py-8 lg:px-8 focus:outline-none"
+            className="max-w-7xl mx-auto px-3 py-5 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-6 sm:py-8 lg:px-8 focus:outline-none"
           >
             {children}
           </main>

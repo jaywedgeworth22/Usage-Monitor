@@ -38,8 +38,10 @@ public struct SettingsRootView: View {
     public var body: some View {
         NavigationStack {
             Form {
+                // Connect order: (1) server → (2) dashboard password → (3) optional token
                 ConnectionSection(model: model)
                 FullAccessSection(store: access)
+                TokenConnectionSection(model: model)
                 ServerStatusSection(store: status) {
                     await status.refresh(using: env.apiClient)
                 }
