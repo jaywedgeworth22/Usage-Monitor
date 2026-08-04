@@ -182,6 +182,10 @@ requireText(poller, /mountpoint -q/, "writer recovery must require the data moun
 requireText(poller, /docker update --restart=no/, "the poller must retrofit mount-safe restart policy before honoring pause");
 requireText(poller, /flock -w 10 8/, "recovery must share the deployment transaction lock");
 requireText(poller, /flock -u 8/, "the poller must release its recovery lock before the child transaction");
+requireText(poller, /public_ready_matches_revision/, "poller readiness gate must be shared");
+requireText(poller, /r2-disabled-70pct\.flag/, "poller must accept intentional R2 free-tier not_ready");
+requireText(poller, /curl -sS --max-time 15/, "poller ready probes must keep JSON on HTTP 503");
+forbidText(poller, /curl -fsS.*PUBLIC_READY_URL/, "poller must not use curl -f against ready (discards 503 bodies)");
 requireText(deployService, /SuccessExitStatus=75/, "pending checks must not fail systemd");
 requireText(deployService, /TimeoutStartSec=240min/, "systemd must bound an unexpectedly wedged transaction");
 requireText(deployService, /TimeoutStopSec=45min/, "systemd must allow bounded signal rollback to finish");
