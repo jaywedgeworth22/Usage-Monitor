@@ -658,8 +658,11 @@ preflight_current_production() {
   [[ -f "${DB_PATH}" && ! -L "${DB_PATH}" ]] || die_host "production database is missing or not a regular file"
   [[ "$(stat -c '%u:%g' "${DB_PATH}")" == "1000:1000" ]] || die_host "production database must be uid/gid 1000"
   [[ "$(stat -c '%a' "${DB_PATH}")" == "600" ]] || die_host "production database must have mode 0600"
-  [[ "$(timeout 120 sqlite3 -readonly "${DB_PATH}" 'PRAGMA integrity_check;')" == "ok" ]] || die_host "production SQLite integrity check failed"
-  [[ -z "$(timeout 120 sqlite3 -readonly "${DB_PATH}" 'PRAGMA foreign_key_check;')" ]] || die_host "production SQLite foreign-key check failed"
+  # Full integrity_check on the live ~800MB+ production DB routinely exceeds 2
+  # minutes under shared-host load (~440s observed at ~837MB). 900s matches the
+  # temporary host patch so preflight does not false-fail every deploy.
+  [[ "$(timeout 900 sqlite3 -readonly "${DB_PATH}" 'PRAGMA integrity_check;')" == "ok" ]] || die_host "production SQLite integrity check failed"
+  [[ -z "$(timeout 900 sqlite3 -readonly "${DB_PATH}" 'PRAGMA foreign_key_check;')" ]] || die_host "production SQLite foreign-key check failed"
 
   (( $(free_bytes /) >= MIN_ROOT_FREE_BYTES )) || die_host "root/Docker volume has less than 8 GiB free"
   (( $(free_bytes "${DATA_DIR}") >= MIN_DATA_FREE_BYTES )) || die_host "data volume has less than 5 GiB free"
