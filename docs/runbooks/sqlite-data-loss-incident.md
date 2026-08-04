@@ -104,10 +104,10 @@ before proceeding with a `.recover` result.
 Produce the alternatives, so the choice of restore source is evidence, not
 hope:
 
-- **Garage/Litestream replica** (`usage-monitor-prod-v3` — never the retired
-  `usage-monitor` lineage): the app container is paused, so run the restore
-  from a disposable container using the accepted image and runtime env
-  (mirrors the deploy transaction's offline pattern):
+- **R2/Litestream replica** (`usage-monitor-prod-v3` on Cloudflare R2 — never a
+  retired Garage or legacy bucket lineage): the app container is paused, so run
+  the restore from a disposable container using the accepted image and runtime
+  env (mirrors the deploy transaction's offline pattern):
 
   ```bash
   rev="$(sudo awk -F= '$1=="USAGE_MONITOR_REVISION"{print $2}' /etc/usage-monitor/host.env)"
@@ -192,7 +192,7 @@ in one step and no process can ever observe a half-written database.
 Bring layers back one at a time, each verified before the next:
 
 1. **Backup layer.** Decide the replica lineage with the owner: if the
-   restored file diverges from what Garage holds (candidate-fd ahead of the
+   restored file diverges from what R2 holds (candidate-fd ahead of the
    replica is normal and fine; a `.recover` result or an older-than-replica
    restore is not), seed a fresh bucket (the `usage-monitor-prod-v3` seeding
    is precedent) rather than letting two histories interleave in one prefix.
