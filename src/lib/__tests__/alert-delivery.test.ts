@@ -1408,6 +1408,7 @@ describe("alert delivery", () => {
       minSeverity: "warning" as const,
       reminderHours: 24,
       maxAttempts: 1,
+      severityOverrides: { stale_snapshot: "warning" as const },
     };
 
     expect(
@@ -2434,6 +2435,61 @@ describe("alert delivery", () => {
     expect(body.html).toContain("Test Email");
   });
 
+  it("supports Pushover delivery", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "test_pushover",
+        displayName: "Test Pushover",
+        type: "builtin",
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const config = {
+      channels: [
+        { kind: "pushover" as const, userKey: "test-user-key", apiToken: "test-api-token" },
+      ],
+      minSeverity: "warning" as const,
+      reminderHours: 24,
+    };
+
+    await prisma.providerPlan.create({
+      data: {
+        providerId: provider.id,
+        billingMode: "actual",
+        lowBalanceUsd: 10,
+      },
+    });
+
+    await prisma.usageSnapshot.create({
+      data: {
+        providerId: provider.id,
+        fetchedAt: new Date("2026-07-20T08:00:00.000Z"),
+        balance: 5,
+      },
+    });
+
+    const first = await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config,
+      fetchImpl: fetchMock,
+    });
+
+    expect(first.sent).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const callArgs = fetchMock.mock.calls[0];
+    expect(callArgs[0]).toBe("https://api.pushover.net/1/messages.json");
+    expect(callArgs[1].headers).toMatchObject({
+      "Content-Type": "application/x-www-form-urlencoded",
+    });
+    const params = new URLSearchParams(String(callArgs[1]?.body ?? ""));
+    expect(params.get("token")).toBe("test-api-token");
+    expect(params.get("user")).toBe("test-user-key");
+    expect(params.get("title")).toContain("Test Pushover");
+    expect(params.get("message")).toContain("low");
+  });
+
   it("retries an idempotent PagerDuty resolve after an unknown trigger and failed resolve", async () => {
     const provider = await prisma.provider.create({
       data: {
@@ -3389,6 +3445,21 @@ describe("S12: per-code severity overrides and channel routing (env parsing)", (
     expect(config.severityOverrides).toEqual({ stale_snapshot: "info" });
     expect(config.channelRouting).toEqual({ credits_low: ["slack"] });
     expect(warn).toHaveBeenCalled();
+  });
+
+  it("parses Pushover channels and respects ALERT_DISABLE_EMAIL flag", () => {
+    const config = readAlertDeliveryConfig({
+      PUSHOVER_USER_KEY: "user-key-123",
+      PUSHOVER_USAGE_API_TOKEN: "api-token-456",
+      ALERT_RESEND_API_KEY: "re_123",
+      ALERT_EMAIL_FROM: "from@example.com",
+      ALERT_EMAIL_TO: "to@example.com",
+      ALERT_DISABLE_EMAIL: "true",
+    } as unknown as NodeJS.ProcessEnv);
+
+    expect(config.channels).toEqual([
+      { kind: "pushover", userKey: "user-key-123", apiToken: "api-token-456" },
+    ]);
   });
 });
 

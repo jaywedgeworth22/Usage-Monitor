@@ -1,12 +1,20 @@
-# Litestream WAL Replication (Oracle A1 production; Render = retired rollback host)
+# Litestream WAL Replication (Oracle A1 production → Cloudflare R2)
 
 Continuous SQLite backup via [Litestream](https://litestream.io) **0.5.x**. Streams
 writes to `/data/prod.db` as LTX files. **Production is the Oracle A1 VM**
-(Docker + Caddy, see `deploy/oracle/README.md`), replicating to the Coolify
-Garage S3 bucket `usage-monitor-prod-v3`. The suspended Render service is kept
-only as a deliberate, owner-directed rollback host (see `render.yaml`'s header
-and `deploy/render/RETIRED-rollback.md`); its Cloudflare R2 bucket is a
-separate replica lineage so the two hosts can never write to the same replica.
+(Docker + Caddy, see `deploy/oracle/README.md`), replicating to **Cloudflare R2**
+(live Infisical bucket is `usage-monitor-bucket` on the Jay CF account;
+object prefix `api-usage-monitor/prod.db` in `litestream.yml`).
+
+**Hetzner/Coolify Garage is retired** as the production replica (switch completed
+in PR #869, 2026-08-01: “Do not use retired Hetzner Garage endpoints”). Older
+runbooks and the `deploy/coolify/garage.compose.yaml` file are historical only
+— do not point production `LITESTREAM_S3_*` at Garage.
+
+The suspended Render service is a deliberate, owner-directed rollback host only
+(see `render.yaml` and `deploy/render/RETIRED-rollback.md`). If ever revived, it
+must use a **separate** R2 bucket/lineage so two hosts never write the same
+replica prefix.
 
 **Opt-in, with fail-closed configuration.** With `LITESTREAM_S3_*` unset and
 `LITESTREAM_REQUIRED=false`, `scripts/start-with-litestream.sh` still creates
@@ -18,6 +26,32 @@ replication (and restore-on-fresh-disk) on. Partial credentials, an unverified
 local pre-migration snapshot, or a configured replica with a missing/unverified
 binary stop startup. Production runs `LITESTREAM_REQUIRED=true`, so an
 entirely missing replica also stops startup and makes `/api/ready` fail.
+
+### R2 free-tier auto-shutoff (70%)
+
+Maintenance (`src/lib/r2-usage.ts`) queries Cloudflare GraphQL **account-wide**
+analytics each tick for R2 **storage**, **Class A**, and **Class B** against the
+forever free tier (10 GiB / 1M Class A / 10M Class B). When any metric's MTD
+share or linear month-end projection reaches **70%**, the app:
+
+1. Writes `/data/r2-disabled-70pct.flag` and sets `LITESTREAM_EMERGENCY_DISABLE`
+   / `R2_WRITES_DISABLED`.
+2. Sends a priority-1 Pushover alert via **`PUSHOVER_USAGE_API_TOKEN`** (preferred) or `PUSHOVER_API_TOKEN` + `PUSHOVER_USER_KEY` (retried until delivered). Usage Monitor owns this alert — do not rely on Socratic.Trade.
+3. **Stops production Litestream** when the configured endpoint is Cloudflare R2
+   (hostname `*.r2.cloudflarestorage.com`): startup skips replication if the
+   flag is present, and the R2 sibling-process watcher SIGTERMs litestream
+   mid-cycle. Non-R2 S3 endpoints (if ever reintroduced) are not killed by this
+   switch.
+
+Requires `R2_USAGE_ACCOUNT_ID` + `R2_USAGE_API_TOKEN` (or
+`CLOUDFLARE_JAY_*` / `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`) with
+Account Analytics Read. Without credentials the check reports
+`metricsSource: unavailable` and does **not** auto-disable (it will not fake
+local DB size as R2 usage).
+
+Because production uses R2, engaging the kill switch means **no continuous
+off-site replica** until storage is reclaimed and the flag is cleared. Local
+pre-migration snapshots on `/data` still exist.
 
 > **0.5.x note:** Litestream 0.5 only supports a **single replica per database**. It
 > also replaced the `snapshots`/`generations` model with **LTX files** — inspect them
@@ -32,17 +66,18 @@ entirely missing replica also stops startup and makes `/api/ready` fail.
   the script. Idempotent (skips if the right version is already there) and safe
   to run even when replication is never enabled — the binary just sits unused.
 - `litestream.yml` — the replica config: `/data/prod.db`, single S3-type replica
-  populated entirely from `LITESTREAM_S3_*` env vars, `retention: 168h` /
-  `snapshot-interval: 24h` (7 days of history; reduced from 720h/30d on 2026-07-21
-  after Garage on the shared Hetzner 75G disk grew past 14 GiB in a few days),
-  copied from Socratic.Trade's config.
+  populated entirely from `LITESTREAM_S3_*` env vars, `retention: 48h` /
+  `snapshot-interval: 24h` / `sync-interval: 60s` (reduced from 168h then
+  720h for R2 free-tier headroom; live DB is <<1 GiB but multi-day LTX history
+  filled 10 GiB).
 - `scripts/start-with-litestream.sh` — the container entrypoint. If all four
   required `LITESTREAM_S3_*` vars are set and `bin/litestream` exists: restores
   first if `/data/prod.db` doesn't exist yet (fresh disk or disaster recovery).
   In both enabled and disabled modes it then runs
   `backup-sqlite-before-migrate.mjs` and `migrate-safe.mjs` in that order.
-  Enabled mode finally `exec`s `litestream replicate -exec "npm start"`; disabled
-  mode `exec`s `npm start` directly.
+  **R2 endpoints:** litestream runs as a sibling of `npm start` so the free-tier
+  kill switch can stop replication without taking down the app. **Non-R2 S3:**
+  `exec litestream replicate -exec "npm start"` (litestream is PID 1).
 - `prisma.config.ts` — declares Litestream's `_litestream_seq` and
   `_litestream_lock` tables as externally managed. Startup schema sync must
   preserve their exact schema and state; `migrate-safe.mjs` never retries with
@@ -59,7 +94,7 @@ entirely missing replica also stops startup and makes `/api/ready` fail.
   `deploy/oracle/README.md`). Without it, a required backup reports
   `env_active_unverified` and strict readiness fails.
 
-## Production setup (Oracle / Garage)
+## Production setup (Oracle → Cloudflare R2)
 
 Runtime config lives in the Infisical `usage-monitor` project (env `prod`) as
 the sole source of truth — see `DEPLOY.md` "Runtime env: Infisical is the
@@ -67,40 +102,33 @@ source of truth" and `deploy/oracle/README.md`. Set there:
 
 ```
 LITESTREAM_S3_BUCKET=usage-monitor-prod-v3
-LITESTREAM_S3_REGION=garage
-LITESTREAM_S3_ENDPOINT=https://<coolify-garage-host>:9443
+LITESTREAM_S3_REGION=auto
+LITESTREAM_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
 LITESTREAM_S3_ACCESS_KEY_ID=...
 LITESTREAM_S3_SECRET_ACCESS_KEY=...
 LITESTREAM_REQUIRED=true
 ```
 
-All four of bucket/endpoint/access-key-id/secret-access-key must be set together.
-The startup wrapper rejects partial configuration, and it rejects full
-configuration when the verified binary is unavailable. `LITESTREAM_S3_REGION`
-is optional for R2 and can be left unset: Litestream
-expands config env vars with Go's `os.Getenv` (not a shell, so `${VAR:-default}` is not
-supported), and with an S3 endpoint set an empty region falls back to `us-east-1`, which
-R2 accepts for SigV4. Set it to `auto` only if you prefer to be explicit.
-
-For Oracle, Infisical sets both `LITESTREAM_S3_*` and the unified `AWS_*` secret names
-(AWS_S3_ENDPOINT, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_BUCKET_NAME, AWS_REGION).
-The startup wrapper normalizes `AWS_*` into `LITESTREAM_S3_*` for `litestream.yml` expansion.
-Point `LITESTREAM_S3_ENDPOINT` / `AWS_S3_ENDPOINT` to Cloudflare R2 (`https://<account-id>.r2.cloudflarestorage.com`),
-bucket `usage-monitor-prod-v3`, with region `auto`.
+Infisical may also set the unified `AWS_*` names (`AWS_S3_ENDPOINT`,
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET_NAME`,
+`AWS_REGION`). The startup wrapper normalizes `AWS_*` into `LITESTREAM_S3_*`
+for `litestream.yml` expansion.
 
 All four of bucket/endpoint/access-key-id/secret-access-key must be set
 together. The startup wrapper rejects partial configuration, and it rejects
 full configuration when the verified binary is unavailable.
+`LITESTREAM_S3_REGION` is optional for R2 (empty → Litestream falls back to
+`us-east-1`, which R2 accepts for SigV4). Prefer `auto` to be explicit.
+
+Deploy env preflight (`deploy/oracle/usage-monitor-sync-env.sh`) requires the
+bucket name `usage-monitor-prod-v3`. **Account-wide free-tier analytics** count
+**every** R2 bucket on the Cloudflare account (including receipt-inbox and any
+legacy names such as `usage-monitor-bucket`). If inventory shows a different
+large bucket, fix Infisical/env or reclaim that bucket — free tier is not
+per-bucket.
 
 The S3 uploader is intentionally limited to one multipart part at a time in
-`litestream.yml`. This keeps each minimum-size S3 part within the reverse
-proxy's request deadline on slower cross-region links; normal LTX uploads are
-small, so reliability is more important than initial-seed parallelism here.
-The deployed Garage router also uses the dedicated TLS entrypoint on port 9443,
-whose request-body read timeout is five minutes. Keep Oracle's
-`LITESTREAM_S3_ENDPOINT` on that `:9443` URL. Do not raise the shared HTTPS
-entrypoint timeout for every Coolify workload just to accommodate backup
-uploads.
+`litestream.yml` (`concurrency: 1`) for reliability on constrained links.
 
 Changing any of these values: edit them in Infisical, run
 `sudo /usr/local/sbin/usage-monitor-env-sync` (or wait for the 15-minute
@@ -116,7 +144,7 @@ From the Oracle VM:
 # Config parses + replica is wired:
 sudo docker exec oracle-app-1 /app/bin/litestream databases -config /app/litestream.yml
 
-# LTX files actually landed in Garage (tip listing; avoid `-level all`,
+# LTX files actually landed in R2 (tip listing; avoid `-level all`,
 # which lists thousands of compacted objects and can time out):
 sudo docker exec oracle-app-1 /app/bin/litestream ltx -config /app/litestream.yml /data/prod.db
 
@@ -140,14 +168,32 @@ Confirm `/api/ready` reports `checks.backup.required=true`,
 side-channel; `envOnly:true` means the probe is not writing its status file
 and strict readiness will fail).
 
-## Rollback host only (Render / R2)
+### Free-tier growth (what to expect)
+
+R2 storage is **not** “one copy of `prod.db`.” Litestream keeps a rolling
+LTX/snapshot window (`snapshot.retention: 48h`, `snapshot.interval: 24h`,
+`sync-interval: 60s` as of 2026-08-04 free-tier opt). After a cold start onto
+an empty R2 bucket (or a new generation), expect:
+
+1. **Initial seed** — multi-GiB multipart uploads of the current DB (hours of
+   `UploadPart` / `PutObject`).
+2. **Steady LTX drip** — many small objects + frequent `ListObjects` (Class A).
+3. **Daily snapshot / compaction bursts** — multi-GiB jumps in under an hour
+   when large LTX levels complete, often before GC deletes superseded objects.
+
+Account free tier is **10 GiB total**. Crossing ~70% engages the auto-shutoff
+above. Reclaim space by confirming a single intended bucket, shortening
+retention if needed, and deleting orphan/legacy buckets after a verified
+restore drill.
+
+## Rollback host only (Render)
 
 The suspended `api-usage-monitor` Render service keeps its own R2 bucket
 (`api-usage-monitor-backups`) and credentials, configured through Render's
 Environment tab with `sync: false` placeholders in `render.yaml`. That
 dashboard flow applies to a deliberate, owner-directed revival of the rollback
 host only — never to production. A host rollback requires quiescing Oracle and
-restoring the latest verified Garage lineage before transferring
+restoring the latest verified **R2** lineage before transferring
 scheduler/writer authority; never reverse DNS onto Render's stale database.
 On the rollback host, `LITESTREAM_REPLICA_VERIFICATION_REQUIRED=false` is the
 sanctioned way to run without the Oracle heartbeat probe.
@@ -164,7 +210,7 @@ general replica-restore path for a database that is merely lost or corrupt.
 
 `scripts/litestream-restore.sh` restores the latest replica to a scratch file — it
 never overwrites the live `/data/prod.db` directly. Run it inside the app
-container on the Oracle VM (the Garage creds and the `/data` disk are only
+container on the Oracle VM (R2 credentials and the `/data` disk are only
 reachable there):
 
 ```bash
@@ -191,7 +237,7 @@ or `bin/litestream restore -h`.
 If the disk is wiped entirely (new volume, container recreated), you don't
 need to run this manually at all: `scripts/start-with-litestream.sh` already
 calls `litestream restore -if-db-not-exists -if-replica-exists` before
-`migrate-safe.mjs` on every boot, so a fresh empty disk recovers from Garage
+`migrate-safe.mjs` on every boot, so a fresh empty disk recovers from R2
 automatically as long as `LITESTREAM_S3_*` is set.
 
 ### Restore verification
@@ -200,11 +246,10 @@ Restore is exercised continuously, not just at drills:
 
 - Every production deploy hard-gates LTX freshness (≤ 3600s) plus an
   authenticated restore dry-run, and acceptance performs a full authenticated
-  Garage restore with a complete SQLite integrity scan
+  replica restore with a complete SQLite integrity scan
   (`deploy/oracle/deploy-production.sh`).
 - The fleet-sentry-monitor singleton runs an authenticated dry-run every 15
-  minutes and a weekly full-integrity restore to
-  `/data/.garage-backup-monitor-restore.db`
+  minutes and a weekly full-integrity restore to a fixed Oracle scratch path
   (`deploy/oracle/README.md` "Backup monitoring").
 
 Still run a **manual** drill quarterly and after any Litestream version bump —
@@ -233,5 +278,4 @@ cat /data/.litestream-replica-status.json
 Or tail `sudo docker logs oracle-app-1` and watch for repeated `replica sync`
 lines without errors. The strict readiness endpoint
 (`/api/ready?strict=1` → `checks.backup`) and the fleet-sentry-monitor Sentry
-cron check-in (`usage-monitor-garage-backup`) both alert on replica failure
-independently.
+cron check-in both alert on replica failure independently.

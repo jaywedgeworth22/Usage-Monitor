@@ -14,7 +14,160 @@ export interface ProjectBudgetResponse {
   };
 }
 
-export type TimeframeOption = "1d" | "7d" | "30d" | "90d" | "180d" | "all";
+export type TimeframeOption =
+  | "1d"
+  | "7d"
+  | "30d"
+  | "90d"
+  | "180d"
+  | "all"
+  | `month:${string}`  // e.g. "month:2026-08" — calendar month
+  | `year:${string}`;  // e.g. "year:2026" — calendar year
+
+export function isCalendarMonth(tf: TimeframeOption): tf is `month:${string}` {
+  return (tf as string).startsWith("month:");
+}
+
+export function isCalendarYear(tf: TimeframeOption): tf is `year:${string}` {
+  return (tf as string).startsWith("year:");
+}
+
+export function isRollingPeriod(tf: TimeframeOption): boolean {
+  return !isCalendarMonth(tf) && !isCalendarYear(tf);
+}
+
+/** Return the current UTC calendar month token, e.g. "month:2026-08". */
+export function currentMonthToken(): TimeframeOption {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `month:${y}-${m}` as TimeframeOption;
+}
+
+function parseMonthToken(tf: string): { year: number; month: number } | null {
+  const match = tf.match(/^month:(\d{4})-(\d{2})$/);
+  if (!match) return null;
+  return { year: Number(match[1]), month: Number(match[2]) };
+}
+
+function parseYearToken(tf: string): number | null {
+  const match = tf.match(/^year:(\d{4})$/);
+  if (!match) return null;
+  return Number(match[1]);
+}
+
+/**
+ * Build the /api/usage-events URL for a given timeframe.
+ * Rolling periods use ?days=N; calendar months/years use ?from=&to=.
+ */
+export function buildUsageEventsUrl(
+  tf: TimeframeOption,
+  projectId?: string | null
+): string {
+  const projectSuffix = projectId ? `&projectId=${encodeURIComponent(projectId)}` : "";
+
+  if (isCalendarMonth(tf)) {
+    const parsed = parseMonthToken(tf as string);
+    if (!parsed) return `/api/usage-events?days=30${projectSuffix}`;
+    const { year, month } = parsed;
+    const from = `${year}-${String(month).padStart(2, "0")}-01`;
+    // Last day of month via day-0 trick
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    return `/api/usage-events?from=${from}&to=${to}${projectSuffix}`;
+  }
+
+  if (isCalendarYear(tf)) {
+    const year = parseYearToken(tf as string);
+    if (!year) return `/api/usage-events?days=365${projectSuffix}`;
+    return `/api/usage-events?from=${year}-01-01&to=${year}-12-31${projectSuffix}`;
+  }
+
+  // Rolling period
+  const days = timeframeToDays(tf);
+  if (days >= 3650) return `/api/usage-events?days=all${projectSuffix}`;
+  return `/api/usage-events?days=${days}${projectSuffix}`;
+}
+
+/**
+ * Human-readable label for a timeframe, used in picker options.
+ */
+export function timeframeDisplayLabel(tf: TimeframeOption): string {
+  switch (tf as string) {
+    case "1d": return "Past 24 Hours";
+    case "7d": return "Past Week";
+    case "30d": return "Past 30 Days";
+    case "90d": return "Past 3 Months";
+    case "180d": return "Past 6 Months";
+    case "all": return "All Time";
+  }
+  if (isCalendarMonth(tf)) {
+    const parsed = parseMonthToken(tf as string);
+    if (!parsed) return tf as string;
+    const date = new Date(Date.UTC(parsed.year, parsed.month - 1, 1));
+    return date.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  }
+  if (isCalendarYear(tf)) {
+    const year = parseYearToken(tf as string);
+    return year ? String(year) : tf as string;
+  }
+  return tf as string;
+}
+
+/**
+ * Short label for the summary card "Spend" header — e.g. "August 2026",
+ * "Past 30 Days", "2025". Always returns the current month name when the
+ * passed timeframe is the current month or a rolling period (since the
+ * provider cards are always current-month from budget-status).
+ */
+export function spendPeriodLabel(tf: TimeframeOption): string {
+  if (isCalendarMonth(tf)) {
+    const parsed = parseMonthToken(tf as string);
+    if (!parsed) {
+      // Fallback: current month name
+      return new Date().toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    }
+    const date = new Date(Date.UTC(parsed.year, parsed.month - 1, 1));
+    return date.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  }
+  // For rolling periods the provider cards always show current calendar month;
+  // label them as such so they stay accurate.
+  return new Date().toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+/**
+ * Generate an array of calendar-month TimeframeOptions, newest first.
+ * count=13 gives the current month + the previous 12.
+ */
+export function generateMonthOptions(
+  count = 13
+): Array<{ token: TimeframeOption; label: string }> {
+  const options: Array<{ token: TimeframeOption; label: string }> = [];
+  const now = new Date();
+  for (let i = 0; i < count; i++) {
+    // Subtract i months from the current UTC month
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const y = date.getUTCFullYear();
+    const mo = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const token: TimeframeOption = `month:${y}-${mo}` as TimeframeOption;
+    const label = date.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    options.push({ token, label });
+  }
+  return options;
+}
+
+/**
+ * Generate an array of calendar-year TimeframeOptions, newest first.
+ */
+export function generateYearOptions(
+  count = 3
+): Array<{ token: TimeframeOption; label: string }> {
+  const currentYear = new Date().getUTCFullYear();
+  return Array.from({ length: count }, (_, i) => {
+    const year = currentYear - i;
+    return { token: `year:${year}` as TimeframeOption, label: String(year) };
+  });
+}
 
 export function timeframeToDays(tf: TimeframeOption): number {
   switch (tf) {
@@ -31,6 +184,7 @@ export function timeframeToDays(tf: TimeframeOption): number {
     case "all":
       return 3650;
     default:
+      // calendar-month / year — approximate to avoid NaN downstream
       return 30;
   }
 }
@@ -121,7 +275,7 @@ const AUTO_REFRESH_INTERVAL_MS = 60_000;
 const FOCUS_REFRESH_THROTTLE_MS = 15_000;
 
 export function useDashboardData() {
-  const [timeframe, setTimeframe] = useState<TimeframeOption>("30d");
+  const [timeframe, setTimeframe] = useState<TimeframeOption>(currentMonthToken());
   const [providers, setProviders] = useState<any[]>([]);
   const [usageSummary, setUsageSummary] = useState<ExternalUsageSummary | null>(null);
   const [projects, setProjects] = useState<ProjectBudgetStatus[]>([]);
@@ -247,7 +401,7 @@ export function useDashboardData() {
 
   const fetchPortfolioData = useCallback(async (overrideTimeframe?: TimeframeOption) => {
     const activeTimeframe = overrideTimeframe ?? timeframe;
-    const days = timeframeToDays(activeTimeframe);
+    const usageEventsUrl = buildUsageEventsUrl(activeTimeframe);
     if (portfolioFetchInFlightRef.current) return;
     portfolioFetchInFlightRef.current = true;
     setPortfolioLoading(true);
@@ -258,7 +412,7 @@ export function useDashboardData() {
       // max(latency) rather than the sum. Same pattern as fetchProviders above.
       const [usageResult, projectsResult] = await Promise.allSettled([
         fetchJson<ExternalUsageSummary>(
-          `/api/usage-events?days=${days}`,
+          usageEventsUrl,
           "app telemetry",
           unmountAbortRef.current?.signal
         ),

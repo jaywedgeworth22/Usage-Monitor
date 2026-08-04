@@ -235,7 +235,7 @@ export function buildProviderAlertState(
       ) {
         alerts.push({
           code: "stale_snapshot",
-          severity: "warning",
+          severity: "info",
           message: "Latest usage snapshot is stale.",
         });
       }

@@ -9,6 +9,8 @@ interface DashboardSummaryCardsProps {
   ambiguousCostFamilyCount: number;
   attentionItemsCount: number;
   criticalCount: number;
+  /** Period name shown in the spend card header, e.g. "August 2026" or "Past 30 Days". */
+  spendPeriodLabel: string;
   onAlertsNavigate?: () => void;
 }
 
@@ -20,6 +22,7 @@ export default function DashboardSummaryCards({
   ambiguousCostFamilyCount,
   attentionItemsCount,
   criticalCount,
+  spendPeriodLabel,
   onAlertsNavigate,
 }: DashboardSummaryCardsProps) {
   // Money-first KPI order (Wave D / D2): spend → projection → funds → alerts.
@@ -38,8 +41,8 @@ export default function DashboardSummaryCards({
       <div className="bg-white p-4 dark:bg-gray-800">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           {incompleteCostProviderCount > 0 || ambiguousCostFamilyCount > 0
-            ? "Known Spend This Month"
-            : "Tracked Spend This Month"}
+            ? `Known ${spendPeriodLabel} Spend`
+            : `${spendPeriodLabel} Spend`}
         </p>
         <p className="mt-1 text-lg font-semibold tabular-nums text-amber-600 dark:text-amber-400">
           {formatCurrency(totalCost)}
