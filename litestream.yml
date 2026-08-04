@@ -14,14 +14,12 @@
 #     S3 endpoint set (R2 always sets one) Litestream falls back to us-east-1 and
 #     R2 accepts any region for SigV4.
 
-# Point-in-time retention: keep 48h of snapshot history, a fresh snapshot
-# every 24h. History:
-#   - 720h (30d) was too large for the retired Coolify-hosted Garage volume
-#   - 168h (7d) still blew the Cloudflare R2 free tier (10 GiB) on 2026-08-04
-#     when full-DB LTX levels (~0.37 GiB each) re-uploaded many times in hours
-# 48h matches Socratic.Trade's free-tier-safe retention; raise only with a
-# paid R2 plan or a non-R2 replica. Litestream 0.5.x GCs LTX older than
-# `retention`; l0 retention still uses litestream defaults.
+# Point-in-time retention: 48h (was 168h/7d, before that 720h/30d).
+# Coolify-hosted Garage is retired; production targets Cloudflare R2.
+# 2026-08-04 free-tier breach: usage-monitor-bucket hit ~10.5 GiB (104% of
+# R2 free tier) after full-DB LTX (~0.37 GiB) re-uploaded many times in hours
+# even with no dashboard use. 48h matches Socratic.Trade free-tier practice;
+# raise only with paid R2. Litestream 0.5.x GCs LTX older than `retention`.
 snapshot:
   interval: 24h
   retention: 48h
@@ -40,3 +38,6 @@ dbs:
       # on bandwidth-constrained cross-region links. Five concurrent parts can
       # each exceed the deadline while competing for the same uplink.
       concurrency: 1
+      # Class A free-tier guard (default was 1s). Backup RPO only — app path
+      # is unaffected. 60s halves PutObject burn vs 30s, ~60x vs 1s default.
+      sync-interval: 60s
