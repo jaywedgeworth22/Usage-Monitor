@@ -19,6 +19,26 @@ local pre-migration snapshot, or a configured replica with a missing/unverified
 binary stop startup. Production runs `LITESTREAM_REQUIRED=true`, so an
 entirely missing replica also stops startup and makes `/api/ready` fail.
 
+### R2 free-tier auto-shutoff (70%)
+
+Maintenance (`src/lib/r2-usage.ts`) queries Cloudflare GraphQL account analytics
+each tick for R2 **storage**, **Class A**, and **Class B** against the forever
+free tier (10 GiB / 1M Class A / 10M Class B). When any metric's MTD share or
+linear month-end projection reaches **70%**, the app:
+
+1. Writes `/data/r2-disabled-70pct.flag` and sets `LITESTREAM_EMERGENCY_DISABLE`
+   / `R2_WRITES_DISABLED`.
+2. Sends a priority-1 Pushover alert (retried until delivered).
+3. Stops **only R2-backed** Litestream: startup skips R2 replication when the
+   flag is present, and the R2 sibling-process watcher SIGTERMs litestream
+   mid-cycle. **Garage / non-R2 endpoints are never killed** by this switch.
+
+Requires `R2_USAGE_ACCOUNT_ID` + `R2_USAGE_API_TOKEN` (or
+`CLOUDFLARE_JAY_*` / `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`) with
+Account Analytics Read. Without credentials the check reports
+`metricsSource: unavailable` and does **not** auto-disable (it will not fake
+local DB size as R2 usage).
+
 > **0.5.x note:** Litestream 0.5 only supports a **single replica per database**. It
 > also replaced the `snapshots`/`generations` model with **LTX files** — inspect them
 > with `litestream ltx`, not `litestream snapshots`.

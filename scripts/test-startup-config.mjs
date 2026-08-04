@@ -119,6 +119,47 @@ try {
     0
   );
 
+  // R2 free-tier kill switch must disable replication only for R2 endpoints.
+  const r2Kill = run({
+    LITESTREAM_REQUIRED: "true",
+    LITESTREAM_BIN_PATH: fakeBinary,
+    LITESTREAM_S3_BUCKET: "bucket",
+    LITESTREAM_S3_ENDPOINT: "https://abc.r2.cloudflarestorage.com",
+    LITESTREAM_S3_ACCESS_KEY_ID: "access",
+    LITESTREAM_S3_SECRET_ACCESS_KEY: "secret",
+    LITESTREAM_EMERGENCY_DISABLE: "true",
+  });
+  expectStatus("r2 free-tier kill on R2 endpoint", r2Kill, 0);
+  if (
+    !/preflight OK \(replication false; r2_endpoint=true; r2_kill=true\)/.test(
+      r2Kill.stdout
+    )
+  ) {
+    throw new Error(
+      `r2 free-tier kill on R2 endpoint: expected disabled preflight, got:\n${r2Kill.stdout}`
+    );
+  }
+
+  const garageKeepsReplicating = run({
+    LITESTREAM_REQUIRED: "true",
+    LITESTREAM_BIN_PATH: fakeBinary,
+    LITESTREAM_S3_BUCKET: "usage-monitor-prod-v3",
+    LITESTREAM_S3_ENDPOINT: "https://garage.example.com:9443",
+    LITESTREAM_S3_ACCESS_KEY_ID: "access",
+    LITESTREAM_S3_SECRET_ACCESS_KEY: "secret",
+    LITESTREAM_EMERGENCY_DISABLE: "true",
+  });
+  expectStatus("r2 free-tier kill leaves Garage enabled", garageKeepsReplicating, 0);
+  if (
+    !/preflight OK \(replication true; r2_endpoint=false; r2_kill=true\)/.test(
+      garageKeepsReplicating.stdout
+    )
+  ) {
+    throw new Error(
+      `r2 free-tier kill leaves Garage enabled: expected enabled preflight, got:\n${garageKeepsReplicating.stdout}`
+    );
+  }
+
   expectLitestreamAsset(
     "x86_64",
     "litestream-0.5.13-linux-x86_64.tar.gz",

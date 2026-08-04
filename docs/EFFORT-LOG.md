@@ -1097,6 +1097,7 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
   _2026-07-15 (MONET): moved to Completed — stale duplicate row; work already merged (PR #58, squash `dfdb39e`, per this row's own trailing annotation) and docs/EFFORT-LOG.md mirror already corrected by PR #299 on 2026-07-15; the live board simply hadn't caught up. No further action needed._
 
 ## In Progress
+- **[API-usage-monitor][GROK] R2 free-tier 70% auto-shutoff fix (2026-08-03) — IN PROGRESS.** Live GraphQL: storage **9.33 GiB / 10 GiB (93.3%)** almost all in `usage-monitor-bucket` (active litestream-class Put/List). Root cause: `runR2UsageCheck` used local DB size + fake Class A/B so kill switch never fired. Fix: real GraphQL metrics, R2-only litestream kill (Garage preserved), runtime watcher, readiness reason `r2_free_tier_disabled`, tests. Branch: `grok/r2-free-tier-shutoff`.
 
 - **[CURSOR] Blank dashboard skeleton on mobile+desktop (2026-07-27) — IN PROGRESS / PR #823.** Owner report: shell paints, content stays empty gray skeleton on mobile+desktop. Origin healthy at `8d4003e`; public DNS orange-clouded with CF managed challenge on HTML/API. Fix on `cursor/fix-blank-dashboard-5973`: orphaned `isFetching` coalesce break after watchdog; `AbortSignal.any` feature-detect; bfcache `pageshow` recovery; 35s skeleton→Retry watchdog; clearer HTML/403 errors. Ops: grey-cloud or `/api/*` skip rules if CF challenges persist.
 
