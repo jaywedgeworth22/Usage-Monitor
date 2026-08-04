@@ -22,7 +22,8 @@ export type AlertDeliveryChannel =
   | { kind: "slack"; url: string }
   | { kind: "webhook"; url: string }
   | { kind: "email"; apiKey: string; from: string; to: string }
-  | { kind: "pagerduty"; routingKey: string };
+  | { kind: "pagerduty"; routingKey: string }
+  | { kind: "pushover"; userKey: string; apiToken: string };
 
 export interface AlertDeliveryConfig {
   channels: AlertDeliveryChannel[];
@@ -263,14 +264,28 @@ export function readAlertDeliveryConfig(env: NodeJS.ProcessEnv = process.env): A
   const emailFrom = env.ALERT_EMAIL_FROM?.trim();
   const emailTo = env.ALERT_EMAIL_TO?.trim();
   const pagerdutyRoutingKey = env.ALERT_PAGERDUTY_ROUTING_KEY?.trim();
+  const pushoverUserKey = (env.ALERT_PUSHOVER_USER_KEY || env.PUSHOVER_USER_KEY)?.trim();
+  const pushoverApiToken = (
+    env.ALERT_PUSHOVER_API_TOKEN ||
+    env.PUSHOVER_USAGE_API_TOKEN ||
+    env.PUSHOVER_API_TOKEN
+  )?.trim();
 
   if (slackUrl) channels.push({ kind: "slack", url: slackUrl });
   if (webhookUrl) channels.push({ kind: "webhook", url: webhookUrl });
-  if (emailApiKey && emailFrom && emailTo) {
+
+  const emailEnabled =
+    readBoolEnvValue(env, "ALERT_EMAIL_ENABLED", true) &&
+    !readBoolEnvValue(env, "ALERT_DISABLE_EMAIL", false);
+
+  if (emailEnabled && emailApiKey && emailFrom && emailTo) {
     channels.push({ kind: "email", apiKey: emailApiKey, from: emailFrom, to: emailTo });
   }
   if (pagerdutyRoutingKey) {
     channels.push({ kind: "pagerduty", routingKey: pagerdutyRoutingKey });
+  }
+  if (pushoverUserKey && pushoverApiToken) {
+    channels.push({ kind: "pushover", userKey: pushoverUserKey, apiToken: pushoverApiToken });
   }
 
   const minSeverity = normalizeSeverity(env.ALERT_MIN_SEVERITY) ?? "warning";
@@ -312,6 +327,7 @@ const ALERT_CHANNEL_KIND_SET: ReadonlySet<string> = new Set([
   "webhook",
   "email",
   "pagerduty",
+  "pushover",
 ]);
 
 function parseJsonObjectEnv(raw: string | undefined, envName: string): Record<string, unknown> | null {
@@ -643,7 +659,9 @@ function channelKey(channel: AlertDeliveryChannel): string {
       ? `${channel.from}\0${channel.to}`
       : channel.kind === "pagerduty"
         ? channel.routingKey
-        : channel.url;
+        : channel.kind === "pushover"
+          ? `${channel.userKey}\0${channel.apiToken}`
+          : channel.url;
   const digest = createHash("sha256")
     .update(`${channel.kind}\0${destination}`)
     .digest("hex");
@@ -831,6 +849,32 @@ async function postJson(
   if (!ok) throw new ChannelHttpError(`${label} HTTP ${status}`, status);
 }
 
+async function postForm(
+  label: string,
+  url: string,
+  body: URLSearchParams,
+  fetchImpl: typeof fetch,
+  timeoutMs: number
+): Promise<void> {
+  const response = await fetchWithTimeout(
+    fetchImpl,
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    },
+    timeoutMs
+  );
+  const { ok, status } = response;
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Delivery outcome is determined by HTTP status; body cleanup is best-effort.
+  }
+  if (!ok) throw new ChannelHttpError(`${label} HTTP ${status}`, status);
+}
+
 async function sendToChannelOnce(
   channel: AlertDeliveryChannel,
   provider: { id: string; name: string; displayName: string },
@@ -912,6 +956,25 @@ async function sendToChannelOnce(
               },
             },
           },
+      fetchImpl,
+      timeoutMs
+    );
+    return;
+  }
+
+  if (channel.kind === "pushover") {
+    const priority = alert.severity === "critical" ? 1 : 0;
+    const params = new URLSearchParams({
+      token: channel.apiToken,
+      user: channel.userKey,
+      title: `[${alert.severity.toUpperCase()}] ${provider.displayName || provider.name}`,
+      message: alert.message,
+      priority: String(priority),
+    });
+    await postForm(
+      "Pushover API",
+      "https://api.pushover.net/1/messages.json",
+      params,
       fetchImpl,
       timeoutMs
     );
