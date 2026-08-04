@@ -1,3 +1,4 @@
+- **[AG] Settings Management UI & APNs Remote Push Notifications (2026-08-04) — MERGED PR #928.** Added ApnsDeviceToken Prisma model, /api/apns/device-tokens endpoint, /api/settings route, NotificationsSettingsPanel web UI on /settings, and iOS native APNs device token registration in PushScaffold & AppDelegate.
 - **[GROK] R2 free-tier breach response (2026-08-04) — IN PR.** Pruned usage-monitor-bucket LTX ~10.5→0.74 GiB; retention 168h→48h; PUSHOVER_USAGE_API_TOKEN preference; Infisical analytics tokens for kill-switch; docs: Coolify Garage retired, prod is CF R2. Rollout: `docs/rollouts/2026-08-04-r2-free-tier-prune-and-killswitch.md`.
 # API-usage-monitor Effort Log — cross-agent board
 Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this file
