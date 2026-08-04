@@ -136,11 +136,27 @@ async function attachmentGroupId(attachments, identityKey) {
   return hmacHex(utf8(`receipt-attachment-group-v1\0${digests.join("\0")}`), identityKey);
 }
 
+/** Fixed receipt intake subdomain. Apex jays.services MX stays on iCloud. */
+export const RECEIPT_INBOX_DOMAIN = "receipts.jays.services";
+
+/**
+ * Any local-part on receipts.jays.services is accepted for intake, including
+ * short addresses (receipts@…) and high-entropy rcpt-… mailboxes. Apex and
+ * other subdomains remain rejected so personal mail is never co-mingled.
+ */
+export function isReceiptInboxAddress(value) {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  // Local-part: leading alnum, then up to 63 more RFC-ish mailbox chars.
+  return /^[a-z0-9][a-z0-9._+-]{0,63}@receipts\.jays\.services$/i.test(trimmed);
+}
+
+/**
+ * @deprecated Prefer {@link isReceiptInboxAddress}. Kept as an alias so older
+ * tests and call sites keep working while the intake rule is domain-wide.
+ */
 export function isDedicatedReceiptAddress(value) {
-  // Keep the apex jays.services MX independent (it delivers to iCloud).
-  // Receipt intake owns one routed subdomain such as receipts.jays.services.
-  return typeof value === "string"
-    && /^[a-z0-9][a-z0-9._+-]{15,63}@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.jays\.services$/i.test(value);
+  return isReceiptInboxAddress(value);
 }
 
 function evidenceKey(id) {
@@ -186,10 +202,13 @@ async function indexRequest(env, path, init) {
 }
 
 export async function handleEmail(message, env) {
+  // Accept any *@receipts.jays.services recipient (short or high-entropy).
+  // RECEIPT_INBOX_ADDRESS remains a configured identity on that domain used
+  // for readiness/health; it is no longer the sole accepted To: address.
   if (
-    !isDedicatedReceiptAddress(env.RECEIPT_INBOX_ADDRESS)
+    !isReceiptInboxAddress(env.RECEIPT_INBOX_ADDRESS)
     || typeof message.to !== "string"
-    || message.to.toLowerCase() !== env.RECEIPT_INBOX_ADDRESS.toLowerCase()
+    || !isReceiptInboxAddress(message.to)
   ) {
     message.setReject("Unknown receipt mailbox");
     return;
@@ -309,7 +328,7 @@ export async function storeAndCommitEvidence(env, id, raw) {
 }
 
 async function hasValidConfiguration(env) {
-  const structurallyValid = isDedicatedReceiptAddress(env.RECEIPT_INBOX_ADDRESS)
+  const structurallyValid = isReceiptInboxAddress(env.RECEIPT_INBOX_ADDRESS)
     && typeof env.RECEIPT_INBOX_IDENTITY_KEY === "string"
     && env.RECEIPT_INBOX_IDENTITY_KEY.length >= 32
     && typeof env.RECEIPT_INBOX_READ_TOKEN === "string"

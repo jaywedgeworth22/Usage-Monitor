@@ -1,10 +1,11 @@
 # Receipt inbox Worker
 
-Forward vendor receipts to one dedicated high-entropy address on a dedicated
-Cloudflare-routed subdomain, for example
-`receipts-secret-123@receipts.jays.services`. Cloudflare Email Routing sends
-that exact address to this Worker. Do **not** onboard or change the apex
-`jays.services` MX records: they continue delivering to iCloud.
+Forward vendor receipts to any address on the dedicated Cloudflare-routed
+subdomain `receipts.jays.services` (for example `receipts@receipts.jays.services`
+or a high-entropy `rcpt-…@receipts.jays.services`). Cloudflare Email Routing
+should deliver that subdomain to this Worker (catch-all or explicit rules).
+Do **not** onboard or change the apex `jays.services` MX records: they continue
+delivering to iCloud.
 The Worker stores each complete MIME message in a private R2 bucket and keeps a
 chronological, transactional review index in a Durable Object. It exposes only
 bounded, non-content metadata to Usage Monitor. This Worker never receives the
@@ -24,10 +25,10 @@ Required public intake Worker secrets:
   summary endpoint.
 - `RECEIPT_INBOX_EVIDENCE_TOKEN` — separate 32+ character operator token for
   downloading an unreviewed `.eml`; never configure this token in Render.
-- `RECEIPT_INBOX_ADDRESS` — exact high-entropy recipient on one
-  `<subdomain>.jays.services` address, for example
-  `receipts-secret-123@receipts.jays.services`. The handler rejects the apex
-  domain and every other address before reading its MIME stream.
+- `RECEIPT_INBOX_ADDRESS` — any configured identity on
+  `receipts.jays.services` (short or high-entropy), used for readiness/health.
+  Intake accepts **any** local-part on that domain; apex and other domains are
+  rejected before the MIME stream is read.
 - `RECEIPT_INBOX_RETENTION_ACK` — set exactly to
   `receipt-evidence-lifecycle-configured-v1` only after the 180-day R2 lifecycle
   rule below is confirmed.
@@ -44,7 +45,9 @@ Required private lifecycle-auditor Worker secrets:
   `workers_dev=false` auditor and never to the public intake Worker or Render.
 
 Provision/deploy, then onboard only the dedicated receipt subdomain in
-Cloudflare Email Routing (not the apex) and attach the exact address:
+Cloudflare Email Routing (not the apex). Prefer a catch-all (or short
+`receipts@…` plus any high-entropy addresses you still use) so vendors can
+forward without memorizing a long local-part:
 
 ```bash
 npm exec -- wrangler r2 bucket create usage-monitor-receipts
@@ -60,18 +63,19 @@ npm exec -- wrangler secret put CLOUDFLARE_ACCOUNT_ID --config workers/receipt-l
 npm exec -- wrangler secret put RECEIPT_LIFECYCLE_AUDIT_TOKEN --config workers/receipt-lifecycle-auditor/wrangler.jsonc
 npm run receipt-inbox:deploy
 # Wrangler resolves this positional value as a Cloudflare zone, so use the apex zone here.
-# The full match address remains on the separately onboarded routing subdomain.
+# Example short address (also keep any existing high-entropy rule):
 npm exec -- wrangler email routing rules create jays.services --name usage-monitor-receipts \
-  --match-type literal --match-field to --match-value <high-entropy-address>@receipts.jays.services \
+  --match-type literal --match-field to --match-value receipts@receipts.jays.services \
   --action-type worker --action-value usage-monitor-receipt-inbox
+# Catch-all for the routing subdomain (Dashboard: Email Routing → Catch-all → Worker)
+# or Cloudflare API email_routing/rules with matchers type "all".
 ```
 
 Confirm the exact current CLI flags with `wrangler email routing rules create
 --help` before applying the final rule. Confirm the routing domain is
-`receipts.jays.services` (or another dedicated subdomain), never
-`jays.services`. Usage Monitor uses the fixed
+`receipts.jays.services`, never `jays.services`. Usage Monitor uses the fixed
 `https://receipt-inbox.jays.services/v1/receipts/summary` endpoint; configure
-Render with only the summary-read token. The handler fails closed unless the
+the app with only the summary-read token. The handler fails closed unless the
 retention acknowledgement and fallback are present. Every deploy re-checks the
 live lifecycle rule. A SQLite-backed Durable Object transaction admits at most
 100 delivery attempts and 100 MiB per UTC day before raw buffering or MIME
