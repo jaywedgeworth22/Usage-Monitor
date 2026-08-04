@@ -107,8 +107,9 @@ Oracle polls GitHub once per minute and deploys only when all of these are true:
 4. the exact SHA's GitHub Actions `verify`, `gitleaks`, and
    `Analyze JavaScript and TypeScript` checks all completed successfully under
    the official GitHub Actions app;
-5. the current Oracle database, sole scheduler, Garage v3 replica, separate
-   `/data` block volume, disk headroom, and public readiness all pass preflight;
+5. the current Oracle database, sole scheduler, Cloudflare R2 Litestream
+   replica, separate `/data` block volume, disk headroom, and public readiness
+   all pass preflight;
    before the disk check, the transaction removes only unreferenced
    `usage-monitor:<40-hex revision>` images while preserving the running and
    target revisions, both revisions in the last deployment receipt, and every
@@ -156,9 +157,9 @@ sudo systemctl enable --now usage-monitor-replica-status.timer
 ## Replica heartbeat (backup readiness side-channel)
 
 `/api/ready` fails a **required** backup unless the replica side-channel proves
-the Garage replica is advancing: the startup-only `LITESTREAM_ACTIVE=true` env
+the R2 replica is advancing: the startup-only `LITESTREAM_ACTIVE=true` env
 claim is set once at boot and stays true even when Litestream has been timing
-out against Garage for hours. `usage-monitor-replica-status` (installed above,
+out against R2 for hours. `usage-monitor-replica-status` (installed above,
 driven by its 10-minute timer) lists the newest LTX object through the app
 container's authenticated Litestream binary — same per-level tip strategy as
 the deploy gate, never `-level all` — and atomically writes
@@ -241,9 +242,9 @@ old app remains live. It validates a target-image migration against a
 transaction-consistent scratch database before stopping anything. The brief
 cutover stops and replaces only the app container, never Caddy. Acceptance
 requires exact-revision strict readiness, a fresh scheduler tick, three public
-readiness samples, Garage TXID advancement beyond a stable watermark captured
-only after the previous writer has fully stopped,
-and a full authenticated Garage restore whose SQLite integrity, foreign keys,
+readiness samples, R2 Litestream TXID advancement beyond a stable watermark
+captured only after the previous writer has fully stopped,
+and a full authenticated R2 restore whose SQLite integrity, foreign keys,
 and schema match production. The restore gets a bounded 15-minute transfer and
 quick-check window, followed by exactly one bounded 30-minute full SQLite
 integrity scan. This keeps acceptance fail-closed for a growing database
@@ -268,12 +269,11 @@ systemctl list-timers usage-monitor-auto-deploy.timer
 systemctl is-failed usage-monitor-auto-deploy.service
 ```
 
-Oracle and the Coolify backup host are also Tailscale peers. Keep the Garage
-endpoint as its HTTPS hostname so certificate validation remains enabled, and
-pin that hostname to the Coolify Tailscale address in Oracle's `/etc/hosts`.
-Verify both `tailscale ping <coolify-ip>` and `curl --resolve` against the
-Garage endpoint before relying on the private route. Public port 9443 is only a
-source-IP-restricted break-glass path; do not expose Garage broadly.
+Production Litestream targets **Cloudflare R2** (not Hetzner/Coolify Garage —
+retired in PR #869). Confirm Infisical `LITESTREAM_S3_ENDPOINT` is
+`https://<account-id>.r2.cloudflarestorage.com` and the bucket name matches the
+env preflight (`usage-monitor-prod-v3`). Free-tier storage is **account-wide**
+across every R2 bucket; see `docs/litestream.md`.
 
 ## Backup monitoring
 
@@ -282,22 +282,20 @@ The machine-level singleton at
 without adding another daemon or another alert credential to either server.
 Every 15 minutes it:
 
-- SSHes to Oracle and runs authenticated `litestream ltx -level all` plus a
-  no-write `litestream restore -dry-run` against the Garage replica.
+- SSHes to Oracle and runs authenticated `litestream ltx` tip listing plus a
+  no-write `litestream restore -dry-run` against the **R2** replica.
 - Enforces a one-hour maximum replica-object age only after
   `USAGE_SCHEDULER_ENABLED=true`; staging with its scheduler disabled still
   verifies authentication and restorability without false stale alerts.
-- Confirms the Garage container is running and healthy and checks free space
-  on Coolify's Docker filesystem (warning below 15 GiB, error below 8 GiB).
-- Reports a separate Sentry Cron check-in named
-  `usage-monitor-garage-backup`; the existing `fleet-host-monitor` check-in
-  detects absence when the Mac-side singleton itself stops.
+- Reports a Sentry Cron check-in for backup health; the existing
+  `fleet-host-monitor` check-in detects absence when the Mac-side singleton
+  itself stops.
 
-Once a week the same singleton restores to the fixed Oracle scratch path
-`/data/.garage-backup-monitor-restore.db` with Litestream's `full` integrity
-check, then removes the database and SQLite sidecars in a trap. It never
-overwrites `/data/prod.db` or writes backup objects. Persistent failures are
-fingerprint-deduplicated to one Sentry event per hour.
+Once a week the same singleton restores to a fixed Oracle scratch path with
+Litestream's `full` integrity check, then removes the database and SQLite
+sidecars in a trap. It never overwrites `/data/prod.db` or writes backup
+objects. Persistent failures are fingerprint-deduplicated to one Sentry event
+per hour.
 
 The pre-cutover candidate started with `USAGE_SCHEDULER_ENABLED=false` and a
 separate Litestream target. The completed production migration verified:
@@ -311,5 +309,5 @@ separate Litestream target. The completed production migration verified:
 The one-time cutover quiesced Render, restored its terminal backup into Oracle,
 enabled the sole Oracle scheduler, and then changed DNS. Render remains
 suspended as a rollback host. Never reverse DNS to its stale database: a host
-rollback requires quiescing Oracle and restoring the latest verified Garage
+rollback requires quiescing Oracle and restoring the latest verified **R2**
 lineage before transferring scheduler/writer authority.

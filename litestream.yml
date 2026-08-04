@@ -13,13 +13,16 @@
 #     does not work - use a bare `${VAR}`. An empty region is fine here: with an
 #     S3 endpoint set (R2 always sets one) Litestream falls back to us-east-1 and
 #     R2 accepts any region for SigV4.
+#
+# Production target: Cloudflare R2 (PR #869). Hetzner/Coolify Garage is retired.
 
-# Point-in-time retention: 48h (was 168h/7d, before that 720h/30d).
-# 2026-08-04 GROK free-tier opt: usage-monitor-bucket hit 10.45 GiB (104% of
-# R2 free tier). Live DB is <<1 GiB; 7d of LTX/snapshots is what blew the cap.
-# 48h still covers deploy-day restore drills; raise only if moving to paid R2.
-# Litestream 0.5.x stores LTX files and GCs snapshots older than `retention`;
-# the finer-grained LTX/WAL window is governed by the default l0-retention.
+# Point-in-time retention: 48h (was 168h/7d, before that 720h/30d on retired
+# Garage). 2026-08-04 free-tier opt: R2 storage hit ~10.45 GiB (over the 10 GiB
+# free tier). Live DB is <<1 GiB; multi-day LTX/snapshot history is what blew
+# the cap. 48h still covers deploy-day restore drills; raise only if moving to
+# paid R2. Litestream 0.5.x stores LTX files and GCs snapshots older than
+# `retention`; the finer-grained LTX/WAL window is governed by the default
+# l0-retention.
 snapshot:
   interval: 24h
   retention: 48h
