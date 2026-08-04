@@ -743,3 +743,14 @@ model ProviderProjectAllocation {
 
   @@unique([providerId, projectId])
 }
+
+model ApnsDeviceToken {
+  id          String   @id @default(uuid())
+  deviceToken String   @unique
+  deviceModel String?
+  osVersion   String?
+  environment String   @default("production")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

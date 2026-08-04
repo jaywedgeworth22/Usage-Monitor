@@ -154,5 +154,25 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         PushScaffold.configureNotificationCategories()
         return true
     }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        let tokenString = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+        Task {
+            let host = UserDefaults.standard.string(forKey: "settings.baseHost") ?? ""
+            let config = APIConfiguration.fromUserInput(host) ?? .production
+            let client = APIClient(configuration: config, tokenStore: KeychainTokenStore())
+            await PushScaffold.handleAPNsDeviceToken(tokenString, client: client)
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        print("[APNs] Failed to register for remote notifications: \(error)")
+    }
 }
 #endif

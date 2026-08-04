@@ -58,9 +58,26 @@ struct NotificationsSection: View {
                         }
                     }
                 }
+
+                Button {
+                    model.registerRemoteAPNs()
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(model.hasApnsToken ? "APNs Remote Push Registered" : "Enable Remote Push (APNs)")
+                                .foregroundStyle(Theme.Colors.primaryText)
+                            Text(model.hasApnsToken ? "Token saved to server for native iOS push alerts." : "Register device token with Usage Monitor server.")
+                                .font(Theme.Typography.caption)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    } icon: {
+                        Image(systemName: model.hasApnsToken ? "checkmark.seal.fill" : "antenna.radiowaves.left.and.right")
+                            .foregroundStyle(model.hasApnsToken ? Theme.Colors.success : Theme.Colors.accent)
+                    }
+                }
             }
         } header: {
-            Text("Notifications")
+            Text("Notifications & APNs Push")
         } footer: {
             Text(footerText)
         }
@@ -107,6 +124,11 @@ final class NotificationsSettingsModel {
         isEnabled && authorizationStatus == .denied
     }
 
+    var hasApnsToken: Bool {
+        let token = UserDefaults.standard.string(forKey: "apns.deviceToken") ?? ""
+        return !token.isEmpty
+    }
+
     func refreshStatus() async {
         authorizationStatus = await PushScaffold.authorizationStatus()
     }
@@ -119,6 +141,11 @@ final class NotificationsSettingsModel {
             _ = await PushScaffold.requestAuthorization()
         }
         await refreshStatus()
+        registerRemoteAPNs()
+    }
+
+    func registerRemoteAPNs() {
+        PushScaffold.registerForRemoteNotifications()
     }
 
     func openSystemSettings() {

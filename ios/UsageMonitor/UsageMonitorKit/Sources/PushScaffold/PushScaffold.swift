@@ -43,6 +43,39 @@ public enum PushScaffold {
         await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
     }
 
+    // MARK: Remote APNs Notifications
+
+    /// Register for remote APNs push notifications with iOS.
+    public static func registerForRemoteNotifications() {
+        #if canImport(UIKit)
+        Task { @MainActor in
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+        #endif
+    }
+
+    /// Handle newly registered APNs device token and sync it to the Usage Monitor server.
+    public static func handleAPNsDeviceToken(_ tokenString: String, client: APIClient? = nil) async {
+        UserDefaults.standard.set(tokenString, forKey: "apns.deviceToken")
+        guard let client else { return }
+        do {
+            #if canImport(UIKit)
+            let model = await UIDevice.current.model
+            let systemVersion = await UIDevice.current.systemVersion
+            #else
+            let model: String? = nil
+            let systemVersion: String? = nil
+            #endif
+            try await client.registerApnsDeviceToken(
+                deviceToken: tokenString,
+                deviceModel: model,
+                osVersion: systemVersion
+            )
+        } catch {
+            print("[PushScaffold] Failed to upload APNs device token: \(error)")
+        }
+    }
+
     // MARK: Categories
 
     /// Register the notification categories/actions the app understands. Call
