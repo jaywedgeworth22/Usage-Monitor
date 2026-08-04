@@ -41,6 +41,12 @@ public final class AppEnvironment {
     /// no screen is ever a dead end. `nil` in previews/tests (no shell attached).
     public var selectTab: ((AppTab) -> Void)?
 
+    /// Cross-tab provider deep link. Dashboard attention/top-provider rows (and
+    /// push payloads) set this then call ``selectTab``(.providers); the Providers
+    /// root consumes and clears it to push `ProviderDetailView` without coupling
+    /// Dashboard → Providers modules.
+    public var pendingProviderID: String?
+
     private let tokenStore: TokenStoring
     private var activeConfiguration: APIConfiguration
 
@@ -72,6 +78,14 @@ public final class AppEnvironment {
 
     /// Whether an API token is currently stored (drives onboarding vs. data).
     public var hasToken: Bool { tokenStore.hasToken }
+
+    /// Jump to the Providers tab and request a push onto the provider detail
+    /// for `id`. Safe when `selectTab` is nil (previews); the pending id still
+    /// sticks for a later Providers root appear.
+    public func openProvider(id: String) {
+        pendingProviderID = id
+        selectTab?(.providers)
+    }
 
     /// Persist (or clear, when `nil`/empty) the API token. Settings calls this
     /// after a successful `apiClient.verifyToken()`.

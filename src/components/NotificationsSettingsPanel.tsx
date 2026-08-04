@@ -95,7 +95,10 @@ export default function NotificationsSettingsPanel() {
           Notification Channels & Alert Delivery
         </h2>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Configure external alert channels (Pushover, APNs Push, Email, Slack, PagerDuty) and threshold severity rules.
+          Configure external alert channels (Pushover, APNs, Email, Slack, PagerDuty) and severity thresholds.
+          Server-side delivery (Slack/email/Pushover/PagerDuty) runs on the monitor host. Native iOS remote push
+          requires the app to register a device token with a valid session; local/background alerts on device
+          still need a read token configured in the iOS app.
         </p>
 
         {message && (
@@ -150,7 +153,8 @@ export default function NotificationsSettingsPanel() {
                 </span>
               </div>
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                Native iOS app push alerts registered via Apple APNs.
+                Devices that completed APNs registration from the iOS app Settings → Notifications.
+                Zero devices means remote push is not active yet (local/background still possible with a read token).
               </p>
             </div>
 

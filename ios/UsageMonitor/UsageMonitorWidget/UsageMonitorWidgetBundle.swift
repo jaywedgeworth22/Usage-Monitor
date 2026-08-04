@@ -102,27 +102,45 @@ private struct BudgetSummaryColumn: View {
     var showsBadge = true
     var showsUpdatedAt = true
 
+    private var redacted: Bool { WidgetPresentation.shouldRedactAmounts() }
+    private var stale: Bool { WidgetPresentation.isStale(for: snapshot) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            Text("This month")
-                .font(Theme.Typography.caption)
-                .foregroundStyle(Theme.Colors.secondaryText)
+            HStack(spacing: Theme.Spacing.xs) {
+                Text("This month")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                if stale {
+                    Text("STALE")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(Theme.Colors.warning)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(
+                            Theme.Colors.warning.opacity(0.15),
+                            in: Capsule()
+                        )
+                        .accessibilityLabel("Data is stale")
+                }
+            }
 
-            Text(CurrencyFormat.compactUSD(snapshot.totalSpentUsd))
+            Text(WidgetPresentation.displayAmount(snapshot.totalSpentUsd, redacted: redacted))
                 .font(Theme.Typography.title)
                 .monospacedDigit()
                 .foregroundStyle(Theme.Colors.primaryText)
                 .minimumScaleFactor(0.7)
                 .lineLimit(1)
+                .privacySensitive(redacted)
 
-            if let caption = WidgetPresentation.budgetCaption(for: snapshot) {
+            if !redacted, let caption = WidgetPresentation.budgetCaption(for: snapshot) {
                 Text(caption)
                     .font(Theme.Typography.caption)
                     .monospacedDigit()
                     .foregroundStyle(Theme.Colors.tertiaryText)
             }
 
-            if snapshot.totalBudgetUsd > 0 {
+            if snapshot.totalBudgetUsd > 0, !redacted {
                 BudgetMeter(
                     fraction: WidgetPresentation.fraction(
                         spent: snapshot.totalSpentUsd,
@@ -143,17 +161,18 @@ private struct BudgetSummaryColumn: View {
                 .padding(.top, Theme.Spacing.xxs)
             }
 
-            if showsUpdatedAt, WidgetPresentation.showsUpdatedAt(for: snapshot) {
+            if showsUpdatedAt, let caption = WidgetPresentation.updatedCaption(for: snapshot) {
                 // Staleness is first-class: the widget re-reads a cached
-                // snapshot, so days-old data must be visibly dated.
+                // snapshot, so hours-old data is labeled Stale, not just "Updated".
                 HStack(spacing: Theme.Spacing.xxs) {
-                    Image(systemName: "clock")
-                    Text("Updated \(Text(snapshot.generatedAt, style: .relative))")
+                    Image(systemName: stale ? "clock.badge.exclamationmark" : "clock")
+                    Text(caption)
                 }
                 .font(Theme.Typography.caption)
-                .foregroundStyle(Theme.Colors.tertiaryText)
+                .foregroundStyle(stale ? Theme.Colors.warning : Theme.Colors.tertiaryText)
                 .padding(.top, Theme.Spacing.xxs)
                 .accessibilityElement(children: .combine)
+                .accessibilityLabel(caption)
             }
         }
     }
@@ -164,6 +183,8 @@ private struct BudgetSummaryColumn: View {
 private struct SmallBudgetWidget: View {
     let snapshot: WidgetSnapshot
 
+    private var redacted: Bool { WidgetPresentation.shouldRedactAmounts() }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             BudgetSummaryColumn(snapshot: snapshot)
@@ -171,10 +192,11 @@ private struct SmallBudgetWidget: View {
             // Projected end-of-month gives the small widget a forward-looking
             // footer without crowding the hero.
             if snapshot.projectedEomUsd > 0 {
-                Text("Proj. \(CurrencyFormat.compactUSD(snapshot.projectedEomUsd))")
+                Text("Proj. \(WidgetPresentation.displayAmount(snapshot.projectedEomUsd, redacted: redacted))")
                     .font(Theme.Typography.caption)
                     .monospacedDigit()
                     .foregroundStyle(Theme.Colors.secondaryText)
+                    .privacySensitive(redacted)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -185,6 +207,8 @@ private struct SmallBudgetWidget: View {
 
 private struct MediumBudgetWidget: View {
     let snapshot: WidgetSnapshot
+
+    private var redacted: Bool { WidgetPresentation.shouldRedactAmounts() }
 
     private var meters: [WidgetSnapshot.Meter] {
         Array(snapshot.topMeters.prefix(3))
@@ -203,16 +227,20 @@ private struct MediumBudgetWidget: View {
                     ForEach(meters) { meter in
                         LabeledBudgetMeter(
                             title: meter.name,
-                            detail: WidgetPresentation.meterDetail(
+                            detail: WidgetPresentation.displayMeterDetail(
                                 spent: meter.spentUsd,
-                                budget: meter.budgetUsd
+                                budget: meter.budgetUsd,
+                                redacted: redacted
                             ),
-                            fraction: WidgetPresentation.fraction(
-                                spent: meter.spentUsd,
-                                budget: meter.budgetUsd
-                            ),
+                            fraction: redacted
+                                ? 0
+                                : WidgetPresentation.fraction(
+                                    spent: meter.spentUsd,
+                                    budget: meter.budgetUsd
+                                ),
                             status: WidgetPresentation.semanticStatus(forRawStatus: meter.status)
                         )
+                        .privacySensitive(redacted)
                     }
                     Spacer(minLength: 0)
                 }

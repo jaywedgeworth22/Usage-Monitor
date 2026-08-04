@@ -85,11 +85,57 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertFalse(WidgetPresentation.showsUpdatedAt(for: .empty))
     }
 
+    func testIsStaleWhenOlderThanThreshold() {
+        let now = Date(timeIntervalSince1970: 1_720_003_600) // +1h
+        let fresh = makeSnapshot(
+            overBudget: false,
+            warning: false,
+            totalBudget: 900,
+            generatedAt: now.addingTimeInterval(-30 * 60)
+        )
+        let stale = makeSnapshot(
+            overBudget: false,
+            warning: false,
+            totalBudget: 900,
+            generatedAt: now.addingTimeInterval(-2 * 60 * 60)
+        )
+        XCTAssertFalse(WidgetPresentation.isStale(for: fresh, asOf: now))
+        XCTAssertTrue(WidgetPresentation.isStale(for: stale, asOf: now))
+        XCTAssertFalse(WidgetPresentation.isStale(for: .empty, asOf: now))
+    }
+
+    func testUpdatedCaptionMarksStale() {
+        let now = Date(timeIntervalSince1970: 1_720_003_600)
+        let stale = makeSnapshot(
+            overBudget: false,
+            warning: false,
+            totalBudget: 900,
+            generatedAt: now.addingTimeInterval(-3 * 60 * 60)
+        )
+        let caption = WidgetPresentation.updatedCaption(for: stale, asOf: now)
+        XCTAssertEqual(caption, "Stale · 3 hr ago")
+        XCTAssertNil(WidgetPresentation.updatedCaption(for: .empty, asOf: now))
+    }
+
+    func testDisplayAmountRedaction() {
+        XCTAssertEqual(WidgetPresentation.displayAmount(42, redacted: true), "••••")
+        XCTAssertFalse(WidgetPresentation.displayAmount(42, redacted: false).contains("•"))
+        XCTAssertEqual(
+            WidgetPresentation.displayMeterDetail(spent: 10, budget: 100, redacted: true),
+            "••••"
+        )
+    }
+
     // MARK: - Helpers
 
-    private func makeSnapshot(overBudget: Bool, warning: Bool, totalBudget: Double) -> WidgetSnapshot {
+    private func makeSnapshot(
+        overBudget: Bool,
+        warning: Bool,
+        totalBudget: Double,
+        generatedAt: Date = Date(timeIntervalSince1970: 1_720_000_000)
+    ) -> WidgetSnapshot {
         WidgetSnapshot(
-            generatedAt: Date(timeIntervalSince1970: 1_720_000_000),
+            generatedAt: generatedAt,
             month: "2026-07",
             totalSpentUsd: 428.16,
             totalBudgetUsd: totalBudget,

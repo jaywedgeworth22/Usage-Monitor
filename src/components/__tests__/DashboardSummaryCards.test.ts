@@ -72,8 +72,14 @@ describe("DashboardSummaryCards", () => {
       html.indexOf("Open Alerts")
     );
     expect(html).toContain("All clear");
-    // Zero alerts should not use amber/red alarm colors on the count line
+    // Zero alerts / complete spend should not use amber alarm colors
     expect(html).toContain("text-gray-900 dark:text-gray-100");
+    expect(html).not.toContain("text-amber-600 dark:text-amber-400");
+  });
+
+  it("colors spend amber when coverage is incomplete", () => {
+    const html = renderSummary(2, 12.5);
+    expect(html).toContain("text-amber-600 dark:text-amber-400");
   });
 
   it("shows provider funds without inventing an aggregate credit total", () => {

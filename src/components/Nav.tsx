@@ -23,8 +23,8 @@ export default function Nav() {
   }, []);
 
   const links = [
-    { href: "/", label: "Dashboard" },
-    { href: "/attribution", label: "Attribution" },
+    { href: "/", label: "Overview" },
+    { href: "/attribution", label: "Keys & apps" },
     { href: "/settings", label: "Settings" },
   ];
 
@@ -165,7 +165,7 @@ export default function Nav() {
             aria-controls="mobile-navigation"
             aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
             onClick={() => setMenuOpen((open) => !open)}
-            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100 sm:hidden"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100 sm:hidden"
           >
             <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path

@@ -28,6 +28,8 @@ final class DashboardViewDataTests: XCTestCase {
         XCTAssertEqual(data.remaining, 570 - 461.55, accuracy: 0.001)
         XCTAssertTrue(data.hasBudget)
         XCTAssertEqual(data.spentFraction, 461.55 / 570, accuracy: 0.0001)
+        // Hero caption basis: "Across N provider budgets" uses this count.
+        XCTAssertEqual(data.configuredProviderCount, 3)
     }
 
     func testPercentUsedIsProviderDerived() {

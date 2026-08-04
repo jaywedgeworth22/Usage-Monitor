@@ -2,6 +2,7 @@ import SwiftUI
 import AppCore
 import DesignSystem
 import Models
+import Networking
 
 /// Typed navigation value for pushing a provider detail. Carrying only the id
 /// keeps navigation state small and lets the detail re-resolve the *current*
@@ -23,6 +24,7 @@ struct ProviderDetailView: View {
     /// Optional so previews (store-only) don't trap; the app injects it.
     @Environment(AppEnvironment.self) private var env: AppEnvironment?
     @State private var depthStore = ProviderDepthStore()
+    @State private var showBudgetEditor = false
 
     /// Always resolve from the live store so a pull-to-refresh updates the
     /// numbers in place.
@@ -46,6 +48,34 @@ struct ProviderDetailView: View {
         }
         .navigationTitle(provider?.title ?? "Provider")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if provider != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit budget") {
+                        Haptics.tap()
+                        showBudgetEditor = true
+                    }
+                    .accessibilityHint("Opens the monthly budget editor. Requires full access.")
+                }
+            }
+        }
+        .sheet(isPresented: $showBudgetEditor) {
+            ProviderBudgetEditSheet(
+                providerID: route.id,
+                providerTitle: provider?.title ?? "Provider",
+                currentBudgetUsd: provider?.monthlyBudgetUsd,
+                client: env?.apiClient,
+                onSaved: {
+                    showBudgetEditor = false
+                    Task { await store.refresh() }
+                },
+                onRequestSignIn: {
+                    showBudgetEditor = false
+                    env?.selectTab?(.settings)
+                }
+            )
+            .presentationDetents([.medium, .large])
+        }
         .task { await store.loadIfNeeded() }
         .task(id: route.id) { [apiClient = env?.apiClient] in
             if let apiClient {
@@ -94,14 +124,11 @@ struct ProviderDetailView: View {
     private func header(_ provider: ProviderBudgetStatus) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             HStack(spacing: Theme.Spacing.md) {
-                Text(provider.title.prefix(1).uppercased())
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(provider.semanticStatus == .neutral ? Theme.Colors.accent : provider.semanticStatus.tint)
-                    .frame(width: 52, height: 52)
-                    .background(
-                        (provider.semanticStatus == .neutral ? Theme.Colors.accentSoft : provider.semanticStatus.wash),
-                        in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                    )
+                ProviderMonogram(
+                    title: provider.title,
+                    status: provider.semanticStatus,
+                    size: 52
+                )
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     Text(provider.title)
                         .font(Theme.Typography.title)
@@ -146,7 +173,17 @@ struct ProviderDetailView: View {
     @ViewBuilder
     private func budgetCard(_ provider: ProviderBudgetStatus) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            SectionHeader("Budget", subtitle: provider.hasBudget ? "Month to date" : nil)
+            SectionHeader("Budget", subtitle: provider.hasBudget ? "Month to date" : nil) {
+                Button {
+                    Haptics.tap()
+                    showBudgetEditor = true
+                } label: {
+                    Text(provider.hasBudget ? "Edit" : "Set budget")
+                        .font(Theme.Typography.captionEmphasis)
+                        .foregroundStyle(Theme.Colors.accent)
+                }
+                .accessibilityLabel(provider.hasBudget ? "Edit monthly budget" : "Set monthly budget")
+            }
             if provider.hasBudget, let budget = provider.monthlyBudgetUsd {
                 LabeledBudgetMeter(
                     title: provider.hasBudget ? "\(CurrencyFormat.percent(provider.budgetFraction)) used" : "Spend",

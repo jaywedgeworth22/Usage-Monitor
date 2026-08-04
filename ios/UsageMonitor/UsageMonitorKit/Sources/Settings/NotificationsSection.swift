@@ -86,15 +86,15 @@ struct NotificationsSection: View {
 
     private var footerText: String {
         guard model.isEnabled else {
-            return "Get notified when a provider crosses or nears its monthly budget — checked quietly in the background."
+            return "Local budget alerts need a read token (or full-access session) so background refresh can check spend. Remote push only works after the server registers this device for APNs."
         }
         switch model.authorizationStatus {
         case .denied:
-            return "Usage Monitor can't send notifications until you allow them in iOS Settings."
+            return "Usage Monitor can't send notifications until you allow them in iOS Settings. Local/background alerts still require a read token; remote push only when the server has this device registered."
         case .notDetermined:
-            return "You'll be asked to allow notifications."
+            return "You'll be asked to allow notifications. Local alerts use background refresh with a read token; remote push is scaffolded until the server registers the device."
         default:
-            return "Alerts are delivered in the background as budgets change, deduplicated so you're never spammed."
+            return "Local alerts fire from background budget checks (needs a read token) and are deduplicated. Remote APNs push only delivers when the monitor has registered this device — the button above is the registration scaffold, not a guarantee of server-side push."
         }
     }
 }

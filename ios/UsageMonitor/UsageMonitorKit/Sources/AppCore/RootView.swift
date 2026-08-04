@@ -113,7 +113,7 @@ public struct RootView: View {
         TabView(selection: selection) {
             tab(.dashboard) { features.dashboard() }
             tab(.providers) { features.providers() }
-            tab(.alerts) { features.alerts() }
+            tab(.alerts, badge: activeAlertCount) { features.alerts() }
             tab(.projects) { features.projects() }
             tab(.settings) { features.settings() }
         }
@@ -133,9 +133,19 @@ public struct RootView: View {
         .preferredColorScheme(environment.settings.theme.colorScheme)
     }
 
-    private func tab(_ tab: AppTab, @ViewBuilder content: () -> some View) -> some View {
+    /// Active provider alerts for the Alerts tab badge (0 hides the badge).
+    private var activeAlertCount: Int {
+        environment.budgetStore.alertItems.count
+    }
+
+    private func tab(
+        _ tab: AppTab,
+        badge: Int = 0,
+        @ViewBuilder content: () -> some View
+    ) -> some View {
         content()
             .tabItem { Label(tab.title, systemImage: tab.systemImage) }
+            .badge(badge)
             .tag(tab)
     }
 }

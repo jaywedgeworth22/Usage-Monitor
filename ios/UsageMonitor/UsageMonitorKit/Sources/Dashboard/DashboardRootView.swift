@@ -33,7 +33,16 @@ public struct DashboardRootView: View {
                 .navigationTitle(AppTab.dashboard.title)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        TimeframePicker(selection: $selectedTimeframe)
+                        VStack(alignment: .leading, spacing: 1) {
+                            TimeframePicker(selection: $selectedTimeframe)
+                            Text("Budget is always this month")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.Colors.tertiaryText)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(
+                            "Time period filter, \(selectedTimeframe.displayLabel). Hero and budget totals always show the current calendar month; timeframe only affects portfolio telemetry when present."
+                        )
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -77,7 +86,12 @@ public struct DashboardRootView: View {
                 BudgetStalenessBanner(staleness: staleness)
             }
 
-            DashboardContentView(data: data, generatedAt: store.state.value?.generatedAtDate, timeframe: selectedTimeframe)
+            DashboardContentView(
+                data: data,
+                generatedAt: store.state.value?.generatedAtDate,
+                timeframe: selectedTimeframe,
+                onSelectProvider: { id in env?.openProvider(id: id) }
+            )
 
             LastUpdatedFooter(
                 staleness: budgetStaleness,

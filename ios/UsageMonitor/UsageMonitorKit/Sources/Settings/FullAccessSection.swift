@@ -102,9 +102,13 @@ struct FullAccessSection: View {
                 .accessibilityElement(children: .combine)
             }
         } header: {
-            Text("Full Access")
+            Text(store.capabilities.canManage ? "Full Access" : "2 · Dashboard password (full access)")
         } footer: {
-            Text("The dashboard password is sent once over HTTPS and never stored. Full access persists only as the monitor's HttpOnly session cookie. Complex provider credentials and subscription purchase/link flows remain server-validated on the web.")
+            if store.capabilities.canManage {
+                Text("The dashboard password is sent once over HTTPS and never stored. Full access persists only as the monitor's HttpOnly session cookie. Complex provider credentials and subscription purchase/link flows remain server-validated on the web.")
+            } else {
+                Text("Step 2 of connect: sign in with the dashboard password for history, budget edits, and native management. The password is sent once over HTTPS and never stored — only the monitor's HttpOnly session cookie persists. A read token (step 3) is optional for background refresh.")
+            }
         }
         .confirmationDialog(
             "Sign out of full access?",
