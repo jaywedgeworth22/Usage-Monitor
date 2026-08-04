@@ -14,15 +14,15 @@
 #     S3 endpoint set (R2 always sets one) Litestream falls back to us-east-1 and
 #     R2 accepts any region for SigV4.
 
-# Point-in-time retention: keep 7 days of snapshot history, a fresh snapshot
-# every 24h. Was 720h (30d) — too large for the shared Hetzner Garage volume
-# (~14 GiB in ~3 days of LTX at prod write rate). 168h still covers weekly
-# restore drills; operator can raise later if Garage moves off the 75G box.
+# Point-in-time retention: 48h (was 168h/7d, before that 720h/30d).
+# 2026-08-04 GROK free-tier opt: usage-monitor-bucket hit 10.45 GiB (104% of
+# R2 free tier). Live DB is <<1 GiB; 7d of LTX/snapshots is what blew the cap.
+# 48h still covers deploy-day restore drills; raise only if moving to paid R2.
 # Litestream 0.5.x stores LTX files and GCs snapshots older than `retention`;
 # the finer-grained LTX/WAL window is governed by the default l0-retention.
 snapshot:
   interval: 24h
-  retention: 168h
+  retention: 48h
 
 dbs:
   - path: /data/prod.db
@@ -38,3 +38,6 @@ dbs:
       # on bandwidth-constrained cross-region links. Five concurrent parts can
       # each exceed the deadline while competing for the same uplink.
       concurrency: 1
+      # Class A free-tier guard (default was 1s). Backup RPO only — app path
+      # is unaffected. 60s halves PutObject burn vs 30s, ~60x vs 1s default.
+      sync-interval: 60s
