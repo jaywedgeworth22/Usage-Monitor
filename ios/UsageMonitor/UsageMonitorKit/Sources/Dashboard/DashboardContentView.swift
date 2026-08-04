@@ -9,6 +9,9 @@ import Models
 struct DashboardContentView: View {
     let data: DashboardViewData
     let generatedAt: Date?
+    /// Portfolio telemetry timeframe — forwarded to telemetry sub-views.
+    /// Hero / stat tiles always show current-calendar-month data from budget-status.
+    var timeframe: TimeframeOption = .currentMonth
 
     private let columns = [
         GridItem(.flexible(), spacing: Theme.Spacing.md),
@@ -181,7 +184,8 @@ private struct AttentionCard: View {
         VStack(spacing: Theme.Spacing.lg) {
             DashboardContentView(
                 data: DashboardViewData(.sample),
-                generatedAt: BudgetStatusResponse.sample.generatedAtDate
+                generatedAt: BudgetStatusResponse.sample.generatedAtDate,
+                timeframe: .currentMonth
             )
         }
         .padding()
@@ -194,7 +198,8 @@ private struct AttentionCard: View {
         VStack(spacing: Theme.Spacing.lg) {
             DashboardContentView(
                 data: DashboardViewData(.sample),
-                generatedAt: BudgetStatusResponse.sample.generatedAtDate
+                generatedAt: BudgetStatusResponse.sample.generatedAtDate,
+                timeframe: .currentMonth
             )
         }
         .padding()

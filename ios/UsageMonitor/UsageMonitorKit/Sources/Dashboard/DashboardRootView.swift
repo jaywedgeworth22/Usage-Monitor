@@ -21,6 +21,10 @@ public struct DashboardRootView: View {
     /// trap; the live app always provides it via `RootView`.
     @Environment(AppEnvironment.self) private var env: AppEnvironment?
 
+    /// Selected period for the portfolio telemetry panel.
+    /// The hero / budget-status data is always current-calendar-month regardless.
+    @State private var selectedTimeframe: TimeframeOption = .currentMonth
+
     public init() {}
 
     public var body: some View {
@@ -28,6 +32,9 @@ public struct DashboardRootView: View {
             content
                 .navigationTitle(AppTab.dashboard.title)
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        TimeframePicker(selection: $selectedTimeframe)
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             Task { await refresh() }
@@ -70,7 +77,7 @@ public struct DashboardRootView: View {
                 BudgetStalenessBanner(staleness: staleness)
             }
 
-            DashboardContentView(data: data, generatedAt: store.state.value?.generatedAtDate)
+            DashboardContentView(data: data, generatedAt: store.state.value?.generatedAtDate, timeframe: selectedTimeframe)
 
             LastUpdatedFooter(
                 staleness: budgetStaleness,
