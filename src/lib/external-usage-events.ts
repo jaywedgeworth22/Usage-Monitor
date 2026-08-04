@@ -730,12 +730,16 @@ function usageEventsSummaryMemoTtlMs(): number {
 export async function summarizeExternalUsageEvents(
   since: Date,
   rawCutoff: Date,
-  now = new Date()
+  now = new Date(),
+  /** Optional upper bound for the query window. When provided the memo is
+   * bypassed (calendar-range queries are infrequent and key-cardinality would
+   * pollute the memo). Defaults to `now` when omitted. */
+  until?: Date
 ): Promise<ExternalUsageEventSummary> {
-  // Under vitest, skip the process memo so mocked query sequences and
-  // per-test fixtures never observe cross-call contamination (same rule as
-  // the MTD cost material memo below).
-  const memoEnabled = process.env.VITEST !== "true";
+  // Bypass the memo for explicit calendar-range queries: the date range is
+  // the canonical key, and unbounded month/year tokens would blow up the
+  // memo key space. Default-window calls (until === undefined) still memo.
+  const memoEnabled = process.env.VITEST !== "true" && until === undefined;
   // Day-granularity key (same shape as mtdScanKey): sequential same-day
   // default-window dashboard calls share one memo entry. The derivation-flag
   // bit keeps a same-day flag flip from serving the other mode's cached
@@ -762,7 +766,8 @@ export async function summarizeExternalUsageEvents(
     const summary = await summarizeExternalUsageEventsUnserialized(
       since,
       rawCutoff,
-      now
+      now,
+      until
     );
     if (memoEnabled) {
       setUsageEventsSummaryMemo({
@@ -791,12 +796,23 @@ export async function summarizeExternalUsageEvents(
 async function summarizeExternalUsageEventsUnserialized(
   since: Date,
   rawCutoff: Date,
-  now: Date
+  now: Date,
+  until?: Date
 ): Promise<ExternalUsageEventSummary> {
   const groups = new Map<string, SummaryAccumulator>();
+  // `upperBound` caps both raw-event and rollup upper bounds so calendar-range
+  // queries (from/to) see only events in their window. For rollup queries the
+  // upper bound must not exceed rawCutoff (start of retention window).
+  const upperBound = until !== undefined && until < now ? until : now;
   const rawSince = since > rawCutoff ? since : rawCutoff;
 
-  const receiptCandidates = await rawReceiptCashCandidates(rawSince, now);
+  const receiptCandidates = await rawReceiptCashCandidates(rawSince, upperBound);
+  // For rollups: the day-lt bound is the lesser of rawCutoff and the day after
+  // `upperBound`, so a calendar-range query doesn't include rollup days beyond
+  // the requested `to` date.
+  const rollupDayLt = upperBound < rawCutoff
+    ? new Date(Date.UTC(upperBound.getUTCFullYear(), upperBound.getUTCMonth(), upperBound.getUTCDate() + 1))
+    : rawCutoff;
   const [rawGroups, rollups, derivedCostEstimates] = await Promise.all([
     prisma.externalUsageEvent.groupBy({
       by: [
@@ -811,7 +827,7 @@ async function summarizeExternalUsageEventsUnserialized(
         "limitWindow",
       ],
       where: {
-        occurredAt: { gte: rawSince, lte: now },
+        occurredAt: { gte: rawSince, lte: upperBound },
         metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
         ...NON_RECEIPT_CANDIDATE_WHERE,
       },
@@ -824,7 +840,7 @@ async function summarizeExternalUsageEventsUnserialized(
           where: {
             day: {
               gte: new Date(Date.UTC(since.getUTCFullYear(), since.getUTCMonth(), since.getUTCDate())),
-              lt: rawCutoff,
+              lt: rollupDayLt,
             },
             metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
           },
