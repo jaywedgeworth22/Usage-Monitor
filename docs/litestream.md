@@ -3,7 +3,7 @@
 Continuous SQLite backup via [Litestream](https://litestream.io) **0.5.x**. Streams
 writes to `/data/prod.db` as LTX files. **Production is the Oracle A1 VM**
 (Docker + Caddy, see `deploy/oracle/README.md`), replicating to **Cloudflare R2**
-(bucket name enforced as `usage-monitor-prod-v3` by the deploy env preflight;
+(live Infisical bucket is `usage-monitor-bucket` on the Jay CF account;
 object prefix `api-usage-monitor/prod.db` in `litestream.yml`).
 
 **Hetzner/Coolify Garage is retired** as the production replica (switch completed
@@ -36,7 +36,7 @@ share or linear month-end projection reaches **70%**, the app:
 
 1. Writes `/data/r2-disabled-70pct.flag` and sets `LITESTREAM_EMERGENCY_DISABLE`
    / `R2_WRITES_DISABLED`.
-2. Sends a priority-1 Pushover alert (retried until delivered).
+2. Sends a priority-1 Pushover alert via **`PUSHOVER_USAGE_API_TOKEN`** (preferred) or `PUSHOVER_API_TOKEN` + `PUSHOVER_USER_KEY` (retried until delivered). Usage Monitor owns this alert — do not rely on Socratic.Trade.
 3. **Stops production Litestream** when the configured endpoint is Cloudflare R2
    (hostname `*.r2.cloudflarestorage.com`): startup skips replication if the
    flag is present, and the R2 sibling-process watcher SIGTERMs litestream

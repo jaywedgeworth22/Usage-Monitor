@@ -74,9 +74,9 @@ if (( configured_keys > 0 && configured_keys < ${#REQUIRED_KEYS[@]} )); then
   exit 1
 fi
 
-# Cloudflare R2 free-tier kill switch applies ONLY when the replica endpoint is
-# R2. Garage / MinIO / other S3-compatible endpoints must keep replicating —
-# free-tier limits do not apply to them. Detect by endpoint hostname.
+# Cloudflare R2 free-tier kill switch applies when the replica endpoint is R2
+# (production). The Coolify-hosted Garage replica is retired/gone — production
+# litestream targets R2 only. Detect R2 by endpoint hostname.
 litestream_endpoint_is_r2=false
 endpoint_lc="$(printf '%s' "${LITESTREAM_S3_ENDPOINT:-}" | tr '[:upper:]' '[:lower:]')"
 if [[ "${endpoint_lc}" == *"r2.cloudflarestorage.com"* || "${endpoint_lc}" == *".r2.cloudflare.com"* ]]; then
@@ -97,10 +97,11 @@ if (( configured_keys == ${#REQUIRED_KEYS[@]} )); then
   litestream_enabled=true
   if [[ "${r2_free_tier_kill}" == "true" && "${litestream_endpoint_is_r2}" == "true" ]]; then
     log "WARNING: Litestream replication disabled via R2 free-tier kill switch (70% threshold)."
-    log "Endpoint is Cloudflare R2; Garage/non-R2 endpoints would not be disabled."
+    log "Delete /data/r2-disabled-70pct.flag and clear LITESTREAM_EMERGENCY_DISABLE to resume after pruning R2."
     litestream_enabled=false
   elif [[ "${r2_free_tier_kill}" == "true" && "${litestream_endpoint_is_r2}" != "true" ]]; then
     log "R2 free-tier kill switch is set, but Litestream endpoint is not R2 — leaving replication ENABLED."
+    log "Production should use Cloudflare R2 (Coolify Garage is retired)."
   fi
 elif [[ "${LITESTREAM_REQUIRED:-false}" == "true" ]]; then
   log "ERROR: LITESTREAM_REQUIRED=true but no replica credentials are configured."
