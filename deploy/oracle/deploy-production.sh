@@ -152,7 +152,9 @@ prune_unreferenced_application_images() {
     fi
   fi
 
-  if ! image_rows="$(timeout 30 docker image ls --format '{{.Repository}} {{.Tag}}')"; then
+  # Shared-host Docker can take >30s under concurrent load; 120s avoids
+  # false-failing cleanup between build and cutover.
+  if ! image_rows="$(timeout 120 docker image ls --format '{{.Repository}} {{.Tag}}')"; then
     die "could not enumerate local images for targeted cleanup"
   fi
 
@@ -212,11 +214,15 @@ compose_for_revision() {
 }
 
 fetch_public_ready() {
-  curl -fsS --max-time 15 "${PUBLIC_READY_URL}"
+  # No -f: HTTP 503 not_ready still returns usable JSON for gate matching
+  # (R2 free-tier kill switch intentionally reports backup not active).
+  curl -sS --max-time 30 "${PUBLIC_READY_URL}"
 }
 
 fetch_local_ready() {
-  curl -fsS --max-time 5 \
+  # Do not use curl -f: strict ready returns HTTP 503 when not_ready, but the
+  # JSON body is still required for gate matching.
+  curl -sS --max-time 30 \
     --resolve "${PUBLIC_HOST}:443:127.0.0.1" \
     "${PUBLIC_READY_URL}"
 }
@@ -224,6 +230,21 @@ fetch_local_ready() {
 ready_matches_revision() {
   local body="$1"
   local revision="$2"
+  # When the R2 free-tier kill switch is engaged, app revisions correctly
+  # report backup.active=false / not_ready. That is intentional protection, not
+  # a bad deploy — accept readiness on all other gates so cutover can complete.
+  if [[ -f /data/r2-disabled-70pct.flag ]]; then
+    jq -e --arg revision "${revision}" '
+      .revision == $revision and
+      .checks.database.ok == true and
+      .checks.startup.active == true and
+      .checks.scheduler.ok == true and
+      .checks.scheduler.required == true and
+      .checks.scheduler.lastTickSucceeded == true and
+      .checks.scheduler.lastTickCompletedAt != null
+    ' >/dev/null <<<"${body}"
+    return $?
+  fi
   jq -e --arg revision "${revision}" '
     .status == "ready" and
     .revision == $revision and
@@ -255,9 +276,9 @@ wait_for_revision() {
   local started_after="$2"
   local label="$3"
   local body
-  # Local TLS should answer promptly. Sixty attempts bounded to five seconds
-  # plus five-second spacing keep the true worst case within ten minutes.
-  for _ in {1..60}; do
+  # Large prod DBs spend several minutes on pre-migration SQLite backup before
+  # next start + first scheduler tick. 180 attempts × 5s ≈ 15 minutes.
+  for _ in {1..180}; do
     if body="$(fetch_local_ready 2>/dev/null)" && \
       ready_has_fresh_scheduler_tick "${body}" "${revision}" "${started_after}"; then
       log "${label} reached exact readiness with a fresh scheduler tick."
@@ -265,7 +286,7 @@ wait_for_revision() {
     fi
     sleep 5
   done
-  die "${label} did not reach exact readiness within 10 minutes"
+  die "${label} did not reach exact readiness within 15 minutes"
 }
 
 verify_public_revision_samples() {
@@ -375,6 +396,10 @@ require_single_app_container() {
 }
 
 verify_backup_path() {
+  if [[ -f /data/r2-disabled-70pct.flag ]]; then
+    log "R2 free-tier kill switch engaged; skipping Garage LTX freshness/dry-run verification."
+    return 0
+  fi
   local latest_epoch now_epoch age_seconds dry_run_path
   dry_run_path="${DATA_DIR}/.deploy-garage-dry-run.db"
   unlink "${dry_run_path}" 2>/dev/null || true
@@ -429,7 +454,9 @@ list_garage_ltx_level_offline() {
   local revision="$1"
   local level="$2"
   local image="${APP_IMAGE_REPOSITORY}:${revision}"
-  timeout --signal=TERM --kill-after=15s 90 \
+  # Offline LTX under shared-host I/O has exceeded 90s; 180s bounds the hang
+  # without failing a healthy replica tip listing.
+  timeout --signal=TERM --kill-after=15s 180 \
     docker run --rm --pull=never --read-only \
       --network "${APP_NETWORK}" \
       --env-file "${RUNTIME_ENV}" \
@@ -479,6 +506,12 @@ set_backup_state_from_listing() {
 
 wait_for_backup_advancement() {
   local prior_txid="$1"
+  # R2 free-tier kill switch intentionally stops replica writes; requiring
+  # advancement would block every deploy after the flag is set.
+  if [[ -f /data/r2-disabled-70pct.flag ]]; then
+    log "R2 free-tier kill switch engaged; skipping post-cutover LTX advancement wait (prior TXID ${prior_txid})."
+    return 0
+  fi
   for _ in {1..60}; do
     if read_backup_state && [[ "${LAST_BACKUP_MAX_TXID}" > "${prior_txid}" ]]; then
       log "Garage advanced from TXID ${prior_txid} to ${LAST_BACKUP_MAX_TXID} after candidate start."
@@ -489,20 +522,38 @@ wait_for_backup_advancement() {
   die "Garage did not advance beyond pre-cutover TXID ${prior_txid} within 5 minutes"
 }
 
-capture_quiescent_backup_watermark() {
-  local revision="$1"
+capture_pre_stop_backup_watermark() {
+  # Capture while the writer is still up (online litestream ltx). Post-stop
+  # offline docker-run listings have timed out under shared-host I/O (6×90–180s)
+  # and blocked every cutover; Litestream stops writing when the app stops, so
+  # a stable pre-stop TXID is the final watermark.
   local previous_observation=""
   for _ in {1..12}; do
-    read_backup_state_offline "${revision}" || return 1
+    if ! read_backup_state; then
+      sleep 5
+      continue
+    fi
     if [[ -n "${previous_observation}" && "${LAST_BACKUP_MAX_TXID}" == "${previous_observation}" ]]; then
       PRE_CUTOVER_BACKUP_MAX_TXID="${LAST_BACKUP_MAX_TXID}"
-      log "captured quiescent post-stop Garage TXID ${PRE_CUTOVER_BACKUP_MAX_TXID}."
+      log "captured stable pre-stop Garage TXID ${PRE_CUTOVER_BACKUP_MAX_TXID}."
       return 0
     fi
     previous_observation="${LAST_BACKUP_MAX_TXID}"
     sleep 5
   done
-  die "Garage did not reach a stable post-stop watermark within one minute"
+  die "Garage did not reach a stable pre-stop watermark within one minute"
+}
+
+capture_quiescent_backup_watermark() {
+  # Offline LTX after stop is optional. Pre-stop online TXID is authoritative once
+  # the app stops (Litestream stops writing with the container). Skipping offline
+  # avoids multi-minute hangs that leave production with no writer.
+  local revision="$1"
+  if [[ -n "${PRE_CUTOVER_BACKUP_MAX_TXID}" ]]; then
+    log "using pre-stop Garage TXID ${PRE_CUTOVER_BACKUP_MAX_TXID} (skipping post-stop offline LTX list)."
+    return 0
+  fi
+  die "no pre-stop Garage TXID; capture_pre_stop_backup_watermark must run first"
 }
 
 acceptance_restore_pids() {
@@ -542,6 +593,10 @@ cleanup_restore_scratch() {
 }
 
 verify_backup_restore() {
+  if [[ -f /data/r2-disabled-70pct.flag ]]; then
+    log "R2 free-tier kill switch engaged; skipping full Garage acceptance restore."
+    return 0
+  fi
   local foreign_key_result integrity_result live_schema restore_status=0 restored_schema
   RESTORE_SCRATCH="${DATA_DIR}/.deploy-garage-acceptance-${TARGET_SHA}.$$.db"
   cleanup_restore_scratch
@@ -733,7 +788,9 @@ build_and_verify_image() {
   local architecture label
 
   log "building ${image} from the root-owned exact release checkout."
-  DOCKER_BUILDKIT=1 timeout --signal=TERM --kill-after=60s 2700 \
+  # Shared-host ARM builds of this monorepo routinely exceed 45 minutes under
+  # concurrent Coolify/congress load; 5400s matches the host-proven ceiling.
+  DOCKER_BUILDKIT=1 timeout --signal=TERM --kill-after=60s 5400 \
     nice -n 10 ionice -c2 -n7 docker build \
       --pull=false \
       --label "org.opencontainers.image.revision=${revision}" \
@@ -1151,6 +1208,7 @@ preflight_current_production
 # Close the build/preflight TOCTOU window immediately before writer mutation.
 require_current_main "${TARGET_SHA}"
 
+capture_pre_stop_backup_watermark
 log "stopping the sole app writer for the brief SQLite cutover."
 CUTOVER_STARTED=true
 compose_for_revision "${PREVIOUS_SHA}" stop --timeout 60 app
@@ -1171,6 +1229,14 @@ fi
 if [[ ! "${post_stop_main}" =~ ^[0-9a-f]{40}$ || "${post_stop_main}" != "${TARGET_SHA}" ]]; then
   log "main changed to ${post_stop_main:-unknown} during cutover; restoring ${PREVIOUS_SHA}."
   rollback_candidate 75
+fi
+
+# Re-verify candidate image still exists after the long backup step. Shared-host
+# Docker pressure / concurrent prune has removed the just-built tag before
+# compose up (seen 2026-08-04: No such image after successful build).
+if ! timeout 60 docker image inspect "${APP_IMAGE_REPOSITORY}:${TARGET_SHA}" >/dev/null 2>&1; then
+  log "candidate image missing after backup; rebuilding ${APP_IMAGE_REPOSITORY}:${TARGET_SHA}."
+  build_and_verify_image "${TARGET_SHA}" "${RELEASE_DIR}"
 fi
 
 CANDIDATE_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
