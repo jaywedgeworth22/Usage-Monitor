@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handleEmail, handleFetch, inspectAttachments, isDedicatedReceiptAddress, ReceiptInboxIndex, senderAuthentication, validateLifecycleRules } from "./src/index.mjs";
+import { handleEmail, handleFetch, inspectAttachments, isDedicatedReceiptAddress, isReceiptInboxAddress, ReceiptInboxIndex, senderAuthentication, validateLifecycleRules } from "./src/index.mjs";
 
 if (typeof crypto.subtle.timingSafeEqual !== "function") {
   Object.defineProperty(crypto.subtle, "timingSafeEqual", {
@@ -168,10 +168,17 @@ function rawImageReceipt(wrapper) {
 }
 
 describe("receipt inbox email worker", () => {
-  it("requires a high-entropy address on a dedicated jays.services subdomain", () => {
-    expect(isDedicatedReceiptAddress("receipts-secret-123@receipts.jays.services")).toBe(true);
-    expect(isDedicatedReceiptAddress("receipts-secret-123@jays.services")).toBe(false);
-    expect(isDedicatedReceiptAddress("short@receipts.jays.services")).toBe(false);
+  it("accepts any local-part on receipts.jays.services, including short and high-entropy", () => {
+    expect(isReceiptInboxAddress("receipts@receipts.jays.services")).toBe(true);
+    expect(isReceiptInboxAddress("short@receipts.jays.services")).toBe(true);
+    expect(isReceiptInboxAddress("receipts-secret-123@receipts.jays.services")).toBe(true);
+    expect(isReceiptInboxAddress("rcpt-abcdef0123456789@receipts.jays.services")).toBe(true);
+    // Apex and other subdomains stay rejected (personal mail / non-intake).
+    expect(isReceiptInboxAddress("receipts-secret-123@jays.services")).toBe(false);
+    expect(isReceiptInboxAddress("receipts@mail.jays.services")).toBe(false);
+    expect(isReceiptInboxAddress("not-an-email")).toBe(false);
+    // Alias keeps working for older call sites.
+    expect(isDedicatedReceiptAddress("receipts@receipts.jays.services")).toBe(true);
   });
 
   it("rejects unknown recipients, missing retention acknowledgement, and oversize messages before reading raw", async () => {
@@ -183,10 +190,7 @@ describe("receipt inbox email worker", () => {
     expect(message.rejected).toContain("exceeds");
     expect(rawRead).toBe(false);
 
-    const wrongRecipient = receiptMessage("x", { to: "receipts@receipts.jays.services" });
-    await handleEmail(wrongRecipient, env);
-    expect(wrongRecipient.rejected).toBe("Unknown receipt mailbox");
-
+    // Other domains / apex are still unknown even if configured wrongly.
     let apexRawRead = false;
     const apex = receiptMessage("x", { to: "receipts-secret-123@jays.services" });
     Object.defineProperty(apex, "raw", {
@@ -200,6 +204,10 @@ describe("receipt inbox email worker", () => {
     expect(apex.forwardedTo).toBeUndefined();
     expect(apexRawRead).toBe(false);
 
+    const foreignDomain = receiptMessage("x", { to: "receipts@example.com" });
+    await handleEmail(foreignDomain, env);
+    expect(foreignDomain.rejected).toBe("Unknown receipt mailbox");
+
     const noRetention = receiptMessage("x");
     await handleEmail(noRetention, { ...env, RECEIPT_INBOX_RETENTION_ACK: "" });
     expect(noRetention.rejected).toContain("retention");
@@ -208,6 +216,29 @@ describe("receipt inbox email worker", () => {
     const lifecycleDrift = receiptMessage("x");
     await expect(handleEmail(lifecycleDrift, env)).rejects.toThrow("lifecycle readiness");
     expect(lifecycleDrift.forwardedTo).toBe("socratic.trade@jays.services");
+  });
+
+  it("admits short *@receipts.jays.services recipients as well as the configured high-entropy address", async () => {
+    const { env } = createEnvironment();
+    await handleEmail(
+      receiptMessage(rawReceipt("short-address receipt"), {
+        to: "receipts@receipts.jays.services",
+      }),
+      env
+    );
+    expect(env.RECEIPTS_BUCKET.objects.size).toBe(1);
+
+    // Separate index/bucket: attachment-group dedupe is intentional across
+    // identical PDFs, so this case needs an isolated environment.
+    const shortConfig = createEnvironment();
+    shortConfig.env.RECEIPT_INBOX_ADDRESS = "receipts@receipts.jays.services";
+    await handleEmail(
+      receiptMessage(rawReceipt("long-address receipt"), {
+        to: "rcpt-abcdef0123456789xyz@receipts.jays.services",
+      }),
+      shortConfig.env
+    );
+    expect(shortConfig.env.RECEIPTS_BUCKET.objects.size).toBe(1);
   });
 
   it("dedupes identical MIME and different wrappers around the same supported attachment", async () => {
