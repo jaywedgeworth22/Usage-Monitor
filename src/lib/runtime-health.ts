@@ -323,9 +323,41 @@ export interface BackupRuntimeStatus {
  * `LITESTREAM_REPLICA_MAX_AGE_SECONDS` (default 3600) fails the side-channel when
  * age exceeds the budget.
  */
+function litestreamEndpointIsR2(): boolean {
+  const endpoint = (
+    process.env.LITESTREAM_S3_ENDPOINT ||
+    process.env.AWS_S3_ENDPOINT ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+  if (!endpoint) return false;
+  return (
+    endpoint.includes("r2.cloudflarestorage.com") ||
+    endpoint.includes(".r2.cloudflare.com")
+  );
+}
+
+function r2FreeTierKillEngaged(): boolean {
+  if (process.env.LITESTREAM_EMERGENCY_DISABLE === "true") return true;
+  if (process.env.R2_WRITES_DISABLED === "true") return true;
+  try {
+    // Same path the Node free-tier monitor and start-with-litestream.sh share.
+    return existsSync("/data/r2-disabled-70pct.flag");
+  } catch {
+    return false;
+  }
+}
+
 export function getBackupRuntimeStatus(now = new Date()): BackupRuntimeStatus {
   const required = process.env.LITESTREAM_REQUIRED === "true";
-  const active = process.env.LITESTREAM_ACTIVE === "true";
+  let active = process.env.LITESTREAM_ACTIVE === "true";
+  // When the R2 free-tier kill switch is engaged and the replica endpoint is
+  // Cloudflare R2, report backup inactive even if LITESTREAM_ACTIVE was set at
+  // boot (the runtime watcher may have stopped litestream mid-cycle).
+  if (active && litestreamEndpointIsR2() && r2FreeTierKillEngaged()) {
+    active = false;
+  }
   // LITESTREAM_ACTIVE/APP_STARTUP_WRAPPER are startup-only strings: Litestream
   // timing out against Garage for hours changes neither, so an env-only claim
   // is not evidence the replica is advancing. Fail closed by default and make
@@ -339,6 +371,24 @@ export function getBackupRuntimeStatus(now = new Date()): BackupRuntimeStatus {
     : 3600;
   const maxAge =
     Number.isFinite(maxAgeSeconds) && maxAgeSeconds > 0 ? maxAgeSeconds : 3600;
+
+  if (
+    !active &&
+    litestreamEndpointIsR2() &&
+    r2FreeTierKillEngaged() &&
+    process.env.LITESTREAM_ACTIVE === "true"
+  ) {
+    // Boot claimed active but free-tier kill stopped R2 replication.
+    return {
+      required,
+      active: false,
+      envOnly: true,
+      replicaOk: false,
+      replicaAgeSeconds: null,
+      verificationRequired,
+      reason: "r2_free_tier_disabled",
+    };
+  }
 
   if (!statusPath) {
     return {
