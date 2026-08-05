@@ -1,6 +1,10 @@
 import Foundation
 import UserNotifications
 import Models
+import Networking
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Public entry point for the **PushScaffold** lane: the client-side plumbing
 /// for `UserNotifications` so budget/alert notifications can be delivered and
@@ -60,8 +64,8 @@ public enum PushScaffold {
         guard let client else { return }
         do {
             #if canImport(UIKit)
-            let model = await UIDevice.current.model
-            let systemVersion = await UIDevice.current.systemVersion
+            let model = await MainActor.run { UIDevice.current.model }
+            let systemVersion = await MainActor.run { UIDevice.current.systemVersion }
             #else
             let model: String? = nil
             let systemVersion: String? = nil
