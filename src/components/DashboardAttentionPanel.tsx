@@ -71,7 +71,7 @@ export default function DashboardAttentionPanel({
         </h2>
         <Link
           href="/settings?tab=connections"
-          className="text-xs font-medium text-indigo-600 dark:text-indigo-400"
+          className="text-xs font-medium text-accent"
         >
           Manage budgets
         </Link>
@@ -99,7 +99,7 @@ export default function DashboardAttentionPanel({
                     {provider.displayName}
                     {provider.label ? ` - ${provider.label}` : ""}
                     {codeChip && (
-                      <span className="ml-2 inline-flex rounded bg-indigo-50 px-1.5 py-0.5 align-middle text-[10px] font-medium text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                      <span className="ml-2 inline-flex rounded bg-accent-soft px-1.5 py-0.5 align-middle text-[10px] font-medium text-gray-800 dark:text-gray-200">
                         {codeChip}
                       </span>
                     )}
@@ -115,7 +115,7 @@ export default function DashboardAttentionPanel({
                   <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
                     <Link
                       href={`/providers/${provider.id}`}
-                      className="text-xs font-semibold text-indigo-600 dark:text-indigo-400"
+                      className="text-xs font-semibold text-accent"
                     >
                       Open provider
                     </Link>
@@ -125,7 +125,7 @@ export default function DashboardAttentionPanel({
                           ? editBudgetHref
                           : action.href
                       }
-                      className="text-xs font-semibold text-indigo-600 dark:text-indigo-400"
+                      className="text-xs font-semibold text-accent"
                     >
                       {action.label}
                     </Link>
@@ -150,7 +150,7 @@ export default function DashboardAttentionPanel({
                 type="button"
                 onClick={() => setShowAll((expanded) => !expanded)}
                 aria-expanded={showAll}
-                className="min-h-11 text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
+                className="min-h-11 text-xs font-medium text-accent hover:opacity-90"
               >
                 {showAll
                   ? "Show fewer alerts"

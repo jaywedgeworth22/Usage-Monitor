@@ -18,12 +18,12 @@ import {
   type CommandPaletteProviderItem,
 } from "@/components/CommandPalette";
 import EmptyState from "@/components/EmptyState";
+import HistoryWindowControl from "@/components/HistoryWindowControl";
 import {
   shouldShowDashboardSkeleton,
   useDashboardData,
-  generateMonthOptions,
-  generateYearOptions,
   spendPeriodLabel as computeSpendPeriodLabel,
+  type TimeframeOption,
 } from "@/hooks/useDashboardData";
 import { sumProviderFunds } from "@/lib/provider-financial-semantics";
 import { canonicalProviderKey } from "@/lib/provider-identity";
@@ -188,10 +188,6 @@ export default function DashboardPage() {
   // History/telemetry window label — not the MTD budget hero period.
   const historyWindowLabel = useMemo(() => computeSpendPeriodLabel(timeframe), [timeframe]);
   const mtdMonthLabel = useMemo(() => currentMtdMonthLabel(), []);
-
-  // Picker option lists — computed once per render (stable month/year based on now).
-  const monthOptions = useMemo(() => generateMonthOptions(13), []);
-  const yearOptions = useMemo(() => generateYearOptions(3), []);
 
   const incompleteCostProviderCount = useMemo(
     () =>
@@ -437,72 +433,32 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 sm:space-y-8">
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Overview</h1>
           <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
             Press{" "}
             <kbd className="rounded border border-gray-300 px-1 font-sans dark:border-gray-600">⌘K</kbd>
             {" "}to jump anywhere
+            {lastUpdatedAt && (
+              <span className="hidden sm:inline">
+                {" · "}Updated{" "}
+                {new Date(lastUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </span>
+            )}
           </p>
         </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-end sm:gap-3">
-          {lastUpdatedAt && (
-            <span className="order-last text-xs text-gray-500 dark:text-gray-400 sm:order-first sm:self-center">
-              Updated {new Date(lastUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-            </span>
-          )}
-          <div className="flex min-w-0 flex-1 flex-col gap-1 sm:min-w-[12.5rem] sm:flex-none">
-            <label
-              htmlFor="dashboard-timeframe-select"
-              className="text-[11px] font-medium leading-none text-gray-500 dark:text-gray-400"
-            >
-              History window
-              <span className="ml-1 font-normal text-gray-400 dark:text-gray-500">(charts only)</span>
-            </label>
-            <div className="relative">
-              <select
-                id="dashboard-timeframe-select"
-                aria-label="History window for charts and telemetry (not MTD budget)"
-                title="Affects charts and telemetry only. Month-to-date budgets stay on the current UTC month."
-                value={timeframe}
-                onChange={(e) => setTimeframe(e.target.value as any)}
-                className="min-h-11 w-full appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-3 pr-9 text-sm font-medium text-gray-800 shadow-sm hover:border-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:border-gray-500"
-              >
-                <optgroup label="Rolling periods">
-                  <option value="1d">Past 24 hours</option>
-                  <option value="7d">Past week</option>
-                  <option value="30d">Past 30 days</option>
-                  <option value="90d">Past 3 months</option>
-                  <option value="180d">Past 6 months</option>
-                  <option value="all">All time</option>
-                </optgroup>
-                <optgroup label="Calendar months">
-                  {monthOptions.map(({ token, label }) => (
-                    <option key={token as string} value={token as string}>{label}</option>
-                  ))}
-                </optgroup>
-                <optgroup label="Calendar years">
-                  {yearOptions.map(({ token, label }) => (
-                    <option key={token as string} value={token as string}>{label}</option>
-                  ))}
-                </optgroup>
-              </select>
-              <span
-                className="pointer-events-none absolute inset-y-0 right-0 flex w-9 items-center justify-center text-gray-400 dark:text-gray-500"
-                aria-hidden="true"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </span>
-            </div>
-          </div>
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end sm:justify-end sm:gap-3 lg:w-auto">
+          <HistoryWindowControl
+            value={timeframe as TimeframeOption}
+            onChange={(next) => setTimeframe(next)}
+            className="w-full sm:w-auto"
+          />
           <button
             type="button"
             onClick={() => void refreshDashboard()}
             disabled={refreshing}
-            className="min-h-11 shrink-0 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:border-gray-500 dark:hover:bg-gray-800"
+            className="min-h-10 shrink-0 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:border-gray-500 dark:hover:bg-gray-800 sm:min-h-11"
           >
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>

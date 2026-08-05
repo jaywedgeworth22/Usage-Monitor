@@ -1123,9 +1123,9 @@ export default function AddProviderModal({
                     <span
                       className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${
                         active
-                          ? "bg-indigo-600 text-white dark:bg-indigo-500"
+                          ? "bg-accent text-white"
                           : done
-                            ? "bg-indigo-50 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-200"
+                            ? "bg-accent-soft text-gray-900 dark:text-gray-100"
                             : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
                       }`}
                       aria-current={active ? "step" : undefined}
@@ -1378,7 +1378,7 @@ export default function AddProviderModal({
                 </>
               )}
               {wizardStep === "review" && (
-                <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-3 text-sm text-indigo-950 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-100">
+                <div className="rounded-lg border border-orange-100 bg-orange-50/60 px-3 py-3 text-sm text-gray-900 dark:border-orange-900/40 dark:bg-orange-950/20 dark:text-gray-100">
                   <p className="font-medium">Review</p>
                   <p className="mt-1 text-xs opacity-90">
                     {builtinDisplayName || selectedBuiltin} · {tab}
@@ -1675,7 +1675,7 @@ export default function AddProviderModal({
                   type="button"
                   onClick={goNextStep}
                   disabled={saving}
-                  className="min-h-11 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                  className="min-h-11 px-4 py-2 text-sm font-medium text-white bg-accent rounded-lg hover:opacity-90 disabled:opacity-50"
                 >
                   Next
                 </button>
