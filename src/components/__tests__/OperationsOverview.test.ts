@@ -132,7 +132,7 @@ describe("OperationsOverview cards", () => {
           },
           {
             id: "ct",
-            label: "Congress Trade",
+            label: "Congress.Trade",
             accountIdSuffix: null,
             configured: false,
             status: "unconfigured",
@@ -149,7 +149,7 @@ describe("OperationsOverview cards", () => {
     expect(html).toContain("R2 free tier (fleet)");
     expect(html).toContain("Usage Monitor");
     expect(html).toContain("Socratic Trade");
-    expect(html).toContain("Congress Trade");
+    expect(html).toContain("Congress.Trade");
     expect(html).toContain("usage-monitor-prod-v3");
     expect(html).toContain("Status:");
     expect(html).toContain("Class A ops");

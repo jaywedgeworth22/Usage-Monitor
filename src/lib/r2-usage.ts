@@ -763,7 +763,13 @@ export function resolveR2S3ListCredentials(
   return { endpoint, region, accessKeyId, secretAccessKey };
 }
 
-/** Buckets that count toward free tier for this app (primary + known siblings). */
+/**
+ * Buckets to ListObjects for live storage (Class A!). Prefer the litestream
+ * primary only. Optional `R2_USAGE_EXTRA_BUCKETS` (comma-separated) for
+ * receipts/legacy inventory. Do NOT hardcode every historical bucket — listing
+ * large orphan buckets every maintenance tick burned free-tier Class A with no
+ * product benefit (2026-08-05 free-tier survival).
+ */
 export function resolveR2StorageBucketNames(
   env: Record<string, string | undefined> = process.env
 ): string[] {
@@ -779,13 +785,10 @@ export function resolveR2StorageBucketNames(
     const n = part.trim();
     if (n) names.add(n);
   }
-  // Known account buckets (list is no-op if key lacks access).
-  for (const n of [
-    "usage-monitor-prod-v3",
-    "usage-monitor-bucket",
-    "usage-monitor-receipts",
-  ]) {
-    names.add(n);
+  // Fallback when env has no bucket name yet (local/dev): only the current prod
+  // litestream target — not legacy usage-monitor-bucket (often multi-GiB orphans).
+  if (names.size === 0) {
+    names.add("usage-monitor-prod-v3");
   }
   return [...names];
 }
@@ -904,11 +907,38 @@ export async function listR2BucketStorageViaS3(
   };
 }
 
+/** In-process cache for live ListObjects inventory (Class A). Default 6h. */
+const LIVE_S3_LIST_CACHE_MS = (() => {
+  const raw = process.env.R2_LIVE_LIST_CACHE_HOURS?.trim();
+  const n = raw ? Number(raw) : 6;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n * 3600_000) : 6 * 3600_000;
+})();
+
+let liveS3ListCache: {
+  atMs: number;
+  value: { storageBytes: number; buckets: R2BucketStorageSample[] };
+} | null = null;
+
 export async function fetchLiveR2StorageViaS3(
   fetchImpl: typeof fetch = fetch,
   now: Date = new Date(),
   env: Record<string, string | undefined> = process.env
 ): Promise<{ storageBytes: number; buckets: R2BucketStorageSample[] } | null> {
+  // When R2 writes are already killed, listing every maintenance tick (15m) only
+  // burns Class A ListObjects with no kill decision left to make. Prefer cache /
+  // GraphQL until writes resume.
+  if (isR2AutoDisabled() && LIVE_S3_LIST_CACHE_MS > 0 && liveS3ListCache) {
+    if (now.getTime() - liveS3ListCache.atMs < Math.max(LIVE_S3_LIST_CACHE_MS, 24 * 3600_000)) {
+      return liveS3ListCache.value;
+    }
+  } else if (
+    LIVE_S3_LIST_CACHE_MS > 0 &&
+    liveS3ListCache &&
+    now.getTime() - liveS3ListCache.atMs < LIVE_S3_LIST_CACHE_MS
+  ) {
+    return liveS3ListCache.value;
+  }
+
   const creds = resolveR2S3ListCredentials(env);
   if (!creds) return null;
   const names = resolveR2StorageBucketNames(env);
@@ -929,7 +959,9 @@ export async function fetchLiveR2StorageViaS3(
   if (buckets.length === 0) return null;
   buckets.sort((a, b) => b.bytes - a.bytes);
   const storageBytes = buckets.reduce((s, b) => s + b.bytes, 0);
-  return { storageBytes, buckets };
+  const value = { storageBytes, buckets };
+  liveS3ListCache = { atMs: now.getTime(), value };
+  return value;
 }
 
 export function graphqlStorageSamplesAreFresh(
@@ -1063,7 +1095,7 @@ const FLEET_SLOTS: Array<{
   },
   {
     id: "ct",
-    label: "Congress Trade",
+    label: "Congress.Trade",
     accountEnv: ["CLOUDFLARE_CT_ACCOUNT_ID"],
     tokenEnv: ["CLOUDFLARE_CT_API_TOKEN"],
   },
