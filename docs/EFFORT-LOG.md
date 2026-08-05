@@ -1,3 +1,4 @@
+- **[GROK] Full historical catalog + Hetzner MTD estimate + Voyage/Oracle truth (2026-08-05) — IN PR.** Local: all 42 defs + historical; Hetzner poll on Local; remote Hetzner pro-rates catalog run-rate into totalCost; research notes Voyage still no API, Oracle cash on remote only.
 - **[GROK] Billing API coverage research (LLMs + partial providers) (2026-08-05) — IN PR.** Hard dig: Render OpenAPI has no invoice paths; xAI has invoice list API; consumer Max/Plus/SuperGrok console-only; matrix in docs/research/2026-08-05-billing-api-coverage.md.
 - **[GROK] Local Usage Monitor fleet provider catalog + poll adapters (2026-08-05) — IN PR.** Catalog of ~40 fleet providers; poll: OpenRouter/OpenAI/DeepSeek/Anthropic Admin; seed templates; searchable Add Provider UI.
 - **[GROK] Rename Local app → LocalUsageMonitor / Local Usage Monitor / services.jays.local.usage.monitor (2026-08-05) — IN PR.** Target, scheme, display name, bundle ID, app group, deep link, Keychain service.
