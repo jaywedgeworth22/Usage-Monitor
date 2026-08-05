@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// Keychain storage for provider API keys (Usage Monitor Local only).
+/// Keychain storage for provider API keys (Local Usage Monitor only).
 /// Never write secrets into SQLite / LocalStore.
 public struct ProviderCredentials: Sendable, Equatable {
     public var apiKey: String
@@ -17,7 +17,7 @@ public protocol ProviderSecretStoring: Sendable {
 public struct ProviderKeychainStore: ProviderSecretStoring, Sendable {
     public static let shared = ProviderKeychainStore()
 
-    private let service = "services.jays.usage.monitor.local.provider-keys"
+    private let service = "services.jays.local.usage.monitor.provider-keys"
 
     public init() {}
 

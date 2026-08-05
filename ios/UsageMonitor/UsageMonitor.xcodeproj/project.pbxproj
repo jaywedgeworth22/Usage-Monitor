@@ -7,41 +7,41 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		015574DB5733115F9AD66A42 /* LocalDataPlane in Frameworks */ = {isa = PBXBuildFile; productRef = 3D1EA8338E0268795F805F14 /* LocalDataPlane */; };
 		0DAE1542F635F3A7312AFC3F /* PushScaffold in Frameworks */ = {isa = PBXBuildFile; productRef = 590BA6623B548785E8D8773F /* PushScaffold */; };
 		1BC7DDFCC842993EF462F71D /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 56712F7BC822DA0DB33B2F89 /* DesignSystem */; };
 		276F317A99A928209250BE5E /* UsageMonitorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B30FDC3F50A61E4D10BC24B /* UsageMonitorApp.swift */; };
 		29A5ED6DA3DD8518200726E2 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 792B1B2FC84FE1924C7CD1A6 /* WidgetPresentation.swift */; };
-		2D87DCB108D6CB122BA01419 /* LocalSecrets in Frameworks */ = {isa = PBXBuildFile; productRef = 434882210083388D5AF17398 /* LocalSecrets */; };
 		2D970CB0E24D8B1C86CBE1E5 /* WidgetShared in Frameworks */ = {isa = PBXBuildFile; productRef = 3CBA66112816FD1903144B30 /* WidgetShared */; };
 		2F405C0C02E1C475403A48C0 /* ProjectBudgets in Frameworks */ = {isa = PBXBuildFile; productRef = AC0DB39F15745ACE550BB82F /* ProjectBudgets */; };
-		3635496E3496A67478990DF3 /* UsageMonitorLocalApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D11E27899DC5F790DEB409FD /* UsageMonitorLocalApp.swift */; };
+		3DB6F0FB952A4C7466662619 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01455828D3A2004E9EE6FCA6 /* Assets.xcassets */; };
 		3F00B7EA559035693708214F /* OfflineCacheSnapshotSink.swift in Sources */ = {isa = PBXBuildFile; fileRef = C81B7D14B31665FDA6183BF8 /* OfflineCacheSnapshotSink.swift */; };
 		42818448D29A8B5C06D4732C /* Networking in Frameworks */ = {isa = PBXBuildFile; productRef = DD0E3F28FEE2BA45E1360BC1 /* Networking */; };
+		4320540C5DEEAA5D0C2F25CB /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = C022422D070736B642E57F94 /* LocalStore */; };
 		43BB491704B8779FB0BAAD2A /* Models in Frameworks */ = {isa = PBXBuildFile; productRef = 578CB27F890CAE1DDEB4F688 /* Models */; };
-		528E39DFC1B1D795B81A30C1 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 021308CE51B7F6B76FE40DB4 /* DesignSystem */; };
+		484D7BC266DC175D2274DAD3 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = F8E4DDCCA164861B780DEDCC /* DesignSystem */; };
 		5C12427D9391EE93838A7FDA /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 01C1A13CED0B1B95124CBDC8 /* DesignSystem */; };
 		5D7B4982B98EF255980605B5 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 792B1B2FC84FE1924C7CD1A6 /* WidgetPresentation.swift */; };
-		5E9641540EB44545541BB2A8 /* LocalAdapters in Frameworks */ = {isa = PBXBuildFile; productRef = D588B7031BD38937789BFC11 /* LocalAdapters */; };
 		653C8DD8CA2750953F698C58 /* WidgetShared in Frameworks */ = {isa = PBXBuildFile; productRef = 574A28A99BCD3C462CA17A0D /* WidgetShared */; };
+		6B2191AA76ABBB7C0B9E4EC9 /* LocalAdapters in Frameworks */ = {isa = PBXBuildFile; productRef = 6E9A2E2D92F2F0E964E1CD4E /* LocalAdapters */; };
 		6CB37F405426D5B08943A367 /* Alerts in Frameworks */ = {isa = PBXBuildFile; productRef = BCBC6C1579802E15115FA523 /* Alerts */; };
-		8391BC83B7D2C0ADFC027ED2 /* LocalBudget in Frameworks */ = {isa = PBXBuildFile; productRef = 7F3FF1E0A060A6954192A815 /* LocalBudget */; };
 		8F40DA5814B26236048AE760 /* Settings in Frameworks */ = {isa = PBXBuildFile; productRef = EEF104AFE3B635560BB73E94 /* Settings */; };
 		9FC1AA41DEEF222CA0DD91F6 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 37C47BD409744EC363A5D9C3 /* DesignSystem */; };
 		A25988FF08C31D2498209FB2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DA93AC5DCCD01FBB2A560D25 /* Assets.xcassets */; };
 		A33EA13C79DE4913AEC1B6D2 /* BudgetWidgetIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 345CB985D932922EA66F6D73 /* BudgetWidgetIntent.swift */; };
+		A976B24560232E9756646779 /* LocalBudget in Frameworks */ = {isa = PBXBuildFile; productRef = 87FAB76F5E354143A475532D /* LocalBudget */; };
 		B0D9919838E639EB7D80FEEA /* OfflineCache in Frameworks */ = {isa = PBXBuildFile; productRef = DCDD9B886592E046087C8AB8 /* OfflineCache */; };
 		B82FFD609432C0928F46DA8F /* AccountChangeNotifyingTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB1864248318F2267ECF38E2 /* AccountChangeNotifyingTokenStore.swift */; };
+		C155B87B338BD9E084925657 /* LocalSecrets in Frameworks */ = {isa = PBXBuildFile; productRef = 0368BE726DC57AFA46C92F87 /* LocalSecrets */; };
 		C3186C23E4A15ACE7390C70A /* UsageMonitorWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F1AEB8CDA324975C39D57883 /* UsageMonitorWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C36A8008C72FC6F54DC9D91F /* AppCore in Frameworks */ = {isa = PBXBuildFile; productRef = BC8AFCFC7A57AE9488201CE1 /* AppCore */; };
 		C66672426BD66072764EF255 /* Models in Frameworks */ = {isa = PBXBuildFile; productRef = FB1941171577206B0A52D658 /* Models */; };
-		CC4E5F363ADE075707C62CD5 /* LocalDataPlane in Frameworks */ = {isa = PBXBuildFile; productRef = 4C7FA439C9EA8F1044F9E785 /* LocalDataPlane */; };
 		D59524D4370F4A67319835B6 /* AppLock in Frameworks */ = {isa = PBXBuildFile; productRef = 4A50A30B1EBA9441B1967DC6 /* AppLock */; };
 		D7A3794CC04F7C2FC1E5BC8A /* WidgetShared in Frameworks */ = {isa = PBXBuildFile; productRef = F5DE3993265E786D85889937 /* WidgetShared */; };
 		DAED714153D252B9557AD1B3 /* WidgetPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FEDFB3CAEE756FB7630C7E0 /* WidgetPresentationTests.swift */; };
 		E813273A1FAAB7D3E13847EC /* UsageMonitorWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A4F16263E10D7A4C46F8FC1 /* UsageMonitorWidgetBundle.swift */; };
-		EC84848F3D12C0B82BE7CA2B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01455828D3A2004E9EE6FCA6 /* Assets.xcassets */; };
+		EAAD082FEEBCF157A5348BC7 /* LocalUsageMonitorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D22095A081B9D89B4CED0E /* LocalUsageMonitorApp.swift */; };
 		F3DA80422F5F65435C87288A /* Providers in Frameworks */ = {isa = PBXBuildFile; productRef = AF921547F127906DB1C7629D /* Providers */; };
-		F9FFBE36D958C5B1E386DA82 /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = BED820C3162F0BC3CC4AF1B8 /* LocalStore */; };
 		FEE74AA132592406B60358C3 /* AppSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8C3B26815D2E6893A2F0BD4 /* AppSmokeTests.swift */; };
 		FF66F17C1AE42AF2DD556265 /* Dashboard in Frameworks */ = {isa = PBXBuildFile; productRef = 6CA467140AF00BE2F6D28D3F /* Dashboard */; };
 /* End PBXBuildFile section */
@@ -84,19 +84,19 @@
 		1FEDFB3CAEE756FB7630C7E0 /* WidgetPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPresentationTests.swift; sourceTree = "<group>"; };
 		218D4D62AEF190D10BE2A1B7 /* UsageMonitor.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = UsageMonitor.entitlements; sourceTree = "<group>"; };
 		2B30FDC3F50A61E4D10BC24B /* UsageMonitorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageMonitorApp.swift; sourceTree = "<group>"; };
-		2CEB394881E5FC96AAC66C38 /* UsageMonitorLocal.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = UsageMonitorLocal.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		345CB985D932922EA66F6D73 /* BudgetWidgetIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetWidgetIntent.swift; sourceTree = "<group>"; };
 		37A37C7541E4CEA8D9236FFF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		6CF0AEBB3717E9EAC8485618 /* LocalUsageMonitor.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LocalUsageMonitor.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		764AB0422F0A2B31B88D25D2 /* UsageMonitorWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = UsageMonitorWidget.entitlements; sourceTree = "<group>"; };
 		792B1B2FC84FE1924C7CD1A6 /* WidgetPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPresentation.swift; sourceTree = "<group>"; };
 		8A4F16263E10D7A4C46F8FC1 /* UsageMonitorWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageMonitorWidgetBundle.swift; sourceTree = "<group>"; };
+		90D22095A081B9D89B4CED0E /* LocalUsageMonitorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalUsageMonitorApp.swift; sourceTree = "<group>"; };
 		9EB62C1B4DB2DCA2D9888180 /* UsageMonitorKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = UsageMonitorKit; path = UsageMonitorKit; sourceTree = SOURCE_ROOT; };
-		BE842A1902044CDB7D8A89F5 /* UsageMonitorLocal.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = UsageMonitorLocal.entitlements; sourceTree = "<group>"; };
+		BB83A7A318DCAACF119C1A48 /* LocalUsageMonitor.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LocalUsageMonitor.entitlements; sourceTree = "<group>"; };
 		C81B7D14B31665FDA6183BF8 /* OfflineCacheSnapshotSink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineCacheSnapshotSink.swift; sourceTree = "<group>"; };
 		C8C3B26815D2E6893A2F0BD4 /* AppSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSmokeTests.swift; sourceTree = "<group>"; };
 		CCA5B2DBBB9F3790B7052B0B /* UsageMonitorTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = UsageMonitorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF0A3F2520A92A49204A46CD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		D11E27899DC5F790DEB409FD /* UsageMonitorLocalApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageMonitorLocalApp.swift; sourceTree = "<group>"; };
 		DA93AC5DCCD01FBB2A560D25 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		EB1864248318F2267ECF38E2 /* AccountChangeNotifyingTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountChangeNotifyingTokenStore.swift; sourceTree = "<group>"; };
 		F1AEB8CDA324975C39D57883 /* UsageMonitorWidgetExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = UsageMonitorWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -104,6 +104,19 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		373E4873F501622D6FE50DFC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				484D7BC266DC175D2274DAD3 /* DesignSystem in Frameworks */,
+				4320540C5DEEAA5D0C2F25CB /* LocalStore in Frameworks */,
+				C155B87B338BD9E084925657 /* LocalSecrets in Frameworks */,
+				6B2191AA76ABBB7C0B9E4EC9 /* LocalAdapters in Frameworks */,
+				A976B24560232E9756646779 /* LocalBudget in Frameworks */,
+				015574DB5733115F9AD66A42 /* LocalDataPlane in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		6EAA76F9D80D97F98D08CFA3 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -140,19 +153,6 @@
 				2D970CB0E24D8B1C86CBE1E5 /* WidgetShared in Frameworks */,
 				1BC7DDFCC842993EF462F71D /* DesignSystem in Frameworks */,
 				43BB491704B8779FB0BAAD2A /* Models in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		C98C16F35D155E4710D24175 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				528E39DFC1B1D795B81A30C1 /* DesignSystem in Frameworks */,
-				F9FFBE36D958C5B1E386DA82 /* LocalStore in Frameworks */,
-				2D87DCB108D6CB122BA01419 /* LocalSecrets in Frameworks */,
-				5E9641540EB44545541BB2A8 /* LocalAdapters in Frameworks */,
-				8391BC83B7D2C0ADFC027ED2 /* LocalBudget in Frameworks */,
-				CC4E5F363ADE075707C62CD5 /* LocalDataPlane in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -212,8 +212,8 @@
 		A3C59A548B43215CFD3EDE82 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				6CF0AEBB3717E9EAC8485618 /* LocalUsageMonitor.app */,
 				FCD5897C4158EE40F3B5B676 /* UsageMonitor.app */,
-				2CEB394881E5FC96AAC66C38 /* UsageMonitorLocal.app */,
 				CCA5B2DBBB9F3790B7052B0B /* UsageMonitorTests.xctest */,
 				F1AEB8CDA324975C39D57883 /* UsageMonitorWidgetExtension.appex */,
 				11C0A37BE3F0610AC2BE88FB /* UsageMonitorWidgetTests.xctest */,
@@ -246,7 +246,7 @@
 			children = (
 				F780E74C41025A29AD0FAAB4 /* Resources */,
 				01455828D3A2004E9EE6FCA6 /* Assets.xcassets */,
-				D11E27899DC5F790DEB409FD /* UsageMonitorLocalApp.swift */,
+				90D22095A081B9D89B4CED0E /* LocalUsageMonitorApp.swift */,
 			);
 			path = LocalApp;
 			sourceTree = "<group>";
@@ -255,7 +255,7 @@
 			isa = PBXGroup;
 			children = (
 				CF0A3F2520A92A49204A46CD /* Info.plist */,
-				BE842A1902044CDB7D8A89F5 /* UsageMonitorLocal.entitlements */,
+				BB83A7A318DCAACF119C1A48 /* LocalUsageMonitor.entitlements */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -263,31 +263,6 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		32E36034E93B3E77B7BFA1D7 /* UsageMonitorLocal */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 1C53A0D9315B24C217FFAA15 /* Build configuration list for PBXNativeTarget "UsageMonitorLocal" */;
-			buildPhases = (
-				F5A303A9EF6B64EB1192BD10 /* Sources */,
-				E8ACAD4587FC7925E7BF85C6 /* Resources */,
-				C98C16F35D155E4710D24175 /* Frameworks */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = UsageMonitorLocal;
-			packageProductDependencies = (
-				021308CE51B7F6B76FE40DB4 /* DesignSystem */,
-				BED820C3162F0BC3CC4AF1B8 /* LocalStore */,
-				434882210083388D5AF17398 /* LocalSecrets */,
-				D588B7031BD38937789BFC11 /* LocalAdapters */,
-				7F3FF1E0A060A6954192A815 /* LocalBudget */,
-				4C7FA439C9EA8F1044F9E785 /* LocalDataPlane */,
-			);
-			productName = UsageMonitorLocal;
-			productReference = 2CEB394881E5FC96AAC66C38 /* UsageMonitorLocal.app */;
-			productType = "com.apple.product-type.application";
-		};
 		4561EA92BD08891F12A3DF6C /* UsageMonitorWidgetExtension */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 7FC04BE63614B3855063F6FE /* Build configuration list for PBXNativeTarget "UsageMonitorWidgetExtension" */;
@@ -381,6 +356,31 @@
 			productReference = 11C0A37BE3F0610AC2BE88FB /* UsageMonitorWidgetTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		FA6CE617E531033E34DE1EFC /* LocalUsageMonitor */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 56178EDE4FADCD67D3C896E2 /* Build configuration list for PBXNativeTarget "LocalUsageMonitor" */;
+			buildPhases = (
+				5DE212CEC2E7247BE3A0E1A3 /* Sources */,
+				B6A1A61A3F0B8FAD88AA5B15 /* Resources */,
+				373E4873F501622D6FE50DFC /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LocalUsageMonitor;
+			packageProductDependencies = (
+				F8E4DDCCA164861B780DEDCC /* DesignSystem */,
+				C022422D070736B642E57F94 /* LocalStore */,
+				0368BE726DC57AFA46C92F87 /* LocalSecrets */,
+				6E9A2E2D92F2F0E964E1CD4E /* LocalAdapters */,
+				87FAB76F5E354143A475532D /* LocalBudget */,
+				3D1EA8338E0268795F805F14 /* LocalDataPlane */,
+			);
+			productName = LocalUsageMonitor;
+			productReference = 6CF0AEBB3717E9EAC8485618 /* LocalUsageMonitor.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -390,10 +390,6 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
-					32E36034E93B3E77B7BFA1D7 = {
-						DevelopmentTeam = CC8UTF7ATG;
-						ProvisioningStyle = Automatic;
-					};
 					4561EA92BD08891F12A3DF6C = {
 						DevelopmentTeam = CC8UTF7ATG;
 						ProvisioningStyle = Automatic;
@@ -406,6 +402,10 @@
 						ProvisioningStyle = Automatic;
 					};
 					697B0B4631A2FF72678DE8B3 = {
+						ProvisioningStyle = Automatic;
+					};
+					FA6CE617E531033E34DE1EFC = {
+						DevelopmentTeam = CC8UTF7ATG;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -428,7 +428,7 @@
 			projectRoot = "";
 			targets = (
 				5889469B5CB3C6B159E86759 /* UsageMonitor */,
-				32E36034E93B3E77B7BFA1D7 /* UsageMonitorLocal */,
+				FA6CE617E531033E34DE1EFC /* LocalUsageMonitor */,
 				4561EA92BD08891F12A3DF6C /* UsageMonitorWidgetExtension */,
 				4B4B11010774BFBB5561CA61 /* UsageMonitorTests */,
 				697B0B4631A2FF72678DE8B3 /* UsageMonitorWidgetTests */,
@@ -437,19 +437,19 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		B6A1A61A3F0B8FAD88AA5B15 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3DB6F0FB952A4C7466662619 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D944039A18077B4E53725DCE /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				A25988FF08C31D2498209FB2 /* Assets.xcassets in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		E8ACAD4587FC7925E7BF85C6 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				EC84848F3D12C0B82BE7CA2B /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -474,6 +474,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5DE212CEC2E7247BE3A0E1A3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EAAD082FEEBCF157A5348BC7 /* LocalUsageMonitorApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		876C25C1BCF32D2069AB1127 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -490,14 +498,6 @@
 				B82FFD609432C0928F46DA8F /* AccountChangeNotifyingTokenStore.swift in Sources */,
 				3F00B7EA559035693708214F /* OfflineCacheSnapshotSink.swift in Sources */,
 				276F317A99A928209250BE5E /* UsageMonitorApp.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		F5A303A9EF6B64EB1192BD10 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				3635496E3496A67478990DF3 /* UsageMonitorLocalApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -531,6 +531,30 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.widget;
 				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		14076DE03CE5CB937C4E42CB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LocalApp/Resources/LocalUsageMonitor.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = CC8UTF7ATG;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = LocalApp/Resources/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Local Usage Monitor";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.local.usage.monitor;
+				PRODUCT_NAME = LocalUsageMonitor;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -593,30 +617,6 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_STRICT_CONCURRENCY = targeted;
 				SWIFT_VERSION = 5.0;
-			};
-			name = Release;
-		};
-		53717F141D82133B3BD53577 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = LocalApp/Resources/UsageMonitorLocal.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = CC8UTF7ATG;
-				ENABLE_PREVIEWS = YES;
-				INFOPLIST_FILE = LocalApp/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "UM Local";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.local;
-				PRODUCT_NAME = UsageMonitorLocal;
-				SDKROOT = iphoneos;
-				SUPPORTS_MACCATALYST = NO;
-				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -704,6 +704,30 @@
 			};
 			name = Release;
 		};
+		61FA475820C32A7AB0D6F598 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LocalApp/Resources/LocalUsageMonitor.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = CC8UTF7ATG;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = LocalApp/Resources/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Local Usage Monitor";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.local.usage.monitor;
+				PRODUCT_NAME = LocalUsageMonitor;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		7407D47549C47B7D373E62E8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -769,30 +793,6 @@
 			};
 			name = Debug;
 		};
-		AD4EA22CDFAB389E3AF23DF7 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = LocalApp/Resources/UsageMonitorLocal.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = CC8UTF7ATG;
-				ENABLE_PREVIEWS = YES;
-				INFOPLIST_FILE = LocalApp/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "UM Local";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.local;
-				PRODUCT_NAME = UsageMonitorLocal;
-				SDKROOT = iphoneos;
-				SUPPORTS_MACCATALYST = NO;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
 		BFB76AACC0C29E6A5F6208EA /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -847,15 +847,6 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		1C53A0D9315B24C217FFAA15 /* Build configuration list for PBXNativeTarget "UsageMonitorLocal" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				AD4EA22CDFAB389E3AF23DF7 /* Debug */,
-				53717F141D82133B3BD53577 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
-		};
 		46CD7EF8E50C4FD54D7F9693 /* Build configuration list for PBXNativeTarget "UsageMonitorTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -870,6 +861,15 @@
 			buildConfigurations = (
 				F7CA68351F37DA656CB4AA50 /* Debug */,
 				58664CE57FB9B0AD038C7C97 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		56178EDE4FADCD67D3C896E2 /* Build configuration list for PBXNativeTarget "LocalUsageMonitor" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				61FA475820C32A7AB0D6F598 /* Debug */,
+				14076DE03CE5CB937C4E42CB /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -915,9 +915,9 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = DesignSystem;
 		};
-		021308CE51B7F6B76FE40DB4 /* DesignSystem */ = {
+		0368BE726DC57AFA46C92F87 /* LocalSecrets */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = DesignSystem;
+			productName = LocalSecrets;
 		};
 		37C47BD409744EC363A5D9C3 /* DesignSystem */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -927,17 +927,13 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = WidgetShared;
 		};
-		434882210083388D5AF17398 /* LocalSecrets */ = {
+		3D1EA8338E0268795F805F14 /* LocalDataPlane */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = LocalSecrets;
+			productName = LocalDataPlane;
 		};
 		4A50A30B1EBA9441B1967DC6 /* AppLock */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AppLock;
-		};
-		4C7FA439C9EA8F1044F9E785 /* LocalDataPlane */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = LocalDataPlane;
 		};
 		56712F7BC822DA0DB33B2F89 /* DesignSystem */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -959,7 +955,11 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = Dashboard;
 		};
-		7F3FF1E0A060A6954192A815 /* LocalBudget */ = {
+		6E9A2E2D92F2F0E964E1CD4E /* LocalAdapters */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LocalAdapters;
+		};
+		87FAB76F5E354143A475532D /* LocalBudget */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalBudget;
 		};
@@ -979,13 +979,9 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = Alerts;
 		};
-		BED820C3162F0BC3CC4AF1B8 /* LocalStore */ = {
+		C022422D070736B642E57F94 /* LocalStore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalStore;
-		};
-		D588B7031BD38937789BFC11 /* LocalAdapters */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = LocalAdapters;
 		};
 		DCDD9B886592E046087C8AB8 /* OfflineCache */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -1002,6 +998,10 @@
 		F5DE3993265E786D85889937 /* WidgetShared */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = WidgetShared;
+		};
+		F8E4DDCCA164861B780DEDCC /* DesignSystem */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DesignSystem;
 		};
 		FB1941171577206B0A52D658 /* Models */ = {
 			isa = XCSwiftPackageProductDependency;

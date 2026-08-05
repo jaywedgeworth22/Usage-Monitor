@@ -3,7 +3,7 @@ import DesignSystem
 import LocalBudget
 import LocalStore
 
-/// Full shell for **Usage Monitor Local** (Milestone A).
+/// Full shell for **Local Usage Monitor** (Milestone A).
 public struct LocalRootView: View {
     @State private var model = LocalAppModel()
     @State private var tab: Tab = .overview
@@ -55,14 +55,14 @@ public struct LocalRootView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                    // Always-visible product identity (home-screen name is "UM Local").
+                    // Always-visible product identity (home-screen: "Local Usage Monitor").
                     HStack(spacing: Theme.Spacing.sm) {
                         Image(systemName: "iphone")
                             .font(.system(size: 14, weight: .semibold))
                         Text("ON-DEVICE · no server")
                             .font(Theme.Typography.captionEmphasis)
                         Spacer()
-                        Text("UM Local")
+                        Text("Local")
                             .font(Theme.Typography.captionEmphasis)
                     }
                     .foregroundStyle(Color.white)
@@ -121,7 +121,7 @@ public struct LocalRootView: View {
                 .padding(Theme.Spacing.lg)
             }
             .dsScreenBackground()
-            .navigationTitle("UM Local")
+            .navigationTitle("Local Usage Monitor")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

@@ -3,106 +3,55 @@
 This directory holds **two** iOS products that share design tokens and some kit
 code, but **not** the same money-truth.
 
-| App | Scheme | Bundle ID | Purpose |
+| App | Scheme / product | Bundle ID | Purpose |
 |---|---|---|---|
-| **Usage Monitor** | `UsageMonitor` | `services.jays.usage.monitor` | Live-sync **client** of a Usage Monitor **server** (owner Oracle host, or your own Docker/VPS self-host). Full remote features, widgets, optional APNs registration against that server. |
-| **Usage Monitor Local** | `UsageMonitorLocal` | `services.jays.usage.monitor.local` | **Standalone** on-device self-host. Keys in Keychain; budgets in local SQLite (GRDB). No server required. Separate App Store product. |
+| **Usage Monitor** | `UsageMonitor` | `services.jays.usage.monitor` | Live-sync **client** of a Usage Monitor **server** (owner Oracle host, or your own Docker/VPS self-host). |
+| **Local Usage Monitor** | `LocalUsageMonitor` | `services.jays.local.usage.monitor` | **Standalone** on-device self-host. Keys in Keychain; budgets in local SQLite. No server required. |
 
 Design authority: [`docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`](../docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md).  
 Binding contract: [`UsageMonitor/ARCHITECTURE-CONTRACT.md`](UsageMonitor/ARCHITECTURE-CONTRACT.md).
 
 ## Which one should I use?
 
-- **You run a server** (like the owner at `usage.jays.services`) and want live
-  sync, OTLP/ingest from other machines, multi-device producers → install
-  **Usage Monitor**, point Settings at your HTTPS origin, use read token /
-  dashboard login.
-- **You want the phone itself to be the whole product** (no VPS) → install
-  **Usage Monitor Local** (Milestone A in progress).
+- Server + live sync (how the owner runs) → **Usage Monitor**
+- Phone is the whole product → **Local Usage Monitor**
 
-Do **not** install both expecting a shared database — different app groups.
-
-## Layout
-
-```
-ios/
-  README.md                 ← this file
-  UsageMonitor/             ← XcodeGen project (both app targets)
-    project.yml
-    App/                    ← Usage Monitor (remote client) shell
-    LocalApp/               ← Usage Monitor Local shell
-    UsageMonitorKit/        ← SPM package (remote features + LocalStore/LocalDataPlane)
-    UsageMonitorWidget/     ← widget for remote client
-    ARCHITECTURE-CONTRACT.md
-```
+They do **not** share an app group, Keychain, or database.
 
 ## Generate & build
 
 ```bash
 cd ios/UsageMonitor
 xcodegen generate
-
-# Remote client (owner / server self-host path)
-xcodebuild -scheme UsageMonitor -destination 'platform=iOS Simulator,name=iPhone 16' build
-
-# On-device Local product
-xcodebuild -scheme UsageMonitorLocal -destination 'platform=iOS Simulator,name=iPhone 16' build
-
-# Kit unit tests (includes LocalStore scaffold)
-swift test --package-path UsageMonitorKit
+xcodebuild -scheme UsageMonitor -destination 'generic/platform=iOS Simulator' build
+xcodebuild -scheme LocalUsageMonitor -destination 'generic/platform=iOS Simulator' build
 ```
 
-Headless CI often passes `CODE_SIGNING_ALLOWED=NO`. Release/TestFlight signing
-stays Automatic with team `CC8UTF7ATG` in `project.yml`.
-
-## Installing **both** apps on one phone
-
-One Xcode project can (and does) ship **two separate apps**. They install
-side-by-side because they have **different bundle IDs**:
+## Installing both on one phone
 
 | Scheme | Bundle ID | Home-screen name | Icon |
 |---|---|---|---|
-| `UsageMonitor` | `services.jays.usage.monitor` | Usage Monitor | Blue ring |
-| `UsageMonitorLocal` | `services.jays.usage.monitor.local` | **UM Local** | **Teal** ring |
+| `UsageMonitor` | `services.jays.usage.monitor` | Usage Monitor | Purple ring |
+| `LocalUsageMonitor` | `services.jays.local.usage.monitor` | Local Usage Monitor | Teal ring |
 
-They do **not** share an app group, Keychain, or database.
+1. Scheme menu (toolbar, next to the device picker) → **UsageMonitor** → Run.  
+2. **Stop** the debugger (■) or leave the app running on the phone — either is fine.  
+3. Scheme menu → **LocalUsageMonitor** (not UsageMonitor) → Run.  
+4. Two icons on the home screen.
 
-**How to put both on a device from Xcode:**
+### “Replace UsageMonitor?” dialog
 
-1. Scheme menu → **UsageMonitor** → Run (installs remote client).
-2. Leave that app on the phone. Switch scheme → **UsageMonitorLocal** → Run.
-3. You should see **two** icons: blue “Usage Monitor” and teal “UM Local”.
+That dialog means Xcode is trying to **debug the same scheme again**. It is
+**not** proof that the two apps share an identity.
 
-If the second Run seems to “replace” the first, check that the scheme is
-actually `UsageMonitorLocal` (not `UsageMonitor`) and that the destination is
-your physical device. Xcode only ever installs the **selected scheme’s**
-product; it does not uninstall the other bundle ID.
+Look at the scheme name in the toolbar (and in the dialog title). If it says
+**UsageMonitor**, you are re-running the remote client. Switch the scheme to
+**LocalUsageMonitor** first — then Play installs/launches the local app under
+`services.jays.local.usage.monitor` without replacing the remote client.
 
-Do not expect a single scheme to toggle modes — dual-app is intentional
-(see `ARCHITECTURE-CONTRACT.md` §10).
+Also open **Product → Scheme → Manage Schemes…** and confirm both
+`UsageMonitor` and `LocalUsageMonitor` are checked (shared). After `xcodegen
+generate`, re-open the project if the second scheme is missing from the menu.
 
-## Self-host “the way the owner does”
-
-That path is **server + Usage Monitor client**, not the Local app:
-
-1. Deploy the Next.js app (Oracle production scripts or a future generic
-   `deploy/self-host` profile) with SQLite on a persistent disk.
-2. Set `DASHBOARD_PASSWORD`, `USAGE_READ_TOKEN`, `USAGE_INGEST_TOKEN`, etc.
-3. Install **Usage Monitor**, set host to your HTTPS origin, verify token / log in.
-4. Point producers (Congress.Trade, Socratic.Trade, Claude Code OTLP) at that host.
-
-The Local app intentionally cannot receive fleet OTLP/ingest on a sleeping phone.
-
-## Milestone A (Local) — implemented
-
-| Layer | Module | Status |
-|---|---|---|
-| SQLite money-truth (design §2.2.1 DDL) | `LocalStore` | Done (`SQLiteLocalStore`) |
-| Provider API keys | `LocalSecrets` | Done (Keychain) |
-| OpenRouter poll (Management key MTD) | `LocalAdapters` | Done |
-| BudgetEngine v1 + materializer | `LocalBudget` | Done |
-| UI shell (Overview / Providers / Settings) | `LocalDataPlane` | Done |
-
-Run scheme **UsageMonitorLocal**, add an OpenRouter **Management** key (or a Claude subscription-only row), pull to refresh.
-
-Still later: more adapters (OpenAI/DeepSeek), App Lock, widget for Local, App Store listing, export/import.
+Delete any old install of `services.jays.usage.monitor.local` / “UM Local” if
+you tested under a pre-rename identity.

@@ -1,9 +1,9 @@
 import SwiftUI
 import LocalDataPlane
 
-/// Entry point for **Usage Monitor Local** — on-device self-host product.
+/// Entry point for **Local Usage Monitor** — on-device self-host product.
 @main
-struct UsageMonitorLocalApp: App {
+struct LocalUsageMonitorApp: App {
     var body: some Scene {
         WindowGroup {
             LocalRootView()

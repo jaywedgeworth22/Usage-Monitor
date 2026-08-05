@@ -101,10 +101,10 @@ targets:
         product: PushScaffold
 
   # -------------------------------------------------------------------------
-  # Usage Monitor Local — on-device self-host product (separate App Store app).
+  # Local Usage Monitor — on-device self-host product (separate App Store app).
   # Does NOT embed the remote client widget or link Networking money paths.
   # -------------------------------------------------------------------------
-  UsageMonitorLocal:
+  LocalUsageMonitor:
     type: application
     platform: iOS
     sources:
@@ -112,14 +112,14 @@ targets:
     settings:
       base:
         # Distinct product name + bundle ID so Xcode never overwrites the remote client.
-        PRODUCT_NAME: UsageMonitorLocal
-        PRODUCT_BUNDLE_IDENTIFIER: services.jays.usage.monitor.local
+        PRODUCT_NAME: LocalUsageMonitor
+        PRODUCT_BUNDLE_IDENTIFIER: services.jays.local.usage.monitor
         DEVELOPMENT_TEAM: CC8UTF7ATG
         INFOPLIST_FILE: LocalApp/Resources/Info.plist
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
-        # Short home-screen label (must differ from "Usage Monitor").
-        INFOPLIST_KEY_CFBundleDisplayName: "UM Local"
-        CODE_SIGN_ENTITLEMENTS: LocalApp/Resources/UsageMonitorLocal.entitlements
+        # Home-screen name (spaces allowed).
+        INFOPLIST_KEY_CFBundleDisplayName: "Local Usage Monitor"
+        CODE_SIGN_ENTITLEMENTS: LocalApp/Resources/LocalUsageMonitor.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_PREVIEWS: YES
@@ -214,10 +214,10 @@ schemes:
         - UsageMonitorTests
         - UsageMonitorWidgetTests
 
-  UsageMonitorLocal:
+  LocalUsageMonitor:
     build:
       targets:
-        UsageMonitorLocal: all
+        LocalUsageMonitor: all
     run:
       config: Debug
     test:

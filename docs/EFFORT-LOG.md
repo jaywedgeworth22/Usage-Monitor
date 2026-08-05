@@ -1,3 +1,4 @@
+- **[GROK] Rename Local app → LocalUsageMonitor / Local Usage Monitor / services.jays.local.usage.monitor (2026-08-05) — IN PR.** Target, scheme, display name, bundle ID, app group, deep link, Keychain service.
 - **[GROK] iOS dual-app identity: distinct name/icon so Local doesn't look like remote (2026-08-05) — IN PR #982.** Teal LOCAL icon, home-screen "UM Local", PRODUCT_NAME split, on-device banner; docs how to install both side-by-side.
 - **[GROK] Usage Monitor Local Milestone A implementation (2026-08-04) — MERGED PR #946.** Shipped SQLiteLocalStore (design DDL), Keychain, OpenRouter adapter, BudgetEngine+materializer, full Local UI. Sim BUILD SUCCEEDED. Branch grok/usage-monitor-local-milestone-a.
 - **[GROK] R2 fleet metrics (3 apps) + calm backup readiness (2026-08-05) — MERGED PR #975.** Ops card for ST/CT/UM free-tier; backup no longer gates `/api/ready` ok; litestream sync 1h. Branch `grok/r2-fleet-metrics-and-backup-calm`.

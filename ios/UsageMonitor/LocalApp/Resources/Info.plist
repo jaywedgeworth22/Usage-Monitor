@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>UM Local</string>
+	<string>Local Usage Monitor</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -23,7 +23,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
-	<string>Usage Monitor Local uses Face ID to unlock the app and keep your on-device budget data private.</string>
+	<string>Local Usage Monitor uses Face ID to unlock the app and keep your on-device budget data private.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
@@ -38,10 +38,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>services.jays.usage.monitor.local.deeplink</string>
+			<string>services.jays.local.usage.monitor.deeplink</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>usagemonitorlocal</string>
+				<string>localusagemonitor</string>
 			</array>
 		</dict>
 	</array>

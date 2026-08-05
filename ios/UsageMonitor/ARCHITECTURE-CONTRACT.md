@@ -21,7 +21,7 @@ total spend).
 | App target | Bundle ID | Role |
 |---|---|---|
 | **UsageMonitor** | `services.jays.usage.monitor` | Remote live-sync client (owner + server self-hosters). §§1–9. |
-| **UsageMonitorLocal** | `services.jays.usage.monitor.local` | On-device self-host product. §10 + design doc. |
+| **LocalUsageMonitor** | `services.jays.local.usage.monitor` | On-device self-host product. §10 + design doc. |
 
 See `ios/README.md` and
 `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`.
@@ -340,10 +340,10 @@ depend on both AppCore and the integration modules.
 
 ---
 
-## 10. Usage Monitor Local (separate app) — addendum
+## 10. Local Usage Monitor (separate app) — addendum
 
 **Authority:** `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`.
-This section binds the **UsageMonitorLocal** app target only. §§1–9 bind
+This section binds the **LocalUsageMonitor** app target only. §§1–9 bind
 **UsageMonitor** (remote client).
 
 ### 10.1 Two apps — not a compile flag
@@ -351,7 +351,7 @@ This section binds the **UsageMonitorLocal** app target only. §§1–9 bind
 | App | Xcode scheme | Money-truth | App group |
 |---|---|---|---|
 | **UsageMonitor** | `UsageMonitor` | Remote server SQLite via HTTPS | `group.services.jays.usage.monitor` |
-| **UsageMonitorLocal** | `UsageMonitorLocal` | On-device GRDB (PR-2+) | `group.services.jays.usage.monitor.local` |
+| **LocalUsageMonitor** | `LocalUsageMonitor` | On-device GRDB (PR-2+) | `group.services.jays.local.usage.monitor` |
 
 - **Do not** merge these into one binary with a runtime switch.
 - Local app must **not** link remote money write paths (`APIClient` mutations,
@@ -411,5 +411,5 @@ Materializer     → LocalStore             subscription_charge rows (planned)
    **UsageMonitor** client talking to a server).
 5. Any PR that ports server money math must cite design §2.3 and add golden
    vector tests before merge.
-6. Deep links use scheme `usagemonitorlocal://` (remote client keeps
+6. Deep links use scheme `localusagemonitor://` (remote client keeps
    `usagemonitor://`).
