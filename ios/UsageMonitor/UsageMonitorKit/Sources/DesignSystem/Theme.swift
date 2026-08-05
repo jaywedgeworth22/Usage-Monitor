@@ -30,11 +30,11 @@ public extension Theme {
         public static let tertiaryText = Color(uiColor: .tertiaryLabel)
         public static let separator = Color(uiColor: .separator)
 
-        // Brand accent — an indigo that stays legible on both appearances.
+        // Brand accent — orange matching web favicon / --um-accent (#f97316 light, #fb923c dark).
         public static let accent = Color(uiColor: UIColor { traits in
             traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.51, green: 0.55, blue: 1.00, alpha: 1)   // #828CFF
-                : UIColor(red: 0.35, green: 0.36, blue: 0.90, alpha: 1)   // #595CE6
+                ? UIColor(red: 0.984, green: 0.573, blue: 0.235, alpha: 1)  // #fb923c
+                : UIColor(red: 0.976, green: 0.451, blue: 0.086, alpha: 1)  // #f97316
         })
         public static let accentSoft = accent.opacity(0.14)
 

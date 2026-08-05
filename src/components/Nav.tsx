@@ -27,15 +27,36 @@ function isLinkActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/** Brand mark: orange rounded square + white usage bars (matches favicon / apple-icon). */
+function BrandMark({ className = "h-8 w-8" }: { className?: string }) {
+  return (
+    <div
+      className={`flex shrink-0 items-center justify-center rounded-lg bg-accent ${className}`}
+      aria-hidden="true"
+    >
+      <svg className="h-[62.5%] w-[62.5%] text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+        />
+      </svg>
+    </div>
+  );
+}
+
 export default function Nav() {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [prefsOpen, setPrefsOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [logoutPending, setLogoutPending] = useState(false);
   const [logoutError, setLogoutError] = useState("");
   const moreRef = useRef<HTMLDivElement>(null);
+  const prefsRef = useRef<HTMLDivElement>(null);
 
   const { theme, setTheme } = useTheme();
   const density = useDisplayDensity();
@@ -48,18 +69,23 @@ export default function Nav() {
   useEffect(() => {
     setMenuOpen(false);
     setMoreOpen(false);
+    setPrefsOpen(false);
   }, [pathname]);
 
   useEffect(() => {
-    if (!moreOpen) return;
+    if (!moreOpen && !prefsOpen) return;
     const onPointer = (event: MouseEvent) => {
-      if (moreRef.current && !moreRef.current.contains(event.target as Node)) {
+      const t = event.target as Node;
+      if (moreOpen && moreRef.current && !moreRef.current.contains(t)) {
         setMoreOpen(false);
+      }
+      if (prefsOpen && prefsRef.current && !prefsRef.current.contains(t)) {
+        setPrefsOpen(false);
       }
     };
     document.addEventListener("mousedown", onPointer);
     return () => document.removeEventListener("mousedown", onPointer);
-  }, [moreOpen]);
+  }, [moreOpen, prefsOpen]);
 
   const handleLogout = async () => {
     setLogoutPending(true);
@@ -84,170 +110,238 @@ export default function Nav() {
   const secondaryActive = SECONDARY_LINKS.some((link) => isLinkActive(pathname, link.href));
   const mobileLinks = [...PRIMARY_LINKS, ...SECONDARY_LINKS];
 
+  // Primary links that fit the bar; remainder go under More on mid widths.
+  // xl: all primary links. lg: first 5 + More for rest. md: first 4 + More.
+  const mainLinksXl = PRIMARY_LINKS;
+  const mainLinksLg = PRIMARY_LINKS.slice(0, 5);
+  const overflowLinksLg = PRIMARY_LINKS.slice(5);
+  const mainLinksMd = PRIMARY_LINKS.slice(0, 4);
+  const overflowLinksMd = PRIMARY_LINKS.slice(4);
+
   return (
     <>
       <nav
         aria-label="Primary navigation"
         className="sticky top-0 z-50 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
       >
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between">
-            <div className="flex min-w-0 items-center gap-3 lg:gap-6">
-              <Link href="/" className="flex shrink-0 items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent">
-                  <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                    />
-                  </svg>
+        <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
+          {/*
+            Single row, never wrap: logo | flexible nav (scroll if needed) | tools.
+            Previous layout put 7 links + theme + density + logout in one flex row
+            that overflowed mid breakpoints → overlapping text ("MoreLight", etc.).
+          */}
+          <div className="flex h-14 min-h-14 items-center gap-2 sm:h-16 sm:gap-3">
+            <Link href="/" className="flex shrink-0 items-center gap-2">
+              <BrandMark />
+              <span className="hidden text-base font-semibold tracking-tight text-gray-900 dark:text-gray-100 sm:inline">
+                Usage Monitor
+              </span>
+            </Link>
+
+            {/* Desktop / tablet nav — hide below md; use overflow-x if tight */}
+            <div className="hidden min-w-0 flex-1 items-center md:flex">
+              <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {/* md–lg: fewer inline links */}
+                <div className="flex items-center gap-0.5 lg:hidden">
+                  {mainLinksMd.map((link) => {
+                    const isActive = isLinkActive(pathname, link.href);
+                    return (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        aria-current={isActive ? "page" : undefined}
+                        className={`shrink-0 whitespace-nowrap rounded-md px-2 py-1.5 text-sm font-medium transition-colors ${
+                          isActive
+                            ? "bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100"
+                            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                        }`}
+                      >
+                        {link.label}
+                      </Link>
+                    );
+                  })}
+                  <MoreMenu
+                    moreRef={moreRef}
+                    moreOpen={moreOpen}
+                    setMoreOpen={setMoreOpen}
+                    secondaryActive={
+                      secondaryActive || overflowLinksMd.some((l) => isLinkActive(pathname, l.href))
+                    }
+                    links={[...overflowLinksMd, ...SECONDARY_LINKS]}
+                    pathname={pathname}
+                  />
                 </div>
-                <span className="hidden text-lg font-semibold text-gray-900 dark:text-gray-100 sm:inline">
-                  Usage Monitor
-                </span>
-              </Link>
-              <div className="hidden items-center gap-0.5 md:flex">
-                {PRIMARY_LINKS.map((link) => {
-                  const isActive = isLinkActive(pathname, link.href);
-                  return (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      aria-current={isActive ? "page" : undefined}
-                      className={`rounded-md px-2.5 py-2 text-sm font-medium transition-colors lg:px-3 ${
-                        isActive
-                          ? "bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100"
-                          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
-                      }`}
-                    >
-                      {link.label}
-                    </Link>
-                  );
-                })}
-                <div className="relative" ref={moreRef}>
-                  <button
-                    type="button"
-                    aria-expanded={moreOpen}
-                    aria-haspopup="menu"
-                    onClick={() => setMoreOpen((v) => !v)}
-                    className={`rounded-md px-2.5 py-2 text-sm font-medium transition-colors lg:px-3 ${
-                      secondaryActive || moreOpen
-                        ? "bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100"
-                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
-                    }`}
-                  >
-                    More
-                    <span className="ml-1 text-[10px] opacity-70" aria-hidden="true">
-                      ▾
-                    </span>
-                  </button>
-                  {moreOpen && (
-                    <div
-                      role="menu"
-                      className="absolute left-0 top-full z-50 mt-1 min-w-[10rem] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
-                    >
-                      {SECONDARY_LINKS.map((link) => {
-                        const isActive = isLinkActive(pathname, link.href);
-                        return (
-                          <Link
-                            key={link.href}
-                            role="menuitem"
-                            href={link.href}
-                            onClick={() => setMoreOpen(false)}
-                            aria-current={isActive ? "page" : undefined}
-                            className={`block px-3 py-2 text-sm ${
-                              isActive
-                                ? "bg-gray-100 font-medium text-gray-900 dark:bg-gray-800 dark:text-gray-100"
-                                : "text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
-                            }`}
-                          >
-                            {link.label}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  )}
+                {/* lg–xl: 5 links + overflow */}
+                <div className="hidden items-center gap-0.5 lg:flex xl:hidden">
+                  {mainLinksLg.map((link) => {
+                    const isActive = isLinkActive(pathname, link.href);
+                    return (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        aria-current={isActive ? "page" : undefined}
+                        className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors ${
+                          isActive
+                            ? "bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100"
+                            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                        }`}
+                      >
+                        {link.label}
+                      </Link>
+                    );
+                  })}
+                  <MoreMenu
+                    moreRef={moreRef}
+                    moreOpen={moreOpen}
+                    setMoreOpen={setMoreOpen}
+                    secondaryActive={
+                      secondaryActive || overflowLinksLg.some((l) => isLinkActive(pathname, l.href))
+                    }
+                    links={[...overflowLinksLg, ...SECONDARY_LINKS]}
+                    pathname={pathname}
+                  />
+                </div>
+                {/* xl+: all primary + More for secondary only */}
+                <div className="hidden items-center gap-0.5 xl:flex">
+                  {mainLinksXl.map((link) => {
+                    const isActive = isLinkActive(pathname, link.href);
+                    return (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        aria-current={isActive ? "page" : undefined}
+                        className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors ${
+                          isActive
+                            ? "bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100"
+                            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                        }`}
+                      >
+                        {link.label}
+                      </Link>
+                    );
+                  })}
+                  <MoreMenu
+                    moreRef={moreRef}
+                    moreOpen={moreOpen}
+                    setMoreOpen={setMoreOpen}
+                    secondaryActive={secondaryActive}
+                    links={SECONDARY_LINKS}
+                    pathname={pathname}
+                  />
                 </div>
               </div>
             </div>
 
-            <div className="hidden items-center gap-3 md:flex">
+            {/* Right tools: never shrink; compact chrome on narrow desktop */}
+            <div className="ml-auto hidden shrink-0 items-center gap-1.5 md:flex lg:gap-2">
               <button
                 type="button"
                 onClick={() => setCommandOpen(true)}
                 aria-label="Open command palette"
                 title="Command palette (⌘K)"
-                className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-gray-600 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-accent dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-accent dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
               >
                 <Search size={16} aria-hidden="true" />
-                <kbd className="hidden rounded border border-gray-200 px-1 text-[10px] font-medium text-gray-500 dark:border-gray-600 dark:text-gray-400 xl:inline">
-                  ⌘K
-                </kbd>
               </button>
+
               {mounted && (
-                <>
-                  <div
-                    className="flex items-center gap-0.5 rounded-lg border border-gray-200 bg-gray-100 p-0.5 dark:border-gray-700 dark:bg-gray-800/80"
-                    role="group"
-                    aria-label="Theme selector"
+                <div className="relative" ref={prefsRef}>
+                  <button
+                    type="button"
+                    aria-expanded={prefsOpen}
+                    aria-haspopup="menu"
+                    onClick={() => {
+                      setPrefsOpen((v) => !v);
+                      setMoreOpen(false);
+                    }}
+                    className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors ${
+                      prefsOpen
+                        ? "border-gray-300 bg-gray-100 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+                        : "border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                    }`}
                   >
-                    {(["light", "dark", "system"] as const).map((t) => {
-                      const active = theme === t;
-                      const Icon = t === "dark" ? Moon : t === "light" ? Sun : Monitor;
-                      const label = t.charAt(0).toUpperCase() + t.slice(1);
-                      return (
-                        <button
-                          key={t}
-                          type="button"
-                          onClick={() => setTheme(t)}
-                          aria-pressed={active}
-                          title={`Set theme to ${label}`}
-                          aria-label={`Set theme to ${label}`}
-                          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
-                            active
-                              ? "border border-gray-200/80 bg-white text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                              : "border border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
-                          }`}
-                        >
-                          <Icon size={13} />
-                          <span className="hidden lg:inline">{label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div
-                    className="flex items-center gap-0.5 rounded-lg border border-gray-200 bg-gray-100 p-0.5 dark:border-gray-700 dark:bg-gray-800/80"
-                    role="group"
-                    aria-label="Display density selector"
-                  >
-                    {(["compact", "comfortable"] as const).map((d) => {
-                      const active = density === d;
-                      const label = d === "compact" ? "Compact" : "Comfortable";
-                      return (
-                        <button
-                          key={d}
-                          type="button"
-                          onClick={() => setStoredDisplayDensity(d)}
-                          aria-pressed={active}
-                          title={`Set display density to ${label}`}
-                          aria-label={`Set display density to ${label}`}
-                          className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
-                            active
-                              ? "border border-gray-200/80 bg-white text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                              : "border border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </>
+                    <span className="hidden sm:inline">Display</span>
+                    <span className="sm:hidden" aria-hidden="true">
+                      ···
+                    </span>
+                    <span className="text-[10px] opacity-70" aria-hidden="true">
+                      ▾
+                    </span>
+                  </button>
+                  {prefsOpen && (
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full z-50 mt-1 w-56 overflow-hidden rounded-lg border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+                    >
+                      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Theme
+                      </p>
+                      <div
+                        className="mb-3 flex items-center gap-0.5 rounded-lg border border-gray-200 bg-gray-100 p-0.5 dark:border-gray-700 dark:bg-gray-800/80"
+                        role="group"
+                        aria-label="Theme selector"
+                      >
+                        {(["light", "dark", "system"] as const).map((t) => {
+                          const active = theme === t;
+                          const Icon = t === "dark" ? Moon : t === "light" ? Sun : Monitor;
+                          const label = t.charAt(0).toUpperCase() + t.slice(1);
+                          return (
+                            <button
+                              key={t}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={active}
+                              onClick={() => setTheme(t)}
+                              title={`Set theme to ${label}`}
+                              className={`flex flex-1 items-center justify-center gap-1 rounded-md px-1.5 py-1.5 text-xs font-medium transition-all ${
+                                active
+                                  ? "border border-gray-200/80 bg-white text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                                  : "border border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                              }`}
+                            >
+                              <Icon size={13} aria-hidden="true" />
+                              <span>{label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Density
+                      </p>
+                      <div
+                        className="flex items-center gap-0.5 rounded-lg border border-gray-200 bg-gray-100 p-0.5 dark:border-gray-700 dark:bg-gray-800/80"
+                        role="group"
+                        aria-label="Display density selector"
+                      >
+                        {(["compact", "comfortable"] as const).map((d) => {
+                          const active = density === d;
+                          const label = d === "compact" ? "Compact" : "Comfortable";
+                          return (
+                            <button
+                              key={d}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={active}
+                              onClick={() => setStoredDisplayDensity(d)}
+                              title={`Set display density to ${label}`}
+                              className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-all ${
+                                active
+                                  ? "border border-gray-200/80 bg-white text-gray-900 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                                  : "border border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
+
               {logoutError && (
-                <span role="alert" className="max-w-48 text-xs text-red-600 dark:text-red-300">
+                <span role="alert" className="max-w-32 truncate text-xs text-red-600 dark:text-red-300">
                   {logoutError}
                 </span>
               )}
@@ -255,13 +349,14 @@ export default function Nav() {
                 type="button"
                 onClick={handleLogout}
                 disabled={logoutPending}
-                className="rounded-md px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                className="shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 disabled:opacity-50 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
               >
-                {logoutPending ? "Logging out…" : "Log out"}
+                {logoutPending ? "…" : "Log out"}
               </button>
             </div>
 
-            <div className="flex items-center gap-1 md:hidden">
+            {/* Mobile hamburger */}
+            <div className="ml-auto flex items-center gap-1 md:hidden">
               <button
                 type="button"
                 onClick={() => {
@@ -269,7 +364,7 @@ export default function Nav() {
                   setCommandOpen(true);
                 }}
                 aria-label="Open command palette"
-                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-accent dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-accent dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
               >
                 <Search className="h-5 w-5" aria-hidden="true" />
               </button>
@@ -279,7 +374,7 @@ export default function Nav() {
                 aria-controls="mobile-navigation"
                 aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
                 onClick={() => setMenuOpen((open) => !open)}
-                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-accent dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-accent dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
               >
                 <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
@@ -395,5 +490,69 @@ export default function Nav() {
       </nav>
       <CommandPalette open={commandOpen} onOpenChange={setCommandOpen} />
     </>
+  );
+}
+
+function MoreMenu({
+  moreRef,
+  moreOpen,
+  setMoreOpen,
+  secondaryActive,
+  links,
+  pathname,
+}: {
+  moreRef: React.RefObject<HTMLDivElement | null>;
+  moreOpen: boolean;
+  setMoreOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  secondaryActive: boolean;
+  links: NavLink[];
+  pathname: string;
+}) {
+  if (links.length === 0) return null;
+  return (
+    <div className="relative shrink-0" ref={moreRef}>
+      <button
+        type="button"
+        aria-expanded={moreOpen}
+        aria-haspopup="menu"
+        onClick={() => setMoreOpen((v) => !v)}
+        className={`whitespace-nowrap rounded-md px-2 py-1.5 text-sm font-medium transition-colors lg:px-2.5 ${
+          secondaryActive || moreOpen
+            ? "bg-gray-100 text-gray-900 dark:bg-gray-800 dark:text-gray-100"
+            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+        }`}
+      >
+        More
+        <span className="ml-1 text-[10px] opacity-70" aria-hidden="true">
+          ▾
+        </span>
+      </button>
+      {moreOpen && (
+        <div
+          role="menu"
+          className="absolute left-0 top-full z-50 mt-1 min-w-[10rem] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+        >
+          {links.map((link) => {
+            const isActive = isLinkActive(pathname, link.href);
+            return (
+              <Link
+                key={link.href}
+                role="menuitem"
+                href={link.href}
+                onClick={() => setMoreOpen(false)}
+                aria-current={isActive ? "page" : undefined}
+                className={`block px-3 py-2 text-sm ${
+                  isActive
+                    ? "bg-gray-100 font-medium text-gray-900 dark:bg-gray-800 dark:text-gray-100"
+                    : "text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
+                }`}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }

@@ -107,7 +107,7 @@ public final class LocalAppModel {
         }()
 
         // Poll adapters available on phone today.
-        let supportedPoll = Set(["openrouter", "deepseek", "openai", "anthropic"])
+        let supportedPoll = Set(["openrouter", "deepseek", "openai", "anthropic", "hetzner"])
         let resolvedKind: String = {
             if adapterKind == "subscription_only" { return adapterKind }
             if supportedPoll.contains(adapterKind) { return adapterKind }
@@ -146,15 +146,30 @@ public final class LocalAppModel {
         try await reload()
     }
 
-    /// Insert every catalog provider not already present (subscription shells / empty poll rows).
+    /// Insert every catalog provider not already present.
+    /// Poll-only entries without a key become inactive shells so historical fleet
+    /// coverage is complete; attach keys later via delete+re-add or future edit UI.
     @discardableResult
     public func seedMissingCatalogProviders() async throws -> Int {
         let existing = Set(try await store.listProviders().map(\.name))
         var added = 0
         for entry in LocalProviderCatalog.all {
             if existing.contains(entry.name) { continue }
-            // Skip pure poll entries that require a key (user adds those with credentials).
-            if entry.mode == .poll { continue }
+            if entry.mode == .poll {
+                // Shell without key — not pollable until key is added.
+                var p = LocalProvider(
+                    name: entry.name,
+                    displayName: entry.displayName,
+                    adapterKind: "subscription_only",
+                    category: entry.category,
+                    isActive: false
+                )
+                p.updatedAt = Date()
+                try await store.upsertProvider(p)
+                try await store.upsertPlan(LocalProviderPlan(providerId: p.id))
+                added += 1
+                continue
+            }
             try await addFromCatalog(
                 entry: entry,
                 displayName: entry.displayName,
