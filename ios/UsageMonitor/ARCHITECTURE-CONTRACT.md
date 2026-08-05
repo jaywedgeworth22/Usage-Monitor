@@ -6,14 +6,22 @@ today (SPM package `UsageMonitorKit` + a thin app target + a widget extension).
 Do not re-architect it — extend it. If something here disagrees with the code,
 the code wins; fix the doc.
 
-**Status (2026-07-29):** Dashboard, Providers, Alerts, Project budgets,
+**Status (2026-08-04):** Dashboard, Providers, Alerts, Project budgets,
 Settings, protected account-scoped OfflineCache, Widget, AppLock, and
 session-backed native provider/subscription/**project** management are
-implemented. Provider detail additionally loads recorded snapshot history and
-provider-reported external billing through session-gated routes when a
-dashboard session is active (labeled-estimate fallback + sign-in hint
-otherwise). Account Overview / widget totals are **provider-scoped** (do not
-mix server project-summary budget with provider total spend).
+implemented against the **remote** Next.js host. Provider detail additionally
+loads recorded snapshot history and provider-reported external billing through
+session-gated routes when a dashboard session is active (labeled-estimate
+fallback + sign-in hint otherwise). Account Overview / widget totals are
+**provider-scoped** (do not mix server project-summary budget with provider
+total spend).
+
+**Product pivot (phone-only self-host):** App Store product goal is an
+**on-device native data plane** (local SQLite + Keychain keys + Swift poll
+adapters). See §10 and
+`docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`. Until
+`LOCAL_DATAPLANE` builds ship, §§1–9 still describe the live remote-client
+code. New local-plane code must not invent cash rules outside that design.
 
 Toolchain on the build host: **Swift 6.4** (`swift --version`), **Xcode 27.0**
 (`xcodebuild -version`). Package targets iOS 26+ for the owner's single-user device fleet.
@@ -326,3 +334,76 @@ depend on both AppCore and the integration modules.
    the `AppCore` `Theme.SemanticStatus(_:)` bridge. No hard-coded colors.
 6. Render `LoadState`: skeleton on `isInitialLoading`, `ErrorState` on `error`,
    content on `value`; keep stale data + soft banner on refresh failure.
+
+---
+
+## 10. LOCAL_DATAPLANE (phone-only product) — addendum
+
+**Authority:** `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`
+(approved design; phone **is** the instance). This section is the binding
+contract for that product path. §§1–9 remain the remote-client contract.
+
+### 10.1 Compile modes
+
+| Mode | Flag / scheme | Money-truth | Networking mutations |
+|---|---|---|---|
+| **Remote client** (today / owner fleet) | default | Server SQLite via HTTPS | `APIClient` session + bearer as today |
+| **Local data plane** (App Store product) | `LOCAL_DATAPLANE` (compile-time) | On-device GRDB SQLite | **No** remote money writes; no `USAGE_*` tokens required |
+
+- **App Store / TestFlight product binary is local-only** (K16). Owner may keep
+  a separate scheme that still talks to `usage.jays.services`.
+- Do not dual-write cash: a build is **either** local money-truth **or** remote
+  money-truth, never both for the same totals.
+
+### 10.2 MVP surface freeze (Milestone A)
+
+**In scope:** Overview, Providers (list/detail + fetch-now), Alerts (local),
+Projects (direct attribution only), Settings (providers/subscriptions/keys),
+widget, Face ID App Lock.
+
+**Out of scope for v1 App Store:** live OTLP/ingest, CT/ST push telemetry,
+Money/Ops/Sentry depth, residual % project allocation, remote APNs as product
+alert path, Docker/self-host packaging as the product answer.
+
+### 10.3 New module boundaries (planned; do not invent outside design)
+
+```
+LocalStore       → Models          GRDB schema exactly per design §2.2.1
+KeychainSecrets  → (none)          provider API keys only
+Adapters         → Models          ProviderAdapter + LocalUsageResult subset
+BudgetEngine     → Models, LocalStore   spentUsd formula per design §2.3
+Materializer     → LocalStore      subscription_charge rows
+LocalDataPlane   → AppCore inject  BudgetStore reads local engine
+```
+
+- **Do not edit `Package.swift` without coordinating** a new target name.
+- Widget continues to use **file snapshot** via `WidgetShared` in v1 (not GRDB
+  in the app group).
+
+### 10.4 Cash contracts (do not invent)
+
+1. **BudgetEngine v1:**  
+   `spentUsd = pollVariableUsd + subscriptionChargesUsd + planFixedMonthlyUsd`  
+   with plan-fixed vs subscription exclusivity as on the server. No residual %
+   allocation in v1. Golden vectors live in the design doc.
+2. **Snapshot eligibility:** prefer `calendar_month_to_date` (+ window); else
+   `unknown` with `fetched_at >= monthStart`; **no grace**.
+3. **`LocalUsageResult`:** bounded subset — **no** `rawData`, **no**
+   `externalBilling` persistence.
+4. **P0 poll order:** OpenRouter → OpenAI → DeepSeek. OpenRouter MTD budget
+   requires a **Management** key (inference-only → connected, `$0` poll, no
+   `usage_monthly` → `totalCost` mapping). Anthropic personal / Tiingo / FMP
+   are **subscription_only** (not poll targets).
+5. **Export package v1:** keys never included; passphrase optional with
+   warning; Replace-all in Milestone A; Merge-by-name in B.
+
+### 10.5 Rules of the road (local mode additions)
+
+1. Provider API keys → Keychain only; never GRDB, never export payload.
+2. Face ID App Lock replaces dashboard password for local use.
+3. BGAppRefresh is **opportunistic** — no 15-minute SLA; UI must show last
+   successful poll age.
+4. Local notifications only for product alerts (remote APNs is fleet/owner,
+   not required for phone-only product).
+5. Any PR that ports server money math must cite design §2.3 and add golden
+   vector tests before merge.

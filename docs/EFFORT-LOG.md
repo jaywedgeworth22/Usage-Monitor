@@ -1,3 +1,4 @@
+- **[GROK] Phone-only self-host Milestone A (2026-08-04) — IN PROGRESS.** Owner: phone IS the instance; free App Store; optional export passphrase. PR #942 design+contract pivot (PR-1). Next: LocalStore GRDB (PR-2).
 - **[GROK] Design: mobile full-parity + phone self-host topology (2026-08-04) — COMPLETE (phone-only pivot approved).** Product answer: native Swift data plane ON the phone (local SQLite/GRDB, Keychain keys, opportunistic poll). Not phone→remote host. Public App Store target. Doc: `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`. Review rounds closed 0 open.
 - **[GROK] iOS TestFlight agent ship pipeline (cross-app) — IN PROGRESS 2026-08-04.** `scripts/ios-ship-testflight.sh` + fleet `/Users/jay/apps/ios-fleet/`. Bundle `services.jays.usage.monitor`. Branch `grok/ios-testflight-ship`.
 

@@ -658,12 +658,13 @@ User-visible last fetch / errors / staleness. Optional local debug export. No de
 
 ## Open Questions (narrowed)
 
-1. **Passphrase required on export?** Default optional with warning.  
+1. ~~**Passphrase required on export?**~~ **Owner (2026-08-04): optional with warning.**  
 2. **OpenAI before DeepSeek in Milestone B order?** Default OpenAI second (already in P0 table).  
-3. **Paid App Store vs free?** Product/legal only.  
-4. **Import merge UI complexity in A vs B?** Default Replace-only in A; Merge in B.
+3. ~~**Paid App Store vs free?**~~ **Owner (2026-08-04): free.**  
+4. **Import merge UI complexity in A vs B?** Default Replace-only in A; Merge in B.  
+5. ~~Start Milestone A now?~~ **Owner (2026-08-04): yes — implement PR-1+.**
 
-**Closed by design:** live CT/ST/OTLP v1 = **no**; P0 poll start = **OpenRouter**; absolute phone-only product binary = **yes** (K16).
+**Closed by design / owner:** live CT/ST/OTLP v1 = **no**; P0 poll start = **OpenRouter**; absolute phone-only product binary = **yes** (K16); App Store = **free**; export passphrase = **optional with warning**; start implementation = **yes**.
 
 ---
 
@@ -692,6 +693,7 @@ User-visible last fetch / errors / staleness. Optional local debug export. No de
 | **K19** | P0 poll order: OpenRouter → OpenAI → (DeepSeek); Anthropic personal = subscription_only |
 | **K20** | `LocalUsageResult` is a **bounded subset**; no externalBilling/rawData persistence |
 | **K21** | OpenRouter budget MTD requires **Management key** (server-aligned); inference-only → connected, `$0` poll; no `usage_monthly`→`totalCost` mapping |
+| **K23** | App Store listing is **free**; export passphrase is **optional with warning** |
 | **K22** | Snapshot eligibility: prefer `calendar_month_to_date` + window; else `unknown` + `fetched_at >= monthStart`; no `grace`; no billing-cycle/daily in v1 |
 
 ---
