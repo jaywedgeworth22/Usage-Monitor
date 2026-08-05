@@ -13,32 +13,61 @@ interface CommandItem {
 
 const STATIC_COMMANDS: CommandItem[] = [
   { id: "overview", label: "Overview", hint: "Dashboard", href: "/", keywords: "home dashboard" },
-  { id: "attribution", label: "Keys & apps", hint: "Attribution", href: "/attribution", keywords: "keys attribution project" },
+  { id: "providers", label: "Providers", hint: "Workspace", href: "/providers", keywords: "table families connections" },
+  { id: "money", label: "Money", hint: "Paid services", href: "/money", keywords: "subscriptions billing recurring" },
+  { id: "projects", label: "Projects", hint: "Budgets", href: "/projects", keywords: "budgets attribution" },
+  { id: "alerts", label: "Alerts", hint: "Attention", href: "/alerts", keywords: "alerts critical attention" },
+  { id: "ops", label: "Ops", hint: "Operations", href: "/ops", keywords: "health sentry receipt infrastructure" },
   { id: "settings", label: "Settings", href: "/settings", keywords: "config" },
+  { id: "attribution", label: "Keys & apps", hint: "Attribution", href: "/attribution", keywords: "keys attribution project" },
   { id: "connections", label: "Connections", hint: "Settings", href: "/settings?tab=connections", keywords: "providers" },
-  { id: "services", label: "Paid services", hint: "Settings", href: "/settings?tab=services", keywords: "subscriptions billing" },
-  { id: "projects", label: "Projects", hint: "Settings", href: "/settings?tab=projects", keywords: "budgets" },
+  { id: "services", label: "Paid services settings", hint: "Settings", href: "/settings?tab=services", keywords: "subscriptions billing manage" },
+  { id: "projects-settings", label: "Project settings", hint: "Settings", href: "/settings?tab=projects", keywords: "budgets manage" },
   { id: "notifications", label: "Notifications", hint: "Settings", href: "/settings?tab=notifications", keywords: "alerts slack" },
-  { id: "attention", label: "Attention", hint: "Open alerts", href: "/#attention", keywords: "alerts critical" },
-  { id: "providers-section", label: "Provider workspace", href: "/#providers", keywords: "table families" },
+  { id: "attention-hash", label: "Attention (Overview)", hint: "Overview section", href: "/#attention", keywords: "alerts critical" },
+  { id: "providers-section", label: "Provider workspace (Overview)", href: "/#providers", keywords: "table families" },
   { id: "portfolio", label: "Portfolio detail", href: "/#portfolio", keywords: "charts telemetry burn" },
-  { id: "ops", label: "Operations", href: "/#operations", keywords: "health sentry receipt" },
+  { id: "ops-hash", label: "Operations (Overview)", href: "/#operations", keywords: "health sentry receipt" },
 ];
 
+export const OPEN_COMMAND_PALETTE_EVENT = "usage-monitor:open-command-palette";
+export const COMMAND_PALETTE_PROVIDERS_EVENT = "usage-monitor:command-palette-providers";
+export type CommandPaletteProviderItem = { id: string; label: string };
+
 /**
- * ⌘K / Ctrl+K command palette for quick navigation.
- * Provider rows can be injected so operators jump straight to a detail page.
+ * ⌘K / Ctrl+K command palette. Mount once from Nav (site-wide).
+ * Controlled open for mobile search button; receives providers via custom event.
  */
 export default function CommandPalette({
-  providerItems = [],
+  providerItems: providerItemsProp = [],
+  open: openProp,
+  onOpenChange,
 }: {
-  providerItems?: { id: string; label: string }[];
+  providerItems?: CommandPaletteProviderItem[];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  const [eventProviders, setEventProviders] = useState<CommandPaletteProviderItem[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : uncontrolledOpen;
+
+  const setOpen = useCallback(
+    (next: boolean | ((prev: boolean) => boolean)) => {
+      const resolved = typeof next === "function" ? next(open) : next;
+      if (!isControlled) setUncontrolledOpen(resolved);
+      onOpenChange?.(resolved);
+    },
+    [isControlled, onOpenChange, open]
+  );
+
+  const providerItems =
+    providerItemsProp.length > 0 ? providerItemsProp : eventProviders;
 
   const items = useMemo(() => {
     const providerCmds: CommandItem[] = providerItems.map((p) => ({
@@ -71,9 +100,20 @@ export default function CommandPalette({
       }
       if (event.key === "Escape") setOpen(false);
     };
+    const onOpenEvent = () => setOpen(true);
+    const onProvidersEvent = (event: Event) => {
+      const detail = (event as CustomEvent<CommandPaletteProviderItem[]>).detail;
+      if (Array.isArray(detail)) setEventProviders(detail);
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    window.addEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpenEvent);
+    window.addEventListener(COMMAND_PALETTE_PROVIDERS_EVENT, onProvidersEvent);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, onOpenEvent);
+      window.removeEventListener(COMMAND_PALETTE_PROVIDERS_EVENT, onProvidersEvent);
+    };
+  }, [setOpen]);
 
   useEffect(() => {
     if (open) {
@@ -94,7 +134,7 @@ export default function CommandPalette({
       }
       router.push(item.href);
     },
-    [router]
+    [router, setOpen]
   );
 
   if (!open) return null;
@@ -115,7 +155,7 @@ export default function CommandPalette({
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Jump to… providers, settings, alerts"
+            placeholder="Jump to… providers, money, alerts, settings"
             className="w-full min-h-11 rounded-lg border-0 bg-transparent px-2 text-base text-gray-900 outline-none placeholder:text-gray-400 focus:ring-0 dark:text-gray-100"
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") {

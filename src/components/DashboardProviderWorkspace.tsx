@@ -1151,7 +1151,71 @@ export default function DashboardProviderWorkspace({
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-b-lg">
+      <ul className="provider-mobile-list space-y-3 px-3 py-3 sm:hidden" aria-label="Provider families">
+        {visibleFamilies.map((family) => {
+          const isCollapsed = collapsed[family.key] ?? !initiallyExpanded;
+          const familyHasPartial = family.providers.some(
+            (p) => p.isActive && p.spendCoverage === "partial"
+          );
+          const familySpendLabel =
+            family.spentUsd == null
+              ? "Cost not reported"
+              : `${formatCurrency(family.spentUsd)}${
+                  familyHasPartial || family.incompleteCostCount > 0 ? " known" : ""
+                }`;
+          const onToggle = () =>
+            setCollapsed((current) => ({ ...current, [family.key]: !isCollapsed }));
+          const mobileDetailsId = `${family.detailsId}-mobile`;
+          const meterPct =
+            family.budgetUsd != null && family.budgetUsd > 0 && family.spentUsd != null
+              ? Math.min((family.spentUsd / family.budgetUsd) * 100, 100)
+              : null;
+          const healthLabel =
+            family.criticalCount > 0
+              ? `${family.criticalCount} critical`
+              : family.alertCount > 0
+                ? `${family.alertCount} alerts`
+                : "On track";
+          return (
+            <li key={`m-${family.key}`} className="provider-mobile-card list-none rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+              <button type="button" aria-expanded={!isCollapsed} aria-controls={mobileDetailsId} onClick={onToggle}
+                className="flex w-full items-start gap-3 px-3.5 py-3.5 text-left">
+                <ProviderMonogram name={family.displayName} size="md" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{family.displayName}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${family.criticalCount > 0 ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300" : family.alertCount > 0 ? "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" : "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"}`}>{healthLabel}</span>
+                  </span>
+                  <span className="mt-1.5 block text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100">{familySpendLabel}</span>
+                  <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+                    {family.budgetUsd != null ? `${formatCurrency(family.budgetUsd)} budget` : family.projectedUsd != null ? `${formatCurrency(family.projectedUsd)} projected` : "No budget"}
+                    {family.paceLabel ? ` · ${family.paceLabel}` : ""}
+                  </span>
+                  {meterPct != null && (
+                    <span className="mt-2 block h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700" role="meter" aria-valuenow={Math.round(meterPct)} aria-valuemin={0} aria-valuemax={100}>
+                      <span className={`block h-full rounded-full ${meterPct >= 100 ? "bg-red-500" : meterPct >= 80 ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${meterPct}%` }} />
+                    </span>
+                  )}
+                </span>
+                {isCollapsed ? <ChevronRight className="mt-1 h-5 w-5 shrink-0 text-gray-400" aria-hidden="true" /> : <ChevronDown className="mt-1 h-5 w-5 shrink-0 text-gray-400" aria-hidden="true" />}
+              </button>
+              {!isCollapsed && (
+                <div id={mobileDetailsId} className="space-y-2 border-t border-gray-100 px-3 py-3 dark:border-gray-700">
+                  {family.providers.map((provider) => (
+                    <Link key={provider.id} href={`/providers/${provider.id}`}
+                      className="flex min-h-11 items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-800">
+                      <span className="truncate font-medium text-gray-900 dark:text-gray-100">{childLabel(provider)}</span>
+                      <span className="tabular-nums text-gray-700 dark:text-gray-200">{providerSpendLabel(provider)}</span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="hidden overflow-x-auto rounded-b-lg sm:block">
         <table className="responsive-table w-full text-sm">
           <caption className="sr-only">Provider families with expandable account, service, usage, quota, renewal, and alert rows</caption>
           <thead>

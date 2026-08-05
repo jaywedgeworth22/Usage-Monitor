@@ -11,6 +11,10 @@ import {
   PROVIDER_CATEGORIES,
   type ProviderDefinition,
 } from "@/lib/provider-definitions";
+import {
+  FIXED_FEE_SUBSCRIPTION_WARNING,
+  hasFixedMonthlyCostSet,
+} from "@/lib/provider-wizard";
 
 type BillingMode = "actual" | "estimated" | "manual";
 
@@ -553,6 +557,14 @@ export default function AddProviderModal({
           <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
             Not a Subscription. Do not also Track a paid service for the same fee.
           </p>
+          {hasFixedMonthlyCostSet(fixedMonthlyCostUsd) && (
+            <p
+              role="status"
+              className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-relaxed text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+            >
+              {FIXED_FEE_SUBSCRIPTION_WARNING}
+            </p>
+          )}
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1 dark:text-gray-400">

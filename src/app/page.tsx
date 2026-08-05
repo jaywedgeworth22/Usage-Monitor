@@ -9,7 +9,10 @@ import DashboardAttentionPanel from "@/components/DashboardAttentionPanel";
 import DashboardProviderWorkspace from "@/components/DashboardProviderWorkspace";
 import DashboardPortfolioSection from "@/components/DashboardPortfolioSection";
 import OperationsOverview from "@/components/OperationsOverview";
-import CommandPalette from "@/components/CommandPalette";
+import {
+  COMMAND_PALETTE_PROVIDERS_EVENT,
+  type CommandPaletteProviderItem,
+} from "@/components/CommandPalette";
 import EmptyState from "@/components/EmptyState";
 import {
   shouldShowDashboardSkeleton,
@@ -279,14 +282,16 @@ export default function DashboardPage() {
   );
   const portfolioSummary = `${portfolioSummaryParts.join(" · ")} · charts & intelligence`;
 
-  const commandProviders = useMemo(
-    () =>
-      (providers || []).map((p: any) => ({
-        id: p.id,
-        label: p.displayName || p.name,
-      })),
-    [providers]
-  );
+  // Push provider shortcuts into the site-wide CommandPalette (mounted in Nav).
+  useEffect(() => {
+    const items: CommandPaletteProviderItem[] = (providers || []).map((p: any) => ({
+      id: p.id,
+      label: p.displayName || p.name,
+    }));
+    window.dispatchEvent(
+      new CustomEvent(COMMAND_PALETTE_PROVIDERS_EVENT, { detail: items })
+    );
+  }, [providers]);
 
   // Never blank the dashboard once provider rows are on screen — a later
   // loading=true race was flashing content then sticking on skeletons.
@@ -321,32 +326,28 @@ export default function DashboardPage() {
 
   if (!loading && providers.length === 0) {
     return (
-      <>
-        <CommandPalette providerItems={[]} />
-        <EmptyState
-          title="No providers yet"
-          message="Connect an API provider, set a monthly budget, and Overview will show spend, pace, and alerts in one place."
-          icon={
-            <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v12m6-6H6" />
-            </svg>
-          }
-          action={
-            <Link
-              href="/settings?tab=connections"
-              className="inline-flex min-h-11 items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-            >
-              Add your first provider
-            </Link>
-          }
-        />
-      </>
+      <EmptyState
+        title="No providers yet"
+        message="Connect an API provider, set a monthly budget, and Overview will show spend, pace, and alerts in one place."
+        icon={
+          <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v12m6-6H6" />
+          </svg>
+        }
+        action={
+          <Link
+            href="/settings?tab=connections"
+            className="inline-flex min-h-11 items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            Add your first provider
+          </Link>
+        }
+      />
     );
   }
 
   return (
     <div className="space-y-6 sm:space-y-8">
-      <CommandPalette providerItems={commandProviders} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
