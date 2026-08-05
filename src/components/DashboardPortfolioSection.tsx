@@ -86,6 +86,9 @@ export default function DashboardPortfolioSection({
             maxItems={6}
           />
 
+          {/* Full-width: MTD pace primary + projected breakdown secondary */}
+          <DashboardCharts families={chartFamilies} />
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-8">
               {usageSummary && <ExternalTelemetryPanel usageSummary={usageSummary} />}
@@ -99,7 +102,6 @@ export default function DashboardPortfolioSection({
               )}
             </div>
             <div className="space-y-8">
-              <DashboardCharts families={chartFamilies} />
               <SentryHealthCard />
             </div>
           </div>

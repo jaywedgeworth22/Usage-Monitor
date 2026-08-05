@@ -122,15 +122,11 @@ describe("AddProviderModal billing normalization", () => {
       })
     );
 
-    expect(html).toContain("Optional single-resource metadata probes");
-    expect(html).toContain(CLOUDFLARE_RESOURCE_PROBE_DISCLOSURE);
-    expect(html).toContain("D1 database ID");
-    expect(html).toContain("R2 bucket name");
-    expect(html).toContain("KV namespace ID");
-    expect(html).toContain("Queue ID");
-    expect(html).toContain(
-      'aria-describedby="cloudflare-resource-probe-help"'
-    );
-    expect(html).not.toContain("D1 Database ID (optional)");
+    // Wizard opens on Type step — credential probe fields are step-gated.
+    expect(html).toContain('aria-label="Provider setup steps"');
+    expect(html).toContain("Step 1/4");
+    expect(html).toContain("Next");
+    expect(CLOUDFLARE_RESOURCE_PROBE_DISCLOSURE).toMatch(/metadata/i);
+    expect(CLOUDFLARE_RESOURCE_PROBE_DISCLOSURE).toMatch(/do not affect billing/i);
   });
 });

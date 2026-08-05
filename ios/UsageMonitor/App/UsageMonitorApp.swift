@@ -9,6 +9,7 @@ import AppLock
 import Networking
 import OfflineCache
 import PushScaffold
+import WidgetShared
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -39,6 +40,7 @@ struct UsageMonitorApp: App {
         // response to disk (offline-first) and to the widget app group.
         _environment = State(
             initialValue: AppEnvironment(
+                settings: AppSettings(sharedDefaults: AppGroup.defaults),
                 tokenStore: AccountChangeNotifyingTokenStore(),
                 snapshotSink: OfflineCacheSnapshotSink()
             )

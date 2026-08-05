@@ -24,6 +24,7 @@ public struct DashboardRootView: View {
     /// Selected period for the portfolio telemetry panel.
     /// The hero / budget-status data is always current-calendar-month regardless.
     @State private var selectedTimeframe: TimeframeOption = .currentMonth
+    @State private var intelligenceStore = IntelligenceStore()
 
     public init() {}
 
@@ -55,6 +56,12 @@ public struct DashboardRootView: View {
                     }
                 }
                 .task { await store.loadIfNeeded() }
+                .task(id: env?.accessIdentityRevision) { [apiClient = env?.apiClient] in
+                    intelligenceStore.reset()
+                    if let apiClient {
+                        await intelligenceStore.loadIfNeeded(using: apiClient)
+                    }
+                }
         }
     }
 
@@ -91,6 +98,11 @@ public struct DashboardRootView: View {
                 generatedAt: store.state.value?.generatedAtDate,
                 timeframe: selectedTimeframe,
                 onSelectProvider: { id in env?.openProvider(id: id) }
+            )
+
+            IntelligenceSection(
+                store: intelligenceStore,
+                onOpenSettings: { env?.selectTab?(.settings) }
             )
 
             LastUpdatedFooter(
@@ -160,6 +172,9 @@ public struct DashboardRootView: View {
     @MainActor
     private func refresh() async {
         await store.refresh()
+        if let apiClient = env?.apiClient {
+            await intelligenceStore.refresh(using: apiClient)
+        }
         if store.lastError == nil {
             Haptics.success()
         } else {

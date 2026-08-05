@@ -124,9 +124,8 @@ enum WidgetPresentation {
     // that handoff exists, the widget always shows amounts — do not invent a
     // second lock source of truth here.
     static func shouldRedactAmounts(appGroupDefaults: UserDefaults = AppGroup.defaults) -> Bool {
-        // Prefer a shared lock flag if the main app ever mirrors it.
-        let key = "settings.appLockEnabled"
-        guard appGroupDefaults.object(forKey: key) != nil else { return false }
+        WidgetPrivacy.isAppLockEnabled(defaults: appGroupDefaults)
+    }
         return appGroupDefaults.bool(forKey: key)
     }
 

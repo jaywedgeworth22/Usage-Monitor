@@ -404,7 +404,19 @@ public actor APIClient {
     }
 
     /// `POST /api/apns/device-tokens` — upload native APNs device token for push notifications.
-    public func registerApnsDeviceToken(
+    
+    // MARK: - Intelligence (session-only analytics)
+
+    public func llmBurn(hours: Int = 5) async throws -> LlmBurnResponse {
+        let clamped = min(max(hours, 1), 24)
+        return try await get(
+            "/api/llm-burn",
+            queryItems: [URLQueryItem(name: "hours", value: String(clamped))],
+            authorization: .session
+        )
+    }
+
+public func registerApnsDeviceToken(
         deviceToken: String,
         deviceModel: String? = nil,
         osVersion: String? = nil
@@ -424,6 +436,21 @@ public actor APIClient {
             body: RegisterPayload(deviceToken: deviceToken, deviceModel: deviceModel, osVersion: osVersion)
         )
     }
+
+
+    public func claudeCostCheck(days: Int = 30) async throws -> ClaudeCostCheckResponse {
+        let clamped = min(max(days, 1), 3650)
+        return try await get(
+            "/api/claude-cost-check",
+            queryItems: [URLQueryItem(name: "days", value: String(clamped))],
+            authorization: .session
+        )
+    }
+
+    public func keyAttribution() async throws -> KeyAttributionResponse {
+        try await get("/api/key-attribution", authorization: .session)
+    }
+
 
     // MARK: - Request plumbing
 
