@@ -437,6 +437,21 @@ public func registerApnsDeviceToken(
         )
     }
 
+
+    public func claudeCostCheck(days: Int = 30) async throws -> ClaudeCostCheckResponse {
+        let clamped = min(max(days, 1), 3650)
+        return try await get(
+            "/api/claude-cost-check",
+            queryItems: [URLQueryItem(name: "days", value: String(clamped))],
+            authorization: .session
+        )
+    }
+
+    public func keyAttribution() async throws -> KeyAttributionResponse {
+        try await get("/api/key-attribution", authorization: .session)
+    }
+
+
     // MARK: - Request plumbing
 
     private func get<T: Decodable>(
