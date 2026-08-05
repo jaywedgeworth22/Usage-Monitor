@@ -1235,15 +1235,16 @@ FINAL_BACKUP="${DEPLOY_BACKUP_DIR}/prod-${backup_stamp}-${PREVIOUS_SHA}-to-${TAR
 create_sqlite_backup "${FINAL_BACKUP}"
 log "preserved verified offline rollback snapshot ${FINAL_BACKUP}."
 
-# If main changes during writer stop or snapshot creation, restore the accepted
-# previous image and let the next timer transaction build the new main.
+# Main may advance while the writer is stopped (concurrent merges). Rolling
+# back every exact-SHA cutover that loses that race left production stuck on
+# old revisions (2026-08-05). Continue the verified TARGET_SHA; the next timer
+# will catch up to the newer tip.
 if ! post_stop_main="$(remote_main_sha)"; then
-  log "could not re-resolve main during cutover; restoring ${PREVIOUS_SHA}."
-  rollback_candidate 75
-fi
-if [[ ! "${post_stop_main}" =~ ^[0-9a-f]{40}$ || "${post_stop_main}" != "${TARGET_SHA}" ]]; then
-  log "main changed to ${post_stop_main:-unknown} during cutover; restoring ${PREVIOUS_SHA}."
-  rollback_candidate 75
+  log "could not re-resolve main during cutover; continuing exact-SHA deploy of ${TARGET_SHA}."
+elif [[ ! "${post_stop_main}" =~ ^[0-9a-f]{40}$ ]]; then
+  log "unparseable main tip during cutover (${post_stop_main:-empty}); continuing exact-SHA deploy of ${TARGET_SHA}."
+elif [[ "${post_stop_main}" != "${TARGET_SHA}" ]]; then
+  log "main advanced to ${post_stop_main} during cutover; continuing exact-SHA deploy of ${TARGET_SHA} (next timer will catch up)."
 fi
 
 # Re-verify candidate image still exists after the long backup step. Shared-host
@@ -1266,15 +1267,14 @@ verify_backup_path
 verify_backup_restore
 verify_public_revision_samples "${TARGET_SHA}"
 
-# Candidate validation can take minutes. Never commit a reboot pointer for a
-# revision that ceased to be main during scheduler/backup acceptance.
+# Candidate validation can take minutes; concurrent merges may move main.
+# Still commit the verified TARGET_SHA — newer tips deploy on the next timer.
 if ! accepted_main="$(remote_main_sha)"; then
-  log "could not re-resolve main after candidate acceptance; restoring ${PREVIOUS_SHA}."
-  rollback_candidate 75
-fi
-if [[ ! "${accepted_main}" =~ ^[0-9a-f]{40}$ || "${accepted_main}" != "${TARGET_SHA}" ]]; then
-  log "main changed to ${accepted_main:-unknown} during candidate acceptance; restoring ${PREVIOUS_SHA}."
-  rollback_candidate 75
+  log "could not re-resolve main after candidate acceptance; committing exact-SHA ${TARGET_SHA}."
+elif [[ ! "${accepted_main}" =~ ^[0-9a-f]{40}$ ]]; then
+  log "unparseable main tip after acceptance (${accepted_main:-empty}); committing exact-SHA ${TARGET_SHA}."
+elif [[ "${accepted_main}" != "${TARGET_SHA}" ]]; then
+  log "main advanced to ${accepted_main} during candidate acceptance; committing exact-SHA ${TARGET_SHA} (next timer will catch up)."
 fi
 
 # Commit the reboot pointer only after the candidate is independently green.
