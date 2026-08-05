@@ -767,12 +767,25 @@ ensure_mirror_and_release() {
   fi
   [[ "$(stat -c '%U:%G' "${MIRROR_DIR}")" == "root:root" ]] || die "release mirror is not root-owned"
 
+  # Fetch main tip and the exact target SHA. Do NOT require main tip == revision:
+  # auto-deploy can select SHA T, then spend many minutes on image build/cache
+  # while other merges advance main to T'. The old equality check aborted every
+  # long deploy that lost that race (live failure 2026-08-05: selected 2a7cd91,
+  # main moved to 098c965 mid-run). Exact-SHA worktrees still pin the deploy.
   timeout --signal=TERM --kill-after=30s 300 \
     git --git-dir="${MIRROR_DIR}" fetch --force --prune origin \
-      'refs/heads/main:refs/remotes/origin/main'
-  [[ "$(git --git-dir="${MIRROR_DIR}" rev-parse refs/remotes/origin/main)" == "${revision}" ]] || \
-    die "root-owned mirror main does not equal ${revision}"
-  git --git-dir="${MIRROR_DIR}" cat-file -e "${revision}^{commit}"
+      'refs/heads/main:refs/remotes/origin/main' \
+      "+${revision}:refs/deploy/${revision}"
+  git --git-dir="${MIRROR_DIR}" cat-file -e "${revision}^{commit}" || \
+    die "target revision ${revision} is not present in the root-owned mirror"
+  local main_tip
+  main_tip="$(git --git-dir="${MIRROR_DIR}" rev-parse refs/remotes/origin/main)"
+  if [[ "${main_tip}" != "${revision}" ]]; then
+    if ! git --git-dir="${MIRROR_DIR}" merge-base --is-ancestor "${revision}" "${main_tip}"; then
+      die "target revision ${revision} is not an ancestor of origin/main (${main_tip})"
+    fi
+    log "origin/main advanced to ${main_tip} after ${revision} was selected; continuing exact-SHA deploy."
+  fi
 
   RELEASE_DIR="${RELEASES_DIR}/${revision}"
   if [[ ! -d "${RELEASE_DIR}" ]]; then
