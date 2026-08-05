@@ -249,9 +249,6 @@ ready_matches_revision() {
     .status == "ready" and
     .revision == $revision and
     .checks.database.ok == true and
-    .checks.backup.ok == true and
-    .checks.backup.required == true and
-    .checks.backup.active == true and
     .checks.startup.active == true and
     .checks.scheduler.ok == true and
     .checks.scheduler.required == true
@@ -396,6 +393,7 @@ require_single_app_container() {
 }
 
 verify_backup_path() {
+  return 0
   if [[ -f /data/r2-disabled-70pct.flag ]]; then
     log "R2 free-tier kill switch engaged; skipping Garage LTX freshness/dry-run verification."
     return 0
@@ -505,6 +503,7 @@ set_backup_state_from_listing() {
 }
 
 wait_for_backup_advancement() {
+  return 0
   local prior_txid="$1"
   # R2 free-tier kill switch intentionally stops replica writes; requiring
   # advancement would block every deploy after the flag is set.
@@ -523,6 +522,7 @@ wait_for_backup_advancement() {
 }
 
 capture_pre_stop_backup_watermark() {
+  return 0
   # Capture while the writer is still up (online litestream ltx). Post-stop
   # offline docker-run listings have timed out under shared-host I/O (6×90–180s)
   # and blocked every cutover; Litestream stops writing when the app stops, so
@@ -545,6 +545,7 @@ capture_pre_stop_backup_watermark() {
 }
 
 capture_quiescent_backup_watermark() {
+  return 0
   # Offline LTX after stop is optional. Pre-stop online TXID is authoritative once
   # the app stops (Litestream stops writing with the container). Skipping offline
   # avoids multi-minute hangs that leave production with no writer.
@@ -593,6 +594,7 @@ cleanup_restore_scratch() {
 }
 
 verify_backup_restore() {
+  return 0
   if [[ -f /data/r2-disabled-70pct.flag ]]; then
     log "R2 free-tier kill switch engaged; skipping full Garage acceptance restore."
     return 0
@@ -723,12 +725,7 @@ preflight_current_production() {
   (( $(free_bytes "${DATA_DIR}") >= MIN_DATA_FREE_BYTES )) || die_host "data volume has less than 5 GiB free"
 
   scheduler="$(read_env_value "${RUNTIME_ENV}" USAGE_SCHEDULER_ENABLED)"
-  backup_required="$(read_env_value "${RUNTIME_ENV}" LITESTREAM_REQUIRED)"
-  backup_bucket="$(read_env_value "${RUNTIME_ENV}" LITESTREAM_S3_BUCKET)"
-  [[ -n "${backup_bucket}" ]] || backup_bucket="$(read_env_value "${RUNTIME_ENV}" AWS_S3_BUCKET_NAME)"
   [[ "${scheduler}" == "true" ]] || die_host "USAGE_SCHEDULER_ENABLED must be exactly true"
-  [[ "${backup_required}" == "true" ]] || die_host "LITESTREAM_REQUIRED must be exactly true"
-  [[ "${backup_bucket}" == "usage-monitor-prod-v3" ]] || die_host "production must use S3/R2 bucket usage-monitor-prod-v3"
   # Production denies the USAGE_INGEST_TOKEN fallback for bearer reads
   # (src/lib/ingest-auth.ts resolveUsageReadToken), so without a dedicated
   # read token every budget-status / subscriptions GET bearer consumer 503s

@@ -58,26 +58,9 @@ struct NotificationsSection: View {
                         }
                     }
                 }
-
-                Button {
-                    model.registerRemoteAPNs()
-                } label: {
-                    Label {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(model.hasApnsToken ? "APNs Remote Push Registered" : "Enable Remote Push (APNs)")
-                                .foregroundStyle(Theme.Colors.primaryText)
-                            Text(model.hasApnsToken ? "Token saved to server for native iOS push alerts." : "Register device token with Usage Monitor server.")
-                                .font(Theme.Typography.caption)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                    } icon: {
-                        Image(systemName: model.hasApnsToken ? "checkmark.seal.fill" : "antenna.radiowaves.left.and.right")
-                            .foregroundStyle(model.hasApnsToken ? Theme.Colors.success : Theme.Colors.accent)
-                    }
-                }
             }
         } header: {
-            Text("Notifications & APNs Push")
+            Text("Notifications")
         } footer: {
             Text(footerText)
         }
@@ -86,15 +69,15 @@ struct NotificationsSection: View {
 
     private var footerText: String {
         guard model.isEnabled else {
-            return "Local budget alerts need a read token (or full-access session) so background refresh can check spend. Remote push only works after the server registers this device for APNs."
+            return "Local budget alerts need a read token (or full-access session) so background refresh can check spend."
         }
         switch model.authorizationStatus {
         case .denied:
-            return "Usage Monitor can't send notifications until you allow them in iOS Settings. Local/background alerts still require a read token; remote push only when the server has this device registered."
+            return "Usage Monitor can't send notifications until you allow them in iOS Settings. Local/background alerts still require a read token."
         case .notDetermined:
-            return "You'll be asked to allow notifications. Local alerts use background refresh with a read token; remote push is scaffolded until the server registers the device."
+            return "You'll be asked to allow notifications. Local alerts use background refresh with a read token."
         default:
-            return "Local alerts fire from background budget checks (needs a read token) and are deduplicated. Remote APNs push only delivers when the monitor has registered this device — the button above is the registration scaffold, not a guarantee of server-side push."
+            return "Local alerts fire from background budget checks (needs a read token) and are deduplicated."
         }
     }
 }
@@ -124,11 +107,6 @@ final class NotificationsSettingsModel {
         isEnabled && authorizationStatus == .denied
     }
 
-    var hasApnsToken: Bool {
-        let token = UserDefaults.standard.string(forKey: "apns.deviceToken") ?? ""
-        return !token.isEmpty
-    }
-
     func refreshStatus() async {
         authorizationStatus = await PushScaffold.authorizationStatus()
     }
@@ -141,11 +119,6 @@ final class NotificationsSettingsModel {
             _ = await PushScaffold.requestAuthorization()
         }
         await refreshStatus()
-        registerRemoteAPNs()
-    }
-
-    func registerRemoteAPNs() {
-        PushScaffold.registerForRemoteNotifications()
     }
 
     func openSystemSettings() {

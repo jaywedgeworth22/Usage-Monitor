@@ -32,7 +32,6 @@ struct ServerStatusSnapshot: Equatable, Sendable {
         var rows: [(String, Bool)] = []
         if let c = checks.database { rows.append(("Database", c.ok)) }
         if let c = checks.scheduler { rows.append(("Scheduler", c.ok)) }
-        if let c = checks.backup { rows.append(("Backups", c.ok)) }
         if let c = checks.startup { rows.append(("Startup", c.ok)) }
         return rows
     }

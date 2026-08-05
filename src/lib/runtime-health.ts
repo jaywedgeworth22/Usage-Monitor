@@ -280,7 +280,7 @@ export function getRuntimeIdentity(): {
   environment: string;
 } {
   return {
-    service: process.env.RENDER_SERVICE_NAME || "api-usage-monitor",
+    service: process.env.RENDER_SERVICE_NAME || "usage-monitor",
     version: packageJson.version,
     revision:
       process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || null,
