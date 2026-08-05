@@ -35,7 +35,7 @@ forever free tier (10 GiB / 1M Class A / 10M Class B).
 
 | Metric | Trip condition |
 |--------|----------------|
-| **Storage** | **Absolute** MTD ≥ 70% of 10 GiB (stock — no pace projection) |
+| **Storage** | **Absolute** ≥ 70% from **live S3 ListObjects** (not laggy GraphQL). GraphQL storage samples >90 min old are ignored |
 | **Class A / B** | Absolute MTD ≥ 70% **or** linear month-end pace ≥ 70% |
 
 On trip: write kill flag, Pushover, stop R2 Litestream. **Fail-closed** if
