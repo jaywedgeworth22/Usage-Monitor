@@ -1,3 +1,5 @@
+"use client";
+
 import { formatCurrency } from "@/lib/format";
 import {
   accountStatusLabel,
@@ -18,6 +20,10 @@ interface DashboardHeroProps {
   spendPeriodLabel: string;
   /** Calendar month name for locked MTD hero (always current UTC month budgets). */
   mtdMonthLabel: string;
+  /** Global budget source label for meter caption. */
+  globalBudgetSource?: "override" | "suggested" | "none";
+  onOpenGlobalBudget?: () => void;
+  onOpenProjectedBreakdown?: () => void;
 }
 
 /**
@@ -35,6 +41,9 @@ export default function DashboardHero({
   accountStatus,
   spendPeriodLabel,
   mtdMonthLabel,
+  globalBudgetSource = "none",
+  onOpenGlobalBudget,
+  onOpenProjectedBreakdown,
 }: DashboardHeroProps) {
   const incomplete = incompleteCostProviderCount > 0 || ambiguousCostFamilyCount > 0;
   const hasBudget = totalBudgetUsd != null && totalBudgetUsd > 0;
@@ -50,6 +59,15 @@ export default function DashboardHero({
       : accountStatus === "warning"
         ? "bg-amber-500 dark:bg-amber-400"
         : "bg-emerald-500 dark:bg-emerald-400";
+
+  const budgetCaption =
+    globalBudgetSource === "override"
+      ? "Global Budget"
+      : globalBudgetSource === "suggested"
+        ? "Global Budget (from project budgets)"
+        : budgetedProviderCount > 0
+          ? `Across ${budgetedProviderCount} provider budget${budgetedProviderCount === 1 ? "" : "s"}`
+          : "Global Budget";
 
   return (
     <section
@@ -68,7 +86,14 @@ export default function DashboardHero({
             Month-to-date budgets (UTC). History window below is separate.
           </p>
         </div>
-        <StatusBadge label={accountStatusLabel(accountStatus)} status={semantic} />
+        <button
+          type="button"
+          onClick={onOpenGlobalBudget}
+          className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          title="Set Global Budget"
+        >
+          <StatusBadge label={accountStatusLabel(accountStatus)} status={semantic} />
+        </button>
       </div>
 
       <p
@@ -78,14 +103,18 @@ export default function DashboardHero({
       </p>
 
       {hasBudget ? (
-        <div className="mt-4 space-y-2">
+        <button
+          type="button"
+          onClick={onOpenGlobalBudget}
+          className="mt-4 w-full space-y-2 rounded-xl text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
           <div
             className="h-3.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"
             role="meter"
             aria-valuenow={Math.round(meterPct)}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label="Budget used"
+            aria-label="Global Budget used"
           >
             <div
               className={`h-full rounded-full transition-[width] duration-500 ${meterFill}`}
@@ -95,12 +124,7 @@ export default function DashboardHero({
           <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
             <span className="tabular-nums">
               {formatCurrency(totalCost)} of {formatCurrency(totalBudgetUsd)}
-              {budgetedProviderCount > 0 && (
-                <span className="ml-1">
-                  · across {budgetedProviderCount} provider budget
-                  {budgetedProviderCount === 1 ? "" : "s"}
-                </span>
-              )}
+              <span className="ml-1">· {budgetCaption}</span>
             </span>
             {remaining != null && (
               <span
@@ -116,23 +140,38 @@ export default function DashboardHero({
               </span>
             )}
           </div>
-        </div>
+          <p className="text-[11px] text-accent">Tap to edit Global Budget</p>
+        </button>
       ) : (
-        <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">
-          No monthly provider budgets configured yet. Tracked spend still appears
-          below — set budgets in Settings → Connections.
-        </p>
+        <button
+          type="button"
+          onClick={onOpenGlobalBudget}
+          className="mt-3 block w-full rounded-xl border border-dashed border-gray-300 px-3 py-3 text-left text-sm text-gray-600 hover:border-accent hover:bg-accent-soft dark:border-gray-600 dark:text-gray-300"
+        >
+          <span className="font-semibold text-gray-900 dark:text-gray-100">
+            No Global Budget set
+          </span>
+          <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+            Tap to set a portfolio monthly cap — suggested from project budgets
+            when available, or any dollar amount.
+          </span>
+        </button>
       )}
 
       <div className="mt-5 grid grid-cols-2 gap-3 border-t border-gray-100 pt-4 sm:grid-cols-3 dark:border-gray-700">
-        <div>
+        <button
+          type="button"
+          onClick={onOpenProjectedBreakdown}
+          className="rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
           <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
             {incomplete ? "Known-cost projection" : "Projected month end"}
           </p>
           <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-100">
             {formatCurrency(totalProjectedMonthlyCost)}
           </p>
-        </div>
+          <p className="mt-0.5 text-[11px] text-accent">View breakdown</p>
+        </button>
         <div>
           <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
             History window

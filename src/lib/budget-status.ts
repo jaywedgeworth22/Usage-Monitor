@@ -41,6 +41,7 @@ import {
   resolveOpenRouterVerifiedCash,
   resolveOpenRouterVerifiedCashConfig,
 } from "@/lib/openrouter-verified-cash";
+import { loadGlobalBudgetSnapshot } from "@/lib/global-budget";
 // Type-only import — erased at compile time, so it introduces NO runtime import
 // cycle with budget-controls.ts (which imports computeBudgetStatus from here).
 import type { BudgetBreachState } from "@/lib/budget-controls";
@@ -106,6 +107,13 @@ export interface ProviderBudgetStatus {
   linkedFixedDedupeUsd: number;
   fixedCostConflict: boolean;
   forecastedSubscriptionRenewalsUsd: number;
+  /**
+   * Remaining known subscription charges this UTC month (auto-renew walks +
+   * single next bill when autoRenew is false but nextRenewalAt is still ahead).
+   */
+  forecastedRenewals: ForecastedRenewalLine[];
+  /** Variable usage extrapolated to EOM (excludes fixed + known renewals). */
+  projectedVariableUsageUsd: number;
   spentUsd: number;
   projectedEomUsd: number;
   /**
@@ -163,7 +171,23 @@ export interface BudgetStatusResponse {
     percentUsed: number | null;
     overBudget: boolean;
     warning: boolean;
+    /** Explicit Global Budget override (null = use suggestion). */
+    globalMonthlyBudgetUsd: number | null;
+    suggestedGlobalBudgetUsd: number | null;
+    effectiveGlobalBudgetUsd: number | null;
+    globalBudgetSource: "override" | "suggested" | "none";
+    projectBudgetCount: number;
   };
+}
+
+/** One known future charge remaining in the current UTC month. */
+export interface ForecastedRenewalLine {
+  subscriptionId: string;
+  providerId: string;
+  name: string;
+  chargeUsd: number;
+  chargeAt: string;
+  autoRenew: boolean;
 }
 
 function monthStartUtc(now: Date): Date {
@@ -187,8 +211,75 @@ function monthLabel(now: Date): string {
   return `${y}-${m}`;
 }
 
+/**
+ * Known remaining bills this UTC month for Overview projection.
+ * - autoRenew: walk every renewal in (now, monthEnd]
+ * - !autoRenew: still include the single nextRenewalAt if it falls in that window
+ *   (so Grok $99/mo etc. show even when managed rows force autoRenew=false)
+ */
+export function planSubscriptionRenewals(
+  subscriptions: Array<{
+    id: string;
+    providerId: string;
+    name: string;
+    costUsd: number;
+    currency: string;
+    interval: string;
+    intervalCount: number;
+    nextRenewalAt: Date;
+    autoRenew: boolean;
+  }>,
+  now: Date
+): ForecastedRenewalLine[] {
+  const monthEnd = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
+  );
+  const lines: ForecastedRenewalLine[] = [];
+  for (const subscription of subscriptions) {
+    if (
+      subscription.currency.toUpperCase() !== "USD" ||
+      !isSubscriptionInterval(subscription.interval) ||
+      !(subscription.costUsd > 0)
+    ) {
+      continue;
+    }
+    const intervalCount = Math.max(1, Math.trunc(subscription.intervalCount));
+    let renewal = subscription.nextRenewalAt;
+    if (subscription.autoRenew) {
+      let guard = 0;
+      while (renewal < monthEnd && guard < 240) {
+        if (renewal > now) {
+          lines.push({
+            subscriptionId: subscription.id,
+            providerId: subscription.providerId,
+            name: subscription.name,
+            chargeUsd: subscription.costUsd,
+            chargeAt: renewal.toISOString(),
+            autoRenew: true,
+          });
+        }
+        renewal = advancePeriod(renewal, subscription.interval, intervalCount);
+        guard += 1;
+      }
+    } else if (renewal > now && renewal < monthEnd) {
+      lines.push({
+        subscriptionId: subscription.id,
+        providerId: subscription.providerId,
+        name: subscription.name,
+        chargeUsd: subscription.costUsd,
+        chargeAt: renewal.toISOString(),
+        autoRenew: false,
+      });
+    }
+  }
+  return lines;
+}
+
 function forecastSubscriptionRenewals(
   subscriptions: Array<{
+    id: string;
+    providerId: string;
+    name: string;
     costUsd: number;
     currency: string;
     interval: string;
@@ -198,31 +289,10 @@ function forecastSubscriptionRenewals(
   }>,
   now: Date
 ): number {
-  const monthEnd = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
+  return planSubscriptionRenewals(subscriptions, now).reduce(
+    (sum, line) => sum + line.chargeUsd,
+    0
   );
-  let total = 0;
-  for (const subscription of subscriptions) {
-    if (
-      !subscription.autoRenew ||
-      subscription.currency.toUpperCase() !== "USD" ||
-      !isSubscriptionInterval(subscription.interval)
-    ) {
-      continue;
-    }
-    let renewal = subscription.nextRenewalAt;
-    let guard = 0;
-    while (renewal < monthEnd && guard < 240) {
-      if (renewal > now) total += subscription.costUsd;
-      renewal = advancePeriod(
-        renewal,
-        subscription.interval,
-        Math.max(1, Math.trunc(subscription.intervalCount))
-      );
-      guard += 1;
-    }
-  }
-  return total;
 }
 
 // ---------------------------------------------------------------------------
@@ -740,6 +810,7 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
           },
           select: {
             id: true,
+            name: true,
             costUsd: true,
             currency: true,
             interval: true,
@@ -1367,9 +1438,23 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       providerCanonicalKey: canonicalProviderKey(p.name),
       geminiBillingIncomplete,
     });
-    const forecastedSubscriptionRenewalsUsd = forecastSubscriptionRenewals(
-      p.subscriptions,
+    const forecastedRenewals = planSubscriptionRenewals(
+      p.subscriptions.map((sub) => ({
+        id: sub.id,
+        providerId: p.id,
+        name: sub.name,
+        costUsd: sub.costUsd,
+        currency: sub.currency,
+        interval: sub.interval,
+        intervalCount: sub.intervalCount,
+        nextRenewalAt: sub.nextRenewalAt,
+        autoRenew: sub.autoRenew,
+      })),
       now
+    );
+    const forecastedSubscriptionRenewalsUsd = forecastedRenewals.reduce(
+      (sum, line) => sum + line.chargeUsd,
+      0
     );
     // Receipt funding is a lumpy cash event, not a consumption sample (S2).
     // Prepaid receipt cash is FUNDING COVERAGE for the observed usage — it
@@ -1650,6 +1735,8 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       linkedFixedDedupeUsd: reconciled.linkedFixedDedupeUsd,
       fixedCostConflict: reconciled.fixedCostConflict,
       forecastedSubscriptionRenewalsUsd,
+      forecastedRenewals,
+      projectedVariableUsageUsd,
       spentUsd,
       projectedEomUsd,
       projectedRunoutDate: runout.runoutDate?.toISOString() ?? null,
@@ -1681,6 +1768,9 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
     (sum, provider) => sum + provider.estimatedApiEquivalentUsd,
     0
   );
+  // Global / portfolio budget for Overview hero — freeform override preferred
+  // over sum of project budgets; independent of per-provider plan budgets.
+  const globalBudget = await loadGlobalBudgetSnapshot();
 
   return {
     ok: true,
@@ -1697,6 +1787,11 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       percentUsed: totalBudgetUsd > 0 ? budgetedSpentUsd / totalBudgetUsd : null,
       overBudget: providerStatuses.some((p) => p.status === "exceeded"),
       warning: providerStatuses.some((p) => p.status === "warning"),
+      globalMonthlyBudgetUsd: globalBudget.globalMonthlyBudgetUsd,
+      suggestedGlobalBudgetUsd: globalBudget.suggestedGlobalBudgetUsd,
+      effectiveGlobalBudgetUsd: globalBudget.effectiveGlobalBudgetUsd,
+      globalBudgetSource: globalBudget.globalBudgetSource,
+      projectBudgetCount: globalBudget.projectBudgetCount,
     },
   };
 }

@@ -7,6 +7,7 @@ import {
   runUsageMaintenance,
 } from "@/lib/usage-maintenance";
 import { ensureAgentSyncProviderSeeded } from "@/lib/ensure-agent-sync-provider";
+import { ensureRoicProviderSeeded } from "@/lib/ensure-roic-provider";
 import {
   bootstrapStGeminiCredentialToInfisical,
   syncProviderCredentialsFromInfisical,
@@ -367,6 +368,7 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
 
   const run = (async () => {
     await withInternalUsageWriteAdmission(() => ensureAgentSyncProviderSeeded());
+    await withInternalUsageWriteAdmission(() => ensureRoicProviderSeeded());
     // The default-off, exact ST Gemini bootstrap must run before the normal
     // one-way Infisical pull so a successful create can be adopted and bound
     // in this same provider-maintenance pass.

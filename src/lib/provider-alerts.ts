@@ -227,19 +227,12 @@ export function buildProviderAlertState(
         severity: "warning",
         message: "No usage snapshot has been fetched yet.",
       });
-    } else {
-      const fetchedAt = new Date(latestSnapshot.fetchedAt);
-      if (
-        now.getTime() >
-        providerSnapshotStaleAt(fetchedAt, input.refreshIntervalMin).getTime()
-      ) {
-        alerts.push({
-          code: "stale_snapshot",
-          severity: "info",
-          message: "Latest usage snapshot is stale.",
-        });
-      }
     }
+    // Intentionally do NOT emit `stale_snapshot` user alerts. The poll loop
+    // should refresh quietly; nagging operators about age is noise when a
+    // blind/push provider is permanently "stale" by design, and when a live
+    // poller can simply fetch again. Keep the code in PROVIDER_ALERT_CODES
+    // for historical incidents / env routing docs.
   }
 
   if (plan?.monthlyBudgetUsd != null && plan.monthlyBudgetUsd > 0) {

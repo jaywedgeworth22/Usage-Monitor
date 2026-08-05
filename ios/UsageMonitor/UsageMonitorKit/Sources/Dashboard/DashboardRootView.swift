@@ -84,10 +84,11 @@ public struct DashboardRootView: View {
 
     private func loaded(_ data: DashboardViewData) -> some View {
         RefreshableScrollView(onRefresh: { await refresh() }) {
+            // Only surface a banner when a refresh *failed*. Quietly stale
+            // cache age alone is noise — the footer already shows "Updated …"
+            // and load/refresh will pull fresh data without nagging.
             if let error = store.lastError {
                 StaleDataBanner(error: error)
-            } else if let staleness = budgetStaleness, staleness.isStale() {
-                BudgetStalenessBanner(staleness: staleness)
             }
 
             DashboardContentView(

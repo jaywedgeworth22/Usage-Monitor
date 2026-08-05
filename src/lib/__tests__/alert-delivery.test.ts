@@ -1390,13 +1390,15 @@ describe("alert delivery", () => {
     expect(notification.evidenceWatermarkState).toBe("clear");
   });
 
-  it("reopens stale-snapshot evidence when the unchanged fresh snapshot crosses its deterministic deadline", async () => {
+  it("does not emit stale_snapshot user alerts when a snapshot ages past its deadline", async () => {
+    // Intentional product choice: poll quietly; age-only stale_snapshot is noise
+    // for blind/push providers and recoverable live pollers. Code stays in
+    // PROVIDER_ALERT_CODES for historical incidents / env routing docs.
     const firstSnapshotAt = new Date("2026-07-18T08:00:00.000Z");
-    const freshSnapshotAt = new Date("2026-07-20T11:00:00.000Z");
     const provider = await prisma.provider.create({
       data: {
-        name: "stale-snapshot-recurrence",
-        displayName: "Stale Snapshot Recurrence",
+        name: "stale-snapshot-quiet",
+        displayName: "Stale Snapshot Quiet",
         type: "builtin",
         refreshIntervalMin: 60,
         snapshots: { create: { fetchedAt: firstSnapshotAt } },
@@ -1404,52 +1406,27 @@ describe("alert delivery", () => {
     });
     const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
     const config = {
-      channels: [{ kind: "webhook" as const, url: "https://alerts.example/stale-recurrence" }],
+      channels: [{ kind: "webhook" as const, url: "https://alerts.example/stale-quiet" }],
       minSeverity: "warning" as const,
       reminderHours: 24,
       maxAttempts: 1,
       severityOverrides: { stale_snapshot: "warning" as const },
     };
 
+    // ~50h old with 60min interval would have been stale under the old emitter.
     expect(
       await deliverProviderAlerts({
         now: new Date("2026-07-20T12:00:00.000Z"),
         config,
         fetchImpl: fetchMock,
       })
-    ).toMatchObject({ sent: 1 });
-
-    await prisma.usageSnapshot.create({
-      data: { providerId: provider.id, fetchedAt: freshSnapshotAt },
-    });
+    ).toMatchObject({ sent: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(
-      await deliverProviderAlerts({
-        now: new Date("2026-07-20T12:30:00.000Z"),
-        config,
-        fetchImpl: fetchMock,
+      await prisma.providerAlertNotification.findUnique({
+        where: { stateKey: `${provider.id}:stale_snapshot` },
       })
-    ).toMatchObject({ resolved: 1 });
-
-    expect(
-      await deliverProviderAlerts({
-        now: new Date("2026-07-21T11:00:00.001Z"),
-        config,
-        fetchImpl: fetchMock,
-      })
-    ).toMatchObject({ sent: 1 });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const notification = await prisma.providerAlertNotification.findUniqueOrThrow({
-      where: { stateKey: `${provider.id}:stale_snapshot` },
-    });
-    expect(notification).toMatchObject({
-      incidentGeneration: 2,
-      evidenceSourceAt: freshSnapshotAt,
-      evidenceWatermarkState: "active",
-      resolvedAt: null,
-    });
-    expect(notification.evidenceWatermarkAt).toEqual(
-      new Date("2026-07-21T11:00:00.000Z")
-    );
+    ).toBeNull();
   });
 
   it("reopens no-snapshot evidence after disable and re-enable revisions", async () => {

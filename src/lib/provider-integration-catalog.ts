@@ -268,6 +268,7 @@ const CATALOG: Record<CatalogProviderName, ProviderIntegrationProfile> = {
     source: "src/lib/adapters/pinecone.ts",
   }),
   voyage: defineBlindProfile({ name: "voyage", displayName: "Voyage AI", category: "Vector DB", reason: "No documented non-billable account, credit, invoice, or subscription endpoint is available.", source: "src/lib/adapters/voyage.ts" }),
+  roic: defineBlindProfile({ name: "roic", displayName: "ROIC.ai", category: "Market Data", reason: "No documented non-billable ROIC.ai usage/billing API is wired; track plan cost via Subscription or push telemetry.", source: "src/lib/adapters/index.ts" }),
   fmp: defineBlindProfile({ name: "fmp", displayName: "FMP", category: "Market Data", reason: "Usage and billing are dashboard-only; the monitor does not consume a market-data call to test the key.", source: "src/lib/adapters/fmp.ts" }),
   finnhub: defineBlindProfile({ name: "finnhub", displayName: "Finnhub", category: "Market Data", reason: "No documented account usage or billing endpoint is available.", source: "src/lib/adapters/finnhub.ts" }),
   alphavantage: defineBlindProfile({ name: "alphavantage", displayName: "Alpha Vantage", category: "Market Data", reason: "No documented account usage or billing endpoint is available.", source: "src/lib/adapters/alphavantage.ts" }),

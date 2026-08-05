@@ -54,6 +54,8 @@ const PROVIDER_ALIASES: Readonly<Record<string, string>> = {
   quiver: "quiver-quant",
   quiverquant: "quiver-quant",
   quiverquantitative: "quiver-quant",
+  roic: "roic",
+  roicai: "roic",
   rendercom: "render",
   twelvedata: "twelvedata",
   unusualwhales: "unusual-whales",

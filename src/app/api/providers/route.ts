@@ -462,6 +462,9 @@ export async function GET(request: NextRequest) {
       fixedCostConflict: canonicalBudget?.fixedCostConflict ?? false,
       forecastedSubscriptionRenewalsUsd:
         canonicalBudget?.forecastedSubscriptionRenewalsUsd ?? 0,
+      forecastedRenewals: canonicalBudget?.forecastedRenewals ?? [],
+      projectedVariableUsageUsd:
+        canonicalBudget?.projectedVariableUsageUsd ?? 0,
       projectedEomUsd:
         canonicalBudget?.projectedEomUsd ??
         (canonicalBudget != null ? alertState.projectedEomUsd : null),

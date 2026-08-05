@@ -22,7 +22,7 @@ describe("DashboardHero", () => {
     expect(html).toContain("August 2026 spend");
     expect(html).toContain("$42.50");
     expect(html).toContain("On track");
-    expect(html).toContain("across 3 provider budgets");
+    expect(html).toContain("Across 3 provider budgets");
     expect(html).toContain("History window");
     expect(html).toContain("Past 30 Days");
     expect(html).toContain("Charts &amp; telemetry only");

@@ -470,10 +470,11 @@ describe("computeProjectBudgetStatus stale-while-revalidate cache", () => {
       new Date("2026-11-10T10:00:00.000Z")
     );
 
-    // prisma.project.findMany is only ever called from
-    // computeProjectBudgetStatusUncached, never from computeBudgetStatus, so
-    // this isolates the PROJECT cache's own dedup from the nested (already
-    // separately tested) budget-status cache.
+    // project.findMany is hit twice on a single uncached project compute:
+    //   1) loadGlobalBudgetSnapshot inside computeBudgetStatus (suggested sum)
+    //   2) computeProjectBudgetStatusUncached (full projects + allocations)
+    // Concurrent cold callers must still share one uncached path (2 calls total,
+    // not 4). Isolates PROJECT cache dedup; nested provider cache is separate.
     const findManySpy = vi.spyOn(prisma.project, "findMany");
 
     const [first, second] = await Promise.all([
@@ -481,7 +482,7 @@ describe("computeProjectBudgetStatus stale-while-revalidate cache", () => {
       computeProjectBudgetStatus(NOW),
     ]);
 
-    expect(findManySpy).toHaveBeenCalledTimes(1);
+    expect(findManySpy).toHaveBeenCalledTimes(2);
     expect(second).toBe(first);
     expect(first.providers.find((p) => p.id === provider.id)?.spentUsd).toBe(9);
   });
