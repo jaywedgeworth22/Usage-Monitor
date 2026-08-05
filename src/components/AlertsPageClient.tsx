@@ -54,37 +54,49 @@ export default function AlertsPageClient() {
     void load();
   }, [load]);
 
-  const attentionItems = useMemo(
-    () =>
-      providers
-        .flatMap((provider) =>
-          (provider?.alerts || [])
-            .filter((alert: any) => alert?.severity !== "info")
-            .map((alert: any) => ({
-              provider: {
-                id: String(provider.id),
-                displayName: String(provider.displayName || provider.name || "Provider"),
-                label: (provider.label ?? null) as string | null,
-              },
-              alert: {
-                severity: (alert.severity === "critical" || alert.severity === "warning"
-                  ? alert.severity
-                  : "info") as "critical" | "warning" | "info",
-                message: String(alert.message || ""),
-                code: typeof alert.code === "string" ? alert.code : undefined,
-              },
-            }))
-        )
-        .sort((left, right) => {
-          const severityRank = { critical: 0, warning: 1, info: 2 } as const;
-          return (
-            severityRank[left.alert.severity] - severityRank[right.alert.severity] ||
-            left.provider.displayName.localeCompare(right.provider.displayName) ||
-            left.alert.message.localeCompare(right.alert.message)
-          );
-        }),
-    [providers]
-  );
+  type AttentionSeverity = "critical" | "warning" | "info";
+  type AttentionItem = {
+    provider: { id: string; displayName: string; label: string | null };
+    alert: { severity: AttentionSeverity; message: string; code?: string };
+  };
+
+  const attentionItems = useMemo(() => {
+    const severityRank: Record<AttentionSeverity, number> = {
+      critical: 0,
+      warning: 1,
+      info: 2,
+    };
+    const items: AttentionItem[] = [];
+    for (const provider of providers) {
+      const alerts = Array.isArray(provider?.alerts) ? provider.alerts : [];
+      for (const alert of alerts) {
+        if (!alert || alert.severity === "info") continue;
+        const severity: AttentionSeverity =
+          alert.severity === "critical" || alert.severity === "warning"
+            ? alert.severity
+            : "warning";
+        items.push({
+          provider: {
+            id: String(provider.id),
+            displayName: String(provider.displayName || provider.name || "Provider"),
+            label: provider.label != null ? String(provider.label) : null,
+          },
+          alert: {
+            severity,
+            message: String(alert.message || ""),
+            code: typeof alert.code === "string" ? alert.code : undefined,
+          },
+        });
+      }
+    }
+    items.sort(
+      (left, right) =>
+        severityRank[left.alert.severity] - severityRank[right.alert.severity] ||
+        left.provider.displayName.localeCompare(right.provider.displayName) ||
+        left.alert.message.localeCompare(right.alert.message)
+    );
+    return items;
+  }, [providers]);
 
   return (
     <div className="space-y-6">
