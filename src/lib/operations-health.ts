@@ -1,3 +1,5 @@
+import type { R2FleetSummary } from "@/lib/r2-usage";
+
 const SOCRATIC_HEALTH_URL = "https://socratictrade.com/api/health";
 const RECEIPT_INBOX_SUMMARY_URL = "https://receipt-inbox.jays.services/v1/receipts/summary";
 const MAX_HEALTH_RESPONSE_BYTES = 64 * 1024;
@@ -62,6 +64,8 @@ export interface SocraticInfrastructureSummary {
 export interface OperationsHealthSummary {
   receiptInbox: ReceiptInboxSummary;
   socraticInfrastructure: SocraticInfrastructureSummary;
+  /** Cloudflare R2 free-tier snapshot for UM / ST / CT (null if fetch failed). */
+  r2Fleet: R2FleetSummary | null;
   fetchedAt: string;
 }
 
@@ -327,11 +331,21 @@ export async function fetchOperationsHealth(): Promise<OperationsHealthSummary> 
   if (operationsCache && operationsCache.expiresAt > now) return operationsCache.value;
   if (operationsInFlight) return operationsInFlight;
   operationsInFlight = (async () => {
-    const [receiptInbox, socraticInfrastructure] = await Promise.all([
+    const { fetchR2FleetSummary } = await import("@/lib/r2-usage");
+    const [receiptInbox, socraticInfrastructure, r2Fleet] = await Promise.all([
       fetchReceiptInboxSummary(),
       fetchSocraticInfrastructureSummary(),
+      fetchR2FleetSummary().catch((error) => {
+        console.error("[operations] R2 fleet summary failed:", error);
+        return null;
+      }),
     ]);
-    const value = { receiptInbox, socraticInfrastructure, fetchedAt: new Date().toISOString() };
+    const value = {
+      receiptInbox,
+      socraticInfrastructure,
+      r2Fleet,
+      fetchedAt: new Date().toISOString(),
+    };
     operationsCache = { expiresAt: Date.now() + OPERATIONS_CACHE_TTL_MS, value };
     return value;
   })();

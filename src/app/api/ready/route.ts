@@ -272,12 +272,12 @@ export async function GET(request: Request) {
   const schedulerRequired =
     process.env.USAGE_SCHEDULER_ENABLED?.trim().toLowerCase() !== "false";
   const schedulerReady = !schedulerRequired || schedulerReadiness.ok;
-  // Backup: required implies active env flag. When a replica side-channel is
-  // configured (Wave C / C4), replicaOk === false fails ready even if
-  // LITESTREAM_ACTIVE is true so Garage/R2 death is not silent. An env-only
-  // claim (no side-channel at all) is not proof the replica is advancing, so
-  // it no longer passes either unless verification is explicitly opted out.
-  const backupReady =
+  // Backup health is honest in checks.backup, but does NOT gate overall `ok`.
+  // This app's money-truth is the live SQLite on /data; R2 Litestream is
+  // disaster-recovery only and free-tier kill switches / replica lag must not
+  // mark the product "down" or trip uptime monitors (owner 2026-08-05).
+  // Local pre-migration snapshots still run at deploy time regardless.
+  const backupHealthy =
     !backup.required ||
     (backup.active &&
       backup.replicaOk !== false &&
@@ -287,13 +287,11 @@ export async function GET(request: Request) {
     database.ok &&
     databaseFile.ok &&
     schedulerReady &&
-    backupReady &&
     startupReady;
   const databaseOnlyFailure =
     !database.ok &&
     databaseFile.ok &&
     schedulerReady &&
-    backupReady &&
     startupReady;
   // A newly-started process gets a bounded window to finish opening a large
   // SQLite/Litestream database before reporting not_ready, so a dependency
@@ -349,8 +347,10 @@ export async function GET(request: Request) {
           schedulerReadiness.providerFetchDegradedTickThreshold,
         ...scheduler,
       },
+      // Observability only — never part of `ok` (see backupHealthy comment above).
       backup: {
-        ok: backupReady,
+        ok: backupHealthy,
+        gatesOverallOk: false,
         ...backup,
       },
       startup: {

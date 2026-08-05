@@ -145,25 +145,25 @@ describe("GET /api/ready", () => {
     });
   });
 
-  it("fails strict readiness for required env-only backup until verification is opted out", async () => {
+  it("reports required env-only backup as unhealthy without failing overall ready", async () => {
     vi.stubEnv("LITESTREAM_REQUIRED", "true");
     vi.stubEnv("LITESTREAM_ACTIVE", "true");
     // LITESTREAM_REQUIRED also mandates the verified startup wrapper; satisfy
-    // it so this test isolates the backup gate.
+    // it so this test isolates backup observability (no longer an ok-gate).
     vi.stubEnv("APP_STARTUP_WRAPPER", "start-with-litestream-v2");
 
-    // No replica side-channel configured: an env-only claim is no longer
-    // proof the replica is advancing, so a required backup fails ready.
+    // No replica side-channel: backup check is red, but overall ready stays green.
     const unverifiedResponse = await GET(
       new Request("https://usage.jays.services/api/ready?strict=1")
     );
-    expect(unverifiedResponse.status).toBe(503);
+    expect(unverifiedResponse.status).toBe(200);
     await expect(unverifiedResponse.json()).resolves.toMatchObject({
-      ok: false,
-      status: "not_ready",
+      ok: true,
+      status: "ready",
       checks: {
         backup: {
           ok: false,
+          gatesOverallOk: false,
           required: true,
           active: true,
           envOnly: true,
@@ -173,8 +173,7 @@ describe("GET /api/ready", () => {
       },
     });
 
-    // The explicit escape hatch (rollback hosts; the one deploy that installs
-    // the status-file producer) restores the previous env-only behavior.
+    // Explicit verification opt-out still flips checks.backup.ok to true.
     vi.stubEnv("LITESTREAM_REPLICA_VERIFICATION_REQUIRED", "false");
     const optedOutResponse = await GET(
       new Request("https://usage.jays.services/api/ready?strict=1")
@@ -184,7 +183,7 @@ describe("GET /api/ready", () => {
       ok: true,
       status: "ready",
       checks: {
-        backup: { ok: true, envOnly: true, verificationRequired: false },
+        backup: { ok: true, gatesOverallOk: false, envOnly: true, verificationRequired: false },
       },
     });
   });
@@ -550,17 +549,19 @@ describe("GET /api/ready", () => {
     });
   });
 
-  it("reports backup not-ready without failing HTTP liveness", async () => {
+  it("reports backup unhealthy without failing overall ready or liveness", async () => {
     vi.stubEnv("LITESTREAM_REQUIRED", "true");
     vi.stubEnv("LITESTREAM_ACTIVE", "false");
+    vi.stubEnv("APP_STARTUP_WRAPPER", "start-with-litestream-v2");
 
     const response = await GET(READY_REQUEST);
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ ok: false, status: "not_ready" });
+    expect(body).toMatchObject({ ok: true, status: "ready" });
     expect(body.checks.backup).toMatchObject({
       ok: false,
+      gatesOverallOk: false,
       required: true,
       active: false,
     });

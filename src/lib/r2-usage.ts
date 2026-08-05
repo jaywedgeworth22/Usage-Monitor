@@ -993,6 +993,248 @@ export async function fetchR2UsageMetrics(
   return parseR2GraphqlUsage(payload);
 }
 
+// ── Fleet (3 Cloudflare accounts = 3 free tiers) ─────────────────────────────
+// Owner ops hub: show ST / CT / UM R2 free-tier side-by-side on the dashboard.
+// Kill-switch still only runs against THIS app's Jay/UM account via runR2UsageCheck.
+
+export type R2FleetAppId = "um" | "st" | "ct";
+
+export interface R2FleetAccountConfig {
+  id: R2FleetAppId;
+  label: string;
+  accountId: string;
+  apiToken: string;
+}
+
+export interface R2FleetAccountSnapshot {
+  id: R2FleetAppId;
+  label: string;
+  /** Last 8 chars of account id for operator correlation (no secrets). */
+  accountIdSuffix: string | null;
+  configured: boolean;
+  status: "ok" | "error" | "unconfigured";
+  error?: string;
+  storage: R2MetricStatus | null;
+  classA: R2MetricStatus | null;
+  classB: R2MetricStatus | null;
+  overallOnTrackToExceed70Pct: boolean;
+  metricsSource: R2MetricsSource | "unconfigured";
+  buckets: Array<{ bucketName: string; bytes: number }>;
+  /** True only for the Usage Monitor (Jay) account when this host's kill flag is set. */
+  autoDisabled?: boolean;
+  litestreamUsesR2?: boolean;
+}
+
+export interface R2FleetSummary {
+  configured: boolean;
+  thresholdPct: number;
+  freeTier: {
+    storageBytes: number;
+    classAOps: number;
+    classBOps: number;
+  };
+  accounts: R2FleetAccountSnapshot[];
+  anyOnTrackToExceed: boolean;
+  fetchedAt: string;
+  /** Local litestream/kill state for this host (UM only). */
+  localBackup: {
+    autoDisabled: boolean;
+    litestreamUsesR2: boolean;
+  };
+}
+
+const FLEET_SLOTS: Array<{
+  id: R2FleetAppId;
+  label: string;
+  accountEnv: string[];
+  tokenEnv: string[];
+}> = [
+  {
+    id: "um",
+    label: "Usage Monitor",
+    accountEnv: ["R2_USAGE_ACCOUNT_ID", "CLOUDFLARE_JAY_ACCOUNT_ID", "CLOUDFLARE_ACCOUNT_ID"],
+    tokenEnv: ["R2_USAGE_API_TOKEN", "CLOUDFLARE_JAY_API_TOKEN", "CLOUDFLARE_API_TOKEN"],
+  },
+  {
+    id: "st",
+    label: "Socratic Trade",
+    accountEnv: ["CLOUDFLARE_ST_ACCOUNT_ID"],
+    tokenEnv: ["CLOUDFLARE_ST_API_TOKEN"],
+  },
+  {
+    id: "ct",
+    label: "Congress Trade",
+    accountEnv: ["CLOUDFLARE_CT_ACCOUNT_ID"],
+    tokenEnv: ["CLOUDFLARE_CT_API_TOKEN"],
+  },
+];
+
+function firstEnv(
+  env: Record<string, string | undefined>,
+  keys: string[]
+): string {
+  for (const k of keys) {
+    const v = env[k]?.trim();
+    if (v) return v;
+  }
+  return "";
+}
+
+/**
+ * Load any configured fleet account credentials (ST / CT / UM).
+ * Unset slots are skipped so a subset still works.
+ */
+export function loadR2FleetAccounts(
+  env: Record<string, string | undefined> = process.env
+): R2FleetAccountConfig[] {
+  const out: R2FleetAccountConfig[] = [];
+  for (const slot of FLEET_SLOTS) {
+    const accountId = firstEnv(env, slot.accountEnv);
+    const apiToken = firstEnv(env, slot.tokenEnv);
+    if (accountId && apiToken) {
+      out.push({
+        id: slot.id,
+        label: slot.label,
+        accountId,
+        apiToken,
+      });
+    }
+  }
+  return out;
+}
+
+function emptyMetric(): R2MetricStatus {
+  return {
+    actual: 0,
+    limit: 0,
+    mtdPct: 0,
+    projected: 0,
+    projectedPct: 0,
+    onTrackToExceed: false,
+  };
+}
+
+function unconfiguredAccount(
+  id: R2FleetAppId,
+  label: string
+): R2FleetAccountSnapshot {
+  return {
+    id,
+    label,
+    accountIdSuffix: null,
+    configured: false,
+    status: "unconfigured",
+    storage: null,
+    classA: null,
+    classB: null,
+    overallOnTrackToExceed70Pct: false,
+    metricsSource: "unconfigured",
+    buckets: [],
+  };
+}
+
+/**
+ * Read-only fleet snapshot for the Ops dashboard. Does **not** engage the
+ * kill-switch (that remains UM-only in {@link runR2UsageCheck}).
+ */
+export async function fetchR2FleetSummary(
+  fetchImpl: typeof fetch = fetch,
+  now: Date = new Date(),
+  env: Record<string, string | undefined> = process.env
+): Promise<R2FleetSummary> {
+  const configured = loadR2FleetAccounts(env);
+  const byId = new Map(configured.map((a) => [a.id, a]));
+  const accounts: R2FleetAccountSnapshot[] = [];
+
+  for (const slot of FLEET_SLOTS) {
+    const cfg = byId.get(slot.id);
+    if (!cfg) {
+      accounts.push(unconfiguredAccount(slot.id, slot.label));
+      continue;
+    }
+    try {
+      const metrics = await fetchR2UsageMetrics(
+        { accountId: cfg.accountId, apiToken: cfg.apiToken },
+        now,
+        fetchImpl
+      );
+      // For UM only, prefer live S3 list for storage when credentials match
+      // this host's litestream bucket (authoritative inventory).
+      let storageBytes = metrics.storageBytes;
+      let buckets = metrics.buckets;
+      let source: R2MetricsSource = "cloudflare_graphql";
+      if (slot.id === "um") {
+        const live = await fetchLiveR2StorageViaS3(fetchImpl, now);
+        if (live) {
+          storageBytes = live.storageBytes;
+          buckets = live.buckets;
+          source = "live_s3_storage+graphql_ops";
+        }
+      }
+      const assessment = assessR2Usage(
+        storageBytes,
+        metrics.classAOps,
+        metrics.classBOps,
+        DEFAULT_R2_FREE_TIER_LIMITS,
+        now,
+        { metricsSource: source, buckets }
+      );
+      accounts.push({
+        id: slot.id,
+        label: slot.label,
+        accountIdSuffix: cfg.accountId.slice(-8),
+        configured: true,
+        status: "ok",
+        storage: assessment.storage,
+        classA: assessment.classA,
+        classB: assessment.classB,
+        overallOnTrackToExceed70Pct: assessment.overallOnTrackToExceed70Pct,
+        metricsSource: source,
+        buckets: buckets.map((b) => ({
+          bucketName: b.bucketName,
+          bytes: b.bytes,
+        })),
+        autoDisabled: slot.id === "um" ? isR2AutoDisabled() : undefined,
+        litestreamUsesR2:
+          slot.id === "um" ? isLitestreamR2Endpoint() : undefined,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      accounts.push({
+        id: slot.id,
+        label: slot.label,
+        accountIdSuffix: cfg.accountId.slice(-8),
+        configured: true,
+        status: "error",
+        error: message,
+        storage: emptyMetric(),
+        classA: emptyMetric(),
+        classB: emptyMetric(),
+        overallOnTrackToExceed70Pct: false,
+        metricsSource: "unavailable",
+        buckets: [],
+      });
+    }
+  }
+
+  return {
+    configured: configured.length > 0,
+    thresholdPct: R2_THRESHOLD_PCT,
+    freeTier: {
+      storageBytes: DEFAULT_R2_FREE_TIER_LIMITS.storageBytes,
+      classAOps: DEFAULT_R2_FREE_TIER_LIMITS.classAOps,
+      classBOps: DEFAULT_R2_FREE_TIER_LIMITS.classBOps,
+    },
+    accounts,
+    anyOnTrackToExceed: accounts.some((a) => a.overallOnTrackToExceed70Pct),
+    fetchedAt: now.toISOString(),
+    localBackup: {
+      autoDisabled: isR2AutoDisabled(),
+      litestreamUsesR2: isLitestreamR2Endpoint(),
+    },
+  };
+}
+
 export async function runR2UsageCheck(
   fetchImpl: typeof fetch = fetch,
   now: Date = new Date()

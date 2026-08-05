@@ -14,6 +14,8 @@ import {
   classifyR2Action,
   isLitestreamR2Endpoint,
   resolveR2UsageCredentials,
+  loadR2FleetAccounts,
+  fetchR2FleetSummary,
   r2FreeTierFailClosedRequired,
   graphqlStorageSamplesAreFresh,
   DEFAULT_R2_FREE_TIER_LIMITS,
@@ -198,6 +200,31 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(classifyR2Action("GetObject")).toBe("B");
     expect(classifyR2Action("HeadBucket")).toBe("B");
     expect(classifyR2Action("SomeFutureWriteOp")).toBe("A");
+  });
+
+  it("loads fleet accounts for any configured ST/CT/UM env pair", () => {
+    const accounts = loadR2FleetAccounts({
+      CLOUDFLARE_JAY_ACCOUNT_ID: "jay-account-id-12345678",
+      CLOUDFLARE_JAY_API_TOKEN: "jay-token",
+      CLOUDFLARE_ST_ACCOUNT_ID: "st-account-id-abcdef01",
+      CLOUDFLARE_ST_API_TOKEN: "st-token",
+    });
+    expect(accounts.map((a) => a.id)).toEqual(["um", "st"]);
+    expect(accounts.find((a) => a.id === "um")?.label).toBe("Usage Monitor");
+    expect(accounts.find((a) => a.id === "st")?.label).toBe("Socratic Trade");
+  });
+
+  it("returns unconfigured fleet slots without calling GraphQL", async () => {
+    const mockFetch = vi.fn();
+    const summary = await fetchR2FleetSummary(
+      mockFetch as unknown as typeof fetch,
+      new Date("2026-08-05T12:00:00.000Z"),
+      {}
+    );
+    expect(summary.configured).toBe(false);
+    expect(summary.accounts).toHaveLength(3);
+    expect(summary.accounts.every((a) => a.status === "unconfigured")).toBe(true);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("detects Cloudflare R2 endpoints and ignores Garage", () => {

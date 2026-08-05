@@ -34,6 +34,26 @@ describe("operations health", () => {
   beforeEach(() => {
     process.env = { ...ORIGINAL_ENV };
     delete process.env.RECEIPT_INBOX_READ_TOKEN;
+    // Fleet R2 GraphQL must not fire during these unit tests.
+    for (const key of [
+      "R2_USAGE_ACCOUNT_ID",
+      "R2_USAGE_API_TOKEN",
+      "CLOUDFLARE_JAY_ACCOUNT_ID",
+      "CLOUDFLARE_JAY_API_TOKEN",
+      "CLOUDFLARE_ACCOUNT_ID",
+      "CLOUDFLARE_API_TOKEN",
+      "CLOUDFLARE_ST_ACCOUNT_ID",
+      "CLOUDFLARE_ST_API_TOKEN",
+      "CLOUDFLARE_CT_ACCOUNT_ID",
+      "CLOUDFLARE_CT_API_TOKEN",
+      "LITESTREAM_S3_ENDPOINT",
+      "AWS_S3_ENDPOINT",
+      "LITESTREAM_S3_ACCESS_KEY_ID",
+      "LITESTREAM_S3_SECRET_ACCESS_KEY",
+      "LITESTREAM_S3_BUCKET",
+    ]) {
+      delete process.env[key];
+    }
     resetOperationsHealthCacheForTests();
     vi.restoreAllMocks();
   });
@@ -80,6 +100,8 @@ describe("operations health", () => {
     const result = await fetchOperationsHealth();
     expect(result.receiptInbox.state).toBe("unconfigured");
     expect(result.receiptInbox.configured).toBe(false);
+    expect(result.r2Fleet?.configured).toBe(false);
+    expect(result.r2Fleet?.accounts).toHaveLength(3);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toBe("https://socratictrade.com/api/health");
   });

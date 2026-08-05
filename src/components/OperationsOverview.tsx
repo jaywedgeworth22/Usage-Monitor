@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Inbox, RefreshCw, Server } from "lucide-react";
+import { ChevronDown, Cloud, Inbox, RefreshCw, Server } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type {
   OperationsHealthSummary,
@@ -8,6 +8,7 @@ import type {
   ReceiptInboxSummary,
   SocraticInfrastructureSummary,
 } from "@/lib/operations-health";
+import type { R2FleetAccountSnapshot, R2FleetSummary } from "@/lib/r2-usage";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -24,6 +25,8 @@ export function markOperationsStale(previous: OperationsHealthSummary): Operatio
       state: "stale",
       error: "dashboard_refresh_failed",
     },
+    // Keep last R2 numbers; null out only if we never had them.
+    r2Fleet: previous.r2Fleet,
   };
 }
 
@@ -131,6 +134,160 @@ export function ReceiptInboxCard({ data }: { data: ReceiptInboxSummary }) {
   );
 }
 
+function formatGiB(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes)) return "—";
+  return `${(bytes / 1024 ** 3).toFixed(2)} GiB`;
+}
+
+function formatOps(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return Math.round(n).toLocaleString("en-US");
+}
+
+function MeterBar({ pct, warn }: { pct: number; warn: boolean }) {
+  const width = Math.min(Math.max(pct, 0), 100);
+  return (
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
+      <div
+        className={`h-full rounded-full ${warn ? "bg-amber-500" : "bg-emerald-500"}`}
+        style={{ width: `${width}%` }}
+        role="presentation"
+      />
+    </div>
+  );
+}
+
+function FleetAccountBlock({ account, thresholdPct }: { account: R2FleetAccountSnapshot; thresholdPct: number }) {
+  if (!account.configured) {
+    return (
+      <div className="rounded-lg border border-dashed border-gray-200 px-3 py-2 dark:border-gray-600">
+        <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{account.label}</p>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          Not configured — set <span className="font-mono">CLOUDFLARE_{account.id === "um" ? "JAY" : account.id.toUpperCase()}_*</span> account + analytics token.
+        </p>
+      </div>
+    );
+  }
+  if (account.status === "error") {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900 dark:bg-amber-950/20">
+        <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{account.label}</p>
+        <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">{account.error ?? "Metrics unavailable"}</p>
+      </div>
+    );
+  }
+  const metrics = [
+    { key: "storage", label: "Storage", m: account.storage, fmt: formatGiB, unit: "bytes" as const },
+    { key: "classA", label: "Class A", m: account.classA, fmt: formatOps, unit: "ops" as const },
+    { key: "classB", label: "Class B", m: account.classB, fmt: formatOps, unit: "ops" as const },
+  ];
+  return (
+    <div className="rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-700">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{account.label}</p>
+        <div className="flex items-center gap-1.5">
+          {account.autoDisabled ? (
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+              R2 writes paused
+            </span>
+          ) : null}
+          {account.overallOnTrackToExceed70Pct ? (
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+              ≥{thresholdPct}% risk
+            </span>
+          ) : (
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+              OK
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="mt-2 space-y-2">
+        {metrics.map(({ key, label, m, fmt }) => {
+          if (!m) return null;
+          return (
+            <div key={key}>
+              <div className="mb-0.5 flex items-center justify-between text-[11px]">
+                <span className="text-gray-500 dark:text-gray-400">{label}</span>
+                <span className={m.onTrackToExceed ? "font-medium text-amber-700 dark:text-amber-300" : "text-gray-700 dark:text-gray-200"}>
+                  {fmt(m.actual)} · {m.mtdPct.toFixed(0)}%
+                  {key !== "storage" ? ` · pace ${m.projectedPct.toFixed(0)}%` : ""}
+                </span>
+              </div>
+              <MeterBar pct={m.mtdPct} warn={m.onTrackToExceed} />
+            </div>
+          );
+        })}
+      </div>
+      {account.buckets.length > 0 && (
+        <ul className="mt-2 space-y-0.5 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+          {account.buckets
+            .slice()
+            .sort((a, b) => b.bytes - a.bytes)
+            .slice(0, 4)
+            .map((b) => (
+              <li key={b.bucketName} className="flex justify-between gap-2">
+                <span className="truncate font-mono">{b.bucketName}</span>
+                <span className="shrink-0">{formatGiB(b.bytes)}</span>
+              </li>
+            ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export function R2FleetCard({ data }: { data: R2FleetSummary | null }) {
+  if (!data) {
+    return (
+      <section aria-labelledby="r2-fleet-heading" className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+        <div className="flex items-start gap-3 px-5 py-4">
+          <span className="rounded-lg bg-sky-50 p-2 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300" aria-hidden="true">
+            <Cloud className="h-4 w-4" />
+          </span>
+          <div>
+            <h3 id="r2-fleet-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">R2 free tier (fleet)</h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Could not load R2 metrics for Usage Monitor / Socratic / Congress.</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+  const state: OperationalState = !data.configured
+    ? "unconfigured"
+    : data.anyOnTrackToExceed || data.localBackup.autoDisabled
+      ? "degraded"
+      : "healthy";
+  return (
+    <section aria-labelledby="r2-fleet-heading" className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 lg:col-span-2">
+      <div className="flex items-start justify-between gap-4 px-5 py-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="rounded-lg bg-sky-50 p-2 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300" aria-hidden="true">
+            <Cloud className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h3 id="r2-fleet-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">R2 free tier (fleet)</h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Three Cloudflare accounts · 10 GiB / 1M Class A / 10M Class B each · alert at {data.thresholdPct}%
+              {data.localBackup.autoDisabled ? " · this host paused Litestream writes" : ""}
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Checked <time suppressHydrationWarning dateTime={data.fetchedAt}>{relativeTime(data.fetchedAt)}</time>
+              {" · "}Off-site backup is DR-only (hourly sync); app readiness does not depend on it.
+            </p>
+          </div>
+        </div>
+        <StatePill state={state} />
+      </div>
+      <div className="grid gap-3 border-t border-gray-100 px-5 py-4 sm:grid-cols-3 dark:border-gray-700">
+        {data.accounts.map((account) => (
+          <FleetAccountBlock key={account.id} account={account} thresholdPct={data.thresholdPct} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function SocraticInfrastructureCard({ data }: { data: SocraticInfrastructureSummary }) {
   const [expanded, setExpanded] = useState(false);
   const scheduler = data.schedulerAgeSeconds === null ? "scheduler unavailable" : `scheduler ${Math.round(data.schedulerAgeSeconds)}s ago`;
@@ -218,11 +375,13 @@ export default function OperationsOverview() {
       {requestError && <p className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">{requestError}{data ? " Last confirmed data is marked stale." : ""}</p>}
       {data ? (
         <div className="grid gap-3 lg:grid-cols-2">
+          <R2FleetCard data={data.r2Fleet} />
           <ReceiptInboxCard data={data.receiptInbox} />
           <SocraticInfrastructureCard data={data.socraticInfrastructure} />
         </div>
       ) : !requestError ? (
         <div className="grid gap-3 lg:grid-cols-2" aria-hidden="true">
+          <div className="h-40 animate-pulse rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800 lg:col-span-2" />
           <div className="h-28 animate-pulse rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800" />
           <div className="h-28 animate-pulse rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800" />
         </div>
