@@ -94,7 +94,7 @@ export default function Nav() {
           <div className="flex h-16 items-center justify-between">
             <div className="flex min-w-0 items-center gap-3 lg:gap-6">
               <Link href="/" className="flex shrink-0 items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent">
                   <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
                       strokeLinecap="round"
@@ -179,7 +179,7 @@ export default function Nav() {
                 onClick={() => setCommandOpen(true)}
                 aria-label="Open command palette"
                 title="Command palette (⌘K)"
-                className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-gray-600 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg border border-gray-200 px-2.5 text-gray-600 hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-accent dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
               >
                 <Search size={16} aria-hidden="true" />
                 <kbd className="hidden rounded border border-gray-200 px-1 text-[10px] font-medium text-gray-500 dark:border-gray-600 dark:text-gray-400 xl:inline">
@@ -269,7 +269,7 @@ export default function Nav() {
                   setCommandOpen(true);
                 }}
                 aria-label="Open command palette"
-                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-accent dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
               >
                 <Search className="h-5 w-5" aria-hidden="true" />
               </button>
@@ -279,7 +279,7 @@ export default function Nav() {
                 aria-controls="mobile-navigation"
                 aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
                 onClick={() => setMenuOpen((open) => !open)}
-                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-accent dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
               >
                 <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path

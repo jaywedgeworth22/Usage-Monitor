@@ -181,19 +181,7 @@ body {
   padding-bottom: 0.35rem !important;
 }
 
-/* Design tokens (web ↔ iOS accent parity) */
-:root {
-  --um-accent: #595ce6;
-  --um-accent-soft: rgba(89, 92, 230, 0.14);
-  --um-radius-lg: 1rem;
-  --um-radius-xl: 1.25rem;
-}
-.dark {
-  --um-accent: #828cff;
-  --um-accent-soft: rgba(130, 140, 255, 0.18);
-}
-
-/* Design tokens (web ↔ iOS parity) */
+/* Design tokens (web ↔ iOS accent parity). Prefer these over ad-hoc indigo/blue. */
 :root {
   --um-accent: #595ce6;
   --um-accent-soft: rgba(89, 92, 230, 0.14);
