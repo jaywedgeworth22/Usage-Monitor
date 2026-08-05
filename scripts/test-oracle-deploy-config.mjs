@@ -131,6 +131,7 @@ for (const [pattern, message] of [
   [/is not an ancestor of origin\/main/, "reject target SHAs that left main"],
   [/continuing exact-SHA deploy of/, "cutover continues when main tip advances"],
   [/committing exact-SHA/, "acceptance continues when main tip advances"],
+  [/still on main \(tip advanced to/, "require_current_main allows main ancestors"],
 
   [/capture_pre_stop_backup_watermark/, "pre-stop online Garage watermark capture"],
   [/capture_quiescent_backup_watermark/, "post-stop Garage watermark capture (uses pre-stop TXID)"],
