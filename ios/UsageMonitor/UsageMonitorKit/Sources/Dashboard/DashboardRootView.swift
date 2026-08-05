@@ -53,6 +53,27 @@ public struct DashboardRootView: View {
                     }
                 }
                 .task { await store.loadIfNeeded() }
+                // Quiet refresh: if cache age ≥ 30m, pull again (don't label "stale").
+                .task(id: store.lastCachedAt) {
+                    guard let cachedAt = store.lastCachedAt else { return }
+                    let staleness = BudgetStaleness(cachedAt: cachedAt)
+                    if staleness.isStale() {
+                        await store.refresh()
+                    }
+                }
+                // While Overview is visible, re-check about every 30 minutes.
+                .task {
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(30 * 60))
+                        guard !Task.isCancelled else { return }
+                        if let cachedAt = store.lastCachedAt,
+                           BudgetStaleness(cachedAt: cachedAt).isStale() {
+                            await store.refresh()
+                        } else if store.lastCachedAt == nil {
+                            await store.loadIfNeeded()
+                        }
+                    }
+                }
                 .task(id: env?.accessIdentityRevision) { [apiClient = env?.apiClient] in
                     intelligenceStore.reset()
                     if let apiClient {
@@ -245,7 +266,7 @@ private struct LastUpdatedFooter: View {
             if let staleness {
                 Text(staleness.shortLabel())
                     .font(Theme.Typography.caption)
-                    .foregroundStyle(staleness.isStale() ? Theme.Colors.warning : Theme.Colors.tertiaryText)
+                    .foregroundStyle(Theme.Colors.tertiaryText)
             }
             if incompleteCoverage {
                 Text("Some spend is still syncing and may rise.")

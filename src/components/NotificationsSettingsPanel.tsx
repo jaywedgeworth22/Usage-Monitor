@@ -219,12 +219,12 @@ export default function NotificationsSettingsPanel() {
               onChange={(e) => setMinSeverity(e.target.value as any)}
               className="w-full max-w-xs rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
             >
-              <option value="warning">Warning & Critical (Default — suppresses info/stale snapshots)</option>
+              <option value="warning">Warning & Critical (Default)</option>
               <option value="critical">Critical Only (High urgency budget breaches only)</option>
-              <option value="info">All Alerts including Info (Includes stale snapshots)</option>
+              <option value="info">All Alerts including Info</option>
             </select>
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              Stale snapshot alerts are classified as <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-gray-700">info</code> level. Setting threshold to Warning or Critical suppresses stale snapshot emails/pushes.
+              Pollable providers refresh quietly on a schedule (at least hourly). Never-pollable sources are labeled Manual, not stale.
             </p>
           </div>
 

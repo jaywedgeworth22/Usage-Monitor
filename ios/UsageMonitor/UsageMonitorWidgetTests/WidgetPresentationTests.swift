@@ -113,7 +113,8 @@ final class WidgetPresentationTests: XCTestCase {
             generatedAt: now.addingTimeInterval(-3 * 60 * 60)
         )
         let caption = WidgetPresentation.updatedCaption(for: stale, asOf: now)
-        XCTAssertEqual(caption, "Stale · 3 hr ago")
+        // Age is never labeled "Stale" — refresh quietly; caption stays Updated.
+        XCTAssertEqual(caption, "Updated 3 hr ago")
         XCTAssertNil(WidgetPresentation.updatedCaption(for: .empty, asOf: now))
     }
 

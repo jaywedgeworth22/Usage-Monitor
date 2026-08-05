@@ -32,6 +32,10 @@ import {
 import { providerFinancialSemantics } from "@/lib/provider-financial-semantics";
 import { aggregateProviderFamilyMoney } from "@/lib/provider-money-aggregation";
 import { canonicalProviderKey } from "@/lib/provider-identity";
+import {
+  formatProviderSyncLabel,
+  resolveProviderSyncMode,
+} from "@/lib/provider-sync-mode";
 
 interface WorkspaceProvider {
   id: string;
@@ -591,9 +595,22 @@ function CompactFamilyCells({
   const accountPlural = family.activeCount === 1 ? "" : "s";
   const criticalSegment = family.criticalCount > 0 ? `, ${family.criticalCount} critical` : "";
   const healthAriaLabel = `${family.alertCount} open alert${alertPlural}${criticalSegment}, ${family.activeCount} active account${accountPlural}`;
-  const lastSyncTitle = family.latestFetchedAt
-    ? `${new Date(family.latestFetchedAt).toLocaleString()} · ${family.providerName}`
-    : family.providerName;
+  const familySyncMode = resolveProviderSyncMode({
+    name: family.providerName || family.providers[0]?.name || "",
+    type: family.providers[0]?.type,
+  });
+  const lastSyncLabel = formatProviderSyncLabel({
+    syncMode: familySyncMode,
+    latestFetchedAt: family.latestFetchedAt,
+    nowMs,
+    formatRelative: formatRelativeTime,
+  });
+  const lastSyncTitle =
+    familySyncMode === "manual"
+      ? `Manual · ${family.providerName} (no poll API — use Subscription or push)`
+      : family.latestFetchedAt
+        ? `${new Date(family.latestFetchedAt).toLocaleString()} · ${family.providerName}`
+        : `Never synced · ${family.providerName}`;
 
   return (
     <>
@@ -742,7 +759,7 @@ function CompactFamilyCells({
           className="text-sm tabular-nums text-gray-800 dark:text-gray-200 sm:whitespace-nowrap"
           aria-label={lastSyncTitle}
         >
-          {formatRelativeTime(family.latestFetchedAt, nowMs)}
+          {lastSyncLabel}
         </p>
       </td>
     </>
