@@ -27,7 +27,7 @@ public struct StatTile: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             HStack(spacing: Theme.Spacing.xs) {
-                if let systemImage {
+                if let systemImage, !systemImage.isEmpty {
                     Image(systemName: systemImage)
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(status == .neutral ? Theme.Colors.secondaryText : status.tint)

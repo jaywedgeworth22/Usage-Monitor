@@ -16,7 +16,8 @@ struct AlertIconBadge: View {
     var size: CGFloat = 38
 
     var body: some View {
-        Image(systemName: systemImage)
+        let glyph = systemImage.isEmpty ? "bell.badge" : systemImage
+        Image(systemName: glyph)
             .font(.system(size: size * 0.42, weight: .semibold))
             .foregroundStyle(status.tint)
             .frame(width: size, height: size)

@@ -35,6 +35,8 @@ public struct AlertsRootView: View {
         NavigationStack {
             content
                 .navigationTitle(AppTab.alerts.title)
+                // Inline (centered compact) title — avoid large left-aligned title at rest.
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbarContent }
                 .navigationDestination(for: ProviderAlertItem.self) { item in
                     ProviderAlertDetailView(providerId: item.provider.id, fallback: item.provider)

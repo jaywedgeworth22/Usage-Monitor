@@ -157,13 +157,41 @@ function MeterBar({ pct, warn }: { pct: number; warn: boolean }) {
   );
 }
 
-function FleetAccountBlock({ account, thresholdPct }: { account: R2FleetAccountSnapshot; thresholdPct: number }) {
+function fleetAccountStatusLine(
+  account: R2FleetAccountSnapshot,
+  thresholdPct: number
+): string {
+  if (account.autoDisabled) {
+    return `DISABLED (auto-kill at ${thresholdPct}% threshold)`;
+  }
+  if (account.metricsSource === "unavailable") {
+    return "METRICS UNAVAILABLE";
+  }
+  if (account.overallOnTrackToExceed70Pct) {
+    return `WARNING (pace/MTD ≥ ${thresholdPct}%)`;
+  }
+  return `OK (under ${thresholdPct}% free-tier pace)`;
+}
+
+function FleetAccountBlock({
+  account,
+  thresholdPct,
+  freeTier,
+}: {
+  account: R2FleetAccountSnapshot;
+  thresholdPct: number;
+  freeTier: R2FleetSummary["freeTier"];
+}) {
   if (!account.configured) {
     return (
       <div className="rounded-lg border border-dashed border-gray-200 px-3 py-2 dark:border-gray-600">
         <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{account.label}</p>
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          Not configured — set <span className="font-mono">CLOUDFLARE_{account.id === "um" ? "JAY" : account.id.toUpperCase()}_*</span> account + analytics token.
+          Not configured — set{" "}
+          <span className="font-mono">
+            CLOUDFLARE_{account.id === "um" ? "JAY" : account.id.toUpperCase()}_ACCOUNT_ID
+          </span>{" "}
+          + analytics token.
         </p>
       </div>
     );
@@ -172,20 +200,51 @@ function FleetAccountBlock({ account, thresholdPct }: { account: R2FleetAccountS
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 dark:border-amber-900 dark:bg-amber-950/20">
         <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{account.label}</p>
-        <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">{account.error ?? "Metrics unavailable"}</p>
+        <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
+          {account.error ?? "Metrics unavailable"}
+        </p>
       </div>
     );
   }
   const metrics = [
-    { key: "storage", label: "Storage", m: account.storage, fmt: formatGiB, unit: "bytes" as const },
-    { key: "classA", label: "Class A", m: account.classA, fmt: formatOps, unit: "ops" as const },
-    { key: "classB", label: "Class B", m: account.classB, fmt: formatOps, unit: "ops" as const },
+    {
+      key: "storage",
+      label: "Storage",
+      m: account.storage,
+      fmt: formatGiB,
+      limitLabel: formatGiB(freeTier.storageBytes),
+      showPace: false,
+    },
+    {
+      key: "classA",
+      label: "Class A ops",
+      m: account.classA,
+      fmt: formatOps,
+      limitLabel: formatOps(freeTier.classAOps),
+      showPace: true,
+    },
+    {
+      key: "classB",
+      label: "Class B ops",
+      m: account.classB,
+      fmt: formatOps,
+      limitLabel: formatOps(freeTier.classBOps),
+      showPace: true,
+    },
   ];
+  const statusLine = fleetAccountStatusLine(account, thresholdPct);
   return (
     <div className="rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-700">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{account.label}</p>
-        <div className="flex items-center gap-1.5">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{account.label}</p>
+          {account.accountIdSuffix ? (
+            <p className="font-mono text-[10px] text-gray-500 dark:text-gray-400">
+              …{account.accountIdSuffix}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
           {account.autoDisabled ? (
             <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
               R2 writes paused
@@ -202,16 +261,31 @@ function FleetAccountBlock({ account, thresholdPct }: { account: R2FleetAccountS
           )}
         </div>
       </div>
+      <p
+        className={`mt-1.5 text-[11px] ${
+          account.overallOnTrackToExceed70Pct || account.autoDisabled
+            ? "font-medium text-amber-800 dark:text-amber-200"
+            : "text-gray-600 dark:text-gray-300"
+        }`}
+      >
+        Status: {statusLine}
+      </p>
       <div className="mt-2 space-y-2">
-        {metrics.map(({ key, label, m, fmt }) => {
+        {metrics.map(({ key, label, m, fmt, limitLabel, showPace }) => {
           if (!m) return null;
           return (
             <div key={key}>
-              <div className="mb-0.5 flex items-center justify-between text-[11px]">
+              <div className="mb-0.5 flex items-center justify-between gap-2 text-[11px]">
                 <span className="text-gray-500 dark:text-gray-400">{label}</span>
-                <span className={m.onTrackToExceed ? "font-medium text-amber-700 dark:text-amber-300" : "text-gray-700 dark:text-gray-200"}>
-                  {fmt(m.actual)} · {m.mtdPct.toFixed(0)}%
-                  {key !== "storage" ? ` · pace ${m.projectedPct.toFixed(0)}%` : ""}
+                <span
+                  className={
+                    m.onTrackToExceed
+                      ? "text-right font-medium text-amber-700 dark:text-amber-300"
+                      : "text-right text-gray-700 dark:text-gray-200"
+                  }
+                >
+                  {fmt(m.actual)} / {limitLabel} ({m.mtdPct.toFixed(0)}% MTD
+                  {showPace ? `, ${m.projectedPct.toFixed(0)}% proj` : ""})
                 </span>
               </div>
               <MeterBar pct={m.mtdPct} warn={m.onTrackToExceed} />
@@ -219,8 +293,17 @@ function FleetAccountBlock({ account, thresholdPct }: { account: R2FleetAccountS
           );
         })}
       </div>
+      <p className="mt-2 text-[10px] text-gray-500 dark:text-gray-400">
+        Threshold {thresholdPct}% · Source {account.metricsSource}
+        {account.litestreamUsesR2 != null
+          ? ` · Litestream→R2: ${account.litestreamUsesR2 ? "yes" : "no"}`
+          : ""}
+      </p>
       {account.buckets.length > 0 && (
         <ul className="mt-2 space-y-0.5 border-t border-gray-100 pt-2 text-[11px] text-gray-500 dark:border-gray-700 dark:text-gray-400">
+          <li className="text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Top buckets
+          </li>
           {account.buckets
             .slice()
             .sort((a, b) => b.bytes - a.bytes)
@@ -281,7 +364,12 @@ export function R2FleetCard({ data }: { data: R2FleetSummary | null }) {
       </div>
       <div className="grid gap-3 border-t border-gray-100 px-5 py-4 sm:grid-cols-3 dark:border-gray-700">
         {data.accounts.map((account) => (
-          <FleetAccountBlock key={account.id} account={account} thresholdPct={data.thresholdPct} />
+          <FleetAccountBlock
+            key={account.id}
+            account={account}
+            thresholdPct={data.thresholdPct}
+            freeTier={data.freeTier}
+          />
         ))}
       </div>
     </section>

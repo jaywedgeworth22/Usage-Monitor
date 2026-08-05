@@ -45,7 +45,8 @@ public struct ProjectBudgetsRootView: View {
                 onAdd: managementStore.canManage ? { editorContext = .add } : nil
             )
             .navigationTitle(AppTab.projects.title)
-            .navigationBarTitleDisplayMode(.large)
+            // Inline (centered compact) title — avoid large left-aligned title at rest.
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $detailID) { id in
                 projectDetail(id: id)
             }
@@ -191,14 +192,19 @@ struct ProjectBudgetsContentView: View {
                 ProjectsRollupCard(rollup: rollup)
             }
 
-            SectionHeader(
-                "Projects",
-                subtitle: "Month to date"
-            ) {
+            // Do not repeat the tab title ("Projects") as an in-content header;
+            // the navigation bar already names the screen.
+            HStack {
+                Text("Month to date")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                Spacer()
                 Text("\(items.count)")
                     .font(Theme.Typography.captionEmphasis)
                     .foregroundStyle(Theme.Colors.secondaryText)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(items.count) projects, month to date")
 
             VStack(spacing: Theme.Spacing.md) {
                 ForEach(items) { item in
