@@ -1,3 +1,4 @@
+- **[GROK] Billing API coverage research (LLMs + partial providers) (2026-08-05) — IN PR.** Hard dig: Render OpenAPI has no invoice paths; xAI has invoice list API; consumer Max/Plus/SuperGrok console-only; matrix in docs/research/2026-08-05-billing-api-coverage.md.
 - **[GROK] Local Usage Monitor fleet provider catalog + poll adapters (2026-08-05) — IN PR.** Catalog of ~40 fleet providers; poll: OpenRouter/OpenAI/DeepSeek/Anthropic Admin; seed templates; searchable Add Provider UI.
 - **[GROK] Rename Local app → LocalUsageMonitor / Local Usage Monitor / services.jays.local.usage.monitor (2026-08-05) — IN PR.** Target, scheme, display name, bundle ID, app group, deep link, Keychain service.
 - **[GROK] iOS dual-app identity: distinct name/icon so Local doesn't look like remote (2026-08-05) — IN PR #982.** Teal LOCAL icon, home-screen "UM Local", PRODUCT_NAME split, on-device banner; docs how to install both side-by-side.
