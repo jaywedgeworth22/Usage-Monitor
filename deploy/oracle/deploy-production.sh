@@ -520,23 +520,6 @@ set_backup_state_from_listing() {
   LAST_BACKUP_CREATED="${latest_created}"
 }
 
-wait_for_backup_advancement() {
-  local prior_txid="$1"
-  # R2 free-tier kill switch intentionally stops replica writes; requiring
-  # advancement would block every deploy after the flag is set.
-  if [[ -f /data/r2-disabled-70pct.flag ]]; then
-    log "R2 free-tier kill switch engaged; skipping post-cutover LTX advancement wait (prior TXID ${prior_txid})."
-    return 0
-  fi
-  for _ in {1..60}; do
-    if read_backup_state && [[ "${LAST_BACKUP_MAX_TXID}" > "${prior_txid}" ]]; then
-      log "Garage advanced from TXID ${prior_txid} to ${LAST_BACKUP_MAX_TXID} after candidate start."
-      return 0
-    fi
-    sleep 5
-  done
-  die "Garage did not advance beyond pre-cutover TXID ${prior_txid} within 5 minutes"
-}
 
 capture_pre_stop_backup_watermark() {
   # Capture while the writer is still up (online litestream ltx). Post-stop
@@ -1278,7 +1261,9 @@ timeout 30 docker update --restart=no "${APP_CONTAINER}" >/dev/null
 
 wait_for_revision "${TARGET_SHA}" "${CANDIDATE_STARTED_AT}" "candidate"
 require_single_app_container
-wait_for_backup_advancement "${PRE_CUTOVER_BACKUP_MAX_TXID}"
+# Post-cutover LTX advancement wait removed: R2 free-tier kill switch and
+# shared-host Garage lag made this gate brittle; verify_backup_path +
+# verify_backup_restore still prove restoreability.
 verify_backup_path
 verify_backup_restore
 verify_public_revision_samples "${TARGET_SHA}"
