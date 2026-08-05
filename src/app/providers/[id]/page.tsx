@@ -557,7 +557,7 @@ export default function ProviderDetailPage() {
             <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Budget & alert policy</h2>
             <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Owner-defined guardrails; these are not provider-reported plan terms.</p>
           </div>
-          <Link href={`/settings?tab=connections&edit=${encodeURIComponent(provider.id)}`} className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300">
+          <Link href={`/settings?tab=connections&edit=${encodeURIComponent(provider.id)}`} className="text-xs font-semibold text-accent hover:opacity-90">
             Edit connection
           </Link>
         </div>

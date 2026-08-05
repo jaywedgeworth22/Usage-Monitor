@@ -18,12 +18,12 @@ import {
   type CommandPaletteProviderItem,
 } from "@/components/CommandPalette";
 import EmptyState from "@/components/EmptyState";
+import HistoryWindowControl from "@/components/HistoryWindowControl";
 import {
   shouldShowDashboardSkeleton,
   useDashboardData,
-  generateMonthOptions,
-  generateYearOptions,
   spendPeriodLabel as computeSpendPeriodLabel,
+  type TimeframeOption,
 } from "@/hooks/useDashboardData";
 import { sumProviderFunds } from "@/lib/provider-financial-semantics";
 import { canonicalProviderKey } from "@/lib/provider-identity";
@@ -188,10 +188,6 @@ export default function DashboardPage() {
   // History/telemetry window label — not the MTD budget hero period.
   const historyWindowLabel = useMemo(() => computeSpendPeriodLabel(timeframe), [timeframe]);
   const mtdMonthLabel = useMemo(() => currentMtdMonthLabel(), []);
-
-  // Picker option lists — computed once per render (stable month/year based on now).
-  const monthOptions = useMemo(() => generateMonthOptions(13), []);
-  const yearOptions = useMemo(() => generateYearOptions(3), []);
 
   const incompleteCostProviderCount = useMemo(
     () =>
@@ -403,7 +399,7 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => fetchProviders()}
-            className="min-h-11 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="min-h-11 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             Retry
           </button>
@@ -425,7 +421,7 @@ export default function DashboardPage() {
         action={
           <Link
             href="/settings?tab=connections"
-            className="inline-flex min-h-11 items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            className="inline-flex min-h-11 items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
           >
             Add your first provider
           </Link>
@@ -437,58 +433,32 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 sm:space-y-8">
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Overview</h1>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Overview</h1>
           <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
             Press{" "}
-            <kbd className="rounded border border-gray-300 px-1 dark:border-gray-600">⌘K</kbd>
+            <kbd className="rounded border border-gray-300 px-1 font-sans dark:border-gray-600">⌘K</kbd>
             {" "}to jump anywhere
+            {lastUpdatedAt && (
+              <span className="hidden sm:inline">
+                {" · "}Updated{" "}
+                {new Date(lastUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </span>
+            )}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          {lastUpdatedAt && (
-            <span className="hidden text-xs text-gray-500 dark:text-gray-400 sm:inline">
-              Updated {new Date(lastUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-            </span>
-          )}
-          <div className="flex flex-col items-end gap-0.5">
-            <label htmlFor="dashboard-timeframe-select" className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
-              History window
-            </label>
-            <select
-              id="dashboard-timeframe-select"
-              aria-label="History window for charts and telemetry (not MTD budget)"
-              title="Affects charts and telemetry only. Month-to-date budgets stay on the current UTC month."
-              value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value as any)}
-              className="min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-            >
-              <optgroup label="Rolling Periods">
-                <option value="1d">Past 24 Hours</option>
-                <option value="7d">Past Week</option>
-                <option value="30d">Past 30 Days</option>
-                <option value="90d">Past 3 Months</option>
-                <option value="180d">Past 6 Months</option>
-                <option value="all">All Time</option>
-              </optgroup>
-              <optgroup label="Calendar Months">
-                {monthOptions.map(({ token, label }) => (
-                  <option key={token as string} value={token as string}>{label}</option>
-                ))}
-              </optgroup>
-              <optgroup label="Calendar Years">
-                {yearOptions.map(({ token, label }) => (
-                  <option key={token as string} value={token as string}>{label}</option>
-                ))}
-              </optgroup>
-            </select>
-          </div>
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end sm:justify-end sm:gap-3 lg:w-auto">
+          <HistoryWindowControl
+            value={timeframe as TimeframeOption}
+            onChange={(next) => setTimeframe(next)}
+            className="w-full sm:w-auto"
+          />
           <button
             type="button"
             onClick={() => void refreshDashboard()}
             disabled={refreshing}
-            className="min-h-11 self-end rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            className="min-h-10 shrink-0 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:border-gray-500 dark:hover:bg-gray-800 sm:min-h-11"
           >
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>

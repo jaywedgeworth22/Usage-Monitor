@@ -55,7 +55,7 @@ function LoginForm() {
     <div className="flex items-center justify-center min-h-[70vh] px-4">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-sm">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 shadow-sm">
             <svg
               className="h-6 w-6 text-white"
               fill="none"
@@ -93,7 +93,7 @@ function LoginForm() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter password"
-                className="w-full min-h-11 px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                className="w-full min-h-11 px-3 py-2 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
               />
             </div>
             {error && (
@@ -104,7 +104,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={submitting || !password}
-              className="w-full min-h-11 px-4 py-2 text-base font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+              className="w-full min-h-11 px-4 py-2 text-base font-medium text-white bg-accent rounded-lg hover:opacity-90 transition-colors disabled:opacity-50"
             >
               {submitting ? "Logging in…" : "Log in"}
             </button>
