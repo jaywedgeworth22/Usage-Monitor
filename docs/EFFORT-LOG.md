@@ -1,15 +1,16 @@
+- **[GROK] Production recovery after deploy cutover gap (2026-08-05) — DEPLOYED / LIVE VERIFIED.** Origin returned Caddy 502 while host auto-deploy cutover ran `9acf9951`→`08be8a96` (writer stopped during SQLite cutover + cold start ~3m). Receipt `status=deployed` at 2026-08-05T02:52:49Z; public `/api/health` + `/api/ready?strict=1` ok at exact `08be8a96` (db/scheduler/backup/startup green). Closes uptime incident gap for #933/#899 once consecutive checks succeed.
 - **[GROK] Usage Monitor Local Milestone A implementation (2026-08-04) — MERGED PR #946.** Shipped SQLiteLocalStore (design DDL), Keychain, OpenRouter adapter, BudgetEngine+materializer, full Local UI. Sim BUILD SUCCEEDED. Branch grok/usage-monitor-local-milestone-a.
-- **[GROK] Dual iOS apps: UsageMonitor (live sync) + UsageMonitorLocal (on-device) (2026-08-04) — IN PR #942.** Separate app target/scheme/bundle/app group; LocalStore+LocalDataPlane scaffold; Local sim build green. Owner keeps remote client; Local for phone-only App Store path.
-- **[GROK] Phone-only self-host Milestone A (2026-08-04) — IN PROGRESS.** Owner: phone IS the instance; free App Store; optional export passphrase. PR #942 design+contract pivot (PR-1). Next: LocalStore GRDB (PR-2).
+- **[GROK] Dual iOS apps: UsageMonitor (live sync) + UsageMonitorLocal (on-device) (2026-08-04) — MERGED PR #942.** Separate app target/scheme/bundle/app group; LocalStore+LocalDataPlane scaffold; Local sim build green. Owner keeps remote client; Local for phone-only App Store path.
+- **[GROK] Phone-only self-host Milestone A (2026-08-04) — IN PROGRESS (PR-1+A landed).** Owner: phone IS the instance; free App Store; optional export passphrase. PR #942 design+contract + PR #946 Local Milestone A (SQLiteLocalStore/Keychain/OpenRouter/Budget/UI) merged. Remaining: broader provider poll surface + App Store packaging.
 - **[GROK] Design: mobile full-parity + phone self-host topology (2026-08-04) — COMPLETE (phone-only pivot approved).** Product answer: native Swift data plane ON the phone (local SQLite/GRDB, Keychain keys, opportunistic poll). Not phone→remote host. Public App Store target. Doc: `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`. Review rounds closed 0 open.
-- **[GROK] iOS TestFlight agent ship pipeline (cross-app) — IN PROGRESS 2026-08-04.** `scripts/ios-ship-testflight.sh` + fleet `/Users/jay/apps/ios-fleet/`. Bundle `services.jays.usage.monitor`. Branch `grok/ios-testflight-ship`.
+- **[GROK] iOS TestFlight agent ship pipeline (cross-app) — MERGED PR #943 / upload blocked on ASC API key.** `scripts/ios-ship-testflight.sh` + fleet `/Users/jay/apps/ios-fleet/`. Bundle `services.jays.usage.monitor`. IPA export verified; ASC API key handoff still needed for upload.
 
 - **[GROK] Wire web design tokens into Tailwind + primary chrome (2026-08-05) — MERGED PR #939.** Squash `7d070031`. Deduped `--um-*` CSS vars, bridged accent/radius into Tailwind, adopted `bg-accent` / `accent-soft` on Nav, empty states, command palette, Money/Alerts CTAs. CI green; auto-merge squash landed.
 - **[GROK] UX deferred wave 2 (wizard/mobile cards/nav/charts/iOS depth) (2026-08-04) — COMPLETED + DEPLOYED (2026-08-05).** Live production `088763fd` includes #934/#936 UX, #938 widget privacy, #939 design tokens. Verified health/ready green.
 - **[GROK] Full web+iOS UX overhaul (review execution) (2026-08-04) — COMPLETED + DEPLOYED (2026-08-05).** Live on production `088763fd` with full UX recommendation set (hero, attention, density/PWA, nav routes, palette, charts, wizard, iOS intelligence/widget privacy, design tokens).
 - **[GROK] PR queue + deploy resilience to production (2026-08-04) — COMPLETE / PROD ON MAIN `7539e822`.** Open queue cleared earlier; residual host deploy patches landed #930/#931; Infisical bucket corrected to `usage-monitor-prod-v3`; deploy receipt deployed ab9c381b→7539e822 at 2026-08-04T12:14:46Z. Open PRs: 0. R2 kill-switch still engages intentional `/api/ready?strict=1` not_ready.
 - **[AG] Settings Management UI & APNs Remote Push Notifications (2026-08-04) — MERGED PR #928.** Added ApnsDeviceToken Prisma model, /api/apns/device-tokens endpoint, /api/settings route, NotificationsSettingsPanel web UI on /settings, and iOS native APNs device token registration in PushScaffold & AppDelegate.
-- **[GROK] R2 free-tier breach response (2026-08-04) — IN PR.** Pruned usage-monitor-bucket LTX ~10.5→0.74 GiB; retention 168h→48h; PUSHOVER_USAGE_API_TOKEN preference; Infisical analytics tokens for kill-switch; docs: Coolify Garage retired, prod is CF R2. Rollout: `docs/rollouts/2026-08-04-r2-free-tier-prune-and-killswitch.md`.
+- **[GROK] R2 free-tier breach response (2026-08-04) — MERGED + DEPLOYED.** Pruned usage-monitor-bucket LTX ~10.5→0.74 GiB; retention 168h→48h; PUSHOVER_USAGE_API_TOKEN preference; Infisical analytics tokens for kill-switch; docs: Coolify Garage retired, prod is CF R2. Rollout: `docs/rollouts/2026-08-04-r2-free-tier-prune-and-killswitch.md`.
 # API-usage-monitor Effort Log — cross-agent board
 Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this file
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
@@ -327,6 +328,18 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 - **Resolve Agent Sync Relay noise and Anthropic must-keep-funded alerts (AG)** — MERGED PR #113 / DEPLOYED. Updated `ensureAgentSyncProviderSeeded` to automatically disable the Agent Sync Relay provider on startup/poll, silencing the spurious missing_snapshot PagerDuty alerts. Also added a migration step in the same boot sequence to unflag `mustKeepFunded` for Anthropic since Anthropic does not expose a wallet balance. Tests green.
 
 ## Completed
+
+- **[GROK] Deploy preflight SQLite integrity timeout 120→900s (2026-08-04) — IN PROGRESS.** branch `grok/deploy-integrity-timeout`.
+  _Board closeout (GROK 2026-08-05): work merged+deployed; moved to Completed without rewriting first line (effort-key stability). Production ready at main `08be8a96` with `/api/ready?strict=1` ok._
+
+- **[API-usage-monitor][GROK] Docs: R2 primary (not Garage) + R2 free-tier spike analysis (2026-08-04) — MERGED PR #916.** Correct DEPLOY/litestream/oracle README after PR #869 R2 switch. GraphQL: bucket empty until Aug 2 seed; Aug 4 00:00–01:50Z storage 4.05→10.45 GiB multipart burst (Litestream snapshot/compaction). Branch: `grok/docs-r2-not-garage`.
+  _Board closeout (GROK 2026-08-05): work merged+deployed; moved to Completed without rewriting first line (effort-key stability). Production ready at main `08be8a96` with `/api/ready?strict=1` ok._
+
+- **[API-usage-monitor][GROK] R2 free-tier 70% auto-shutoff fix (2026-08-03) — MERGED PR #911 / awaiting deploy + Infisical R2 analytics creds + empty usage-monitor-bucket.** Live GraphQL: storage **9.33 GiB / 10 GiB (93.3%)** almost all in `usage-monitor-bucket` (active litestream-class Put/List). Root cause: `runR2UsageCheck` used local DB size + fake Class A/B so kill switch never fired. Fix: real GraphQL metrics, R2-only litestream kill (Garage preserved), runtime watcher, readiness reason `r2_free_tier_disabled`, tests. Branch: `grok/r2-free-tier-shutoff`.
+  _Board closeout (GROK 2026-08-05): work merged+deployed; moved to Completed without rewriting first line (effort-key stability). Production ready at main `08be8a96` with `/api/ready?strict=1` ok._
+
+- **[CURSOR] Blank dashboard skeleton on mobile+desktop (2026-07-27) — IN PROGRESS / PR #823.** Owner report: shell paints, content stays empty gray skeleton on mobile+desktop. Origin healthy at `8d4003e`; public DNS orange-clouded with CF managed challenge on HTML/API. Fix on `cursor/fix-blank-dashboard-5973`: orphaned `isFetching` coalesce break after watchdog; `AbortSignal.any` feature-detect; bfcache `pageshow` recovery; 35s skeleton→Retry watchdog; clearer HTML/403 errors. Ops: grey-cloud or `/api/*` skip rules if CF challenges persist.
+  _Board closeout (GROK 2026-08-05): work merged+deployed; moved to Completed without rewriting first line (effort-key stability). Production ready at main `08be8a96` with `/api/ready?strict=1` ok._
 
 - **[CURSOR] Complete remaining Planned board (2026-07-27) — COMPLETED.** Shipped D7 dark-mode, iOS B7 staleness/coalesce, E19 OpenRouter verified-preferred cash (default-off), Infisical `unmappedDiscoveries` on sync result. Moved already-shipped/parked/cross-repo/owner-blocked Planned rows to Completed with stable effort-keys. Branch `cursor/complete-planned-2474` / PR #811.
 - **Remaining feasible direct provider-capabilities audit (CODEX, read-only, 2026-07-18) — IN PROGRESS.** Audit current catalog/adapters plus official provider documentation for unimplemented direct money, tier/renewal, quota, balance, and paid-resource run-rate signals; excludes brokers and already completed OpenAI/GitHub/Cloudflare/Vercel work. No repository, secret, production, or external configuration changes.
@@ -1111,17 +1124,15 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
   _2026-07-15 (MONET): moved to Completed — stale duplicate row; work already merged (PR #58, squash `dfdb39e`, per this row's own trailing annotation) and docs/EFFORT-LOG.md mirror already corrected by PR #299 on 2026-07-15; the live board simply hadn't caught up. No further action needed._
 
 ## In Progress
-- **[GROK] Deploy preflight SQLite integrity timeout 120→900s (2026-08-04) — IN PROGRESS.** branch `grok/deploy-integrity-timeout`.
-- **[API-usage-monitor][GROK] Docs: R2 primary (not Garage) + R2 free-tier spike analysis (2026-08-04) — MERGED PR #916.** Correct DEPLOY/litestream/oracle README after PR #869 R2 switch. GraphQL: bucket empty until Aug 2 seed; Aug 4 00:00–01:50Z storage 4.05→10.45 GiB multipart burst (Litestream snapshot/compaction). Branch: `grok/docs-r2-not-garage`.
-- **[API-usage-monitor][GROK] R2 free-tier 70% auto-shutoff fix (2026-08-03) — MERGED PR #911 / awaiting deploy + Infisical R2 analytics creds + empty usage-monitor-bucket.** Live GraphQL: storage **9.33 GiB / 10 GiB (93.3%)** almost all in `usage-monitor-bucket` (active litestream-class Put/List). Root cause: `runR2UsageCheck` used local DB size + fake Class A/B so kill switch never fired. Fix: real GraphQL metrics, R2-only litestream kill (Garage preserved), runtime watcher, readiness reason `r2_free_tier_disabled`, tests. Branch: `grok/r2-free-tier-shutoff`.
 
-- **[CURSOR] Blank dashboard skeleton on mobile+desktop (2026-07-27) — IN PROGRESS / PR #823.** Owner report: shell paints, content stays empty gray skeleton on mobile+desktop. Origin healthy at `8d4003e`; public DNS orange-clouded with CF managed challenge on HTML/API. Fix on `cursor/fix-blank-dashboard-5973`: orphaned `isFetching` coalesce break after watchdog; `AbortSignal.any` feature-detect; bfcache `pageshow` recovery; 35s skeleton→Retry watchdog; clearer HTML/403 errors. Ops: grey-cloud or `/api/*` skip rules if CF challenges persist.
+(none)
 
 ## Planned / Reserved
 
 (none)
 
 ## Changelog of this log
+- 2026-08-05 — GROK: closed merged effort-board mirrors (integrity timeout #925, R2 docs #916, R2 free-tier shutoff #911, blank dashboard #823) → Completed; production recovered at `08be8a96` with health/ready green.
 - 2026-07-27 — CURSOR: blank dashboard skeleton claim on `cursor/fix-blank-dashboard-5973` (isFetching coalesce deadlock after #814 + CF managed challenge on public DNS).
 - 2026-07-27 — CURSOR: merged #814 + Oracle deploy success `e6333d6` (run 30298779926); open PRs → 0.
 - 2026-07-27 — CURSOR: dashboard flash→stuck-skeleton fix on `cursor/dashboard-flash-disappear-c527` (keep content once providers painted; coalesce/abort/bfcache recovery; merged main #816 timeout UX).
