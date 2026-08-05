@@ -42,7 +42,8 @@ dbs:
       secret-access-key: ${LITESTREAM_S3_SECRET_ACCESS_KEY}
       # One multipart part at a time for reliability on constrained links.
       concurrency: 1
-      # Upload WAL at most every 15 minutes. Class A (List/Put) is what burns
-      # free-tier ops; 15m RPO is more than enough for a usage dashboard.
-      # (Default 1s; was 60s free-tier opt — still too chatty.)
-      sync-interval: 15m
+      # Upload WAL at most every hour. Class A (List/Put) burns free-tier ops;
+      # this is disaster recovery only (host/disk death), not continuous PITR.
+      # Owner 2026-08-05: infrequent is fine; re-entering keys beats R2 drama.
+      # (Was 1s → 60s → 15m → 1h.)
+      sync-interval: 1h

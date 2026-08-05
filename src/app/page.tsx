@@ -622,7 +622,7 @@ export default function DashboardPage() {
             Infrastructure &amp; ops
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Receipt inbox and sibling service health — not part of your spend totals.
+            R2 free-tier (UM / ST / CT), receipt inbox, and sibling health — not part of spend totals.
           </p>
         </div>
         <OperationsOverview />

@@ -61,8 +61,9 @@ Local pre-migration snapshots on `/data` still exist.
 - `litestream.yml` — the replica config: `/data/prod.db`, single S3-type replica
   populated entirely from `LITESTREAM_S3_*` env vars. **Disaster recovery only**
   for this app: `snapshot.interval: 24h`, `snapshot.retention: 24h`,
-  `sync-interval: 15m`. Not multi-day continuous PITR — R2 is host/disk death
-  recovery, not “rewind to 3h42m ago.”
+  `sync-interval: 1h`. Not multi-day continuous PITR — R2 is host/disk death
+  recovery, not “rewind to 3h42m ago.” Off-site backup health is observability
+  only on `/api/ready` (does not gate product readiness).
 - `scripts/start-with-litestream.sh` — the container entrypoint. If all four
   required `LITESTREAM_S3_*` vars are set and `bin/litestream` exists: restores
   first if `/data/prod.db` doesn't exist yet (fresh disk or disaster recovery).
