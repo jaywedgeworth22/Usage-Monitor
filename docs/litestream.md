@@ -227,7 +227,7 @@ automatically as long as `LITESTREAM_S3_*` is set.
 
 Restore is exercised continuously, not just at drills:
 
-- Every production deploy hard-gates LTX freshness (≤ 3600s) plus an
+- Every production deploy hard-gates LTX freshness (≤ 10800s / 3h) plus an
   authenticated restore dry-run, and acceptance performs a full authenticated
   replica restore with a complete SQLite integrity scan
   (`deploy/oracle/deploy-production.sh`).

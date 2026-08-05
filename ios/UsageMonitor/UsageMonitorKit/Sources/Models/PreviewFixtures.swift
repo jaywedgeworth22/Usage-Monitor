@@ -233,7 +233,7 @@ public extension ServerHealth {
         status: "live",
         uptimeSeconds: 84_213,
         checkedAt: "2026-07-19T09:15:00.000Z",
-        service: "api-usage-monitor",
+        service: "usage-monitor",
         version: "1.0.0",
         commit: "c747e892"
     )

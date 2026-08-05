@@ -419,8 +419,10 @@ verify_backup_path() {
   fi
   now_epoch="$(date -u +%s)"
   age_seconds=$((now_epoch - latest_epoch))
-  if (( age_seconds < 0 || age_seconds > 3600 )); then
-    die "Garage newest LTX object is ${age_seconds}s old (limit 3600s)"
+  # 3h budget matches LITESTREAM_REPLICA_MAX_AGE_SECONDS / replica-status-probe
+  # after the R2 free-tier 1h sync-interval change (was 3600s).
+  if (( age_seconds < 0 || age_seconds > 10800 )); then
+    die "Replica newest LTX object is ${age_seconds}s old (limit 10800s)"
     return 1
   fi
 

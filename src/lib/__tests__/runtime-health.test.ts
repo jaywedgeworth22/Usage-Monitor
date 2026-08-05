@@ -237,11 +237,12 @@ describe("runtime health state", () => {
       });
 
       // A probe that stopped running ages out via checkedAt (fail closed).
+      // Default budget is 3h (aligned with 1h Litestream sync); 4h is stale.
       writeFileSync(
         statusPath,
         JSON.stringify({
           ok: true,
-          checkedAt: "2026-08-01T10:00:00Z",
+          checkedAt: "2026-08-01T08:00:00Z",
           ltxAgeSeconds: 42,
           reason: null,
         })

@@ -30,7 +30,8 @@ readonly DB_CONTAINER_PATH="/data/prod.db"
 readonly STATUS_FILE="/data/.litestream-replica-status.json"
 # Matches the deploy gate's freshness budget (deploy-production.sh) and the
 # app's LITESTREAM_REPLICA_MAX_AGE_SECONDS default (src/lib/runtime-health.ts).
-readonly MAX_LTX_AGE_SECONDS=3600
+# 3h default: litestream.yml uses a 1h sync-interval for R2 free-tier calm.
+readonly MAX_LTX_AGE_SECONDS=10800
 
 log() {
   printf '[usage-monitor-replica-status] %s\n' "$*"

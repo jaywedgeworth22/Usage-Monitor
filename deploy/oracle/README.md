@@ -171,7 +171,7 @@ the deploy gate, never `-level all` — and atomically writes
 
 The app reads it via `LITESTREAM_REPLICA_STATUS_PATH` (set in the root-owned
 compose file, not Infisical). `ok:false`, a missing file, or `checkedAt` older
-than `LITESTREAM_REPLICA_MAX_AGE_SECONDS` (default 3600s, matching the deploy
+than `LITESTREAM_REPLICA_MAX_AGE_SECONDS` (default 10800s / 3h, matching the deploy
 gate's LTX budget) fails strict readiness — so a dead probe fails closed
 instead of freezing a healthy verdict. `ageSeconds` is deliberately not
 written: the app would prefer it over `checkedAt` and a stale file would then

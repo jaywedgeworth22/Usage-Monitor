@@ -280,7 +280,7 @@ export function getRuntimeIdentity(): {
   environment: string;
 } {
   return {
-    service: process.env.RENDER_SERVICE_NAME || "api-usage-monitor",
+    service: process.env.RENDER_SERVICE_NAME || "usage-monitor",
     version: packageJson.version,
     revision:
       process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || null,
@@ -320,8 +320,9 @@ export interface BackupRuntimeStatus {
  * - JSON: `{ "ok": true, "ageSeconds": 42, "checkedAt": "ISO" }`
  * - Heartbeat: any file whose mtime is treated as last-success; age is now-mtime.
  *
- * `LITESTREAM_REPLICA_MAX_AGE_SECONDS` (default 3600) fails the side-channel when
- * age exceeds the budget.
+ * `LITESTREAM_REPLICA_MAX_AGE_SECONDS` (default 10800) fails the side-channel when
+ * the probe/status file is older than the budget. Default is 3h so a 1h
+ * Litestream `sync-interval` (R2 free-tier calm) does not flap backup health.
  */
 function litestreamEndpointIsR2(): boolean {
   const endpoint = (
@@ -378,9 +379,9 @@ export function getBackupRuntimeStatus(now = new Date()): BackupRuntimeStatus {
   const maxAgeRaw = process.env.LITESTREAM_REPLICA_MAX_AGE_SECONDS?.trim();
   const maxAgeSeconds = maxAgeRaw
     ? Number.parseInt(maxAgeRaw, 10)
-    : 3600;
+    : 10800;
   const maxAge =
-    Number.isFinite(maxAgeSeconds) && maxAgeSeconds > 0 ? maxAgeSeconds : 3600;
+    Number.isFinite(maxAgeSeconds) && maxAgeSeconds > 0 ? maxAgeSeconds : 10800;
 
   if (
     !active &&
