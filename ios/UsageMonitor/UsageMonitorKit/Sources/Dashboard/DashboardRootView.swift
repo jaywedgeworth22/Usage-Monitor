@@ -34,16 +34,13 @@ public struct DashboardRootView: View {
                 .navigationTitle(AppTab.dashboard.title)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            TimeframePicker(selection: $selectedTimeframe)
-                            Text("Budget is always this month")
-                                .font(.caption2)
-                                .foregroundStyle(Theme.Colors.tertiaryText)
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(
-                            "Time period filter, \(selectedTimeframe.displayLabel). Hero and budget totals always show the current calendar month; timeframe only affects portfolio telemetry when present."
-                        )
+                        // No secondary caption under the picker — it truncated
+                        // ("Budget is always this…") and read as product noise.
+                        // Scope is on the control’s accessibility label only.
+                        TimeframePicker(selection: $selectedTimeframe)
+                            .accessibilityHint(
+                                "Hero and budget totals stay on the current calendar month. This filter only applies to portfolio telemetry."
+                            )
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
