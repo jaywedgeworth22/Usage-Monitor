@@ -1,3 +1,4 @@
+- **[GROK] iOS dual-app identity: distinct name/icon so Local doesn't look like remote (2026-08-05) — IN PR #982.** Teal LOCAL icon, home-screen "UM Local", PRODUCT_NAME split, on-device banner; docs how to install both side-by-side.
 - **[GROK] Usage Monitor Local Milestone A implementation (2026-08-04) — MERGED PR #946.** Shipped SQLiteLocalStore (design DDL), Keychain, OpenRouter adapter, BudgetEngine+materializer, full Local UI. Sim BUILD SUCCEEDED. Branch grok/usage-monitor-local-milestone-a.
 - **[GROK] R2 fleet metrics (3 apps) + calm backup readiness (2026-08-05) — MERGED PR #975.** Ops card for ST/CT/UM free-tier; backup no longer gates `/api/ready` ok; litestream sync 1h. Branch `grok/r2-fleet-metrics-and-backup-calm`.
 - **[GROK] Dual iOS apps: UsageMonitor (live sync) + UsageMonitorLocal (on-device) (2026-08-04) — IN PR #942.** Separate app target/scheme/bundle/app group; LocalStore+LocalDataPlane scaffold; Local sim build green. Owner keeps remote client; Local for phone-only App Store path.
@@ -1144,7 +1145,6 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
   _2026-07-15 (MONET): moved to Completed — stale duplicate row; work already merged (PR #58, squash `dfdb39e`, per this row's own trailing annotation) and docs/EFFORT-LOG.md mirror already corrected by PR #299 on 2026-07-15; the live board simply hadn't caught up. No further action needed._
 
 ## Historical archive — former “In Progress”
-- **[API-usage-monitor][GROK] Receipt inbox addresses chosen 2026-07-27.** Fallback: `receipts@jays.services` (apex → existing iCloud MX; do not change MX). Intake: high-entropy `rcpt-…@receipts.jays.services` stored in `~/.secrets/usage-monitor-receipt-inbox-addresses` (chmod 600). Next: Email Routing destination verify for fallback, onboard receipts subdomain, Worker secrets+deploy.
 
 ## Planned / Reserved
 - **[API-usage-monitor][GROK] Receipt inbox Worker + Email Routing (post-R2 bucket) — COMPLETE 2026-08-04.** Bucket+lifecycle done. Remaining: Worker secrets, `receipt-inbox:deploy`, `receipts.jays.services` routing rule only (preserve apex iCloud MX), dashboard read-token only. Owner must supply/confirm fallback mailbox + high-entropy recipient. Issue #797.

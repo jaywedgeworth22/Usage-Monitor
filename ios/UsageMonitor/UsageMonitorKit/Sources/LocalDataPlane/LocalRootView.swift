@@ -55,6 +55,21 @@ public struct LocalRootView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    // Always-visible product identity (home-screen name is "UM Local").
+                    HStack(spacing: Theme.Spacing.sm) {
+                        Image(systemName: "iphone")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("ON-DEVICE · no server")
+                            .font(Theme.Typography.captionEmphasis)
+                        Spacer()
+                        Text("UM Local")
+                            .font(Theme.Typography.captionEmphasis)
+                    }
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.vertical, Theme.Spacing.sm)
+                    .background(Color(red: 0.05, green: 0.72, blue: 0.68), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+
                     if let err = model.lastError {
                         Text(err)
                             .font(Theme.Typography.caption)
@@ -106,7 +121,7 @@ public struct LocalRootView: View {
                 .padding(Theme.Spacing.lg)
             }
             .dsScreenBackground()
-            .navigationTitle("Usage Monitor Local")
+            .navigationTitle("UM Local")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
