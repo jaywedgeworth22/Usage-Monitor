@@ -21,6 +21,8 @@ import PackageDescription
 //   AppLock          → AppCore, DesignSystem            LocalAuthentication gate
 //   OfflineCache     → Models, Networking, WidgetShared  disk cache + snapshot writer
 //   PushScaffold     → AppCore, Models                  UserNotifications / push scaffold
+//   LocalStore       → (no deps)                        on-device money-truth (Usage Monitor Local)
+//   LocalDataPlane   → DesignSystem, LocalStore         Local app shell + future BudgetEngine
 // ---------------------------------------------------------------------------
 
 let package = Package(
@@ -43,6 +45,9 @@ let package = Package(
         .library(name: "AppLock", targets: ["AppLock"]),
         .library(name: "OfflineCache", targets: ["OfflineCache"]),
         .library(name: "PushScaffold", targets: ["PushScaffold"]),
+        // Usage Monitor Local (on-device product) — not linked by the remote client app.
+        .library(name: "LocalStore", targets: ["LocalStore"]),
+        .library(name: "LocalDataPlane", targets: ["LocalDataPlane"]),
     ],
     targets: [
         // ---- Shared foundation ------------------------------------------
@@ -85,6 +90,14 @@ let package = Package(
         ),
         .target(name: "PushScaffold", dependencies: ["AppCore", "Models", "Networking"]),
 
+        // ---- Usage Monitor Local (on-device self-host product) -----------
+        // Do not add Networking here — Local must not dual-write remote cash.
+        .target(name: "LocalStore"),
+        .target(
+            name: "LocalDataPlane",
+            dependencies: ["DesignSystem", "LocalStore"]
+        ),
+
         // ---- Tests (foundation-owned; feature agents add their own) -----
         .testTarget(
             name: "UsageMonitorKitTests",
@@ -93,6 +106,7 @@ let package = Package(
                 "Dashboard", "Providers", "Alerts", "ProjectBudgets",
                 "Settings", "AppLock", "OfflineCache", "WidgetShared",
                 "PushScaffold",
+                "LocalStore", "LocalDataPlane",
             ]
         ),
     ]

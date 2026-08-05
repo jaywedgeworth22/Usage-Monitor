@@ -100,6 +100,36 @@ targets:
         product: PushScaffold
 
   # -------------------------------------------------------------------------
+  # Usage Monitor Local — on-device self-host product (separate App Store app).
+  # Does NOT embed the remote client widget or link Networking money paths.
+  # -------------------------------------------------------------------------
+  UsageMonitorLocal:
+    type: application
+    platform: iOS
+    sources:
+      - path: LocalApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: services.jays.usage.monitor.local
+        DEVELOPMENT_TEAM: CC8UTF7ATG
+        INFOPLIST_FILE: LocalApp/Resources/Info.plist
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        INFOPLIST_KEY_CFBundleDisplayName: "Usage Monitor Local"
+        CODE_SIGN_ENTITLEMENTS: LocalApp/Resources/UsageMonitorLocal.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+    dependencies:
+      - package: UsageMonitorKit
+        product: DesignSystem
+      - package: UsageMonitorKit
+        product: LocalStore
+      - package: UsageMonitorKit
+        product: LocalDataPlane
+
+  # -------------------------------------------------------------------------
   # WidgetKit extension
   # -------------------------------------------------------------------------
   UsageMonitorWidgetExtension:
@@ -173,3 +203,14 @@ schemes:
       targets:
         - UsageMonitorTests
         - UsageMonitorWidgetTests
+
+  UsageMonitorLocal:
+    build:
+      targets:
+        UsageMonitorLocal: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - UsageMonitorTests

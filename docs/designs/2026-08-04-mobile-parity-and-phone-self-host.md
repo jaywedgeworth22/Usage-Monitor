@@ -2,25 +2,30 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Ready for implementation (phone-only; MVP contracts locked; OpenRouter key-tier + eligibility fixed) |
+| **Status** | Ready for implementation (dual iOS apps; local app scaffolded; MVP contracts locked) |
 | **Author** | Architecture (Grok) |
 | **Date** | 2026-08-04 |
-| **Revised** | 2026-08-04 (owner: phone-only; post-review: MVP freeze, GRDB DDL, BudgetEngine, P0, export, privacy) |
+| **Revised** | 2026-08-04 (owner: dual apps — remote client for live sync + separate on-device Local app) |
 | **Repo** | `/Users/jay/Code/Usage-Monitor` |
 | **Audience** | Senior engineers / multi-agent fleet implementing incremental PRs |
-| **Related** | `ios/UsageMonitor/ARCHITECTURE-CONTRACT.md`, `prisma/schema.prisma`, `src/lib/adapters/helpers.ts`, `src/lib/adapters/anthropic.ts`, `src/lib/budget-status.ts`, `src/lib/subscriptions.ts`, `src/lib/subscription-materializer.ts` |
+| **Related** | `ios/UsageMonitor/ARCHITECTURE-CONTRACT.md`, `ios/README.md`, `prisma/schema.prisma` |
 
 ---
 
 ## Overview
 
-**Product goal (owner decision, final):** users run Usage Monitor **on their phone such that the phone IS the self-hosted instance** — not a thin client of Oracle, a home NAS, or any always-on remote data plane.
+**Product model (owner decision, 2026-08-04):** **two iOS apps** in this monorepo — not one binary with a compile flag.
 
-Topology **A** (phone UI → remote Next.js host) is **rejected as the product answer**. The App Store product is a **personal on-device Usage Monitor** with a **native Swift data plane**.
+| App | Bundle ID | Who | Data plane |
+|---|---|---|---|
+| **Usage Monitor** (existing) | `services.jays.usage.monitor` | Owner + anyone who self-hosts a **server** the way the owner does | **Remote** Next.js + SQLite (Oracle / Docker / VPS). Live sync, ingest, OTLP, widgets against that host. |
+| **Usage Monitor Local** (new) | `services.jays.usage.monitor.local` | Users who want the phone to **be** the instance | **On-device** GRDB + Keychain + Swift adapters. No required remote host. |
 
-**v1 bar (not “full Oracle web”):** a shippable **poll + subscription** personal budget app — Overview, Providers, Alerts, Settings CRUD, widget, App Lock — with **honest** non-parity for live OTLP/ingest, guaranteed 15‑minute polls, fleet ops, and server-scale money edge cases. See [MVP Surface Freeze](#mvp-surface-freeze-v1-app-store).
+The owner keeps using **Usage Monitor** against `usage.jays.services` (or any self-hosted origin) with live sync. That same **client + server** path is what we document and share for self-hosters who want “how I run it.” **Usage Monitor Local** is a **separate App Store product** for true phone-only self-host.
 
-**Brutal honesty:** Next.js + Prisma + continuous multi-provider scheduler + inbound OTLP **cannot** ship as an App Store iOS binary. Phone-only means GRDB + Swift adapters + opportunistic BG + local notifications.
+Topology **A** remains the answer for the **remote client app**. Topology **D (native local data plane)** is the answer for the **Local app only** — never “run Next.js on the iPhone.”
+
+**v1 Local bar:** shippable **poll + subscription** personal budget app — Overview, Providers, Alerts, Settings CRUD, widget, App Lock — with **honest** non-parity for live OTLP/ingest and fleet ops. See [MVP Surface Freeze](#mvp-surface-freeze-v1-app-store).
 
 ```mermaid
 flowchart TB
@@ -46,16 +51,23 @@ flowchart TB
 
 ## Background & Motivation
 
-### Two SKUs (do not conflate)
+### Two iOS apps (do not conflate)
 
-| SKU | Runtime | Product? |
-|---|---|---|
-| **Phone-only App Store** | On-device GRDB + adapters | **Yes — this design** |
-| **Owner fleet** | Oracle Next.js (`usage.jays.services`) | Continues independently; optional export → phone |
+| App / SKU | Runtime | Shared kit | Product path |
+|---|---|---|---|
+| **Usage Monitor** | Client → self-hosted or owner Next.js | `UsageMonitorKit` remote features | **Live-sync / full stack** — owner daily driver; also what we ship docs for “self-host like me” (server + this app) |
+| **Usage Monitor Local** | On-device GRDB + adapters | Shared `Models` / `DesignSystem` / `AppLock` + **new** `LocalStore` / `LocalDataPlane` | **Phone-only App Store** — separate target, separate app group, separate bundle ID |
+| **Server** | Oracle / Docker self-host | N/A (Node) | Shared with remote client; **not** required for Local app |
 
-### Why topology A is not the product answer
+### Why Local is a separate app (not a compile flag)
 
-User asked for self-host **on the phone**. Pointing at a VPS is still a thin client. Fleet packaging (Docker, Tailscale, remote APNs) is **out of product path** (K14).
+1. **Different trust model:** remote client stores host tokens + session cookies; Local stores provider API keys and is the sole money-truth.  
+2. **Different App Store privacy labels** and review notes.  
+3. **No dual cash** risk from one binary toggling modes.  
+4. Owner can keep full remote features (APNs register, intelligence, ops) without shipping them to Local.  
+5. Separate app groups: `group.services.jays.usage.monitor` vs `group.services.jays.usage.monitor.local`.
+
+**K16 revised:** App Store **Local** binary has no remote money path. The **remote client app** remains fully remote (no `LOCAL_DATAPLANE` flag required).
 
 ### Platform limits (unchanged, still binding)
 
@@ -687,7 +699,7 @@ User-visible last fetch / errors / staleness. Optional local debug export. No de
 | K13 | Keep UI kit; inject LocalDataPlane |
 | K14 | Remote APNs/Docker product PRs de-scoped |
 | K15 | v1 poll+subscription; no live push telemetry |
-| **K16** | App Store binary **local-only compile**; remote client owner scheme only |
+| **K16** | **Two apps:** `UsageMonitor` = remote live-sync client; `UsageMonitorLocal` = on-device product. No single-binary mode switch. |
 | **K17** | Materializer writes **`subscription_charge`** table (not dual options) |
 | **K18** | MVP surface freeze; milestones A/B/C |
 | **K19** | P0 poll order: OpenRouter → OpenAI → (DeepSeek); Anthropic personal = subscription_only |
@@ -700,8 +712,10 @@ User-visible last fetch / errors / staleness. Optional local debug export. No de
 
 ## PR Plan
 
-### PR-1 — Design + contract pivot
-- Docs + ARCHITECTURE-CONTRACT addendum (LOCAL_DATAPLANE, MVP freeze)  
+### PR-1 — Design + dual-app scaffold
+- Docs + ARCHITECTURE-CONTRACT dual-app addendum  
+- XcodeGen target **UsageMonitorLocal** + `LocalStore` / `LocalDataPlane` kit stubs  
+- `ios/README.md` product map (remote client vs Local vs server self-host)  
 - **Deps:** none  
 
 ### PR-2 — LocalStore migration v1

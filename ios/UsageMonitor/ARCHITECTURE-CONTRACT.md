@@ -16,12 +16,15 @@ fallback + sign-in hint otherwise). Account Overview / widget totals are
 **provider-scoped** (do not mix server project-summary budget with provider
 total spend).
 
-**Product pivot (phone-only self-host):** App Store product goal is an
-**on-device native data plane** (local SQLite + Keychain keys + Swift poll
-adapters). See §10 and
-`docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`. Until
-`LOCAL_DATAPLANE` builds ship, §§1–9 still describe the live remote-client
-code. New local-plane code must not invent cash rules outside that design.
+**Dual iOS apps (2026-08-04):**
+
+| App target | Bundle ID | Role |
+|---|---|---|
+| **UsageMonitor** | `services.jays.usage.monitor` | Remote live-sync client (owner + server self-hosters). §§1–9. |
+| **UsageMonitorLocal** | `services.jays.usage.monitor.local` | On-device self-host product. §10 + design doc. |
+
+See `ios/README.md` and
+`docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`.
 
 Toolchain on the build host: **Swift 6.4** (`swift --version`), **Xcode 27.0**
 (`xcodebuild -version`). Package targets iOS 26+ for the owner's single-user device fleet.
@@ -337,23 +340,23 @@ depend on both AppCore and the integration modules.
 
 ---
 
-## 10. LOCAL_DATAPLANE (phone-only product) — addendum
+## 10. Usage Monitor Local (separate app) — addendum
 
-**Authority:** `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`
-(approved design; phone **is** the instance). This section is the binding
-contract for that product path. §§1–9 remain the remote-client contract.
+**Authority:** `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`.
+This section binds the **UsageMonitorLocal** app target only. §§1–9 bind
+**UsageMonitor** (remote client).
 
-### 10.1 Compile modes
+### 10.1 Two apps — not a compile flag
 
-| Mode | Flag / scheme | Money-truth | Networking mutations |
+| App | Xcode scheme | Money-truth | App group |
 |---|---|---|---|
-| **Remote client** (today / owner fleet) | default | Server SQLite via HTTPS | `APIClient` session + bearer as today |
-| **Local data plane** (App Store product) | `LOCAL_DATAPLANE` (compile-time) | On-device GRDB SQLite | **No** remote money writes; no `USAGE_*` tokens required |
+| **UsageMonitor** | `UsageMonitor` | Remote server SQLite via HTTPS | `group.services.jays.usage.monitor` |
+| **UsageMonitorLocal** | `UsageMonitorLocal` | On-device GRDB (PR-2+) | `group.services.jays.usage.monitor.local` |
 
-- **App Store / TestFlight product binary is local-only** (K16). Owner may keep
-  a separate scheme that still talks to `usage.jays.services`.
-- Do not dual-write cash: a build is **either** local money-truth **or** remote
-  money-truth, never both for the same totals.
+- **Do not** merge these into one binary with a runtime switch.
+- Local app must **not** link remote money write paths (`APIClient` mutations,
+  session login for cash). Outbound HTTPS to **provider APIs only** (adapters).
+- Owner daily driver stays **UsageMonitor** → self-hosted/Oracle host (live sync).
 
 ### 10.2 MVP surface freeze (Milestone A)
 
@@ -365,20 +368,20 @@ widget, Face ID App Lock.
 Money/Ops/Sentry depth, residual % project allocation, remote APNs as product
 alert path, Docker/self-host packaging as the product answer.
 
-### 10.3 New module boundaries (planned; do not invent outside design)
+### 10.3 Module boundaries (Local app)
 
 ```
-LocalStore       → Models          GRDB schema exactly per design §2.2.1
-KeychainSecrets  → (none)          provider API keys only
-Adapters         → Models          ProviderAdapter + LocalUsageResult subset
-BudgetEngine     → Models, LocalStore   spentUsd formula per design §2.3
-Materializer     → LocalStore      subscription_charge rows
-LocalDataPlane   → AppCore inject  BudgetStore reads local engine
+LocalStore       → (none)                 GRDB schema exactly per design §2.2.1 (scaffold today)
+LocalDataPlane   → DesignSystem, LocalStore   LocalRootView + future engine glue
+KeychainSecrets  → (none)                 provider API keys only (planned)
+Adapters         → Models                 ProviderAdapter + LocalUsageResult (planned)
+BudgetEngine     → Models, LocalStore     spentUsd formula per design §2.3 (planned)
+Materializer     → LocalStore             subscription_charge rows (planned)
 ```
 
-- **Do not edit `Package.swift` without coordinating** a new target name.
-- Widget continues to use **file snapshot** via `WidgetShared` in v1 (not GRDB
-  in the app group).
+- Remote client app targets **must not** depend on `LocalStore` / `LocalDataPlane`.
+- Local app target depends only on Local + DesignSystem (+ AppLock when local settings exist).
+- Widget for Local (if added later) uses a **separate** extension + local app group file snapshot.
 
 ### 10.4 Cash contracts (do not invent)
 
@@ -397,13 +400,16 @@ LocalDataPlane   → AppCore inject  BudgetStore reads local engine
 5. **Export package v1:** keys never included; passphrase optional with
    warning; Replace-all in Milestone A; Merge-by-name in B.
 
-### 10.5 Rules of the road (local mode additions)
+### 10.5 Rules of the road (Local app)
 
 1. Provider API keys → Keychain only; never GRDB, never export payload.
-2. Face ID App Lock replaces dashboard password for local use.
+2. Face ID App Lock replaces dashboard password for local use (wire when local
+   Settings ships; do not force remote `AppEnvironment` into Local).
 3. BGAppRefresh is **opportunistic** — no 15-minute SLA; UI must show last
    successful poll age.
-4. Local notifications only for product alerts (remote APNs is fleet/owner,
-   not required for phone-only product).
+4. Local notifications only for product alerts (remote APNs belongs to the
+   **UsageMonitor** client talking to a server).
 5. Any PR that ports server money math must cite design §2.3 and add golden
    vector tests before merge.
+6. Deep links use scheme `usagemonitorlocal://` (remote client keeps
+   `usagemonitor://`).
