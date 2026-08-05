@@ -380,10 +380,24 @@ require_current_main() {
   local actual
   actual="$(remote_main_sha)"
   [[ "${actual}" =~ ^[0-9a-f]{40}$ ]] || die "could not resolve origin main"
-  if [[ "${actual}" != "${expected}" ]]; then
-    log "revision ${expected} was superseded by ${actual}; no production mutation required."
-    exit 0
+  if [[ "${actual}" == "${expected}" ]]; then
+    return 0
   fi
+  # Concurrent merges advance main during multi-minute image builds. Aborting
+  # here left production stuck (2026-08-05: built b6edd48, main moved, exit 0
+  # "superseded" without cutover). Continue exact-SHA deploy of a main ancestor;
+  # the next timer catches up to the tip. Only refuse if expected left main.
+  if [[ -d "${MIRROR_DIR:-}" ]]; then
+    if git --git-dir="${MIRROR_DIR}" fetch --force origin \
+      'refs/heads/main:refs/remotes/origin/main' \
+      "+${actual}:refs/tips/${actual}" >/dev/null 2>&1 \
+      && git --git-dir="${MIRROR_DIR}" merge-base --is-ancestor "${expected}" "${actual}" 2>/dev/null; then
+      log "revision ${expected} is still on main (tip advanced to ${actual}); continuing exact-SHA deploy."
+      return 0
+    fi
+  fi
+  log "revision ${expected} was superseded by ${actual} and is not an ancestor of main tip; no production mutation required."
+  exit 0
 }
 
 require_single_app_container() {
