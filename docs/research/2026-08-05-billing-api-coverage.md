@@ -93,6 +93,23 @@ These are almost always **separate products**. There is **no** public API that r
 | Channel | Billing history / subscription API? | Notes |
 |---|---|---|
 | **API** | **None found (blind)** | Catalog: no non-billable account/invoice/subscription endpoint. Console only if any. |
+| **Remote Usage Monitor** | **Push/manual + Subscription row** | Blind adapter; no key poll. Cost via `ExternalUsageEvent` push or Settings subscription. |
+| **Local Usage Monitor** | **Subscription shell only** | Same reality — no phone poll. Catalog entry `voyage` seeds for historical tracking. |
+
+### Oracle Cloud Infrastructure (OCI)
+
+| Channel | Billing history / subscription API? | Notes |
+|---|---|---|
+| **Remote** | **Have — OCI Usage API (COST)** | RSA-signed Usage API for completed UTC days MTD; budgets; service detail. Up to ~48h publication lag (caveat). |
+| **Local (iPhone)** | **Subscription shell only** | OCI RSA private-key signing is server-side; phone does not embed RSA tenancy poll in v1. Track paid add-ons as subscription; use **remote** for live OCI cash. |
+
+### Hetzner Cloud
+
+| Channel | Billing history / subscription API? | Notes |
+|---|---|---|
+| **Invoice / billing history REST** | **Not in public Cloud API** | Account invoices stay on accounts.hetzner.com UI. |
+| **Remote** | **Estimate path — Have** | Full inventory + public pricing catalog; `totalCost` = pro-rated UTC MTD catalog run-rate with `hetzner_catalog_runrate_prorated` caveat. |
+| **Local** | **Estimate path — Have** | Same idea: project token → servers/volumes/IPs/LBs + pricing catalog × month fraction. |
 
 ### Cursor (IDE — LLM-adjacent spend)
 
@@ -139,7 +156,7 @@ Mostly **metadata / inventory / partial** — plan labels without invoice APIs, 
 
 | Provider | Billing history API? | Better path |
 |---|---|---|
-| Hetzner | Invoice APIs exist on Hetzner Cloud for accounts (separate from our current depth) — worth a dedicated pass if invoices needed | Price estimate from server types + invoices API research |
+| Hetzner | **No public invoice API** (re-verified). Catalog MTD estimate wired on **remote + Local** | Keep watching accounts API; until then catalog pro-rate |
 | Pinecone | Console billing; control-plane inventory only in our adapter | Plan estimate + console |
 | Sentry | Org stats / subscription often console or partner | Stats ≠ invoice |
 | Coolify | Self-hosted / host bill, not Coolify SaaS invoice | Host cost (Hetzner/Oracle) |
@@ -179,7 +196,7 @@ For **Claude Max, ChatGPT Plus/Pro, SuperGrok, Cursor, Apple-billed anything**:
 ### B — Estimate money (no invoice API)
 
 1. **Render** — plan/disk/instance × published price table + bandwidth quantity (+ overage estimate only if included GB known from workspace tier). Label **estimate**.  
-2. Same pattern for **Hetzner** server types, other hosts with SKU prices.
+2. **Hetzner** — **done (remote + Local)**: catalog run-rate × UTC month fraction → `totalCost` with explicit non-invoice caveat.
 
 ### C — Cannot automate vendor-side (honest)
 
@@ -209,12 +226,32 @@ For **Claude Max, ChatGPT Plus/Pro, SuperGrok, Cursor, Apple-billed anything**:
 
 ---
 
-## 6. Bottom line for the product
+## 6. Dual-app historical coverage (remote + Local)
+
+**Product rule:** both apps must surface **every provider ever used** (active, dormant, retired), not only current spend sources. Missing rows hide cost.
+
+| Layer | Remote (Next.js / Oracle) | Local Usage Monitor (iOS) |
+|---|---|---|
+| **Catalog** | `PROVIDER_DEFINITIONS` (42 builtins) + lifecycle retired/dormant retained | `LocalProviderCatalog` = all 42 + Claude sub, Cursor, Agent Sync, custom |
+| **Seed** | DB rows from UI / Infisical / poll | `seedMissingCatalogProviders()` inserts inactive shells for every missing entry |
+| **Voyage** | Blind push/manual | Subscription shell |
+| **Oracle** | OCI Usage API cash (RSA) | Subscription shell (use remote for live $) |
+| **Hetzner** | Catalog pro-rated MTD estimate | Same pattern via phone poll adapter |
+| **True poll $ on phone** | n/a | OpenRouter, OpenAI Admin, DeepSeek balance, Anthropic Admin, Hetzner estimate |
+| **Everything else** | Per-adapter poll or blind | Subscription / key shell until ported |
+
+Retired brokers (Tradier, Alpaca, Robinhood) and dormant Firecrawl stay in both catalogs for **historical** tracking even when auto-poll is off.
+
+---
+
+## 7. Bottom line for the product
 
 1. **API token spend** for major LLMs is largely solvable (and partly already solved) via **Admin / Management / Costs** APIs — **not** via consumer Max/Plus portals.  
 2. **Consumer subscriptions** (Max, Plus, SuperGrok, Cursor) will not become “full insight” through vendor REST without scraping; receipt/email/subscription SKU is correct.  
 3. **Render** still has **no** public invoice endpoint after a full OpenAPI dig; next best is **SKU estimate + bandwidth**, and keep watching for billing APIs.  
-4. Highest ROI automation: **xAI invoices + Render estimates + Cloudflare billable usage**, not more empty catalog rows.
+4. **Hetzner** is on the estimate path for **both apps** (not invoice truth).  
+5. **Voyage** remains non-automatable until they ship a usage API; **Oracle live $** is remote-only.  
+6. Highest remaining ROI automation: **xAI invoices + Render estimates + Cloudflare billable usage**.
 
 ---
 
