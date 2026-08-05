@@ -40,7 +40,7 @@ struct StatusFilterBar: View {
             onChange?()
         } label: {
             HStack(spacing: Theme.Spacing.xs) {
-                if let symbol = facet.systemImage {
+                if let symbol = facet.systemImage, !symbol.isEmpty {
                     Image(systemName: symbol).imageScale(.small)
                 }
                 Text(facet.label)

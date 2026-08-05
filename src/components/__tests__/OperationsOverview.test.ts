@@ -151,5 +151,9 @@ describe("OperationsOverview cards", () => {
     expect(html).toContain("Socratic Trade");
     expect(html).toContain("Congress Trade");
     expect(html).toContain("usage-monitor-prod-v3");
+    expect(html).toContain("Status:");
+    expect(html).toContain("Class A ops");
+    expect(html).toContain("Class B ops");
+    expect(html).toContain("Top buckets");
   });
 });

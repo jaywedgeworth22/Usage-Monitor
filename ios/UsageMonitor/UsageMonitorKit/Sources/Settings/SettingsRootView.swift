@@ -51,6 +51,8 @@ public struct SettingsRootView: View {
                 AboutSection(host: model.resolvedHostDisplay)
             }
             .navigationTitle(AppTab.settings.title)
+            // Inline (centered compact) title — avoid large left-aligned title at rest.
+            .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
             .task {
                 model.bind(to: env)

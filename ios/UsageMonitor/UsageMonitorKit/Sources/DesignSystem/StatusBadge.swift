@@ -16,7 +16,8 @@ public struct StatusBadge: View {
 
     public var body: some View {
         HStack(spacing: Theme.Spacing.xs) {
-            if let systemImage {
+            // Empty strings crash SF Symbol lookup ("No symbol named '' found").
+            if let systemImage, !systemImage.isEmpty {
                 Image(systemName: systemImage).imageScale(.small)
             }
             Text(text)

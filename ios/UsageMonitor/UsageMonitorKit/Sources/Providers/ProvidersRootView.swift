@@ -28,7 +28,8 @@ public struct ProvidersRootView: View {
         NavigationStack(path: $path) {
             content
                 .navigationTitle(AppTab.providers.title)
-                .navigationBarTitleDisplayMode(.large)
+                // Inline (centered compact) title — avoid large left-aligned title at rest.
+                .navigationBarTitleDisplayMode(.inline)
                 .navigationDestination(for: ProviderRoute.self) { route in
                     ProviderDetailView(route: route)
                 }

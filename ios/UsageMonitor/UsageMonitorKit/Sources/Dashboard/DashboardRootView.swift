@@ -32,6 +32,8 @@ public struct DashboardRootView: View {
         NavigationStack {
             content
                 .navigationTitle(AppTab.dashboard.title)
+                // Inline (centered compact) title — avoid large left-aligned title at rest.
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         // No secondary caption under the picker — it truncated
