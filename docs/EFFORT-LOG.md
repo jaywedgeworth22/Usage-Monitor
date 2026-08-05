@@ -1,5 +1,5 @@
 - **[GROK] Usage Monitor Local Milestone A implementation (2026-08-04) — MERGED PR #946.** Shipped SQLiteLocalStore (design DDL), Keychain, OpenRouter adapter, BudgetEngine+materializer, full Local UI. Sim BUILD SUCCEEDED. Branch grok/usage-monitor-local-milestone-a.
-- **[GROK] R2 fleet metrics (3 apps) + calm backup readiness (2026-08-05) — IN PROGRESS.** Ops card for ST/CT/UM free-tier; backup no longer gates `/api/ready` ok; litestream sync 1h. Branch `grok/r2-fleet-metrics-and-backup-calm`.
+- **[GROK] R2 fleet metrics (3 apps) + calm backup readiness (2026-08-05) — MERGED PR #975.** Ops card for ST/CT/UM free-tier; backup no longer gates `/api/ready` ok; litestream sync 1h. Branch `grok/r2-fleet-metrics-and-backup-calm`.
 - **[GROK] Dual iOS apps: UsageMonitor (live sync) + UsageMonitorLocal (on-device) (2026-08-04) — IN PR #942.** Separate app target/scheme/bundle/app group; LocalStore+LocalDataPlane scaffold; Local sim build green. Owner keeps remote client; Local for phone-only App Store path.
 - **[GROK] iOS TestFlight agent ship pipeline (cross-app) — IN PR 2026-08-04 (ST #2442 / CT #1348 / UM #943); IPA export verified; upload blocked on ASC API key handoff 2026-08-04.** Fleet script + per-repo wrappers so agents can archive/sign/upload without Xcode UI. Bundle IDs: trade.socratic.app / trade.congress.ios / services.jays.usage.monitor. Team CC8UTF7ATG. Branch grok/ios-testflight-ship. Needs ASC API key handoff at ~/.secrets/appstore-connect.env if Xcode session upload fails.
 
@@ -9,10 +9,10 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
-- **[GROK] Issue/effort hygiene + replica age align with 1h Litestream sync (2026-08-05) — IN PR.** Closed PR #974 (would revert #975 R2 fleet metrics). Closed Issues #952/#971 (done). Raise default LITESTREAM_REPLICA_MAX_AGE / probe / deploy LTX budget 3600→10800s so 1h R2 sync does not flap backup side-channel; service display name usage-monitor; hide backup from iOS compact server checklist.
+- **[GROK] Issue/effort hygiene + replica age align with 1h Litestream sync (2026-08-05) — MERGED PR #976.** Closed #974 (would revert #975); closed #952/#971; #972 auto-closed. Replica max-age 3600→10800s; service name usage-monitor; iOS checklist omits backup gate.
 
 <!-- board-hygiene 2026-08-05 GROK final: only current WIP / open PRs / active incidents. -->
-- **[GROK] Overview money UX: global budget, projected breakdown, quiet stale, ROIC builtin (2026-08-05) — IN PR.** Branch `grok/overview-budget-projection-ux`. Global Budget set-from-hero; projected click → renewals+usage breakdown; suppress stale_snapshot nags; ROIC blind provider seed; known renewals include one-term next bill.
+- **[GROK] Overview money UX: global budget, projected breakdown, quiet stale, ROIC builtin (2026-08-05) — MERGED PR #949.** Branch `grok/overview-budget-projection-ux`. Global Budget set-from-hero; projected click → renewals+usage breakdown; suppress stale_snapshot nags; ROIC blind provider seed; known renewals include one-term next bill.
 - **[OWNER ACTION REQUIRED] P0 deleted-live-SQLite recovery (2026-08-01) — ACTIVE INCIDENT / DO NOT RESTART.** At `2026-08-01T14:34:50Z`, a manual root command unlinked `/data/prod.db`, its WAL/SHM, and multiple backup patterns while `oracle-app-1` remained live. The healthy old container is now serving from deleted open inodes; restart/deploy can destroy the freshest state. Freeze traffic/scheduler, pause the container, capture the open DB+WAL descriptors into root-only incident storage, build and verify a disposable recovery candidate, atomically restore the pathname, then re-enable service/backups/scheduler/deploy in stages. CODEX made no production mutation and posted the evidence to `#agent-sync`; coordinated recovery remains owner/unclaimed work.
 
 ## Deployed
@@ -1147,7 +1147,7 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
 - **[API-usage-monitor][GROK] Receipt inbox addresses chosen 2026-07-27.** Fallback: `receipts@jays.services` (apex → existing iCloud MX; do not change MX). Intake: high-entropy `rcpt-…@receipts.jays.services` stored in `~/.secrets/usage-monitor-receipt-inbox-addresses` (chmod 600). Next: Email Routing destination verify for fallback, onboard receipts subdomain, Worker secrets+deploy.
 
 ## Planned / Reserved
-- **[API-usage-monitor][GROK] Receipt inbox Worker + Email Routing (post-R2 bucket) — PLANNED/NEXT 2026-07-27.** Bucket+lifecycle done. Remaining: Worker secrets, `receipt-inbox:deploy`, `receipts.jays.services` routing rule only (preserve apex iCloud MX), dashboard read-token only. Owner must supply/confirm fallback mailbox + high-entropy recipient. Issue #797.
+- **[API-usage-monitor][GROK] Receipt inbox Worker + Email Routing (post-R2 bucket) — COMPLETE 2026-08-04.** Bucket+lifecycle done. Remaining: Worker secrets, `receipt-inbox:deploy`, `receipts.jays.services` routing rule only (preserve apex iCloud MX), dashboard read-token only. Owner must supply/confirm fallback mailbox + high-entropy recipient. Issue #797.
 
 ## Changelog of this log
 - 2026-08-05 — GROK: closed merged effort-board mirrors (integrity timeout #925, R2 docs #916, R2 free-tier shutoff #911, blank dashboard #823) → Completed; production recovered at `08be8a96` with health/ready green.
