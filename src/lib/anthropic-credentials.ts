@@ -23,6 +23,7 @@ interface StoredProviderCredentials {
 
 const NO_POLL_SNAPSHOT_PROVIDER_KEYS = new Set([
   "voyage",
+  "roic",
   "fmp",
   "finnhub",
   "alphavantage",

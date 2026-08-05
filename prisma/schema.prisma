@@ -754,3 +754,12 @@ model ApnsDeviceToken {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+// Singleton portfolio / "Global Budget" cap for Overview hero meter.
+// Null override means use suggested sum of project budgets (or none).
+// Freeform — may disagree with Σ project or provider budgets.
+model AppBudgetSettings {
+  id                     String   @id @default("default")
+  globalMonthlyBudgetUsd Float?
+  updatedAt              DateTime @updatedAt
+}

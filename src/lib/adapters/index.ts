@@ -97,6 +97,11 @@ async function loadAdapters() {
         "voyage",
         "No documented non-billable usage or billing API exists; no inference probe was sent."
       ),
+    roic: async () =>
+      blindProviderResult(
+        "roic",
+        "No documented non-billable ROIC.ai usage/billing API is wired; track via Subscription or push telemetry."
+      ),
     fmp: fmp.fetchUsage,
     finnhub: finnhub.fetchUsage,
     alphavantage: alphavantage.fetchUsage,

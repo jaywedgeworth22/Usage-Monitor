@@ -9,6 +9,10 @@ import DashboardAttentionPanel from "@/components/DashboardAttentionPanel";
 import DashboardProviderWorkspace from "@/components/DashboardProviderWorkspace";
 import DashboardPortfolioSection from "@/components/DashboardPortfolioSection";
 import OperationsOverview from "@/components/OperationsOverview";
+import GlobalBudgetModal from "@/components/GlobalBudgetModal";
+import ProjectedCostBreakdownModal, {
+  type ProjectedRenewalRow,
+} from "@/components/ProjectedCostBreakdownModal";
 import {
   COMMAND_PALETTE_PROVIDERS_EVENT,
   type CommandPaletteProviderItem,
@@ -72,6 +76,21 @@ export default function DashboardPage() {
   const [budgetIntelByProviderId, setBudgetIntelByProviderId] = useState<
     Record<string, ProviderBudgetIntel>
   >({});
+  const [globalBudget, setGlobalBudget] = useState<{
+    globalMonthlyBudgetUsd: number | null;
+    suggestedGlobalBudgetUsd: number | null;
+    effectiveGlobalBudgetUsd: number | null;
+    globalBudgetSource: "override" | "suggested" | "none";
+    projectBudgetCount: number;
+  }>({
+    globalMonthlyBudgetUsd: null,
+    suggestedGlobalBudgetUsd: null,
+    effectiveGlobalBudgetUsd: null,
+    globalBudgetSource: "none",
+    projectBudgetCount: 0,
+  });
+  const [globalBudgetOpen, setGlobalBudgetOpen] = useState(false);
+  const [projectedOpen, setProjectedOpen] = useState(false);
   useEffect(() => {
     let cancelled = false;
     fetch("/api/budget-status", { cache: "no-store" })
@@ -88,6 +107,32 @@ export default function DashboardPage() {
           };
         }
         setBudgetIntelByProviderId(map);
+        const summary = body.summary;
+        if (summary && typeof summary === "object") {
+          setGlobalBudget({
+            globalMonthlyBudgetUsd:
+              typeof summary.globalMonthlyBudgetUsd === "number"
+                ? summary.globalMonthlyBudgetUsd
+                : null,
+            suggestedGlobalBudgetUsd:
+              typeof summary.suggestedGlobalBudgetUsd === "number"
+                ? summary.suggestedGlobalBudgetUsd
+                : null,
+            effectiveGlobalBudgetUsd:
+              typeof summary.effectiveGlobalBudgetUsd === "number"
+                ? summary.effectiveGlobalBudgetUsd
+                : null,
+            globalBudgetSource:
+              summary.globalBudgetSource === "override" ||
+              summary.globalBudgetSource === "suggested"
+                ? summary.globalBudgetSource
+                : "none",
+            projectBudgetCount:
+              typeof summary.projectBudgetCount === "number"
+                ? summary.projectBudgetCount
+                : 0,
+          });
+        }
       })
       .catch(() => {
         // Best-effort surface; the dashboard works without it.
@@ -156,7 +201,9 @@ export default function DashboardPage() {
     [providers]
   );
 
-  const totalBudgetUsd = useMemo(() => {
+  // Prefer Global Budget (override or sum of project budgets). Fall back to
+  // sum of provider plan budgets only when global is unset.
+  const providerPlanBudgetSum = useMemo(() => {
     let sum = 0;
     let any = false;
     for (const provider of providers || []) {
@@ -169,6 +216,11 @@ export default function DashboardPage() {
     return any ? sum : null;
   }, [providers]);
 
+  const totalBudgetUsd =
+    globalBudget.effectiveGlobalBudgetUsd != null
+      ? globalBudget.effectiveGlobalBudgetUsd
+      : providerPlanBudgetSum;
+
   const budgetedProviderCount = useMemo(
     () =>
       (providers || []).filter((provider: any) => {
@@ -177,6 +229,42 @@ export default function DashboardPage() {
       }).length,
     [providers]
   );
+
+  const projectedBreakdown = useMemo(() => {
+    let fixedAccruedUsd = 0;
+    let projectedVariableUsd = 0;
+    let knownRenewalsUsd = 0;
+    const renewals: ProjectedRenewalRow[] = [];
+    for (const provider of providers || []) {
+      const fixed = Number(provider?.fixedAccruedUsd);
+      if (Number.isFinite(fixed)) fixedAccruedUsd += fixed;
+      const variable = Number(provider?.projectedVariableUsageUsd);
+      if (Number.isFinite(variable)) projectedVariableUsd += variable;
+      const renew = Number(provider?.forecastedSubscriptionRenewalsUsd);
+      if (Number.isFinite(renew)) knownRenewalsUsd += renew;
+      const lines = Array.isArray(provider?.forecastedRenewals)
+        ? provider.forecastedRenewals
+        : [];
+      for (const line of lines) {
+        if (!line || typeof line.subscriptionId !== "string") continue;
+        renewals.push({
+          subscriptionId: line.subscriptionId,
+          providerId: line.providerId ?? provider.id,
+          name: line.name ?? "Subscription",
+          chargeUsd: Number(line.chargeUsd) || 0,
+          chargeAt: line.chargeAt,
+          autoRenew: Boolean(line.autoRenew),
+          providerDisplayName: provider.displayName ?? provider.name,
+        });
+      }
+    }
+    return {
+      fixedAccruedUsd,
+      projectedVariableUsd,
+      knownRenewalsUsd,
+      renewals,
+    };
+  }, [providers]);
 
   const chartFamilies = useMemo(
     () =>
@@ -447,6 +535,31 @@ export default function DashboardPage() {
           ambiguousCostFamilyCount={ambiguousCostFamilyCount}
           accountStatus={accountStatus}
           spendPeriodLabel={historyWindowLabel}
+          mtdMonthLabel={mtdMonthLabel}
+          globalBudgetSource={
+            globalBudget.effectiveGlobalBudgetUsd != null
+              ? globalBudget.globalBudgetSource
+              : "none"
+          }
+          onOpenGlobalBudget={() => setGlobalBudgetOpen(true)}
+          onOpenProjectedBreakdown={() => setProjectedOpen(true)}
+        />
+        <GlobalBudgetModal
+          open={globalBudgetOpen}
+          onClose={() => setGlobalBudgetOpen(false)}
+          globalMonthlyBudgetUsd={globalBudget.globalMonthlyBudgetUsd}
+          suggestedGlobalBudgetUsd={globalBudget.suggestedGlobalBudgetUsd}
+          projectBudgetCount={globalBudget.projectBudgetCount}
+          onSaved={(next) => setGlobalBudget(next)}
+        />
+        <ProjectedCostBreakdownModal
+          open={projectedOpen}
+          onClose={() => setProjectedOpen(false)}
+          totalProjectedUsd={totalProjectedMonthlyCost}
+          fixedAccruedUsd={projectedBreakdown.fixedAccruedUsd}
+          projectedVariableUsd={projectedBreakdown.projectedVariableUsd}
+          knownRenewalsUsd={projectedBreakdown.knownRenewalsUsd}
+          renewals={projectedBreakdown.renewals}
           mtdMonthLabel={mtdMonthLabel}
         />
 
