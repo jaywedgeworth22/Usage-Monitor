@@ -120,6 +120,7 @@ for (const [pattern, message] of [
   [/GITHUB_ACTIONS_APP_ID/, "trusted GitHub Actions app guard"],
   [/Analyze JavaScript and TypeScript/, "CodeQL check guard"],
   [/create_sqlite_backup/, "transaction-consistent backup"],
+  [/timeout --signal=TERM --kill-after=30s 1800 \\\s*\n\s*sqlite3/, "long SQLite Online Backup timeout for large prod DB"],
   [/PRAGMA integrity_check/, "SQLite integrity verification"],
   [/PRAGMA foreign_key_check/, "SQLite foreign-key verification"],
   [/--network none/, "offline scratch migration"],

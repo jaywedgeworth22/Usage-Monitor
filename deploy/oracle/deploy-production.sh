@@ -835,7 +835,9 @@ create_sqlite_backup() {
   local partial="${destination}.partial"
   local destination_dir="${destination%/*}"
   unlink "${partial}" 2>/dev/null || true
-  timeout --signal=TERM --kill-after=30s 300 \
+  # ~850MB+ prod DB under concurrent load has exceeded 300s Online Backup API
+  # (exit 124 at create_sqlite_backup during 2026-08-05 deploys). Allow 30m.
+  timeout --signal=TERM --kill-after=30s 1800 \
     sqlite3 -cmd '.timeout 30000' "${DB_PATH}" ".backup '${partial}'"
   [[ "$(sqlite3 -readonly "${partial}" 'PRAGMA integrity_check;')" == "ok" ]] || die "backup integrity check failed"
   [[ -z "$(sqlite3 -readonly "${partial}" 'PRAGMA foreign_key_check;')" ]] || die "backup foreign-key check failed"
