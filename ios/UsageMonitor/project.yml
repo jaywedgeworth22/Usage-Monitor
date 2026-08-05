@@ -57,6 +57,7 @@ targets:
       - path: App
     settings:
       base:
+        PRODUCT_NAME: UsageMonitor
         PRODUCT_BUNDLE_IDENTIFIER: services.jays.usage.monitor
         DEVELOPMENT_TEAM: CC8UTF7ATG
         INFOPLIST_FILE: App/Resources/Info.plist
@@ -110,11 +111,13 @@ targets:
       - path: LocalApp
     settings:
       base:
+        # Distinct product name + bundle ID so Xcode never overwrites the remote client.
+        PRODUCT_NAME: UsageMonitorLocal
         PRODUCT_BUNDLE_IDENTIFIER: services.jays.usage.monitor.local
         DEVELOPMENT_TEAM: CC8UTF7ATG
         INFOPLIST_FILE: LocalApp/Resources/Info.plist
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
-        # Short home-screen label so it is obvious next to "Usage Monitor".
+        # Short home-screen label (must differ from "Usage Monitor").
         INFOPLIST_KEY_CFBundleDisplayName: "UM Local"
         CODE_SIGN_ENTITLEMENTS: LocalApp/Resources/UsageMonitorLocal.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
