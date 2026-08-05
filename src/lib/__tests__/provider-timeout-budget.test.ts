@@ -18,6 +18,7 @@ const fetchProviderUsage = vi.fn();
 const runUsageMaintenance = vi.fn();
 const bootstrapStGeminiCredentialToInfisical = vi.fn();
 const syncProviderCredentialsFromInfisical = vi.fn();
+const ensureRoicProviderSeeded = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -35,6 +36,10 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/adapters", () => ({
   fetchProviderUsage: (provider: unknown) => fetchProviderUsage(provider),
+}));
+
+vi.mock("@/lib/ensure-roic-provider", () => ({
+  ensureRoicProviderSeeded: () => ensureRoicProviderSeeded(),
 }));
 
 vi.mock("@/lib/usage-maintenance", () => ({
@@ -139,6 +144,8 @@ describe("fetchAllDueProviders per-provider timeout budget", () => {
     create.mockReset();
     fetchProviderUsage.mockReset();
     runUsageMaintenance.mockReset();
+    ensureRoicProviderSeeded.mockReset();
+    ensureRoicProviderSeeded.mockResolvedValue(undefined);
     bootstrapStGeminiCredentialToInfisical.mockReset();
     bootstrapStGeminiCredentialToInfisical.mockResolvedValue({
       enabled: false,
