@@ -15,9 +15,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "32E36034E93B3E77B7BFA1D7"
-               BuildableName = "UsageMonitorLocal.app"
-               BlueprintName = "UsageMonitorLocal"
+               BlueprintIdentifier = "FA6CE617E531033E34DE1EFC"
+               BuildableName = "LocalUsageMonitor.app"
+               BlueprintName = "LocalUsageMonitor"
                ReferencedContainer = "container:UsageMonitor.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -32,9 +32,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "32E36034E93B3E77B7BFA1D7"
-            BuildableName = "UsageMonitorLocal.app"
-            BlueprintName = "UsageMonitorLocal"
+            BlueprintIdentifier = "FA6CE617E531033E34DE1EFC"
+            BuildableName = "LocalUsageMonitor.app"
+            BlueprintName = "LocalUsageMonitor"
             ReferencedContainer = "container:UsageMonitor.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -68,9 +68,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "32E36034E93B3E77B7BFA1D7"
-            BuildableName = "UsageMonitorLocal.app"
-            BlueprintName = "UsageMonitorLocal"
+            BlueprintIdentifier = "FA6CE617E531033E34DE1EFC"
+            BuildableName = "LocalUsageMonitor.app"
+            BlueprintName = "LocalUsageMonitor"
             ReferencedContainer = "container:UsageMonitor.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -87,9 +87,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "32E36034E93B3E77B7BFA1D7"
-            BuildableName = "UsageMonitorLocal.app"
-            BlueprintName = "UsageMonitorLocal"
+            BlueprintIdentifier = "FA6CE617E531033E34DE1EFC"
+            BuildableName = "LocalUsageMonitor.app"
+            BlueprintName = "LocalUsageMonitor"
             ReferencedContainer = "container:UsageMonitor.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

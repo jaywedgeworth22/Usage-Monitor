@@ -5,7 +5,7 @@ import SQLite3
 public actor SQLiteLocalStore: LocalStoring {
     public static let shared: SQLiteLocalStore = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("UsageMonitorLocal", isDirectory: true)
+            .appendingPathComponent("LocalUsageMonitor", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return SQLiteLocalStore(path: dir.appendingPathComponent("local.sqlite").path)
     }()

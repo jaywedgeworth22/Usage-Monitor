@@ -19,9 +19,9 @@
 | App | Bundle ID | Who | Data plane |
 |---|---|---|---|
 | **Usage Monitor** (existing) | `services.jays.usage.monitor` | Owner + anyone who self-hosts a **server** the way the owner does | **Remote** Next.js + SQLite (Oracle / Docker / VPS). Live sync, ingest, OTLP, widgets against that host. |
-| **Usage Monitor Local** (new) | `services.jays.usage.monitor.local` | Users who want the phone to **be** the instance | **On-device** GRDB + Keychain + Swift adapters. No required remote host. |
+| **Local Usage Monitor** (new) | `services.jays.local.usage.monitor` | Users who want the phone to **be** the instance | **On-device** GRDB + Keychain + Swift adapters. No required remote host. |
 
-The owner keeps using **Usage Monitor** against `usage.jays.services` (or any self-hosted origin) with live sync. That same **client + server** path is what we document and share for self-hosters who want “how I run it.” **Usage Monitor Local** is a **separate App Store product** for true phone-only self-host.
+The owner keeps using **Usage Monitor** against `usage.jays.services` (or any self-hosted origin) with live sync. That same **client + server** path is what we document and share for self-hosters who want “how I run it.” **Local Usage Monitor** is a **separate App Store product** for true phone-only self-host.
 
 Topology **A** remains the answer for the **remote client app**. Topology **D (native local data plane)** is the answer for the **Local app only** — never “run Next.js on the iPhone.”
 
@@ -56,7 +56,7 @@ flowchart TB
 | App / SKU | Runtime | Shared kit | Product path |
 |---|---|---|---|
 | **Usage Monitor** | Client → self-hosted or owner Next.js | `UsageMonitorKit` remote features | **Live-sync / full stack** — owner daily driver; also what we ship docs for “self-host like me” (server + this app) |
-| **Usage Monitor Local** | On-device GRDB + adapters | Shared `Models` / `DesignSystem` / `AppLock` + **new** `LocalStore` / `LocalDataPlane` | **Phone-only App Store** — separate target, separate app group, separate bundle ID |
+| **Local Usage Monitor** | On-device GRDB + adapters | Shared `Models` / `DesignSystem` / `AppLock` + **new** `LocalStore` / `LocalDataPlane` | **Phone-only App Store** — separate target, separate app group, separate bundle ID |
 | **Server** | Oracle / Docker self-host | N/A (Node) | Shared with remote client; **not** required for Local app |
 
 ### Why Local is a separate app (not a compile flag)
@@ -65,7 +65,7 @@ flowchart TB
 2. **Different App Store privacy labels** and review notes.  
 3. **No dual cash** risk from one binary toggling modes.  
 4. Owner can keep full remote features (APNs register, intelligence, ops) without shipping them to Local.  
-5. Separate app groups: `group.services.jays.usage.monitor` vs `group.services.jays.usage.monitor.local`.
+5. Separate app groups: `group.services.jays.usage.monitor` vs `group.services.jays.local.usage.monitor`.
 
 **K16 revised:** App Store **Local** binary has no remote money path. The **remote client app** remains fully remote (no `LOCAL_DATAPLANE` flag required).
 
@@ -699,7 +699,7 @@ User-visible last fetch / errors / staleness. Optional local debug export. No de
 | K13 | Keep UI kit; inject LocalDataPlane |
 | K14 | Remote APNs/Docker product PRs de-scoped |
 | K15 | v1 poll+subscription; no live push telemetry |
-| **K16** | **Two apps:** `UsageMonitor` = remote live-sync client; `UsageMonitorLocal` = on-device product. No single-binary mode switch. |
+| **K16** | **Two apps:** `UsageMonitor` = remote live-sync client; `LocalUsageMonitor` = on-device product. No single-binary mode switch. |
 | **K17** | Materializer writes **`subscription_charge`** table (not dual options) |
 | **K18** | MVP surface freeze; milestones A/B/C |
 | **K19** | P0 poll order: OpenRouter → OpenAI → (DeepSeek); Anthropic personal = subscription_only |
@@ -714,7 +714,7 @@ User-visible last fetch / errors / staleness. Optional local debug export. No de
 
 ### PR-1 — Design + dual-app scaffold
 - Docs + ARCHITECTURE-CONTRACT dual-app addendum  
-- XcodeGen target **UsageMonitorLocal** + `LocalStore` / `LocalDataPlane` kit stubs  
+- XcodeGen target **LocalUsageMonitor** + `LocalStore` / `LocalDataPlane` kit stubs  
 - `ios/README.md` product map (remote client vs Local vs server self-host)  
 - **Deps:** none  
 

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Product identity and readiness for the **Usage Monitor Local** app shell.
+/// Product identity and readiness for the **Local Usage Monitor** app shell.
 public struct LocalDataPlaneStatus: Equatable, Sendable {
     public enum Phase: String, Equatable, Sendable {
         /// Kit + app shell only; no GRDB money tables yet.
@@ -19,7 +19,7 @@ public struct LocalDataPlaneStatus: Equatable, Sendable {
     public init(
         phase: Phase,
         schemaVersion: Int,
-        appDisplayName: String = "Usage Monitor Local",
+        appDisplayName: String = "Local Usage Monitor",
         detail: String
     ) {
         self.phase = phase
