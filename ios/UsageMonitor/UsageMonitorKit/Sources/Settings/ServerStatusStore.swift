@@ -32,7 +32,9 @@ struct ServerStatusSnapshot: Equatable, Sendable {
         var rows: [(String, Bool)] = []
         if let c = checks.database { rows.append(("Database", c.ok)) }
         if let c = checks.scheduler { rows.append(("Scheduler", c.ok)) }
-        if let c = checks.backup { rows.append(("Backups", c.ok)) }
+        // Off-site backup is observability-only (no longer gates /api/ready ok);
+        // omit it from the compact green/red server checklist so a calm R2
+        // free-tier lag does not look like an app outage.
         if let c = checks.startup { rows.append(("Startup", c.ok)) }
         return rows
     }

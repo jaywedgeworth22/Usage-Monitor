@@ -9,6 +9,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **[GROK] Issue/effort hygiene + replica age align with 1h Litestream sync (2026-08-05) — IN PR.** Closed PR #974 (would revert #975 R2 fleet metrics). Closed Issues #952/#971 (done). Raise default LITESTREAM_REPLICA_MAX_AGE / probe / deploy LTX budget 3600→10800s so 1h R2 sync does not flap backup side-channel; service display name usage-monitor; hide backup from iOS compact server checklist.
 
 <!-- board-hygiene 2026-08-05 GROK final: only current WIP / open PRs / active incidents. -->
 - **[GROK] Overview money UX: global budget, projected breakdown, quiet stale, ROIC builtin (2026-08-05) — IN PR.** Branch `grok/overview-budget-projection-ux`. Global Budget set-from-hero; projected click → renewals+usage breakdown; suppress stale_snapshot nags; ROIC blind provider seed; known renewals include one-term next bill.
