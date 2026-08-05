@@ -27,31 +27,24 @@ local pre-migration snapshot, or a configured replica with a missing/unverified
 binary stop startup. Production runs `LITESTREAM_REQUIRED=true`, so an
 entirely missing replica also stops startup and makes `/api/ready` fail.
 
-### R2 free-tier auto-shutoff (70%)
+### R2 free-tier auto-shutoff (hard 70%)
 
 Maintenance (`src/lib/r2-usage.ts`) queries Cloudflare GraphQL **account-wide**
 analytics each tick for R2 **storage**, **Class A**, and **Class B** against the
-forever free tier (10 GiB / 1M Class A / 10M Class B). When any metric's MTD
-share or linear month-end projection reaches **70%**, the app:
+forever free tier (10 GiB / 1M Class A / 10M Class B).
 
-1. Writes `/data/r2-disabled-70pct.flag` and sets `LITESTREAM_EMERGENCY_DISABLE`
-   / `R2_WRITES_DISABLED`.
-2. Sends a priority-1 Pushover alert via **`PUSHOVER_USAGE_API_TOKEN`** (preferred) or `PUSHOVER_API_TOKEN` + `PUSHOVER_USER_KEY` (retried until delivered). Usage Monitor owns this alert — do not rely on Socratic.Trade.
-3. **Stops production Litestream** when the configured endpoint is Cloudflare R2
-   (hostname `*.r2.cloudflarestorage.com`): startup skips replication if the
-   flag is present, and the R2 sibling-process watcher SIGTERMs litestream
-   mid-cycle. Non-R2 S3 endpoints (if ever reintroduced) are not killed by this
-   switch.
+| Metric | Trip condition |
+|--------|----------------|
+| **Storage** | **Absolute** MTD ≥ 70% of 10 GiB (stock — no pace projection) |
+| **Class A / B** | Absolute MTD ≥ 70% **or** linear month-end pace ≥ 70% |
 
-Requires `R2_USAGE_ACCOUNT_ID` + `R2_USAGE_API_TOKEN` (or
-`CLOUDFLARE_JAY_*` / `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`) with
-Account Analytics Read. Without credentials the check reports
-`metricsSource: unavailable` and does **not** auto-disable (it will not fake
-local DB size as R2 usage).
+On trip: write kill flag, Pushover, stop R2 Litestream. **Fail-closed** if
+analytics credentials missing or GraphQL fails in production
+(`LITESTREAM_REQUIRED=true` or `NODE_ENV=production`).
 
-Because production uses R2, engaging the kill switch means **no continuous
-off-site replica** until storage is reclaimed and the flag is cleared. Local
-pre-migration snapshots on `/data` still exist.
+Requires `R2_USAGE_ACCOUNT_ID` + `R2_USAGE_API_TOKEN` (or `CLOUDFLARE_JAY_*`).
+Local pre-migration snapshots on `/data` still exist.
+
 
 > **0.5.x note:** Litestream 0.5 only supports a **single replica per database**. It
 > also replaced the `snapshots`/`generations` model with **LTX files** — inspect them
@@ -66,10 +59,10 @@ pre-migration snapshots on `/data` still exist.
   the script. Idempotent (skips if the right version is already there) and safe
   to run even when replication is never enabled — the binary just sits unused.
 - `litestream.yml` — the replica config: `/data/prod.db`, single S3-type replica
-  populated entirely from `LITESTREAM_S3_*` env vars, `retention: 48h` /
-  `snapshot-interval: 24h` / `sync-interval: 60s` (reduced from 168h then
-  720h for R2 free-tier headroom; live DB is <<1 GiB but multi-day LTX history
-  filled 10 GiB).
+  populated entirely from `LITESTREAM_S3_*` env vars. **Disaster recovery only**
+  for this app: `snapshot.interval: 24h`, `snapshot.retention: 24h`,
+  `sync-interval: 15m`. Not multi-day continuous PITR — R2 is host/disk death
+  recovery, not “rewind to 3h42m ago.”
 - `scripts/start-with-litestream.sh` — the container entrypoint. If all four
   required `LITESTREAM_S3_*` vars are set and `bin/litestream` exists: restores
   first if `/data/prod.db` doesn't exist yet (fresh disk or disaster recovery).
@@ -170,21 +163,10 @@ and strict readiness will fail).
 
 ### Free-tier growth (what to expect)
 
-R2 storage is **not** “one copy of `prod.db`.” Litestream keeps a rolling
-LTX/snapshot window (`snapshot.retention: 48h`, `snapshot.interval: 24h`,
-`sync-interval: 60s` as of 2026-08-04 free-tier opt). After a cold start onto
-an empty R2 bucket (or a new generation), expect:
+R2 storage is **not** “one copy of `prod.db`.” With `retention: 24h` and
+`sync-interval: 15m`, history stays short so a <<1 GiB live DB stays far under
+70% of free tier. Multi-day retention is what filled 15+ GiB in August 2026.
 
-1. **Initial seed** — multi-GiB multipart uploads of the current DB (hours of
-   `UploadPart` / `PutObject`).
-2. **Steady LTX drip** — many small objects + frequent `ListObjects` (Class A).
-3. **Daily snapshot / compaction bursts** — multi-GiB jumps in under an hour
-   when large LTX levels complete, often before GC deletes superseded objects.
-
-Account free tier is **10 GiB total**. Crossing ~70% engages the auto-shutoff
-above. Reclaim space by confirming a single intended bucket, shortening
-retention if needed, and deleting orphan/legacy buckets after a verified
-restore drill.
 
 ## Rollback host only (Render)
 

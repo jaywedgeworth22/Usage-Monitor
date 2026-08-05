@@ -10,26 +10,27 @@ import path from "node:path";
  *   - Class A ops: 1,000,000 / month
  *   - Class B ops: 10,000,000 / month
  *
- * When any metric's MTD share or linear month-end projection reaches
- * {@link R2_THRESHOLD_PCT} (70%), we:
- *   1. Persist `/data/r2-disabled-70pct.flag` (and set env)
- *   2. Alert via Pushover using the Usage Monitor app token
- *      (`PUSHOVER_USAGE_API_TOKEN`, then generic fallbacks) — this app owns
- *      its own free-tier alerts; peer apps (Socratic.Trade) must not be the
- *      only notifier.
- *   3. Stop *R2-backed* Litestream writes (startup gate + runtime watcher).
- *      Production backups target Cloudflare R2 only. The former Coolify-hosted
- *      Garage replica is retired/gone — free-tier limits apply to R2.
+ * Hard policy at {@link R2_THRESHOLD_PCT} (70%):
+ *   - **Storage (stock):** absolute MTD ≥ 70% of free tier → stop.
+ *     No pace projection for storage (a steady 6 GiB all month is fine;
+ *     7 GiB is not).
+ *   - **Class A / Class B (flows):** absolute MTD ≥ 70% **or** linear
+ *     month-end pace projects ≥ 70% → stop.
  *
- * Metrics come from Cloudflare GraphQL analytics (same source as the R2
- * dashboard). Local SQLite size and day-of-month stubs are never used.
+ * On trip we:
+ *   1. Persist `/data/r2-disabled-70pct.flag` (and set env)
+ *   2. Alert via Pushover (`PUSHOVER_USAGE_API_TOKEN`, then generic fallbacks)
+ *   3. Stop R2-backed Litestream (startup gate + runtime watcher)
+ *
+ * Production fail-closed: if Litestream points at R2 and analytics credentials
+ * are missing (or GraphQL fetch fails) while `LITESTREAM_REQUIRED=true` or
+ * `NODE_ENV=production`, we **disable R2 writes** rather than fly blind.
+ * Local SQLite size and day-of-month stubs are never used as R2 metrics.
  *
  * Required credentials (either pair):
  *   - `R2_USAGE_ACCOUNT_ID` + `R2_USAGE_API_TOKEN`, or
  *   - `CLOUDFLARE_JAY_ACCOUNT_ID` / `CLOUDFLARE_ACCOUNT_ID` +
  *     `CLOUDFLARE_JAY_API_TOKEN` / `CLOUDFLARE_API_TOKEN`
- * Without analytics credentials the check logs `metricsSource: unavailable`
- * and will NOT auto-disable (it refuses to fake local DB size as R2 usage).
  */
 
 export interface R2UsageLimits {
@@ -254,11 +255,18 @@ export function classifyR2Action(actionType: string): "A" | "B" {
   return "A";
 }
 
+export type R2ThresholdMode =
+  /** Absolute MTD share only (storage stock). */
+  | "absolute"
+  /** Absolute MTD share OR linear month-end pace (ops flows). */
+  | "absolute_or_pace";
+
 export function calculatePaceProjection(
   actual: number,
   limit: number,
   now: Date = new Date(),
-  thresholdPct: number = R2_THRESHOLD_PCT
+  thresholdPct: number = R2_THRESHOLD_PCT,
+  mode: R2ThresholdMode = "absolute_or_pace"
 ): R2MetricStatus {
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth();
@@ -272,11 +280,10 @@ export function calculatePaceProjection(
   const mtdPct = (actual / limit) * 100;
   const projected = actual / elapsedFraction;
   const projectedPct = (projected / limit) * 100;
-  // Trip on either current share or projected month-end pace. Storage is a
-  // stock (already-at-70% must kill even late in the month); ops are flows
-  // where early-month pace projection is the main signal.
+  const absoluteBreach = mtdPct >= thresholdPct;
+  const paceBreach = projectedPct >= thresholdPct;
   const onTrackToExceed =
-    projectedPct >= thresholdPct || mtdPct >= thresholdPct;
+    mode === "absolute" ? absoluteBreach : absoluteBreach || paceBreach;
 
   return {
     actual,
@@ -286,6 +293,19 @@ export function calculatePaceProjection(
     projectedPct: Number(projectedPct.toFixed(2)),
     onTrackToExceed,
   };
+}
+
+/**
+ * True when production must not run R2-backed Litestream without a working
+ * free-tier meter (would otherwise burn the account blind).
+ */
+export function r2FreeTierFailClosedRequired(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  if (!isLitestreamR2Endpoint(env.LITESTREAM_S3_ENDPOINT ?? env.AWS_S3_ENDPOINT)) {
+    return false;
+  }
+  return env.LITESTREAM_REQUIRED === "true" || env.NODE_ENV === "production";
 }
 
 export function assessR2Usage(
@@ -300,13 +320,28 @@ export function assessR2Usage(
     buckets?: R2BucketStorageSample[];
   } = {}
 ): R2UsageAssessment {
+  // Storage: absolute 70% of free tier only (stock). Ops: absolute or pace.
   const storage = calculatePaceProjection(
     actualStorageBytes,
     limits.storageBytes,
-    now
+    now,
+    R2_THRESHOLD_PCT,
+    "absolute"
   );
-  const classA = calculatePaceProjection(actualClassAOps, limits.classAOps, now);
-  const classB = calculatePaceProjection(actualClassBOps, limits.classBOps, now);
+  const classA = calculatePaceProjection(
+    actualClassAOps,
+    limits.classAOps,
+    now,
+    R2_THRESHOLD_PCT,
+    "absolute_or_pace"
+  );
+  const classB = calculatePaceProjection(
+    actualClassBOps,
+    limits.classBOps,
+    now,
+    R2_THRESHOLD_PCT,
+    "absolute_or_pace"
+  );
 
   const overallOnTrackToExceed70Pct =
     storage.onTrackToExceed || classA.onTrackToExceed || classB.onTrackToExceed;
@@ -723,16 +758,29 @@ export async function runR2UsageCheck(
 ): Promise<R2UsageAssessment> {
   const credentials = resolveR2UsageCredentials();
   let assessment: R2UsageAssessment;
+  const failClosed = r2FreeTierFailClosedRequired();
 
   if (!credentials) {
+    const errMsg =
+      "R2 usage credentials not configured (set R2_USAGE_ACCOUNT_ID + R2_USAGE_API_TOKEN, or CLOUDFLARE_JAY_ACCOUNT_ID + CLOUDFLARE_JAY_API_TOKEN)";
     assessment = assessR2Usage(0, 0, 0, DEFAULT_R2_FREE_TIER_LIMITS, now, {
       metricsSource: "unavailable",
-      metricsError:
-        "R2 usage credentials not configured (set R2_USAGE_ACCOUNT_ID + R2_USAGE_API_TOKEN, or CLOUDFLARE_JAY_ACCOUNT_ID + CLOUDFLARE_JAY_API_TOKEN)",
+      metricsError: errMsg,
     });
-    console.warn(
-      "[r2-usage] skipping free-tier enforcement: Cloudflare analytics credentials not configured"
-    );
+    if (failClosed) {
+      console.error(
+        "[r2-usage] FAIL CLOSED: analytics credentials missing with R2 Litestream in production — disabling R2 writes"
+      );
+      if (!isR2AutoDisabled()) {
+        enforceR2AutoDisable(
+          `fail-closed: ${errMsg} (cannot enforce ${R2_THRESHOLD_PCT}% free-tier policy blind)`
+        );
+      }
+    } else {
+      console.warn(
+        "[r2-usage] skipping free-tier enforcement (non-production): Cloudflare analytics credentials not configured"
+      );
+    }
   } else {
     try {
       const metrics = await fetchR2UsageMetrics(credentials, now, fetchImpl);
@@ -754,11 +802,16 @@ export async function runR2UsageCheck(
         metricsSource: "unavailable",
         metricsError: message,
       });
+      if (failClosed && !isR2AutoDisabled()) {
+        enforceR2AutoDisable(
+          `fail-closed: R2 GraphQL metrics fetch failed (${message}) — cannot enforce ${R2_THRESHOLD_PCT}% free-tier policy blind`
+        );
+      }
     }
   }
 
-  // Only auto-disable on real metrics. Fake/local proxies previously hid a
-  // 90%+ free-tier breach by reporting local SQLite size instead of R2.
+  // Auto-disable on real metrics at hard 70% policy (storage absolute; ops
+  // absolute or pace). Fake/local proxies previously hid a 90%+ breach.
   if (
     assessment.metricsSource === "cloudflare_graphql" &&
     assessment.overallOnTrackToExceed70Pct &&
@@ -766,7 +819,10 @@ export async function runR2UsageCheck(
   ) {
     const metric = assessment.exceededMetric || "storage";
     const status = assessment[metric];
-    const reason = `R2 free-tier pace/MTD reached ${R2_THRESHOLD_PCT}% on ${metric} (MTD ${status.mtdPct}%, projected ${status.projectedPct}%)`;
+    const reason =
+      metric === "storage"
+        ? `R2 free-tier absolute storage ≥ ${R2_THRESHOLD_PCT}% (MTD ${status.mtdPct}%)`
+        : `R2 free-tier ${metric} ≥ ${R2_THRESHOLD_PCT}% absolute or projected (MTD ${status.mtdPct}%, projected ${status.projectedPct}%)`;
     enforceR2AutoDisable(reason);
   }
 
