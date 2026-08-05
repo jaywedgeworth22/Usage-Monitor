@@ -1,3 +1,4 @@
+- **[GROK] Design: mobile full-parity + phone self-host topology (2026-08-04) — COMPLETE (phone-only pivot approved).** Product answer: native Swift data plane ON the phone (local SQLite/GRDB, Keychain keys, opportunistic poll). Not phone→remote host. Public App Store target. Doc: `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`. Review rounds closed 0 open.
 - **[GROK] iOS TestFlight agent ship pipeline (cross-app) — IN PROGRESS 2026-08-04.** `scripts/ios-ship-testflight.sh` + fleet `/Users/jay/apps/ios-fleet/`. Bundle `services.jays.usage.monitor`. Branch `grok/ios-testflight-ship`.
 
 - **[GROK] Wire web design tokens into Tailwind + primary chrome (2026-08-05) — MERGED PR #939.** Squash `7d070031`. Deduped `--um-*` CSS vars, bridged accent/radius into Tailwind, adopted `bg-accent` / `accent-soft` on Nav, empty states, command palette, Money/Alerts CTAs. CI green; auto-merge squash landed.
