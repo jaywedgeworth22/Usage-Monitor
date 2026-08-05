@@ -126,6 +126,49 @@ final class WidgetPresentationTests: XCTestCase {
         )
     }
 
+    // MARK: - Focus selection (overall vs project)
+
+    func testContentOverallUsesAccountTotalsAndProviderMeters() {
+        let content = WidgetPresentation.content(from: .placeholder, focus: .overall)
+        XCTAssertEqual(content.focus, .overall)
+        XCTAssertEqual(content.title, "Overall")
+        XCTAssertEqual(content.spentUsd, WidgetSnapshot.placeholder.totalSpentUsd)
+        XCTAssertEqual(content.budgetUsd, WidgetSnapshot.placeholder.totalBudgetUsd)
+        XCTAssertEqual(content.meters.count, 3)
+        XCTAssertFalse(content.fellBackToOverall)
+        XCTAssertEqual(content.deepLink?.absoluteString, "usagemonitor://dashboard")
+    }
+
+    func testContentProjectUsesProjectMeter() {
+        let content = WidgetPresentation.content(
+            from: .placeholder,
+            focus: .project(id: "proj-ct")
+        )
+        XCTAssertEqual(content.focus, .project(id: "proj-ct"))
+        XCTAssertEqual(content.title, "Congress.Trade")
+        XCTAssertEqual(content.spentUsd, 180, accuracy: 0.001)
+        XCTAssertEqual(content.budgetUsd, 400, accuracy: 0.001)
+        XCTAssertTrue(content.meters.isEmpty)
+        XCTAssertEqual(content.deepLink?.absoluteString, "usagemonitor://projects")
+    }
+
+    func testContentMissingProjectFallsBackToOverall() {
+        let content = WidgetPresentation.content(
+            from: .placeholder,
+            focus: .project(id: "does-not-exist")
+        )
+        XCTAssertEqual(content.focus, .overall)
+        XCTAssertTrue(content.fellBackToOverall)
+        XCTAssertEqual(content.title, "Overall")
+    }
+
+    func testBudgetFocusParse() {
+        XCTAssertEqual(WidgetBudgetFocus.parse(selectionId: nil), .overall)
+        XCTAssertEqual(WidgetBudgetFocus.parse(selectionId: "overall"), .overall)
+        XCTAssertEqual(WidgetBudgetFocus.parse(selectionId: "project:abc"), .project(id: "abc"))
+        XCTAssertEqual(WidgetBudgetFocus.parse(selectionId: "legacy-id"), .project(id: "legacy-id"))
+    }
+
     // MARK: - Helpers
 
     private func makeSnapshot(
@@ -143,7 +186,8 @@ final class WidgetPresentationTests: XCTestCase {
             percentUsed: totalBudget > 0 ? 428.16 / totalBudget : nil,
             overBudget: overBudget,
             warning: warning,
-            topMeters: []
+            topMeters: [],
+            projects: []
         )
     }
 }

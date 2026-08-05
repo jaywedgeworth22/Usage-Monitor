@@ -2,6 +2,53 @@ import Foundation
 import DesignSystem
 import WidgetShared
 
+/// Which budget the home-screen widget focuses on.
+///
+/// - `overall` — account-wide provider-scoped totals (default).
+/// - `project(id:)` — a single project's budget from the cached snapshot.
+enum WidgetBudgetFocus: Equatable, Sendable {
+    case overall
+    case project(id: String)
+
+    /// Stable id used by App Intents / deep links (`overall` or `project:<id>`).
+    var selectionId: String {
+        switch self {
+        case .overall: return "overall"
+        case .project(let id): return "project:\(id)"
+        }
+    }
+
+    static func parse(selectionId: String?) -> WidgetBudgetFocus {
+        guard let selectionId, !selectionId.isEmpty, selectionId != "overall" else {
+            return .overall
+        }
+        if selectionId.hasPrefix("project:") {
+            let id = String(selectionId.dropFirst("project:".count))
+            return id.isEmpty ? .overall : .project(id: id)
+        }
+        // Bare project ids from older intent payloads.
+        return .project(id: selectionId)
+    }
+}
+
+/// Resolved numbers + chrome for one widget configuration.
+struct WidgetBudgetContent: Equatable, Sendable {
+    var focus: WidgetBudgetFocus
+    /// Short caption above the hero total ("Overall" / project name).
+    var title: String
+    var spentUsd: Double
+    var budgetUsd: Double
+    var projectedEomUsd: Double
+    var percentUsed: Double?
+    var overBudget: Bool
+    var warning: Bool
+    /// Medium-family side list (providers when overall; empty for a project).
+    var meters: [WidgetSnapshot.Meter]
+    var deepLink: URL?
+    /// True when a project focus was requested but that project is missing.
+    var fellBackToOverall: Bool
+}
+
 /// Pure, view-free presentation logic for the budget widget.
 ///
 /// Kept deliberately separate from the SwiftUI views so the status mapping and
@@ -14,6 +61,64 @@ enum WidgetPresentation {
     /// Age past which the widget treats cached spend as stale (1 hour). Longer
     /// than the in-app 15-minute threshold because widgets refresh less often.
     static let staleThreshold: TimeInterval = 60 * 60
+
+    /// Resolve the numbers the widget renders for a given focus selection.
+    static func content(
+        from snapshot: WidgetSnapshot,
+        focus: WidgetBudgetFocus,
+        maxMeters: Int = 3
+    ) -> WidgetBudgetContent {
+        switch focus {
+        case .overall:
+            return overallContent(from: snapshot, maxMeters: maxMeters, fellBack: false)
+        case .project(let id):
+            if let project = snapshot.projects.first(where: { $0.id == id }) {
+                let budget = project.budgetUsd ?? 0
+                let spent = project.spentUsd
+                let over = project.status == "exceeded"
+                    || (budget > 0 && spent >= budget)
+                let warn = over
+                    || project.status == "warning"
+                    || (budget > 0 && spent / budget >= 0.8)
+                return WidgetBudgetContent(
+                    focus: .project(id: id),
+                    title: project.name,
+                    spentUsd: spent,
+                    budgetUsd: budget,
+                    projectedEomUsd: project.projectedEomUsd ?? 0,
+                    percentUsed: project.percentUsed
+                        ?? (budget > 0 ? spent / budget : nil),
+                    overBudget: over,
+                    warning: warn,
+                    meters: [],
+                    deepLink: URL(string: "usagemonitor://projects"),
+                    fellBackToOverall: false
+                )
+            }
+            // Project removed or not yet in cache — show overall rather than zeros.
+            return overallContent(from: snapshot, maxMeters: maxMeters, fellBack: true)
+        }
+    }
+
+    private static func overallContent(
+        from snapshot: WidgetSnapshot,
+        maxMeters: Int,
+        fellBack: Bool
+    ) -> WidgetBudgetContent {
+        WidgetBudgetContent(
+            focus: .overall,
+            title: "Overall",
+            spentUsd: snapshot.totalSpentUsd,
+            budgetUsd: snapshot.totalBudgetUsd,
+            projectedEomUsd: snapshot.projectedEomUsd,
+            percentUsed: snapshot.percentUsed,
+            overBudget: snapshot.overBudget,
+            warning: snapshot.warning,
+            meters: Array(snapshot.topMeters.prefix(maxMeters)),
+            deepLink: URL(string: "usagemonitor://dashboard"),
+            fellBackToOverall: fellBack
+        )
+    }
 
     /// Map a raw `WidgetSnapshot.Meter.status` string onto the design system's
     /// semantic status. The raw values mirror the server's `BudgetLevel`:
@@ -30,23 +135,47 @@ enum WidgetPresentation {
 
     /// Overall status for the summary hero, derived from the snapshot's flags.
     static func overallStatus(for snapshot: WidgetSnapshot) -> Theme.SemanticStatus {
-        if snapshot.overBudget { return .danger }
-        if snapshot.warning { return .warning }
-        return snapshot.totalBudgetUsd > 0 ? .ok : .neutral
+        status(overBudget: snapshot.overBudget, warning: snapshot.warning, budgetUsd: snapshot.totalBudgetUsd)
+    }
+
+    static func status(for content: WidgetBudgetContent) -> Theme.SemanticStatus {
+        status(overBudget: content.overBudget, warning: content.warning, budgetUsd: content.budgetUsd)
+    }
+
+    private static func status(overBudget: Bool, warning: Bool, budgetUsd: Double) -> Theme.SemanticStatus {
+        if overBudget { return .danger }
+        if warning { return .warning }
+        return budgetUsd > 0 ? .ok : .neutral
     }
 
     /// Short badge label for the overall summary, or `nil` when on-track (no
     /// badge shown so the small widget stays calm and uncluttered).
     static func overallLabel(for snapshot: WidgetSnapshot) -> String? {
-        if snapshot.overBudget { return "Over budget" }
-        if snapshot.warning { return "Approaching" }
+        label(overBudget: snapshot.overBudget, warning: snapshot.warning)
+    }
+
+    static func label(for content: WidgetBudgetContent) -> String? {
+        label(overBudget: content.overBudget, warning: content.warning)
+    }
+
+    private static func label(overBudget: Bool, warning: Bool) -> String? {
+        if overBudget { return "Over budget" }
+        if warning { return "Approaching" }
         return nil
     }
 
     /// SF Symbol paired with `overallLabel`.
     static func overallSymbol(for snapshot: WidgetSnapshot) -> String {
-        if snapshot.overBudget { return "exclamationmark.octagon.fill" }
-        if snapshot.warning { return "gauge.with.dots.needle.67percent" }
+        symbol(overBudget: snapshot.overBudget, warning: snapshot.warning)
+    }
+
+    static func symbol(for content: WidgetBudgetContent) -> String {
+        symbol(overBudget: content.overBudget, warning: content.warning)
+    }
+
+    private static func symbol(overBudget: Bool, warning: Bool) -> String {
+        if overBudget { return "exclamationmark.octagon.fill" }
+        if warning { return "gauge.with.dots.needle.67percent" }
         return "checkmark.circle.fill"
     }
 
@@ -68,8 +197,21 @@ enum WidgetPresentation {
 
     /// `"of $900"` sub-caption under the hero total, or `nil` when unbudgeted.
     static func budgetCaption(for snapshot: WidgetSnapshot) -> String? {
-        guard snapshot.totalBudgetUsd > 0 else { return nil }
-        return "of \(CurrencyFormat.compactUSD(snapshot.totalBudgetUsd))"
+        budgetCaption(budgetUsd: snapshot.totalBudgetUsd)
+    }
+
+    static func budgetCaption(for content: WidgetBudgetContent) -> String? {
+        budgetCaption(budgetUsd: content.budgetUsd)
+    }
+
+    private static func budgetCaption(budgetUsd: Double) -> String? {
+        guard budgetUsd > 0 else { return nil }
+        return "of \(CurrencyFormat.compactUSD(budgetUsd))"
+    }
+
+    static func displayBudgetCaption(for content: WidgetBudgetContent, redacted: Bool) -> String? {
+        if redacted { return WidgetPrivacy.lockedLabel }
+        return budgetCaption(for: content)
     }
 
     /// Whether the "updated … ago" staleness caption should render. The empty
