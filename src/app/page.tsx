@@ -403,7 +403,7 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => fetchProviders()}
-            className="min-h-11 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="min-h-11 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             Retry
           </button>
@@ -425,7 +425,7 @@ export default function DashboardPage() {
         action={
           <Link
             href="/settings?tab=connections"
-            className="inline-flex min-h-11 items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            className="inline-flex min-h-11 items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
           >
             Add your first provider
           </Link>
@@ -437,58 +437,72 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 sm:space-y-8">
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Overview</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Overview</h1>
           <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
             Press{" "}
-            <kbd className="rounded border border-gray-300 px-1 dark:border-gray-600">⌘K</kbd>
+            <kbd className="rounded border border-gray-300 px-1 font-sans dark:border-gray-600">⌘K</kbd>
             {" "}to jump anywhere
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-end sm:gap-3">
           {lastUpdatedAt && (
-            <span className="hidden text-xs text-gray-500 dark:text-gray-400 sm:inline">
+            <span className="order-last text-xs text-gray-500 dark:text-gray-400 sm:order-first sm:self-center">
               Updated {new Date(lastUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
             </span>
           )}
-          <div className="flex flex-col items-end gap-0.5">
-            <label htmlFor="dashboard-timeframe-select" className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
-              History window
-            </label>
-            <select
-              id="dashboard-timeframe-select"
-              aria-label="History window for charts and telemetry (not MTD budget)"
-              title="Affects charts and telemetry only. Month-to-date budgets stay on the current UTC month."
-              value={timeframe}
-              onChange={(e) => setTimeframe(e.target.value as any)}
-              className="min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+          <div className="flex min-w-0 flex-1 flex-col gap-1 sm:min-w-[12.5rem] sm:flex-none">
+            <label
+              htmlFor="dashboard-timeframe-select"
+              className="text-[11px] font-medium leading-none text-gray-500 dark:text-gray-400"
             >
-              <optgroup label="Rolling Periods">
-                <option value="1d">Past 24 Hours</option>
-                <option value="7d">Past Week</option>
-                <option value="30d">Past 30 Days</option>
-                <option value="90d">Past 3 Months</option>
-                <option value="180d">Past 6 Months</option>
-                <option value="all">All Time</option>
-              </optgroup>
-              <optgroup label="Calendar Months">
-                {monthOptions.map(({ token, label }) => (
-                  <option key={token as string} value={token as string}>{label}</option>
-                ))}
-              </optgroup>
-              <optgroup label="Calendar Years">
-                {yearOptions.map(({ token, label }) => (
-                  <option key={token as string} value={token as string}>{label}</option>
-                ))}
-              </optgroup>
-            </select>
+              History window
+              <span className="ml-1 font-normal text-gray-400 dark:text-gray-500">(charts only)</span>
+            </label>
+            <div className="relative">
+              <select
+                id="dashboard-timeframe-select"
+                aria-label="History window for charts and telemetry (not MTD budget)"
+                title="Affects charts and telemetry only. Month-to-date budgets stay on the current UTC month."
+                value={timeframe}
+                onChange={(e) => setTimeframe(e.target.value as any)}
+                className="min-h-11 w-full appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-3 pr-9 text-sm font-medium text-gray-800 shadow-sm hover:border-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:border-gray-500"
+              >
+                <optgroup label="Rolling periods">
+                  <option value="1d">Past 24 hours</option>
+                  <option value="7d">Past week</option>
+                  <option value="30d">Past 30 days</option>
+                  <option value="90d">Past 3 months</option>
+                  <option value="180d">Past 6 months</option>
+                  <option value="all">All time</option>
+                </optgroup>
+                <optgroup label="Calendar months">
+                  {monthOptions.map(({ token, label }) => (
+                    <option key={token as string} value={token as string}>{label}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Calendar years">
+                  {yearOptions.map(({ token, label }) => (
+                    <option key={token as string} value={token as string}>{label}</option>
+                  ))}
+                </optgroup>
+              </select>
+              <span
+                className="pointer-events-none absolute inset-y-0 right-0 flex w-9 items-center justify-center text-gray-400 dark:text-gray-500"
+                aria-hidden="true"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </span>
+            </div>
           </div>
           <button
             type="button"
             onClick={() => void refreshDashboard()}
             disabled={refreshing}
-            className="min-h-11 self-end rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            className="min-h-11 shrink-0 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:border-gray-500 dark:hover:bg-gray-800"
           >
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>

@@ -79,7 +79,7 @@ export default function PwaRegistration() {
       <div className="mt-3 flex gap-2">
         <button
           type="button"
-          className="min-h-11 flex-1 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700"
+          className="min-h-11 flex-1 rounded-lg bg-accent px-3 text-sm font-medium text-white hover:opacity-90"
           onClick={() => {
             void installEvent.prompt().finally(() => setVisible(false));
           }}

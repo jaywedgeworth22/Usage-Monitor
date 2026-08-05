@@ -15,8 +15,8 @@ import {
 import { useTheme } from "next-themes";
 import { formatCurrency } from "@/lib/format";
 
-/** Brand accent (matches --um-accent / iOS Theme). SVG stroke attrs need a resolved color. */
-export const SPEND_BURN_ACCENT = "#595CE6";
+/** Brand accent (matches --um-accent / favicon orange). SVG stroke attrs need a resolved color. */
+export const SPEND_BURN_ACCENT = "#f97316";
 
 /** Prefer CSS var when the host supports it (e.g. HTML style props). */
 export const SPEND_BURN_ACCENT_CSS = "var(--um-accent)";
