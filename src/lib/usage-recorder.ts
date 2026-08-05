@@ -9,6 +9,11 @@ import {
 import { ensureAgentSyncProviderSeeded } from "@/lib/ensure-agent-sync-provider";
 import { ensureRoicProviderSeeded } from "@/lib/ensure-roic-provider";
 import {
+  effectivePollDueIntervalMs,
+  resolveProviderSyncMode,
+} from "@/lib/provider-sync-mode";
+import { providerPollSnapshotExpected } from "@/lib/anthropic-credentials";
+import {
   bootstrapStGeminiCredentialToInfisical,
   syncProviderCredentialsFromInfisical,
   type InfisicalCredentialSyncResult,
@@ -170,7 +175,7 @@ export interface ProviderFetchOutcome {
   // E5: why a skip happened, when the reason matters operationally. Only set
   // for total-tick-budget skips today (other skips are interval/backoff/pause
   // gates whose meaning is already implied by cadence).
-  skipReason?: "tick_budget";
+  skipReason?: "tick_budget" | "manual_no_poll";
 }
 
 export interface FetchAllProvidersResult {
@@ -452,7 +457,24 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
         });
         continue;
       }
-      const intervalMs = provider.refreshIntervalMin * 60 * 1000;
+      // Never-pollable (voyage, ROIC, push/generic, …): skip quietly. They are
+      // Manual sources — not "stale" and not missing a snapshot we can fetch.
+      const syncMode = resolveProviderSyncMode(provider);
+      const snapshotExpected = providerPollSnapshotExpected(provider);
+      if (syncMode === "manual" || !snapshotExpected) {
+        skipped++;
+        outcomes.push({
+          providerId: provider.id,
+          name: provider.name,
+          status: "skipped",
+          durationMs: Date.now() - startedAt,
+          skipReason: "manual_no_poll",
+        });
+        continue;
+      }
+      // Cap due interval at 60m so pollable providers refresh at least hourly
+      // (scheduler ticks every 15m; configured interval still wins when shorter).
+      const intervalMs = effectivePollDueIntervalMs(provider.refreshIntervalMin);
       // Pushed quota/credit events intentionally create rawData-less
       // snapshots. They may be newer than the last poll snapshot, but must not
       // hide its retry marker or make an old/missing poll look fresh. The

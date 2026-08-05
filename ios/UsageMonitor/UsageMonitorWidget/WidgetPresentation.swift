@@ -87,14 +87,12 @@ enum WidgetPresentation {
         return now.timeIntervalSince(snapshot.generatedAt) >= staleThreshold
     }
 
-    /// Caption under the hero: "Updated …" when fresh, "Stale · …" when old.
+    /// Caption under the hero: always "Updated …". Age alone is not "Stale" —
+    /// the host app / timeline should refresh; never-pollable spend is Manual.
     /// Returns `nil` for empty snapshots that must not show an age.
     static func updatedCaption(for snapshot: WidgetSnapshot, asOf now: Date = Date()) -> String? {
         guard showsUpdatedAt(for: snapshot) else { return nil }
         let relative = relativeAge(since: snapshot.generatedAt, asOf: now)
-        if isStale(for: snapshot, asOf: now) {
-            return "Stale · \(relative)"
-        }
         return "Updated \(relative)"
     }
 

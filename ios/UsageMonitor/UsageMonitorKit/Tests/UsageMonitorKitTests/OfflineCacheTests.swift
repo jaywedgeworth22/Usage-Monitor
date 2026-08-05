@@ -346,8 +346,9 @@ final class OfflineCacheTests: XCTestCase {
 
         XCTAssertTrue(staleness.isStale(asOf: now))
         XCTAssertEqual(staleness.age(asOf: now), 30 * 60, accuracy: 1)
-        XCTAssertTrue(staleness.staleLabel(asOf: now).hasPrefix("Stale as of "))
-        XCTAssertTrue(staleness.shortLabel(asOf: now).hasPrefix("Stale · "))
+        XCTAssertTrue(staleness.staleLabel(asOf: now).hasPrefix("Updated"))
+        XCTAssertTrue(staleness.shortLabel(asOf: now).hasPrefix("Updated"))
+        XCTAssertTrue(staleness.isStale(asOf: now))
     }
 
     func testThresholdBoundaryIsStale() {
