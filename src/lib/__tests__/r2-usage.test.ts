@@ -15,6 +15,7 @@ import {
   isLitestreamR2Endpoint,
   resolveR2UsageCredentials,
   r2FreeTierFailClosedRequired,
+  graphqlStorageSamplesAreFresh,
   DEFAULT_R2_FREE_TIER_LIMITS,
   R2_DISABLED_FLAG_FILENAME,
   __getR2FlagFilePathForTests,
@@ -559,6 +560,91 @@ describe("R2 usage monitoring & auto-disable", () => {
 
     expect(assessment.metricsSource).toBe("cloudflare_graphql");
     expect(assessment.overallOnTrackToExceed70Pct).toBe(false);
+    expect(isR2AutoDisabled()).toBe(false);
+  });
+
+  it("treats GraphQL storage samples older than 90 minutes as stale", () => {
+    const now = new Date("2026-08-05T00:30:00.000Z");
+    expect(
+      graphqlStorageSamplesAreFresh(
+        [
+          {
+            bucketName: "usage-monitor-bucket",
+            bytes: 15 * 1024 ** 3,
+            objectCount: 600,
+            asOf: "2026-08-05T00:00:00.000Z",
+          },
+        ],
+        now
+      )
+    ).toBe(true);
+    expect(
+      graphqlStorageSamplesAreFresh(
+        [
+          {
+            bucketName: "usage-monitor-bucket",
+            bytes: 15 * 1024 ** 3,
+            objectCount: 600,
+            asOf: "2026-08-04T22:00:00.000Z",
+          },
+        ],
+        now
+      )
+    ).toBe(false);
+  });
+
+  it("does not kill on stale GraphQL storage when live S3 list is unavailable", async () => {
+    process.env.R2_USAGE_ACCOUNT_ID = "acct-test";
+    process.env.R2_USAGE_API_TOKEN = "tok-test";
+    delete process.env.LITESTREAM_S3_ENDPOINT;
+    delete process.env.LITESTREAM_S3_ACCESS_KEY_ID;
+    delete process.env.LITESTREAM_S3_SECRET_ACCESS_KEY;
+
+    const storageBytes = 15 * 1024 * 1024 * 1024;
+    const graphqlBody = {
+      data: {
+        viewer: {
+          accounts: [
+            {
+              r2OperationsAdaptiveGroups: [
+                {
+                  sum: { requests: 1000 },
+                  dimensions: { actionType: "PutObject" },
+                },
+              ],
+              r2StorageAdaptiveGroups: [
+                {
+                  max: {
+                    payloadSize: storageBytes,
+                    metadataSize: 0,
+                    objectCount: 600,
+                  },
+                  dimensions: {
+                    datetime: "2026-08-05T00:00:00Z",
+                    bucketName: "usage-monitor-bucket",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(graphqlBody),
+    });
+
+    // Sample is 3.5h old → stale
+    const now = new Date("2026-08-05T03:30:00.000Z");
+    const assessment = await runR2UsageCheck(
+      mockFetch as unknown as typeof fetch,
+      now
+    );
+
+    expect(assessment.storageSampleStale).toBe(true);
     expect(isR2AutoDisabled()).toBe(false);
   });
 });

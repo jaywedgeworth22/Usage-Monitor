@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash, createHmac } from "node:crypto";
 
 /**
  * Cloudflare R2 free-tier monitor + automatic shutoff.
@@ -121,7 +122,16 @@ export interface R2MetricStatus {
   onTrackToExceed: boolean;
 }
 
-export type R2MetricsSource = "cloudflare_graphql" | "unavailable";
+export type R2MetricsSource =
+  | "live_s3_storage+graphql_ops"
+  | "cloudflare_graphql"
+  | "unavailable";
+
+/** Max age of GraphQL storage samples before we refuse to kill on them (stale). */
+export const R2_GRAPHQL_STORAGE_MAX_AGE_MS = 90 * 60 * 1000;
+
+/** Auto-resume hysteresis: clear kill switch when live storage is below this. */
+export const R2_RESUME_STORAGE_PCT = 65;
 
 export interface R2BucketStorageSample {
   bucketName: string;
@@ -142,6 +152,10 @@ export interface R2UsageAssessment {
   buckets?: R2BucketStorageSample[];
   litestreamUsesR2?: boolean;
   autoDisabled?: boolean;
+  /** True when storage bytes came from live S3 ListObjects (not GraphQL lag). */
+  storageIsLive?: boolean;
+  /** True when GraphQL storage samples were too old to trust for kill decisions. */
+  storageSampleStale?: boolean;
 }
 
 export interface R2UsageCredentials {
@@ -380,6 +394,27 @@ export function isR2AutoDisabled(): boolean {
  * immediately; writes the flag so start-with-litestream.sh and a runtime
  * watcher stop R2-backed Litestream without needing a redeploy.
  */
+/** Clear free-tier kill switch so litestream can resume after prune/restart. */
+export function clearR2AutoDisable(): void {
+  delete process.env.LITESTREAM_EMERGENCY_DISABLE;
+  delete process.env.R2_WRITES_DISABLED;
+  process.env.LITESTREAM_EMERGENCY_DISABLE = "false";
+  process.env.R2_WRITES_DISABLED = "false";
+  try {
+    const flag = getFlagFilePath(R2_DISABLED_FLAG_FILENAME);
+    if (fs.existsSync(flag)) fs.unlinkSync(flag);
+  } catch (err) {
+    console.error("[r2-usage] Failed clearing emergency disable flag:", err);
+  }
+  try {
+    const alert = getFlagFilePath(R2_EMERGENCY_ALERT_FLAG_FILENAME);
+    if (fs.existsSync(alert)) fs.unlinkSync(alert);
+  } catch {
+    // best-effort
+  }
+  inMemoryEmergencyAlertSent = false;
+}
+
 export function enforceR2AutoDisable(reason: string): void {
   process.env.LITESTREAM_EMERGENCY_DISABLE = "true";
   process.env.R2_WRITES_DISABLED = "true";
@@ -405,21 +440,7 @@ export function enforceR2AutoDisable(reason: string): void {
   );
 }
 
-/** Clear the free-tier kill switch so the next container start can resume R2 litestream. */
-export function clearR2AutoDisable(): boolean {
-  process.env.LITESTREAM_EMERGENCY_DISABLE = "false";
-  process.env.R2_WRITES_DISABLED = "false";
-  try {
-    const filePath = getFlagFilePath(R2_DISABLED_FLAG_FILENAME);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    const alertPath = getFlagFilePath(R2_EMERGENCY_ALERT_FLAG_FILENAME);
-    if (fs.existsSync(alertPath)) fs.unlinkSync(alertPath);
-    return true;
-  } catch (err) {
-    console.error("[r2-usage] Failed clearing emergency disable flag:", err);
-    return false;
-  }
-}
+
 
 export async function sendPushoverNotification(
   title: string,
@@ -706,6 +727,226 @@ export function parseR2GraphqlUsage(
   };
 }
 
+
+export interface R2S3ListCredentials {
+  endpoint: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+export function resolveR2S3ListCredentials(
+  env: Record<string, string | undefined> = process.env
+): R2S3ListCredentials | null {
+  const endpoint = (
+    env.LITESTREAM_S3_ENDPOINT ||
+    env.AWS_S3_ENDPOINT ||
+    ""
+  ).trim();
+  const accessKeyId = (
+    env.LITESTREAM_S3_ACCESS_KEY_ID ||
+    env.AWS_ACCESS_KEY_ID ||
+    ""
+  ).trim();
+  const secretAccessKey = (
+    env.LITESTREAM_S3_SECRET_ACCESS_KEY ||
+    env.AWS_SECRET_ACCESS_KEY ||
+    ""
+  ).trim();
+  const region = (
+    env.LITESTREAM_S3_REGION ||
+    env.AWS_REGION ||
+    "auto"
+  ).trim() || "auto";
+  if (!endpoint || !accessKeyId || !secretAccessKey) return null;
+  if (!isLitestreamR2Endpoint(endpoint)) return null;
+  return { endpoint, region, accessKeyId, secretAccessKey };
+}
+
+/** Buckets that count toward free tier for this app (primary + known siblings). */
+export function resolveR2StorageBucketNames(
+  env: Record<string, string | undefined> = process.env
+): string[] {
+  const names = new Set<string>();
+  const primary = (
+    env.LITESTREAM_S3_BUCKET ||
+    env.AWS_S3_BUCKET_NAME ||
+    ""
+  ).trim();
+  if (primary) names.add(primary);
+  const extra = (env.R2_USAGE_EXTRA_BUCKETS || "").trim();
+  for (const part of extra.split(",")) {
+    const n = part.trim();
+    if (n) names.add(n);
+  }
+  // Known account buckets (list is no-op if key lacks access).
+  for (const n of [
+    "usage-monitor-prod-v3",
+    "usage-monitor-bucket",
+    "usage-monitor-receipts",
+  ]) {
+    names.add(n);
+  }
+  return [...names];
+}
+
+function sha256Hex(data: string | Buffer): string {
+  return createHash("sha256").update(data).digest("hex");
+}
+
+function hmac(key: Buffer | string, data: string): Buffer {
+  return createHmac("sha256", key).update(data, "utf8").digest();
+}
+
+/**
+ * ListObjectsV2 size sum for one R2 bucket via the same S3 credentials
+ * Litestream uses. This is live inventory — not GraphQL analytics lag.
+ */
+export async function listR2BucketStorageViaS3(
+  creds: R2S3ListCredentials,
+  bucket: string,
+  fetchImpl: typeof fetch = fetch,
+  now: Date = new Date()
+): Promise<R2BucketStorageSample> {
+  const endpoint = creds.endpoint.replace(/\/$/, "");
+  const host = new URL(
+    /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(endpoint)
+      ? endpoint
+      : `https://${endpoint}`
+  ).host;
+  const region = creds.region === "auto" ? "us-east-1" : creds.region;
+  const service = "s3";
+  let continuation: string | undefined;
+  let bytes = 0;
+  let objectCount = 0;
+  let pages = 0;
+
+  do {
+    pages += 1;
+    if (pages > 200) throw new Error(`ListObjectsV2 page cap for bucket ${bucket}`);
+    const qs = new URLSearchParams({ "list-type": "2", "max-keys": "1000" });
+    if (continuation) qs.set("continuation-token", continuation);
+    // Path-style: https://account.r2.cloudflarestorage.com/bucket?list-type=2
+    const canonicalUri = `/${bucket}`;
+    const queryPairs = [...qs.entries()]
+      .map(([k, v]) => [encodeURIComponent(k), encodeURIComponent(v)] as const)
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : 1));
+    const canonicalQuery = queryPairs.map(([k, v]) => `${k}=${v}`).join("&");
+    const amzDate = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+    const dateStamp = amzDate.slice(0, 8);
+    const payloadHash = sha256Hex("");
+    const canonicalHeaders =
+      `host:${host}\n` + `x-amz-content-sha256:${payloadHash}\n` + `x-amz-date:${amzDate}\n`;
+    const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+    const canonicalRequest = [
+      "GET",
+      canonicalUri,
+      canonicalQuery,
+      canonicalHeaders,
+      signedHeaders,
+      payloadHash,
+    ].join("\n");
+    const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+    const stringToSign = [
+      "AWS4-HMAC-SHA256",
+      amzDate,
+      credentialScope,
+      sha256Hex(canonicalRequest),
+    ].join("\n");
+    const kDate = hmac(`AWS4${creds.secretAccessKey}`, dateStamp);
+    const kRegion = hmac(kDate, region);
+    const kService = hmac(kRegion, service);
+    const kSigning = hmac(kService, "aws4_request");
+    const signature = hmac(kSigning, stringToSign).toString("hex");
+    const authorization =
+      `AWS4-HMAC-SHA256 Credential=${creds.accessKeyId}/${credentialScope}, ` +
+      `SignedHeaders=${signedHeaders}, Signature=${signature}`;
+    const url = `${endpoint.startsWith("http") ? endpoint : `https://${endpoint}`}/${bucket}?${canonicalQuery}`;
+    const res = await fetchImpl(url, {
+      method: "GET",
+      headers: {
+        host,
+        "x-amz-date": amzDate,
+        "x-amz-content-sha256": payloadHash,
+        authorization,
+      },
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(
+        `ListObjectsV2 ${bucket} HTTP ${res.status}: ${text.slice(0, 200)}`
+      );
+    }
+    // Minimal XML parse for <Size> and NextContinuationToken / IsTruncated
+    const sizeMatches = [...text.matchAll(/<Size>(\d+)<\/Size>/g)];
+    for (const m of sizeMatches) {
+      bytes += Number(m[1]) || 0;
+      objectCount += 1;
+    }
+    // Contents count via Key tags is more accurate than Size alone when empty files
+    const keyCount = (text.match(/<Key>/g) || []).length;
+    if (keyCount > 0 && keyCount !== sizeMatches.length) {
+      // Prefer key count for objectCount; sizes still summed from Size tags
+      objectCount = keyCount;
+    }
+    const trunc = /<IsTruncated>\s*true\s*<\/IsTruncated>/i.test(text);
+    const next = text.match(
+      /<NextContinuationToken>([^<]+)<\/NextContinuationToken>/
+    );
+    continuation = trunc && next ? next[1] : undefined;
+  } while (continuation);
+
+  return {
+    bucketName: bucket,
+    bytes,
+    objectCount,
+    asOf: now.toISOString(),
+  };
+}
+
+export async function fetchLiveR2StorageViaS3(
+  fetchImpl: typeof fetch = fetch,
+  now: Date = new Date(),
+  env: Record<string, string | undefined> = process.env
+): Promise<{ storageBytes: number; buckets: R2BucketStorageSample[] } | null> {
+  const creds = resolveR2S3ListCredentials(env);
+  if (!creds) return null;
+  const names = resolveR2StorageBucketNames(env);
+  const buckets: R2BucketStorageSample[] = [];
+  for (const name of names) {
+    try {
+      const sample = await listR2BucketStorageViaS3(creds, name, fetchImpl, now);
+      buckets.push(sample);
+    } catch (err) {
+      // AccessDenied / NoSuchBucket are expected for unrelated names.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/404|NoSuchBucket|AccessDenied|403|InvalidAccessKeyId/i.test(msg)) {
+        continue;
+      }
+      console.warn(`[r2-usage] live list failed for bucket ${name}: ${msg}`);
+    }
+  }
+  if (buckets.length === 0) return null;
+  buckets.sort((a, b) => b.bytes - a.bytes);
+  const storageBytes = buckets.reduce((s, b) => s + b.bytes, 0);
+  return { storageBytes, buckets };
+}
+
+export function graphqlStorageSamplesAreFresh(
+  buckets: R2BucketStorageSample[],
+  now: Date = new Date(),
+  maxAgeMs: number = R2_GRAPHQL_STORAGE_MAX_AGE_MS
+): boolean {
+  if (buckets.length === 0) return false;
+  return buckets.every((b) => {
+    if (!b.asOf) return false;
+    const t = Date.parse(b.asOf);
+    return Number.isFinite(t) && now.getTime() - t <= maxAgeMs;
+  });
+}
+
+
+
 /**
  * Fetch account-wide R2 storage + Class A/B ops for the current UTC month
  * from Cloudflare GraphQL analytics.
@@ -759,71 +1000,177 @@ export async function runR2UsageCheck(
   const credentials = resolveR2UsageCredentials();
   let assessment: R2UsageAssessment;
   const failClosed = r2FreeTierFailClosedRequired();
+  let storageIsLive = false;
+  let storageSampleStale = false;
+
+  // Live S3 inventory is authoritative for storage (GraphQL lag caused a late
+  // false 15 GiB kill after the bucket was already emptied).
+  const liveStorage = await fetchLiveR2StorageViaS3(fetchImpl, now);
 
   if (!credentials) {
-    const errMsg =
-      "R2 usage credentials not configured (set R2_USAGE_ACCOUNT_ID + R2_USAGE_API_TOKEN, or CLOUDFLARE_JAY_ACCOUNT_ID + CLOUDFLARE_JAY_API_TOKEN)";
-    assessment = assessR2Usage(0, 0, 0, DEFAULT_R2_FREE_TIER_LIMITS, now, {
-      metricsSource: "unavailable",
-      metricsError: errMsg,
-    });
-    if (failClosed) {
-      console.error(
-        "[r2-usage] FAIL CLOSED: analytics credentials missing with R2 Litestream in production — disabling R2 writes"
+    if (liveStorage) {
+      // Ops unknown without GraphQL; storage is live. Enforce storage-only.
+      assessment = assessR2Usage(
+        liveStorage.storageBytes,
+        0,
+        0,
+        DEFAULT_R2_FREE_TIER_LIMITS,
+        now,
+        {
+          metricsSource: "live_s3_storage+graphql_ops",
+          metricsError:
+            "GraphQL analytics credentials missing — Class A/B ops not measured; storage from live S3 list",
+          buckets: liveStorage.buckets,
+        }
       );
-      if (!isR2AutoDisabled()) {
-        enforceR2AutoDisable(
-          `fail-closed: ${errMsg} (cannot enforce ${R2_THRESHOLD_PCT}% free-tier policy blind)`
+      // Zero ops will not trip ops thresholds; storage will if absolute ≥ 70%.
+      storageIsLive = true;
+      console.warn(
+        "[r2-usage] GraphQL credentials missing; enforcing storage from live S3 list only"
+      );
+    } else {
+      const errMsg =
+        "R2 usage credentials not configured (set R2_USAGE_ACCOUNT_ID + R2_USAGE_API_TOKEN, or CLOUDFLARE_JAY_ACCOUNT_ID + CLOUDFLARE_JAY_API_TOKEN) and live S3 list unavailable";
+      assessment = assessR2Usage(0, 0, 0, DEFAULT_R2_FREE_TIER_LIMITS, now, {
+        metricsSource: "unavailable",
+        metricsError: errMsg,
+      });
+      if (failClosed) {
+        console.error(
+          "[r2-usage] FAIL CLOSED: cannot measure R2 free tier with R2 Litestream in production — disabling R2 writes"
+        );
+        if (!isR2AutoDisabled()) {
+          enforceR2AutoDisable(
+            `fail-closed: ${errMsg} (cannot enforce ${R2_THRESHOLD_PCT}% free-tier policy blind)`
+          );
+        }
+      } else {
+        console.warn(
+          "[r2-usage] skipping free-tier enforcement (non-production): no live S3 list and no GraphQL credentials"
         );
       }
-    } else {
-      console.warn(
-        "[r2-usage] skipping free-tier enforcement (non-production): Cloudflare analytics credentials not configured"
-      );
     }
   } else {
     try {
       const metrics = await fetchR2UsageMetrics(credentials, now, fetchImpl);
+      let storageBytes = metrics.storageBytes;
+      let buckets = metrics.buckets;
+      let source: R2MetricsSource = "cloudflare_graphql";
+
+      if (liveStorage) {
+        storageBytes = liveStorage.storageBytes;
+        buckets = liveStorage.buckets;
+        source = "live_s3_storage+graphql_ops";
+        storageIsLive = true;
+      } else if (!graphqlStorageSamplesAreFresh(metrics.buckets, now)) {
+        // Stale GraphQL storage caused a delayed false 15 GiB alert after prune.
+        // Refuse to kill on storage when samples are old; still enforce ops.
+        storageSampleStale = true;
+        storageBytes = 0;
+        console.warn(
+          "[r2-usage] GraphQL storage samples are stale; ignoring storage for kill decisions (ops still enforced)"
+        );
+      }
+
       assessment = assessR2Usage(
-        metrics.storageBytes,
+        storageBytes,
         metrics.classAOps,
         metrics.classBOps,
         DEFAULT_R2_FREE_TIER_LIMITS,
         now,
         {
-          metricsSource: "cloudflare_graphql",
-          buckets: metrics.buckets,
+          metricsSource: source,
+          buckets,
+          metricsError: storageSampleStale
+            ? "GraphQL storage samples stale; storage kill deferred until live list or fresh sample"
+            : undefined,
         }
       );
+
+      // If storage was zeroed due to stale GraphQL, do not treat storage as breached.
+      if (storageSampleStale && assessment.exceededMetric === "storage") {
+        assessment = {
+          ...assessment,
+          overallOnTrackToExceed70Pct:
+            assessment.classA.onTrackToExceed || assessment.classB.onTrackToExceed,
+          exceededMetric: assessment.classA.onTrackToExceed
+            ? "classA"
+            : assessment.classB.onTrackToExceed
+              ? "classB"
+              : undefined,
+        };
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[r2-usage] failed to fetch Cloudflare R2 metrics:", message);
-      assessment = assessR2Usage(0, 0, 0, DEFAULT_R2_FREE_TIER_LIMITS, now, {
-        metricsSource: "unavailable",
-        metricsError: message,
-      });
-      if (failClosed && !isR2AutoDisabled()) {
-        enforceR2AutoDisable(
-          `fail-closed: R2 GraphQL metrics fetch failed (${message}) — cannot enforce ${R2_THRESHOLD_PCT}% free-tier policy blind`
+      if (liveStorage) {
+        assessment = assessR2Usage(
+          liveStorage.storageBytes,
+          0,
+          0,
+          DEFAULT_R2_FREE_TIER_LIMITS,
+          now,
+          {
+            metricsSource: "live_s3_storage+graphql_ops",
+            metricsError: `GraphQL failed (${message}); storage from live S3 list`,
+            buckets: liveStorage.buckets,
+          }
         );
+        storageIsLive = true;
+      } else {
+        assessment = assessR2Usage(0, 0, 0, DEFAULT_R2_FREE_TIER_LIMITS, now, {
+          metricsSource: "unavailable",
+          metricsError: message,
+        });
+        if (failClosed && !isR2AutoDisabled()) {
+          enforceR2AutoDisable(
+            `fail-closed: R2 metrics unavailable (${message}) — cannot enforce ${R2_THRESHOLD_PCT}% free-tier policy blind`
+          );
+        }
       }
     }
   }
 
-  // Auto-disable on real metrics at hard 70% policy (storage absolute; ops
-  // absolute or pace). Fake/local proxies previously hid a 90%+ breach.
-  if (
-    assessment.metricsSource === "cloudflare_graphql" &&
+  assessment.storageIsLive = storageIsLive;
+  assessment.storageSampleStale = storageSampleStale;
+
+  // Kill only on trustworthy measurements — never on stale GraphQL storage alone.
+  // Storage kill requires a trustworthy sample: live S3 list, or fresh GraphQL
+  // (stale GraphQL storage is zeroed above and must never re-alert hours late).
+  const mayKillStorage =
+    assessment.exceededMetric === "storage" && !storageSampleStale;
+  const mayKillOps =
+    assessment.exceededMetric === "classA" ||
+    assessment.exceededMetric === "classB";
+  const shouldKill =
+    assessment.metricsSource !== "unavailable" &&
     assessment.overallOnTrackToExceed70Pct &&
-    !isR2AutoDisabled()
-  ) {
+    (mayKillStorage || mayKillOps) &&
+    !isR2AutoDisabled();
+
+  if (shouldKill) {
     const metric = assessment.exceededMetric || "storage";
     const status = assessment[metric];
     const reason =
       metric === "storage"
-        ? `R2 free-tier absolute storage ≥ ${R2_THRESHOLD_PCT}% (MTD ${status.mtdPct}%)`
+        ? `R2 free-tier absolute storage ≥ ${R2_THRESHOLD_PCT}% (live MTD ${status.mtdPct}%)`
         : `R2 free-tier ${metric} ≥ ${R2_THRESHOLD_PCT}% absolute or projected (MTD ${status.mtdPct}%, projected ${status.projectedPct}%)`;
     enforceR2AutoDisable(reason);
+  }
+
+  // Auto-resume when live storage is healthy (hysteresis) and ops are fine.
+  // Fixes sticky kill from stale GraphQL after a successful prune.
+  if (
+    isR2AutoDisabled() &&
+    storageIsLive &&
+    assessment.storage.mtdPct < R2_RESUME_STORAGE_PCT &&
+    !assessment.classA.onTrackToExceed &&
+    !assessment.classB.onTrackToExceed
+  ) {
+    console.warn(
+      `[r2-usage] auto-resume: live storage ${assessment.storage.mtdPct}% < ${R2_RESUME_STORAGE_PCT}% resume threshold; clearing kill switch`
+    );
+    clearR2AutoDisable();
   }
 
   assessment.autoDisabled = isR2AutoDisabled();
