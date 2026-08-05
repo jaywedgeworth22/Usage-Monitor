@@ -1,3 +1,7 @@
+## Current (2026-08-04 GROK)
+
+- iOS TestFlight agent ship: `bash scripts/ios-ship-testflight.sh` (fleet `/Users/jay/apps/ios-fleet/README.md`).
+
 # Status
 
 > **Historical snapshot — 2026-07-21.** This file describes the unmerged side

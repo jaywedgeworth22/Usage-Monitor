@@ -1,3 +1,5 @@
+- **[GROK] iOS TestFlight agent ship pipeline (cross-app) — IN PROGRESS 2026-08-04.** `scripts/ios-ship-testflight.sh` + fleet `/Users/jay/apps/ios-fleet/`. Bundle `services.jays.usage.monitor`. Branch `grok/ios-testflight-ship`.
+
 - **[GROK] Wire web design tokens into Tailwind + primary chrome (2026-08-05) — MERGED PR #939.** Squash `7d070031`. Deduped `--um-*` CSS vars, bridged accent/radius into Tailwind, adopted `bg-accent` / `accent-soft` on Nav, empty states, command palette, Money/Alerts CTAs. CI green; auto-merge squash landed.
 - **[GROK] UX deferred wave 2 (wizard/mobile cards/nav/charts/iOS depth) (2026-08-04) — COMPLETED + DEPLOYED (2026-08-05).** Live production `088763fd` includes #934/#936 UX, #938 widget privacy, #939 design tokens. Verified health/ready green.
 - **[GROK] Full web+iOS UX overhaul (review execution) (2026-08-04) — COMPLETED + DEPLOYED (2026-08-05).** Live on production `088763fd` with full UX recommendation set (hero, attention, density/PWA, nav routes, palette, charts, wizard, iOS intelligence/widget privacy, design tokens).

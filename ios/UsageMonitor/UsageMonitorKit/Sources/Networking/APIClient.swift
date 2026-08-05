@@ -416,7 +416,7 @@ public actor APIClient {
         )
     }
 
-public func registerApnsDeviceToken(
+    public func registerApnsDeviceToken(
         deviceToken: String,
         deviceModel: String? = nil,
         osVersion: String? = nil

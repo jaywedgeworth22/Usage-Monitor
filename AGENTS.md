@@ -404,3 +404,11 @@ merge when CI is green. A remote branch with no PR is unfinished. Canonical:
 - **Same bar at every tier:** full gates, receipts, and board discipline apply no matter
   which model did the work.
 - Canonical reference: `/Users/jay/apps/AGENT-SYNC.md` — "Delegation & model economics".
+
+## iOS native ship (TestFlight, no Xcode UI)
+
+```bash
+bash scripts/ios-ship-testflight.sh
+```
+
+Fleet: `/Users/jay/apps/ios-fleet/README.md`. Bundle `services.jays.usage.monitor`, team `CC8UTF7ATG`.
