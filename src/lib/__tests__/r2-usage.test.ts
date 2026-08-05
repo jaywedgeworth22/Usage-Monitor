@@ -14,6 +14,7 @@ import {
   classifyR2Action,
   isLitestreamR2Endpoint,
   resolveR2UsageCredentials,
+  r2FreeTierFailClosedRequired,
   DEFAULT_R2_FREE_TIER_LIMITS,
   R2_DISABLED_FLAG_FILENAME,
   __getR2FlagFilePathForTests,
@@ -52,50 +53,78 @@ describe("R2 usage monitoring & auto-disable", () => {
     __resetR2UsageStateForTests();
   });
 
-  it("calculates linear month pace projection accurately", () => {
-    // July 15th 12:00:00 UTC = ~50% elapsed month
+  it("calculates linear month pace projection accurately for ops (absolute_or_pace)", () => {
     const testDate = new Date("2026-07-15T12:00:00.000Z");
     const limit = 1_000_000;
 
-    // 300,000 ops at 50% elapsed = 600,000 projected (60% projected pace)
-    const statusLow = calculatePaceProjection(300_000, limit, testDate, 70);
+    const statusLow = calculatePaceProjection(
+      300_000,
+      limit,
+      testDate,
+      70,
+      "absolute_or_pace"
+    );
     expect(statusLow.onTrackToExceed).toBe(false);
     expect(statusLow.projectedPct).toBeLessThan(70);
 
-    // 400,000 ops at 50% elapsed = 800,000 projected (80% projected pace)
-    const statusHigh = calculatePaceProjection(400_000, limit, testDate, 70);
+    const statusHigh = calculatePaceProjection(
+      400_000,
+      limit,
+      testDate,
+      70,
+      "absolute_or_pace"
+    );
     expect(statusHigh.onTrackToExceed).toBe(true);
     expect(statusHigh.projectedPct).toBeGreaterThanOrEqual(70);
   });
 
-  it("trips on MTD share alone when already over 70% late in the month", () => {
-    // Day 30 of a 31-day month: elapsed ~97%, so projection ≈ MTD.
-    // 7.5 GiB / 10 GiB = 75% actual must trip even without growth.
-    const lateMonth = new Date("2026-07-30T12:00:00.000Z");
-    const status = calculatePaceProjection(
+  it("storage absolute mode trips only on MTD ≥ 70%, not early-month pace alone", () => {
+    const earlyMonth = new Date("2026-08-02T12:00:00.000Z");
+    const threeGib = 3 * 1024 * 1024 * 1024;
+    const absoluteOnly = calculatePaceProjection(
+      threeGib,
+      DEFAULT_R2_FREE_TIER_LIMITS.storageBytes,
+      earlyMonth,
+      70,
+      "absolute"
+    );
+    expect(absoluteOnly.mtdPct).toBeLessThan(70);
+    expect(absoluteOnly.projectedPct).toBeGreaterThan(70);
+    expect(absoluteOnly.onTrackToExceed).toBe(false);
+
+    const withPace = calculatePaceProjection(
+      threeGib,
+      DEFAULT_R2_FREE_TIER_LIMITS.storageBytes,
+      earlyMonth,
+      70,
+      "absolute_or_pace"
+    );
+    expect(withPace.onTrackToExceed).toBe(true);
+
+    const over = calculatePaceProjection(
       7.5 * 1024 * 1024 * 1024,
       DEFAULT_R2_FREE_TIER_LIMITS.storageBytes,
-      lateMonth,
-      70
+      earlyMonth,
+      70,
+      "absolute"
     );
-    expect(status.mtdPct).toBeGreaterThanOrEqual(70);
-    expect(status.onTrackToExceed).toBe(true);
+    expect(over.mtdPct).toBeGreaterThanOrEqual(70);
+    expect(over.onTrackToExceed).toBe(true);
   });
 
-  it("assesses overall R2 metrics and detects 70% threshold breach", () => {
+  it("assesses storage absolute + ops absolute/pace at 70%", () => {
     const testDate = new Date("2026-07-15T12:00:00.000Z");
 
     const lowAssessment = assessR2Usage(
-      1 * 1024 * 1024 * 1024, // 1 GiB storage
-      100_000, // 100k Class A
-      500_000, // 500k Class B
+      1 * 1024 * 1024 * 1024,
+      100_000,
+      500_000,
       DEFAULT_R2_FREE_TIER_LIMITS,
       testDate
     );
     expect(lowAssessment.overallOnTrackToExceed70Pct).toBe(false);
     expect(lowAssessment.exceededMetric).toBeUndefined();
 
-    // High Class A usage: 400k at mid-month = 80% pace >= 70%
     const highAssessment = assessR2Usage(
       1 * 1024 * 1024 * 1024,
       400_000,
@@ -105,6 +134,61 @@ describe("R2 usage monitoring & auto-disable", () => {
     );
     expect(highAssessment.overallOnTrackToExceed70Pct).toBe(true);
     expect(highAssessment.exceededMetric).toBe("classA");
+
+    const storageBreach = assessR2Usage(
+      7.5 * 1024 * 1024 * 1024,
+      1_000,
+      1_000,
+      DEFAULT_R2_FREE_TIER_LIMITS,
+      testDate
+    );
+    expect(storageBreach.overallOnTrackToExceed70Pct).toBe(true);
+    expect(storageBreach.exceededMetric).toBe("storage");
+  });
+
+  it("requires fail-closed free-tier meter when production R2 Litestream is configured", () => {
+    expect(
+      r2FreeTierFailClosedRequired({
+        NODE_ENV: "production",
+        LITESTREAM_S3_ENDPOINT: "https://abc.r2.cloudflarestorage.com",
+      })
+    ).toBe(true);
+    expect(
+      r2FreeTierFailClosedRequired({
+        LITESTREAM_REQUIRED: "true",
+        LITESTREAM_S3_ENDPOINT: "https://abc.r2.cloudflarestorage.com",
+      })
+    ).toBe(true);
+    expect(
+      r2FreeTierFailClosedRequired({
+        NODE_ENV: "development",
+        LITESTREAM_S3_ENDPOINT: "https://abc.r2.cloudflarestorage.com",
+      })
+    ).toBe(false);
+    expect(
+      r2FreeTierFailClosedRequired({
+        NODE_ENV: "production",
+        LITESTREAM_S3_ENDPOINT: "https://garage.example:9443",
+      })
+    ).toBe(false);
+  });
+
+  it("fail-closes and disables R2 when production credentials are missing", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv(
+      "LITESTREAM_S3_ENDPOINT",
+      "https://acct.r2.cloudflarestorage.com"
+    );
+
+    const mockFetch = vi.fn();
+    const assessment = await runR2UsageCheck(
+      mockFetch as unknown as typeof fetch,
+      new Date("2026-08-04T12:00:00.000Z")
+    );
+
+    expect(assessment.metricsSource).toBe("unavailable");
+    expect(isR2AutoDisabled()).toBe(true);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("classifies Class A/B actions with conservative unknown-as-A default", () => {

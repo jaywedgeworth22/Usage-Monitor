@@ -15,17 +15,20 @@
 #     R2 accepts any region for SigV4.
 #
 # Production target: Cloudflare R2 (PR #869). Hetzner/Coolify Garage is retired.
+#
+# Backup philosophy for THIS app (usage monitor, not a trading ledger):
+#   Disaster recovery only — survive disk death / host loss. Same-disk
+#   pre-migration snapshots + deploy offline snapshots cover schema rollbacks.
+#   Continuous second-scale LTX / multi-day PITR is not worth R2 free-tier cost
+#   and does not match the restore need ("yesterday's DB" is fine; "3h42m ago"
+#   is not a product requirement). Keep history short and sync infrequent so
+#   storage stays well under 70% of the 10 GiB free tier.
 
-# Point-in-time retention: 48h (was 168h/7d, before that 720h/30d on retired
-# Garage). 2026-08-04 free-tier opt: R2 storage hit ~10.45 GiB (over the 10 GiB
-# free tier). Live DB is <<1 GiB; multi-day LTX/snapshot history is what blew
-# the cap. 48h still covers deploy-day restore drills; raise only if moving to
-# paid R2. Litestream 0.5.x stores LTX files and GCs snapshots older than
-# `retention`; the finer-grained LTX/WAL window is governed by the default
-# l0-retention.
+# One snapshot per day; keep only ~1 day of history so GC drops old LTX quickly.
+# (Was 48h, then 168h, then 720h — all too large for free-tier R2.)
 snapshot:
   interval: 24h
-  retention: 48h
+  retention: 24h
 
 dbs:
   - path: /data/prod.db
@@ -37,10 +40,9 @@ dbs:
       endpoint: ${LITESTREAM_S3_ENDPOINT}
       access-key-id: ${LITESTREAM_S3_ACCESS_KEY_ID}
       secret-access-key: ${LITESTREAM_S3_SECRET_ACCESS_KEY}
-      # Keep each 5 MiB multipart part within reverse-proxy request deadlines
-      # on bandwidth-constrained cross-region links. Five concurrent parts can
-      # each exceed the deadline while competing for the same uplink.
+      # One multipart part at a time for reliability on constrained links.
       concurrency: 1
-      # Class A free-tier guard (default was 1s). Backup RPO only — app path
-      # is unaffected. 60s halves PutObject burn vs 30s, ~60x vs 1s default.
-      sync-interval: 60s
+      # Upload WAL at most every 15 minutes. Class A (List/Put) is what burns
+      # free-tier ops; 15m RPO is more than enough for a usage dashboard.
+      # (Default 1s; was 60s free-tier opt — still too chatty.)
+      sync-interval: 15m

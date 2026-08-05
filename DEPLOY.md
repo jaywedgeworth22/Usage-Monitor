@@ -251,8 +251,9 @@ up to five verified offline SQLite snapshots for automatic code rollback.
 
 [Litestream](https://litestream.io/) continuously replicates `/data/prod.db`
 to **Cloudflare R2** (configured bucket `usage-monitor-prod-v3`) with
-transaction-aware restore points (48 h snapshot retention, 24 h snapshot
-interval, 60 s sync-interval — see `litestream.yml`). The external singleton at
+disaster-recovery restore points (24 h snapshot retention, 24 h snapshot
+interval, 15 m sync-interval — not continuous second-scale PITR; see
+`litestream.yml`). The external singleton at
 `/Users/jay/apps/fleet-sentry-monitor/monitor.py` verifies replica freshness
 and restorability every 15 minutes and runs a weekly full-integrity restore
 drill (see "Backup monitoring" in `deploy/oracle/README.md`). Full setup,
