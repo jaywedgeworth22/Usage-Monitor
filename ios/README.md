@@ -83,3 +83,12 @@ bash scripts/ios-ship-testflight-local.sh
 
 ASC: create an App Store Connect app with bundle ID
 `services.jays.local.usage.monitor` before the first Local upload.
+
+
+## Local provider catalog
+
+**Local Usage Monitor** ships a fleet-aligned catalog (LLM, hosting, market data, infra).
+
+- **Poll (API key):** OpenRouter, OpenAI org costs, DeepSeek balance, Anthropic Admin cost report
+- **Subscription / manual:** Claude Max, Cloudflare Workers, Cursor, FMP, Tiingo, Sentry, etc.
+- **+ → Seed all fleet templates** adds non-key rows in one tap; then edit costs / add keys

@@ -68,26 +68,121 @@ public final class LocalAppModel {
 
     // MARK: - CRUD
 
-    public func addOpenRouterProvider(
-        name: String,
-        displayName: String,
-        apiKey: String,
-        monthlyBudgetUsd: Double?
+    /// Add from fleet catalog (poll key and/or subscription).
+    public func addFromCatalog(
+        entry: LocalProviderCatalogEntry,
+        displayName: String?,
+        apiKey: String?,
+        monthlyBudgetUsd: Double?,
+        subscriptionCostUsd: Double?,
+        subscriptionName: String?
     ) async throws {
-        let accountId = UUID().uuidString
-        try secrets.save(accountId: accountId, credentials: ProviderCredentials(apiKey: apiKey))
+        let name = entry.name
+        let existing = try await store.listProviders()
+        if existing.contains(where: { $0.name == name }) {
+            throw LocalWriteError.conflict("Provider '\(entry.displayName)' is already added.")
+        }
+
+        let trimmedKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let needsKey = entry.mode == .poll || (entry.mode == .keyPlusSubscription && !trimmedKey.isEmpty)
+        if entry.mode == .poll && trimmedKey.isEmpty {
+            throw LocalWriteError.validation("API key required for \(entry.displayName)")
+        }
+
+        var keychainAccountId: String?
+        if needsKey && !trimmedKey.isEmpty {
+            let accountId = UUID().uuidString
+            try secrets.save(accountId: accountId, credentials: ProviderCredentials(apiKey: trimmedKey))
+            keychainAccountId = accountId
+        }
+
+        let adapterKind: String = {
+            switch entry.mode {
+            case .poll: return entry.adapterKind
+            case .subscription: return "subscription_only"
+            case .keyPlusSubscription:
+                // Key stored for future poll ports; spend via subscription if set.
+                return entry.adapterKind == "subscription_only" ? "subscription_only" : entry.adapterKind
+            }
+        }()
+
+        // Poll adapters available on phone today.
+        let supportedPoll = Set(["openrouter", "deepseek", "openai", "anthropic"])
+        let resolvedKind: String = {
+            if adapterKind == "subscription_only" { return adapterKind }
+            if supportedPoll.contains(adapterKind) { return adapterKind }
+            return "subscription_only"
+        }()
+
         var p = LocalProvider(
-            name: name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-            displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines),
-            adapterKind: "openrouter",
-            keychainAccountId: accountId
+            name: name,
+            displayName: (displayName?.isEmpty == false ? displayName! : entry.displayName),
+            adapterKind: resolvedKind,
+            category: entry.category,
+            keychainAccountId: keychainAccountId
         )
         p.updatedAt = Date()
         try await store.upsertProvider(p)
         var plan = LocalProviderPlan(providerId: p.id, monthlyBudgetUsd: monthlyBudgetUsd)
         plan.updatedAt = Date()
         try await store.upsertPlan(plan)
+
+        let subCost = subscriptionCostUsd ?? 0
+        if entry.mode != .poll || subCost > 0 {
+            if subCost > 0 || entry.mode == .subscription {
+                let cost = max(0, subscriptionCostUsd ?? entry.suggestedMonthlyUsd ?? 0)
+                if cost > 0 || entry.mode == .subscription {
+                    try await attachSubscription(
+                        providerId: p.id,
+                        name: subscriptionName
+                            ?? entry.suggestedSubscriptionName
+                            ?? "\(entry.displayName) plan",
+                        costUsd: cost
+                    )
+                }
+            }
+        }
+
         try await reload()
+    }
+
+    /// Insert every catalog provider not already present (subscription shells / empty poll rows).
+    @discardableResult
+    public func seedMissingCatalogProviders() async throws -> Int {
+        let existing = Set(try await store.listProviders().map(\.name))
+        var added = 0
+        for entry in LocalProviderCatalog.all {
+            if existing.contains(entry.name) { continue }
+            // Skip pure poll entries that require a key (user adds those with credentials).
+            if entry.mode == .poll { continue }
+            try await addFromCatalog(
+                entry: entry,
+                displayName: entry.displayName,
+                apiKey: nil,
+                monthlyBudgetUsd: nil,
+                subscriptionCostUsd: entry.suggestedMonthlyUsd,
+                subscriptionName: entry.suggestedSubscriptionName
+            )
+            added += 1
+        }
+        return added
+    }
+
+    public func addOpenRouterProvider(
+        name: String,
+        displayName: String,
+        apiKey: String,
+        monthlyBudgetUsd: Double?
+    ) async throws {
+        guard let entry = LocalProviderCatalog.entry(name: "openrouter") else { return }
+        try await addFromCatalog(
+            entry: entry,
+            displayName: displayName,
+            apiKey: apiKey,
+            monthlyBudgetUsd: monthlyBudgetUsd,
+            subscriptionCostUsd: nil,
+            subscriptionName: nil
+        )
     }
 
     public func addSubscriptionOnlyProvider(
@@ -96,13 +191,27 @@ public final class LocalAppModel {
         subscriptionName: String,
         costUsd: Double
     ) async throws {
-        let p = LocalProvider(
-            name: name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+        let entry = LocalProviderCatalogEntry(
+            name: name,
             displayName: displayName,
-            adapterKind: "subscription_only"
+            category: "Other",
+            mode: .subscription,
+            adapterKind: "subscription_only",
+            help: "",
+            suggestedMonthlyUsd: costUsd,
+            suggestedSubscriptionName: subscriptionName
         )
-        try await store.upsertProvider(p)
-        try await store.upsertPlan(LocalProviderPlan(providerId: p.id))
+        try await addFromCatalog(
+            entry: entry,
+            displayName: displayName,
+            apiKey: nil,
+            monthlyBudgetUsd: nil,
+            subscriptionCostUsd: costUsd,
+            subscriptionName: subscriptionName
+        )
+    }
+
+    private func attachSubscription(providerId: String, name: String, costUsd: Double) async throws {
         let periodStart = BudgetEngine.utcMonthStart()
         let next = SubscriptionPeriodMath.advancePeriod(
             periodStart: periodStart,
@@ -110,17 +219,18 @@ public final class LocalAppModel {
             intervalCount: 1
         )
         let sub = LocalSubscription(
-            providerId: p.id,
-            name: subscriptionName,
+            providerId: providerId,
+            name: name,
             costUsd: costUsd,
             startDate: periodStart,
             currentPeriodStart: periodStart,
             nextRenewalAt: next,
-            status: "active"
+            status: costUsd > 0 ? "active" : "considering"
         )
         try await store.upsertSubscription(sub)
-        _ = try await SubscriptionMaterializer.materialize(store: store)
-        try await reload()
+        if costUsd > 0 {
+            _ = try await SubscriptionMaterializer.materialize(store: store)
+        }
     }
 
     public func setBudget(providerId: String, monthlyBudgetUsd: Double?) async throws {
@@ -226,17 +336,6 @@ public final class LocalAppModel {
     }
 
     private func adapter(for kind: String) -> any ProviderAdapter {
-        switch kind {
-        case "openrouter": return OpenRouterAdapter()
-        default: return UnsupportedAdapter(kind: kind)
-        }
-    }
-}
-
-private struct UnsupportedAdapter: ProviderAdapter {
-    let kind: String
-    var adapterKind: String { kind }
-    func fetchUsage(credentials: ProviderCredentials) async throws -> LocalUsageResult {
-        throw AdapterRunError.unsupported("Adapter '\(kind)' is not available in this build")
+        LocalAdapterRegistry.adapter(for: kind)
     }
 }
