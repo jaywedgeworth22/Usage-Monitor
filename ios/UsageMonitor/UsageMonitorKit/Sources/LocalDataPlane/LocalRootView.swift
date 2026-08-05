@@ -1,5 +1,6 @@
 import SwiftUI
 import DesignSystem
+import LocalAdapters
 import LocalBudget
 import LocalStore
 
@@ -223,6 +224,17 @@ public struct LocalRootView: View {
                     Text("**Usage Monitor** (other app) is the live-sync client for a self-hosted or owner server — use that if you run a VPS like the fleet.")
                         .font(Theme.Typography.caption)
                 }
+                Section("Catalog") {
+                    Text("\(LocalProviderCatalog.all.count) fleet providers available under + Add.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Seed missing fleet templates") {
+                        Task {
+                            _ = try? await model.seedMissingCatalogProviders()
+                            try? await model.reload()
+                        }
+                    }
+                }
                 Section("Data") {
                     Button("Refresh all providers", role: nil) {
                         Task { await model.refreshAllDue(force: true) }
@@ -259,76 +271,141 @@ private struct AddProviderSheet: View {
     @Bindable var model: LocalAppModel
     @Environment(\.dismiss) private var dismiss
 
-    enum Kind: String, CaseIterable {
-        case openrouter = "OpenRouter (poll)"
-        case claudeSub = "Claude subscription (manual)"
-    }
-
-    @State private var kind: Kind = .openrouter
-    @State private var displayName = "OpenRouter"
+    @State private var search = ""
+    @State private var selected: LocalProviderCatalogEntry?
+    @State private var displayName = ""
     @State private var apiKey = ""
     @State private var budgetText = ""
-    @State private var subCostText = "200"
+    @State private var subCostText = ""
     @State private var error: String?
+    @State private var seedMessage: String?
+
+    private var filtered: [LocalProviderCatalogEntry] {
+        LocalProviderCatalog.filtered(search: search)
+    }
+
+    private var grouped: [(String, [LocalProviderCatalogEntry])] {
+        Dictionary(grouping: filtered, by: \.category)
+            .map { ($0.key, $0.value.sorted { $0.displayName < $1.displayName }) }
+            .sorted { $0.0 < $1.0 }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Picker("Type", selection: $kind) {
-                    ForEach(Kind.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                TextField("Display name", text: $displayName)
-                if kind == .openrouter {
-                    SecureField("Management API key", text: $apiKey)
-                    TextField("Monthly budget USD (optional)", text: $budgetText)
-                        .keyboardType(.decimalPad)
-                    Text("Use an OpenRouter **Management** key for month-to-date spend. Inference-only keys connect but report $0 poll spend.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    TextField("Monthly cost USD", text: $subCostText)
-                        .keyboardType(.decimalPad)
-                    Text("Anthropic personal / Claude Max etc. cannot be polled without Admin org keys — track as a subscription.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let error {
-                    Text(error).foregroundStyle(.red).font(.caption)
+                if selected == nil {
+                    Section {
+                        TextField("Search providers", text: $search)
+                        Button("Seed all fleet templates (no API keys)") {
+                            Task { await seed() }
+                        }
+                        Text("Adds subscription/manual shells for every catalog provider that does not need a key on first save. Pollable LLMs (OpenRouter, OpenAI, …) still need a key via Add.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let seedMessage {
+                            Text(seedMessage).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    ForEach(grouped, id: \.0) { category, entries in
+                        Section(category) {
+                            ForEach(entries) { entry in
+                                Button {
+                                    selected = entry
+                                    displayName = entry.displayName
+                                    subCostText = entry.suggestedMonthlyUsd.map { String(format: "%g", $0) } ?? ""
+                                    apiKey = ""
+                                    budgetText = ""
+                                } label: {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(entry.displayName)
+                                                .foregroundStyle(.primary)
+                                            Text(modeLabel(entry.mode))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if let entry = selected {
+                    Section(entry.displayName) {
+                        Text(entry.help)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("Display name", text: $displayName)
+                        if entry.mode == .poll || entry.mode == .keyPlusSubscription {
+                            SecureField(entry.keyFieldLabel, text: $apiKey)
+                            TextField("Monthly budget USD (optional)", text: $budgetText)
+                                .keyboardType(.decimalPad)
+                        }
+                        if entry.mode == .subscription || entry.mode == .keyPlusSubscription {
+                            TextField("Monthly subscription USD", text: $subCostText)
+                                .keyboardType(.decimalPad)
+                        }
+                    }
+                    if let error {
+                        Section { Text(error).foregroundStyle(.red).font(.caption) }
+                    }
                 }
             }
-            .navigationTitle("Add provider")
+            .navigationTitle(selected == nil ? "Add provider" : "Configure")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button(selected == nil ? "Cancel" : "Back") {
+                        if selected != nil {
+                            selected = nil
+                            error = nil
+                        } else {
+                            dismiss()
+                        }
+                    }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save() } }
+                if selected != nil {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") { Task { await save() } }
+                    }
                 }
             }
         }
     }
 
-    private func save() async {
+    private func modeLabel(_ mode: LocalProviderMode) -> String {
+        switch mode {
+        case .poll: return "API poll (cost/balance)"
+        case .subscription: return "Subscription / manual"
+        case .keyPlusSubscription: return "Key optional · track subscription"
+        }
+    }
+
+    private func seed() async {
         error = nil
         do {
-            switch kind {
-            case .openrouter:
-                let budget = Double(budgetText)
-                try await model.addOpenRouterProvider(
-                    name: "openrouter",
-                    displayName: displayName.isEmpty ? "OpenRouter" : displayName,
-                    apiKey: apiKey,
-                    monthlyBudgetUsd: budget
-                )
-            case .claudeSub:
-                let cost = Double(subCostText) ?? 0
-                try await model.addSubscriptionOnlyProvider(
-                    name: "anthropic-claude",
-                    displayName: displayName.isEmpty ? "Claude" : displayName,
-                    subscriptionName: "Claude plan",
-                    costUsd: cost
-                )
-            }
+            let n = try await model.seedMissingCatalogProviders()
+            seedMessage = n == 0 ? "Catalog already fully seeded." : "Added \(n) providers."
+            try? await model.reload()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func save() async {
+        error = nil
+        guard let entry = selected else { return }
+        do {
+            try await model.addFromCatalog(
+                entry: entry,
+                displayName: displayName,
+                apiKey: apiKey.isEmpty ? nil : apiKey,
+                monthlyBudgetUsd: Double(budgetText),
+                subscriptionCostUsd: Double(subCostText),
+                subscriptionName: entry.suggestedSubscriptionName
+            )
             dismiss()
         } catch {
             self.error = error.localizedDescription
