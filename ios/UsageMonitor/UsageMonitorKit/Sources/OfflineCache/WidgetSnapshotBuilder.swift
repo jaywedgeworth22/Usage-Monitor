@@ -4,12 +4,12 @@ import WidgetShared
 
 /// Derives the compact `WidgetShared.WidgetSnapshot` from a full
 /// `BudgetStatusResponse`. Owned by the **OfflineCache** lane (it already
-/// depends on both `Models` and `WidgetShared`). Working starter — the lane may
-/// refine meter selection, ordering, or add per-project rollups.
+/// depends on both `Models` and `WidgetShared`).
 public enum WidgetSnapshotBuilder {
-    /// Build a snapshot capturing the summary plus the highest-utilisation
-    /// budgeted providers.
-    /// - Parameter maxMeters: how many provider meters to keep for the widget.
+    /// Build a snapshot capturing the overall (provider-scoped) summary, top
+    /// provider meters, and every project so the widget can focus overall or
+    /// on a single project budget.
+    /// - Parameter maxMeters: how many provider meters to keep for the overall view.
     public static func snapshot(from response: BudgetStatusResponse, maxMeters: Int = 3) -> WidgetSnapshot {
         let meters: [WidgetSnapshot.Meter] = response.providers
             .filter { $0.hasBudget }
@@ -22,7 +22,8 @@ public enum WidgetSnapshotBuilder {
                     spentUsd: provider.spentUsd,
                     budgetUsd: provider.monthlyBudgetUsd,
                     percentUsed: provider.percentUsed,
-                    status: provider.status.rawValue
+                    status: provider.status.rawValue,
+                    projectedEomUsd: provider.projectedEomUsd
                 )
             }
 
@@ -42,6 +43,25 @@ public enum WidgetSnapshotBuilder {
             || (totalBudget > 0 && totalSpent / totalBudget >= 0.8)
         let percentUsed = totalBudget > 0 ? totalSpent / totalBudget : nil
 
+        let projects: [WidgetSnapshot.Meter] = (response.projects ?? [])
+            .sorted { lhs, rhs in
+                let lp = lhs.percentUsed ?? -1
+                let rp = rhs.percentUsed ?? -1
+                if lp != rp { return lp > rp }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+            .map { project in
+                WidgetSnapshot.Meter(
+                    id: project.id,
+                    name: project.name,
+                    spentUsd: project.spentUsd,
+                    budgetUsd: project.monthlyBudgetUsd,
+                    percentUsed: project.percentUsed,
+                    status: project.status.rawValue,
+                    projectedEomUsd: project.projectedEomUsd
+                )
+            }
+
         return WidgetSnapshot(
             generatedAt: response.generatedAtDate ?? Date(),
             month: response.month,
@@ -51,7 +71,8 @@ public enum WidgetSnapshotBuilder {
             percentUsed: percentUsed,
             overBudget: overBudget,
             warning: warning,
-            topMeters: meters
+            topMeters: meters,
+            projects: projects
         )
     }
 }

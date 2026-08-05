@@ -1,5 +1,6 @@
 import WidgetKit
 import SwiftUI
+import AppIntents
 import WidgetShared
 import DesignSystem
 
@@ -10,8 +11,10 @@ import DesignSystem
 /// compact `WidgetSnapshot` the app persists to the shared app-group container
 /// after every successful refresh, so the home-screen widget shows real,
 /// recently-cached data even when the host app isn't running. When no snapshot
-/// has been written yet (fresh install, signed-out) it falls back to the
-/// deterministic `.placeholder`.
+/// has been written yet (fresh install, signed-out) it falls back to zeros via
+/// `.empty` (gallery previews use `.placeholder`).
+///
+/// Users long-press → Edit Widget to pick **Overall** or a **project budget**.
 @main
 struct UsageMonitorWidgetBundle: WidgetBundle {
     var body: some Widget {
@@ -19,44 +22,45 @@ struct UsageMonitorWidgetBundle: WidgetBundle {
     }
 }
 
-// MARK: - Deep link
-
-/// Tapping the widget opens the app. The app target may route this URL (e.g. in
-/// `.onOpenURL`) to the Overview tab; unhandled, it simply launches the app.
-enum WidgetDeepLink {
-    static let summary = URL(string: "usagemonitor://dashboard")
-}
-
 // MARK: - Timeline
 
 struct BudgetEntry: TimelineEntry {
     let date: Date
     let snapshot: WidgetSnapshot
+    let content: WidgetBudgetContent
 }
 
-struct BudgetTimelineProvider: TimelineProvider {
+struct BudgetTimelineProvider: AppIntentTimelineProvider {
+    typealias Intent = SelectBudgetIntent
+
     func placeholder(in context: Context) -> BudgetEntry {
-        BudgetEntry(date: Date(), snapshot: .placeholder)
+        entry(snapshot: .placeholder, focus: .overall)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (BudgetEntry) -> Void) {
-        // In the gallery (`isPreview`) prefer the curated placeholder so the
-        // widget always looks representative; otherwise show real cached data.
+    func snapshot(for configuration: SelectBudgetIntent, in context: Context) async -> BudgetEntry {
         let snapshot = context.isPreview
-            ? .placeholder
+            ? WidgetSnapshot.placeholder
             : (SharedStore.shared.read() ?? .empty)
-        completion(BudgetEntry(date: Date(), snapshot: snapshot))
+        return entry(snapshot: snapshot, focus: configuration.focus)
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<BudgetEntry>) -> Void) {
+    func timeline(for configuration: SelectBudgetIntent, in context: Context) async -> Timeline<BudgetEntry> {
         let snapshot = SharedStore.shared.read() ?? .empty
-        let entry = BudgetEntry(date: Date(), snapshot: snapshot)
+        let item = entry(snapshot: snapshot, focus: configuration.focus)
         // The app refreshes the snapshot on foreground / background fetch; the
         // widget just re-reads periodically. 30 min is a battery-safe cadence
         // that still keeps spend reasonably fresh through the day.
         let next = Calendar.current.date(byAdding: .minute, value: 30, to: Date())
             ?? Date().addingTimeInterval(1800)
-        completion(Timeline(entries: [entry], policy: .after(next)))
+        return Timeline(entries: [item], policy: .after(next))
+    }
+
+    private func entry(snapshot: WidgetSnapshot, focus: WidgetBudgetFocus) -> BudgetEntry {
+        BudgetEntry(
+            date: Date(),
+            snapshot: snapshot,
+            content: WidgetPresentation.content(from: snapshot, focus: focus)
+        )
     }
 }
 
@@ -66,13 +70,17 @@ struct BudgetSummaryWidget: Widget {
     let kind = "BudgetSummaryWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: BudgetTimelineProvider()) { entry in
-            BudgetWidgetView(snapshot: entry.snapshot)
+        AppIntentConfiguration(
+            kind: kind,
+            intent: SelectBudgetIntent.self,
+            provider: BudgetTimelineProvider()
+        ) { entry in
+            BudgetWidgetView(entry: entry)
                 .containerBackground(Theme.Colors.background, for: .widget)
-                .widgetURL(WidgetDeepLink.summary)
+                .widgetURL(entry.content.deepLink)
         }
         .configurationDisplayName("Budget")
-        .description("Month-to-date spend and your top budgets.")
+        .description("Overall account spend or a project budget. Edit to choose.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
@@ -81,36 +89,39 @@ struct BudgetSummaryWidget: Widget {
 
 struct BudgetWidgetView: View {
     @Environment(\.widgetFamily) private var family
-    let snapshot: WidgetSnapshot
+    let entry: BudgetEntry
 
     var body: some View {
         switch family {
         case .systemMedium:
-            MediumBudgetWidget(snapshot: snapshot)
+            MediumBudgetWidget(entry: entry)
         default:
-            SmallBudgetWidget(snapshot: snapshot)
+            SmallBudgetWidget(entry: entry)
         }
     }
 }
 
 // MARK: - Shared summary column
 
-/// The month-to-date hero: caption, big total, "of budget", overall meter, and
+/// The month-to-date hero: focus title, big total, "of budget", overall meter, and
 /// (only when off-track) a status badge. Reused by both families.
 private struct BudgetSummaryColumn: View {
-    let snapshot: WidgetSnapshot
+    let entry: BudgetEntry
     var showsBadge = true
     var showsUpdatedAt = true
 
+    private var content: WidgetBudgetContent { entry.content }
+    private var snapshot: WidgetSnapshot { entry.snapshot }
     private var redacted: Bool { WidgetPresentation.shouldRedactAmounts() }
     private var stale: Bool { WidgetPresentation.isStale(for: snapshot) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             HStack(spacing: Theme.Spacing.xs) {
-                Text("This month")
+                Text(content.title)
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.secondaryText)
+                    .lineLimit(1)
                 if stale {
                     Text("STALE")
                         .font(.caption2.weight(.bold))
@@ -125,7 +136,7 @@ private struct BudgetSummaryColumn: View {
                 }
             }
 
-            Text(WidgetPresentation.displayAmount(snapshot.totalSpentUsd, redacted: redacted))
+            Text(WidgetPresentation.displayAmount(content.spentUsd, redacted: redacted))
                 .font(Theme.Typography.title)
                 .monospacedDigit()
                 .foregroundStyle(Theme.Colors.primaryText)
@@ -133,37 +144,35 @@ private struct BudgetSummaryColumn: View {
                 .lineLimit(1)
                 .privacySensitive(redacted)
 
-            if !redacted, let caption = WidgetPresentation.budgetCaption(for: snapshot) {
+            if !redacted, let caption = WidgetPresentation.budgetCaption(for: content) {
                 Text(caption)
                     .font(Theme.Typography.caption)
                     .monospacedDigit()
                     .foregroundStyle(Theme.Colors.tertiaryText)
             }
 
-            if snapshot.totalBudgetUsd > 0, !redacted {
+            if content.budgetUsd > 0, !redacted {
                 BudgetMeter(
                     fraction: WidgetPresentation.fraction(
-                        spent: snapshot.totalSpentUsd,
-                        budget: snapshot.totalBudgetUsd
+                        spent: content.spentUsd,
+                        budget: content.budgetUsd
                     ),
-                    status: WidgetPresentation.overallStatus(for: snapshot),
+                    status: WidgetPresentation.status(for: content),
                     height: 8
                 )
                 .padding(.top, Theme.Spacing.xxs)
             }
 
-            if showsBadge, let label = WidgetPresentation.overallLabel(for: snapshot) {
+            if showsBadge, let label = WidgetPresentation.label(for: content) {
                 StatusBadge(
                     label,
-                    status: WidgetPresentation.overallStatus(for: snapshot),
-                    systemImage: WidgetPresentation.overallSymbol(for: snapshot)
+                    status: WidgetPresentation.status(for: content),
+                    systemImage: WidgetPresentation.symbol(for: content)
                 )
                 .padding(.top, Theme.Spacing.xxs)
             }
 
             if showsUpdatedAt, let caption = WidgetPresentation.updatedCaption(for: snapshot) {
-                // Staleness is first-class: the widget re-reads a cached
-                // snapshot, so hours-old data is labeled Stale, not just "Updated".
                 HStack(spacing: Theme.Spacing.xxs) {
                     Image(systemName: stale ? "clock.badge.exclamationmark" : "clock")
                     Text(caption)
@@ -181,18 +190,17 @@ private struct BudgetSummaryColumn: View {
 // MARK: - Small
 
 private struct SmallBudgetWidget: View {
-    let snapshot: WidgetSnapshot
+    let entry: BudgetEntry
 
+    private var content: WidgetBudgetContent { entry.content }
     private var redacted: Bool { WidgetPresentation.shouldRedactAmounts() }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            BudgetSummaryColumn(snapshot: snapshot)
+            BudgetSummaryColumn(entry: entry)
             Spacer(minLength: 0)
-            // Projected end-of-month gives the small widget a forward-looking
-            // footer without crowding the hero.
-            if snapshot.projectedEomUsd > 0 {
-                Text("Proj. \(WidgetPresentation.displayAmount(snapshot.projectedEomUsd, redacted: redacted))")
+            if content.projectedEomUsd > 0 {
+                Text("Proj. \(WidgetPresentation.displayAmount(content.projectedEomUsd, redacted: redacted))")
                     .font(Theme.Typography.caption)
                     .monospacedDigit()
                     .foregroundStyle(Theme.Colors.secondaryText)
@@ -206,20 +214,24 @@ private struct SmallBudgetWidget: View {
 // MARK: - Medium
 
 private struct MediumBudgetWidget: View {
-    let snapshot: WidgetSnapshot
+    let entry: BudgetEntry
 
+    private var content: WidgetBudgetContent { entry.content }
     private var redacted: Bool { WidgetPresentation.shouldRedactAmounts() }
 
     private var meters: [WidgetSnapshot.Meter] {
-        Array(snapshot.topMeters.prefix(3))
+        content.meters
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.lg) {
-            BudgetSummaryColumn(snapshot: snapshot)
+            BudgetSummaryColumn(entry: entry)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if meters.isEmpty {
+            if content.focus != .overall {
+                projectSidePanel
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if meters.isEmpty {
                 emptyMeters
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -250,6 +262,21 @@ private struct MediumBudgetWidget: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private var projectSidePanel: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            Image(systemName: "folder.fill")
+                .foregroundStyle(Theme.Colors.tertiaryText)
+            Text("Project budget")
+                .font(Theme.Typography.callout.weight(.medium))
+                .foregroundStyle(Theme.Colors.secondaryText)
+            Text("Edit Widget to switch to Overall or another project.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.tertiaryText)
+            Spacer(minLength: 0)
+        }
+        .frame(maxHeight: .infinity, alignment: .center)
+    }
+
     private var emptyMeters: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Image(systemName: "gauge.with.dots.needle.bottom.50percent")
@@ -267,14 +294,32 @@ private struct MediumBudgetWidget: View {
 
 // MARK: - Previews
 
-#Preview("Small", as: .systemSmall) {
+#Preview("Small · Overall", as: .systemSmall) {
     BudgetSummaryWidget()
 } timeline: {
-    BudgetEntry(date: .now, snapshot: .placeholder)
+    BudgetEntry(
+        date: .now,
+        snapshot: .placeholder,
+        content: WidgetPresentation.content(from: .placeholder, focus: .overall)
+    )
 }
 
-#Preview("Medium", as: .systemMedium) {
+#Preview("Medium · Overall", as: .systemMedium) {
     BudgetSummaryWidget()
 } timeline: {
-    BudgetEntry(date: .now, snapshot: .placeholder)
+    BudgetEntry(
+        date: .now,
+        snapshot: .placeholder,
+        content: WidgetPresentation.content(from: .placeholder, focus: .overall)
+    )
+}
+
+#Preview("Medium · Project", as: .systemMedium) {
+    BudgetSummaryWidget()
+} timeline: {
+    BudgetEntry(
+        date: .now,
+        snapshot: .placeholder,
+        content: WidgetPresentation.content(from: .placeholder, focus: .project(id: "proj-ct"))
+    )
 }

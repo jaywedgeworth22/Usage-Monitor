@@ -367,6 +367,33 @@ final class OfflineCacheTests: XCTestCase {
         XCTAssertEqual(percents, percents.sorted(by: >))
         XCTAssertEqual(snapshot.month, BudgetStatusResponse.sample.month)
     }
+
+    func testSnapshotIncludesProjectsForWidgetFocusPicker() {
+        let snapshot = WidgetSnapshotBuilder.snapshot(from: .sample, maxMeters: 3)
+        XCTAssertEqual(snapshot.projects.count, ProjectBudgetStatus.sampleList.count)
+        XCTAssertTrue(snapshot.projects.contains { $0.id == ProjectBudgetStatus.sampleTrade.id })
+        // Project rows carry projected EOM for the project-focused widget hero.
+        XCTAssertNotNil(snapshot.projects.first?.projectedEomUsd)
+    }
+
+    func testSnapshotDecodeOmitsProjectsDefaultsEmpty() throws {
+        // Older app-group payloads without `projects` must still load.
+        let legacy = WidgetSnapshot(
+            generatedAt: Date(timeIntervalSince1970: 1),
+            month: "2026-08",
+            totalSpentUsd: 10,
+            totalBudgetUsd: 100,
+            projectedEomUsd: 20,
+            percentUsed: 0.1,
+            overBudget: false,
+            warning: false,
+            topMeters: []
+            // projects defaults to []
+        )
+        let data = try JSONEncoder().encode(legacy)
+        let decoded = try JSONDecoder().decode(WidgetSnapshot.self, from: data)
+        XCTAssertEqual(decoded.projects, [])
+    }
 }
 
 @MainActor
