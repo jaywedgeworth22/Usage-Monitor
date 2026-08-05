@@ -181,7 +181,7 @@ export default function CommandPalette({
                 type="button"
                 className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm ${
                   index === active
-                    ? "bg-indigo-50 text-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-100"
+                    ? "bg-accent-soft text-gray-900 dark:text-gray-100"
                     : "text-gray-800 hover:bg-gray-50 dark:text-gray-100 dark:hover:bg-gray-800"
                 }`}
                 onMouseEnter={() => setActive(index)}
