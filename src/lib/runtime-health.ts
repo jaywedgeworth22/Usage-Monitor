@@ -429,16 +429,25 @@ export function getBackupRuntimeStatus(now = new Date()): BackupRuntimeStatus {
     const raw = readFileSync(statusPath, "utf8").trim();
     let ageSeconds: number | null = null;
     let sideOk = true;
+    let probeReason: string | null = null;
 
     if (raw.startsWith("{")) {
       const parsed = JSON.parse(raw) as {
         ok?: unknown;
         ageSeconds?: unknown;
         checkedAt?: unknown;
+        reason?: unknown;
+        ltxAgeSeconds?: unknown;
       };
       if (typeof parsed.ok === "boolean") {
         sideOk = parsed.ok;
       }
+      if (typeof parsed.reason === "string" && parsed.reason.trim()) {
+        probeReason = parsed.reason.trim();
+      }
+      // Prefer explicit ageSeconds; otherwise use checkedAt. Some probes also
+      // report ltxAgeSeconds (operator detail) — never use it for staleness of
+      // the probe itself (a frozen ltxAge with a fresh checkedAt is fine).
       if (
         typeof parsed.ageSeconds === "number" &&
         Number.isFinite(parsed.ageSeconds) &&
@@ -460,6 +469,19 @@ export function getBackupRuntimeStatus(now = new Date()): BackupRuntimeStatus {
       sideOk = false;
     }
 
+    let reason: string | null = null;
+    if (!sideOk) {
+      if (ageSeconds != null && ageSeconds > maxAge) {
+        reason = "replica_status_stale";
+      } else if (probeReason) {
+        // Pass through host probe reasons (e.g. r2_free_tier_disabled,
+        // ltx_age_exceeds_budget) so Ops does not see a generic unhealthy.
+        reason = probeReason;
+      } else {
+        reason = "replica_status_unhealthy";
+      }
+    }
+
     return {
       required,
       active,
@@ -467,11 +489,7 @@ export function getBackupRuntimeStatus(now = new Date()): BackupRuntimeStatus {
       replicaOk: sideOk,
       replicaAgeSeconds: ageSeconds,
       verificationRequired,
-      reason: sideOk
-        ? null
-        : ageSeconds != null && ageSeconds > maxAge
-          ? "replica_status_stale"
-          : "replica_status_unhealthy",
+      reason,
     };
   } catch {
     return {

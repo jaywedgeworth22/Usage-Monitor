@@ -87,16 +87,25 @@ write_status() {
   mv -f "${temporary}" "${STATUS_FILE}"
 }
 
+# Free-tier kill switch: Litestream is intentionally stopped so LTX stops
+# advancing. Report that reason (not a mysterious age exceed) and exit 0 so
+# the timer does not look like a broken unit — backup is observability-only.
+if [[ -f /data/r2-disabled-70pct.flag ]]; then
+  write_status false null "r2_free_tier_disabled"
+  log "R2 free-tier kill switch engaged (/data/r2-disabled-70pct.flag); reporting intentional replica pause."
+  exit 0
+fi
+
 latest_created=""
 if ! latest_created="$(newest_ltx_created)"; then
   write_status false null "no_parseable_ltx"
-  log "ERROR: Garage returned no parseable LTX objects at levels 0-5."
+  log "ERROR: replica returned no parseable LTX objects at levels 0-5."
   exit 1
 fi
 
 if ! latest_epoch="$(date -u -d "${latest_created}" +%s)"; then
   write_status false null "invalid_ltx_timestamp"
-  log "ERROR: Garage returned an invalid LTX timestamp: ${latest_created}"
+  log "ERROR: replica returned an invalid LTX timestamp: ${latest_created}"
   exit 1
 fi
 
@@ -105,7 +114,9 @@ age_seconds=$((now_epoch - latest_epoch))
 if (( age_seconds < 0 || age_seconds > MAX_LTX_AGE_SECONDS )); then
   write_status false "${age_seconds}" "ltx_age_exceeds_budget"
   log "ERROR: newest LTX object is ${age_seconds}s old (limit ${MAX_LTX_AGE_SECONDS}s)."
-  exit 1
+  # Exit 0 after writing the verdict: a stale replica is a health signal, not a
+  # broken probe. systemd oneshot failure noise was drowning the real reason.
+  exit 0
 fi
 
 write_status true "${age_seconds}" ""

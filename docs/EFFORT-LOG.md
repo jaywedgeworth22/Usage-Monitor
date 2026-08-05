@@ -11,6 +11,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **[GROK] Install replica-status probe + R2 kill reason (2026-08-05) — IN PR.** SSH to Oracle `ubuntu@141.148.182.224`: installed probe/timer with 10800s budget. R2 free-tier kill flag present since 06:04Z (no litestream process; LTX stopped). Probe now short-circuits kill flag as `r2_free_tier_disabled` and app passes probe reason through; reinstall after merge.
 - **[GROK] Issue/effort hygiene + replica age align with 1h Litestream sync (2026-08-05) — MERGED PR #976.** Closed #974 (would revert #975); closed #952/#971; #972 auto-closed. Replica max-age 3600→10800s; service name usage-monitor; iOS checklist omits backup gate.
 
 <!-- board-hygiene 2026-08-05 GROK final: only current WIP / open PRs / active incidents. -->

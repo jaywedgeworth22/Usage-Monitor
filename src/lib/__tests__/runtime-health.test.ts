@@ -252,7 +252,8 @@ describe("runtime health state", () => {
         reason: "replica_status_stale",
       });
 
-      // A fresh but unhealthy verdict fails immediately.
+      // A fresh but unhealthy verdict fails immediately and surfaces the
+      // probe's own reason (not a generic unhealthy).
       writeFileSync(
         statusPath,
         JSON.stringify({
@@ -264,7 +265,21 @@ describe("runtime health state", () => {
       );
       expect(getBackupRuntimeStatus(now)).toMatchObject({
         replicaOk: false,
-        reason: "replica_status_unhealthy",
+        reason: "ltx_age_exceeds_budget",
+      });
+
+      // Free-tier kill switch from the host probe.
+      writeFileSync(
+        statusPath,
+        JSON.stringify({
+          ok: false,
+          checkedAt: "2026-08-01T11:59:30Z",
+          reason: "r2_free_tier_disabled",
+        })
+      );
+      expect(getBackupRuntimeStatus(now)).toMatchObject({
+        replicaOk: false,
+        reason: "r2_free_tier_disabled",
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });
