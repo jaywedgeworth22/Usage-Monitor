@@ -67,7 +67,16 @@ That path is **server + Usage Monitor client**, not the Local app:
 
 The Local app intentionally cannot receive fleet OTLP/ingest on a sleeping phone.
 
-## Milestone A (Local)
+## Milestone A (Local) — implemented
 
-Scaffolded today: `LocalStore` placeholder + `LocalRootView` shell.  
-Next: GRDB DDL, Keychain CRUD, OpenRouter adapter, BudgetEngine — see the design PR plan.
+| Layer | Module | Status |
+|---|---|---|
+| SQLite money-truth (design §2.2.1 DDL) | `LocalStore` | Done (`SQLiteLocalStore`) |
+| Provider API keys | `LocalSecrets` | Done (Keychain) |
+| OpenRouter poll (Management key MTD) | `LocalAdapters` | Done |
+| BudgetEngine v1 + materializer | `LocalBudget` | Done |
+| UI shell (Overview / Providers / Settings) | `LocalDataPlane` | Done |
+
+Run scheme **UsageMonitorLocal**, add an OpenRouter **Management** key (or a Claude subscription-only row), pull to refresh.
+
+Still later: more adapters (OpenAI/DeepSeek), App Lock, widget for Local, App Store listing, export/import.
