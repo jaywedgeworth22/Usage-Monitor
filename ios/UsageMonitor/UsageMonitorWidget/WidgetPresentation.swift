@@ -116,27 +116,28 @@ enum WidgetPresentation {
         return days == 1 ? "1 day ago" : "\(days) days ago"
     }
 
-    // TODO: AppSettings.appLockEnabled lives in standard UserDefaults, not the
-    // app-group store. To redact amounts when the device lock is enabled, the
-    // main app should mirror `settings.appLockEnabled` into AppGroup.defaults
-    // on change, and this helper should return true when that shared flag is
-    // set (and optionally when the app process is backgrounded/locked). Until
-    // that handoff exists, the widget always shows amounts — do not invent a
-    // second lock source of truth here.
+    /// True when the host app mirrored `settings.appLockEnabled` into the
+    /// App Group (`WidgetPrivacy` / `AppSettings.mirrorAppLockToSharedDefaults`).
+    /// Always-on while lock is enabled (presentation-time redaction only).
     static func shouldRedactAmounts(appGroupDefaults: UserDefaults = AppGroup.defaults) -> Bool {
         WidgetPrivacy.isAppLockEnabled(defaults: appGroupDefaults)
-    }
-        return appGroupDefaults.bool(forKey: key)
     }
 
     /// Display string for a USD amount, or a redacted placeholder when privacy
     /// redaction is active.
     static func displayAmount(_ usd: Double, redacted: Bool) -> String {
-        redacted ? "••••" : CurrencyFormat.compactUSD(usd)
+        redacted ? WidgetPrivacy.redactedAmount : CurrencyFormat.compactUSD(usd)
+    }
+
+    /// Budget caption under the hero, or `"Locked"` when redacted so the
+    /// ceiling is never leaked on the home screen.
+    static func displayBudgetCaption(for snapshot: WidgetSnapshot, redacted: Bool) -> String? {
+        if redacted { return WidgetPrivacy.lockedLabel }
+        return budgetCaption(for: snapshot)
     }
 
     static func displayMeterDetail(spent: Double, budget: Double?, redacted: Bool) -> String {
-        if redacted { return "••••" }
+        if redacted { return WidgetPrivacy.redactedAmount }
         return meterDetail(spent: spent, budget: budget)
     }
 }
