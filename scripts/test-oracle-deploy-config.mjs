@@ -125,6 +125,9 @@ for (const [pattern, message] of [
   [/--network none/, "offline scratch migration"],
   [/--no-deps --no-build --force-recreate app/, "single-app cutover"],
   [/lastTickSucceeded/, "fresh scheduler-tick acceptance"],
+  [/refs\/deploy\//, "fetch exact deploy SHA into root-owned mirror"],
+  [/origin\/main advanced to/, "allow main tip to advance mid exact-SHA deploy"],
+  [/is not an ancestor of origin\/main/, "reject target SHAs that left main"],
 
   [/capture_pre_stop_backup_watermark/, "pre-stop online Garage watermark capture"],
   [/capture_quiescent_backup_watermark/, "post-stop Garage watermark capture (uses pre-stop TXID)"],
