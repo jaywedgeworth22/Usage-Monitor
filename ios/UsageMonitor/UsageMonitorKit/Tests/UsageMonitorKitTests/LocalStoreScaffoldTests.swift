@@ -1,21 +1,162 @@
 import XCTest
 @testable import LocalStore
+@testable import LocalBudget
 
 final class LocalStoreScaffoldTests: XCTestCase {
-    func testPlaceholderOpensAtSchemaZero() async throws {
-        let store = PlaceholderLocalStore()
+    func testMigrationAppliesSchemaV1() async throws {
+        let store = SQLiteLocalStore.inMemory()
         try await store.open()
         let version = await store.schemaVersion
-        XCTAssertEqual(version, 0)
-        let isOpen = await store.isOpen
-        XCTAssertTrue(isOpen)
+        XCTAssertEqual(version, 1)
+
+        let p = LocalProvider(name: "openrouter", displayName: "OpenRouter", adapterKind: "openrouter")
+        try await store.upsertProvider(p)
+        let listed = try await store.listProviders()
+        XCTAssertEqual(listed.count, 1)
+        XCTAssertEqual(listed[0].name, "openrouter")
+
+        try await store.upsertPlan(LocalProviderPlan(providerId: p.id, monthlyBudgetUsd: 50))
+        let plan = try await store.getPlan(providerId: p.id)
+        XCTAssertEqual(plan?.monthlyBudgetUsd, 50)
+
+        try await store.insertSnapshot(
+            LocalUsageSnapshot(
+                providerId: p.id,
+                totalCost: 12.5,
+                costScope: "calendar_month_to_date",
+                costWindowStart: BudgetEngine.utcMonthStart()
+            )
+        )
+        let snaps = try await store.listSnapshots(providerId: p.id)
+        XCTAssertEqual(snaps.count, 1)
+        XCTAssertEqual(snaps[0].totalCost, 12.5)
     }
 
-    func testWipeKeepsScaffoldVersion() async throws {
-        let store = PlaceholderLocalStore()
+    func testWipeClearsRows() async throws {
+        let store = SQLiteLocalStore.inMemory()
         try await store.open()
+        let p = LocalProvider(name: "x", displayName: "X", adapterKind: "subscription_only")
+        try await store.upsertProvider(p)
         try await store.wipeAll()
+        let listed = try await store.listProviders()
+        XCTAssertTrue(listed.isEmpty)
         let version = await store.schemaVersion
-        XCTAssertEqual(version, 0)
+        XCTAssertEqual(version, 1)
+    }
+}
+
+final class BudgetEngineTests: XCTestCase {
+    func testGoldenVectors() {
+        let monthStart = BudgetEngine.utcMonthStart()
+        let provider = LocalProvider(
+            id: "p1",
+            name: "or",
+            displayName: "OpenRouter",
+            adapterKind: "openrouter"
+        )
+        let plan = LocalProviderPlan(providerId: "p1", monthlyBudgetUsd: 100, fixedMonthlyCostUsd: nil)
+
+        // 1. Prefer calendar_month_to_date
+        let cal = LocalUsageSnapshot(
+            providerId: "p1",
+            fetchedAt: monthStart.addingTimeInterval(86400),
+            totalCost: 20,
+            fixedCostIncludedUsd: 5,
+            costWindowStart: monthStart,
+            costScope: "calendar_month_to_date"
+        )
+        let unk = LocalUsageSnapshot(
+            providerId: "p1",
+            fetchedAt: monthStart.addingTimeInterval(90000),
+            totalCost: 99,
+            costScope: "unknown"
+        )
+        let billing = LocalUsageSnapshot(
+            providerId: "p1",
+            fetchedAt: monthStart.addingTimeInterval(91000),
+            totalCost: 500,
+            costScope: "billing_cycle_to_date"
+        )
+
+        var summary = BudgetEngine.compute(
+            providers: [provider],
+            plans: ["p1": plan],
+            snapshots: [cal, unk, billing],
+            subscriptions: [],
+            charges: []
+        )
+        // poll = 20 - 5 = 15; billing_cycle ignored
+        XCTAssertEqual(summary.providers[0].pollVariableUsd, 15, accuracy: 0.001)
+        XCTAssertEqual(summary.providers[0].spentUsd, 15, accuracy: 0.001)
+
+        // 2. Unknown only if fetched in month
+        let oldUnknown = LocalUsageSnapshot(
+            providerId: "p1",
+            fetchedAt: monthStart.addingTimeInterval(-86400),
+            totalCost: 40,
+            costScope: "unknown"
+        )
+        summary = BudgetEngine.compute(
+            providers: [provider],
+            plans: ["p1": plan],
+            snapshots: [oldUnknown],
+            subscriptions: [],
+            charges: []
+        )
+        XCTAssertEqual(summary.providers[0].pollVariableUsd, 0, accuracy: 0.001)
+
+        // 3. Plan fixed suppressed when active subscription
+        let planWithFixed = LocalProviderPlan(
+            providerId: "p1",
+            fixedMonthlyCostUsd: 10,
+            monthlyBudgetUsd: 100
+        )
+        let sub = LocalSubscription(
+            providerId: "p1",
+            name: "Plan",
+            costUsd: 10,
+            status: "active"
+        )
+        let charge = LocalSubscriptionCharge(
+            subscriptionId: sub.id,
+            providerId: "p1",
+            periodStart: monthStart,
+            periodEnd: BudgetEngine.nextUtcMonth(after: monthStart),
+            costUsd: 10
+        )
+        summary = BudgetEngine.compute(
+            providers: [provider],
+            plans: ["p1": planWithFixed],
+            snapshots: [],
+            subscriptions: [sub],
+            charges: [charge]
+        )
+        XCTAssertEqual(summary.providers[0].planFixedUsd, 0, accuracy: 0.001)
+        XCTAssertEqual(summary.providers[0].subscriptionChargesUsd, 10, accuracy: 0.001)
+        XCTAssertEqual(summary.providers[0].spentUsd, 10, accuracy: 0.001)
+
+        // 4. Plan fixed alone
+        summary = BudgetEngine.compute(
+            providers: [provider],
+            plans: ["p1": planWithFixed],
+            snapshots: [],
+            subscriptions: [],
+            charges: []
+        )
+        XCTAssertEqual(summary.providers[0].planFixedUsd, 10, accuracy: 0.001)
+        XCTAssertEqual(summary.providers[0].spentUsd, 10, accuracy: 0.001)
+    }
+
+    func testPeriodAdvanceMonthly() {
+        let start = ISO8601DateFormatter().date(from: "2026-01-15T00:00:00Z")!
+        let next = SubscriptionPeriodMath.advancePeriod(
+            periodStart: start,
+            interval: "monthly",
+            intervalCount: 1
+        )
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        XCTAssertEqual(cal.component(.month, from: next), 2)
+        XCTAssertEqual(cal.component(.day, from: next), 15)
     }
 }

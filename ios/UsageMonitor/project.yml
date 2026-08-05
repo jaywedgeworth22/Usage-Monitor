@@ -127,6 +127,12 @@ targets:
       - package: UsageMonitorKit
         product: LocalStore
       - package: UsageMonitorKit
+        product: LocalSecrets
+      - package: UsageMonitorKit
+        product: LocalAdapters
+      - package: UsageMonitorKit
+        product: LocalBudget
+      - package: UsageMonitorKit
         product: LocalDataPlane
 
   # -------------------------------------------------------------------------
