@@ -55,6 +55,32 @@ swift test --package-path UsageMonitorKit
 Headless CI often passes `CODE_SIGNING_ALLOWED=NO`. Release/TestFlight signing
 stays Automatic with team `CC8UTF7ATG` in `project.yml`.
 
+## Installing **both** apps on one phone
+
+One Xcode project can (and does) ship **two separate apps**. They install
+side-by-side because they have **different bundle IDs**:
+
+| Scheme | Bundle ID | Home-screen name | Icon |
+|---|---|---|---|
+| `UsageMonitor` | `services.jays.usage.monitor` | Usage Monitor | Blue ring |
+| `UsageMonitorLocal` | `services.jays.usage.monitor.local` | **UM Local** | **Teal** ring |
+
+They do **not** share an app group, Keychain, or database.
+
+**How to put both on a device from Xcode:**
+
+1. Scheme menu → **UsageMonitor** → Run (installs remote client).
+2. Leave that app on the phone. Switch scheme → **UsageMonitorLocal** → Run.
+3. You should see **two** icons: blue “Usage Monitor” and teal “UM Local”.
+
+If the second Run seems to “replace” the first, check that the scheme is
+actually `UsageMonitorLocal` (not `UsageMonitor`) and that the destination is
+your physical device. Xcode only ever installs the **selected scheme’s**
+product; it does not uninstall the other bundle ID.
+
+Do not expect a single scheme to toggle modes — dual-app is intentional
+(see `ARCHITECTURE-CONTRACT.md` §10).
+
 ## Self-host “the way the owner does”
 
 That path is **server + Usage Monitor client**, not the Local app:

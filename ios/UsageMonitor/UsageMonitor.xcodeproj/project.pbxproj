@@ -606,7 +606,7 @@
 				DEVELOPMENT_TEAM = CC8UTF7ATG;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = LocalApp/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Usage Monitor Local";
+				INFOPLIST_KEY_CFBundleDisplayName = "UM Local";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -776,7 +776,7 @@
 				DEVELOPMENT_TEAM = CC8UTF7ATG;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = LocalApp/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Usage Monitor Local";
+				INFOPLIST_KEY_CFBundleDisplayName = "UM Local";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
