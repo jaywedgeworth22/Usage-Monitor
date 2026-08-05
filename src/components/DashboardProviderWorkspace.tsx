@@ -1166,8 +1166,14 @@ export default function DashboardProviderWorkspace({
           const onToggle = () =>
             setCollapsed((current) => ({ ...current, [family.key]: !isCollapsed }));
           const mobileDetailsId = `${family.detailsId}-mobile`;
+          // Match desktop CompactFamilyCells: only show family money totals when
+          // account identity is aggregated (never invent a summed multi-key budget).
+          const showFamilyMoney = family.financialsAggregated;
           const meterPct =
-            family.budgetUsd != null && family.budgetUsd > 0 && family.spentUsd != null
+            showFamilyMoney &&
+            family.budgetUsd != null &&
+            family.budgetUsd > 0 &&
+            family.spentUsd != null
               ? Math.min((family.spentUsd / family.budgetUsd) * 100, 100)
               : null;
           const healthLabel =
@@ -1176,6 +1182,13 @@ export default function DashboardProviderWorkspace({
               : family.alertCount > 0
                 ? `${family.alertCount} alerts`
                 : "On track";
+          const secondaryMoney = !showFamilyMoney
+            ? "See account values below"
+            : family.budgetUsd != null
+              ? `${formatCurrency(family.budgetUsd)} budget`
+              : family.projectedUsd != null
+                ? `${formatCurrency(family.projectedUsd)} projected`
+                : "No budget";
           return (
             <li key={`m-${family.key}`} className="provider-mobile-card list-none rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
               <button type="button" aria-expanded={!isCollapsed} aria-controls={mobileDetailsId} onClick={onToggle}
@@ -1186,10 +1199,12 @@ export default function DashboardProviderWorkspace({
                     <span className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">{family.displayName}</span>
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${family.criticalCount > 0 ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300" : family.alertCount > 0 ? "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200" : "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"}`}>{healthLabel}</span>
                   </span>
-                  <span className="mt-1.5 block text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100">{familySpendLabel}</span>
+                  <span className="mt-1.5 block text-xl font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                    {showFamilyMoney ? familySpendLabel : "Account total unresolved"}
+                  </span>
                   <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-                    {family.budgetUsd != null ? `${formatCurrency(family.budgetUsd)} budget` : family.projectedUsd != null ? `${formatCurrency(family.projectedUsd)} projected` : "No budget"}
-                    {family.paceLabel ? ` · ${family.paceLabel}` : ""}
+                    {secondaryMoney}
+                    {showFamilyMoney && family.paceLabel ? ` · ${family.paceLabel}` : ""}
                   </span>
                   {meterPct != null && (
                     <span className="mt-2 block h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700" role="meter" aria-valuenow={Math.round(meterPct)} aria-valuemin={0} aria-valuemax={100}>
