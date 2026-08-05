@@ -129,7 +129,7 @@ public enum LocalProviderCatalog {
             category: "LLM",
             mode: .subscription,
             adapterKind: "subscription_only",
-            help: "Usage is push/manual on the server — track prepaid or plan here.",
+            help: "No public usage/billing API (remote is push/manual too). Track prepaid credits or plan fee here; push cost events on the server if you have them.",
             suggestedSubscriptionName: "Voyage"
         ),
 
@@ -165,20 +165,20 @@ public enum LocalProviderCatalog {
         ),
         .init(
             name: "hetzner",
-            displayName: "Hetzner",
+            displayName: "Hetzner Cloud",
             category: "Hosting",
-            mode: .keyPlusSubscription,
-            adapterKind: "subscription_only",
-            help: "Track server monthly costs as subscriptions.",
-            suggestedSubscriptionName: "Hetzner cloud"
+            mode: .poll,
+            adapterKind: "hetzner",
+            keyFieldLabel: "Project API token",
+            help: "Polls inventory + public pricing catalog; pro-rates into estimated MTD (not an invoice). One token per Hetzner project."
         ),
         .init(
             name: "oracle",
-            displayName: "Oracle Cloud",
+            displayName: "Oracle Cloud Infrastructure",
             category: "Hosting",
             mode: .subscription,
             adapterKind: "subscription_only",
-            help: "Always Free / paid OCI — track paid add-ons as subscriptions.",
+            help: "Live USD cost needs OCI RSA signing (remote Usage Monitor only). On phone: track paid add-ons / Always Free $0 here.",
             suggestedSubscriptionName: "OCI"
         ),
         .init(
@@ -285,13 +285,40 @@ public enum LocalProviderCatalog {
             suggestedSubscriptionName: "FRED"
         ),
         .init(
-            name: "quiverquant",
+            name: "quiver-quant",
             displayName: "Quiver Quant",
             category: "Market data",
             mode: .subscription,
             adapterKind: "subscription_only",
             help: "Track subscription plan.",
             suggestedSubscriptionName: "Quiver Quant"
+        ),
+        .init(
+            name: "roic",
+            displayName: "ROIC.ai",
+            category: "Market data",
+            mode: .subscription,
+            adapterKind: "subscription_only",
+            help: "Blind on server (no usage poll). Track plan as subscription.",
+            suggestedSubscriptionName: "ROIC.ai"
+        ),
+        .init(
+            name: "intrinio",
+            displayName: "Intrinio",
+            category: "Market data",
+            mode: .subscription,
+            adapterKind: "subscription_only",
+            help: "Historical / limited API — track paid plan if used.",
+            suggestedSubscriptionName: "Intrinio"
+        ),
+        .init(
+            name: "fintech-studios",
+            displayName: "FinTech Studios",
+            category: "Market data",
+            mode: .subscription,
+            adapterKind: "subscription_only",
+            help: "Track plan/credits if used.",
+            suggestedSubscriptionName: "FinTech Studios"
         ),
         .init(
             name: "unusual-whales",
