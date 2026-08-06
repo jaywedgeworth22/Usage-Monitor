@@ -55,6 +55,18 @@ APP_COMPOSE_PROJECT="usage-monitor"
 LEGACY_APP_COMPOSE_PROJECT="oracle"
 LEGACY_APP_CONTAINER="oracle-app-1"
 LEGACY_APP_NETWORK="oracle_internal"
+
+# One-shot `docker run` MUST set --name. Unnamed runs get Docker random names
+# (e.g. epic_jackson) that show up as Coolify "unmanaged" noise and look like
+# mystery Usage Monitor resources. Prefix always usage-monitor-*.
+run_usage_monitor_oneshot() {
+  local kind="$1"
+  shift
+  local name="usage-monitor-${kind}-$$"
+  timeout 15 docker rm -f "${name}" >/dev/null 2>&1 || true
+  docker run --name "${name}" "$@"
+}
+
 readonly APP_IMAGE_REPOSITORY="usage-monitor"
 readonly COMPOSE_TIMEOUT_SECONDS=300
 readonly MIN_ROOT_FREE_BYTES=$((8 * 1024 * 1024 * 1024))
@@ -542,7 +554,7 @@ list_garage_ltx_level_offline() {
   # Offline LTX under shared-host I/O has exceeded 90s; 180s bounds the hang
   # without failing a healthy replica tip listing.
   timeout --signal=TERM --kill-after=15s 180 \
-    docker run --rm --pull=never --read-only \
+    run_usage_monitor_oneshot "ltx-l${level}" --rm --pull=never --read-only \
       --network "${APP_NETWORK}" \
       --env-file "${RUNTIME_ENV}" \
       --user 1000:1000 \
@@ -885,12 +897,12 @@ build_and_verify_image() {
   [[ "${label}" == "${revision}" ]] || die "candidate image revision label does not match ${revision}"
 
   timeout --signal=TERM --kill-after=30s 180 \
-    docker run --rm --network none \
+    run_usage_monitor_oneshot preflight --rm --network none \
     -e STARTUP_PREFLIGHT_ONLY=true \
     -e LITESTREAM_REQUIRED=false \
     "${image}" >/dev/null
   timeout --signal=TERM --kill-after=15s 60 \
-    docker run --rm --network none --entrypoint test "${image}" -x /app/bin/litestream
+    run_usage_monitor_oneshot litestream-check --rm --network none --entrypoint test "${image}" -x /app/bin/litestream
 
   compose_for_revision "${revision}" config --quiet
   log "candidate image architecture, revision label, startup preflight, and stable compose config passed."
@@ -924,7 +936,7 @@ verify_target_migration_on_scratch() {
   create_sqlite_backup "${scratch_db}"
 
   timeout --signal=TERM --kill-after=30s 900 \
-    docker run --rm --network none \
+    run_usage_monitor_oneshot migrate-scratch --rm --network none \
     --user 1000:1000 \
     -e DATABASE_URL=file:/preflight/prod.db \
     -v "${SCRATCH_DIR}:/preflight" \

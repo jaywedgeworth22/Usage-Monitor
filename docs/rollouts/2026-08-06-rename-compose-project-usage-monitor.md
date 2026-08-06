@@ -34,10 +34,19 @@ Host unit `/etc/systemd/system/usage-monitor.service` is updated when the
 installed deploy artifacts are refreshed (same path as other unit/script
 updates).
 
+## One-shot tool containers (was `epic_jackson`)
+
+Offline Litestream LTX used to `docker run` **without `--name`**. If the process
+was killed before `--rm` cleaned up, Docker left a random name (`epic_jackson`)
+visible as Coolify **unmanaged**. All one-shots now use:
+
+`usage-monitor-<kind>-<pid>` via `run_usage_monitor_oneshot`  
+(e.g. `usage-monitor-ltx-l4-12345`, `usage-monitor-preflight-12345`).
+
 ## Verify
 
 ```bash
 docker ps --filter name=usage-monitor --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
 curl -fsS https://usage.jays.services/api/health
-# expect: usage-monitor-app-1 healthy; no oracle-app-1
+# expect: usage-monitor-app-1 healthy; no oracle-app-1; no random adjective_noun leftovers
 ```
