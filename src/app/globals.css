@@ -103,7 +103,20 @@ body {
   }
 
   .responsive-table .table-actions {
+    flex-wrap: wrap;
     justify-content: flex-start;
+  }
+
+  .responsive-table {
+    min-width: 0 !important;
+  }
+}
+
+/* Desktop/tablet: keep action buttons on one row; allow horizontal scroll
+   instead of crushing columns into multi-line button stacks. */
+@media (min-width: 640px) {
+  .provider-table .table-actions {
+    flex-wrap: nowrap;
   }
 }
 

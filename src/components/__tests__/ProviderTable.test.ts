@@ -90,7 +90,7 @@ describe("ProviderTable cost coverage", () => {
     expect(html).not.toContain("Cost not reported");
   });
 
-  it("hides Fetch Now when Anthropic has no organization Admin key", () => {
+  it("hides Fetch when Anthropic has no organization Admin key", () => {
     const individualHtml = renderTable([
       provider({ name: "anthropic", displayName: "Anthropic individual" }),
     ]);
@@ -107,13 +107,13 @@ describe("ProviderTable cost coverage", () => {
       }),
     ]);
 
-    expect(individualHtml).not.toContain("Fetch Now");
+    expect(individualHtml).not.toContain("Fetch");
     expect(individualHtml).toContain("Push / manual");
-    expect(organizationHtml).toContain("Fetch Now");
+    expect(organizationHtml).toContain("Fetch");
     expect(organizationHtml).toContain("Active");
   });
 
-  it("hides Fetch Now for generic and push-only providers", () => {
+  it("hides Fetch for generic and push-only providers", () => {
     const manualHtml = renderTable([
       provider({
         id: "manual",
@@ -147,13 +147,13 @@ describe("ProviderTable cost coverage", () => {
       }),
     ]);
 
-    expect(manualHtml).not.toContain("Fetch Now");
+    expect(manualHtml).not.toContain("Fetch");
     expect(manualHtml).toContain("Push / manual");
-    expect(pushHtml).not.toContain("Fetch Now");
+    expect(pushHtml).not.toContain("Fetch");
     expect(pushHtml).toContain("Push / manual");
-    expect(customHtml).toContain("Fetch Now");
+    expect(customHtml).toContain("Fetch");
     expect(customHtml).toContain(">Active<");
-    expect(manualProviderHtml).not.toContain("Fetch Now");
+    expect(manualProviderHtml).not.toContain("Fetch");
     expect(manualProviderHtml).toContain("Push / manual");
   });
 
@@ -188,7 +188,7 @@ describe("ProviderTable cost coverage", () => {
     ]);
 
     expect(rejectedHtml).toContain("Key rejected");
-    expect(rejectedHtml).toContain("Verify &amp; fetch");
+    expect(rejectedHtml).toContain("Verify");
     expect(rejectedHtml).toContain("Billing pending");
     expect(rejectedHtml).toContain("Usage permission denied");
     expect(rejectedHtml).toContain("Cost snapshot fetched");
@@ -210,7 +210,7 @@ describe("ProviderTable cost coverage", () => {
     ]);
 
     expect(unavailableHtml).toContain("Check unavailable");
-    expect(unavailableHtml).toContain("Verify &amp; fetch");
+    expect(unavailableHtml).toContain("Verify");
     expect(unavailableHtml).not.toContain("Key rejected");
     expect(unavailableHtml).toContain(">Active<");
   });
@@ -249,10 +249,10 @@ describe("ProviderTable cost coverage", () => {
       }),
     ]);
 
-    // Default density is compact: short label plus a touch/keyboard disclosure.
-    expect(html).toContain("Coverage gap");
+    // Coverage caveat is nested under Billing detail disclosure (compact spend cell).
     expect(html).toContain("Billing detail");
     expect(html).toContain("<details");
+    expect(html).toContain("Coverage:");
     expect(html).toContain(
       "Usage-based costs (D1, R2, Workers, Queues overage) are not visible"
     );
@@ -269,7 +269,7 @@ describe("ProviderTable cost coverage", () => {
       }),
     ]);
 
-    expect(html).not.toContain("Coverage gap");
+    expect(html).not.toContain("Coverage:");
     expect(html).not.toContain("Cost coverage gap");
   });
 });

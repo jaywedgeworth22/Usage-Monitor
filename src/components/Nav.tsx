@@ -114,16 +114,16 @@ export default function Nav() {
 
   if (pathname === "/login" || pathname.startsWith("/login/")) return null;
 
-  const secondaryActive = SECONDARY_LINKS.some((link) => isLinkActive(pathname, link.href));
   const mobileLinks = [...PRIMARY_LINKS, ...SECONDARY_LINKS];
 
-  // Primary links that fit the bar; remainder go under More on mid widths.
-  // xl: all primary links. lg: first 5 + More for rest. md: first 4 + More.
-  const mainLinksXl = PRIMARY_LINKS;
+  // Primary links that fit the bar; remainder (+ secondary) go under More only
+  // when there is real overflow. At xl+ everything fits inline — no More.
+  // lg: first 5 primary; md: first 4 primary.
+  const mainLinksXl = [...PRIMARY_LINKS, ...SECONDARY_LINKS];
   const mainLinksLg = PRIMARY_LINKS.slice(0, 5);
-  const overflowLinksLg = PRIMARY_LINKS.slice(5);
+  const overflowLinksLg = [...PRIMARY_LINKS.slice(5), ...SECONDARY_LINKS];
   const mainLinksMd = PRIMARY_LINKS.slice(0, 4);
-  const overflowLinksMd = PRIMARY_LINKS.slice(4);
+  const overflowLinksMd = [...PRIMARY_LINKS.slice(4), ...SECONDARY_LINKS];
 
   return (
     <>
@@ -171,14 +171,12 @@ export default function Nav() {
                     moreRef={moreRef}
                     moreOpen={moreOpen}
                     setMoreOpen={setMoreOpen}
-                    secondaryActive={
-                      secondaryActive || overflowLinksMd.some((l) => isLinkActive(pathname, l.href))
-                    }
-                    links={[...overflowLinksMd, ...SECONDARY_LINKS]}
+                    secondaryActive={overflowLinksMd.some((l) => isLinkActive(pathname, l.href))}
+                    links={overflowLinksMd}
                     pathname={pathname}
                   />
                 </div>
-                {/* lg–xl: 5 links + overflow */}
+                {/* lg–xl: 5 links + overflow (primary tail + secondary) */}
                 <div className="hidden items-center gap-0.5 lg:flex xl:hidden">
                   {mainLinksLg.map((link) => {
                     const isActive = isLinkActive(pathname, link.href);
@@ -201,14 +199,12 @@ export default function Nav() {
                     moreRef={moreRef}
                     moreOpen={moreOpen}
                     setMoreOpen={setMoreOpen}
-                    secondaryActive={
-                      secondaryActive || overflowLinksLg.some((l) => isLinkActive(pathname, l.href))
-                    }
-                    links={[...overflowLinksLg, ...SECONDARY_LINKS]}
+                    secondaryActive={overflowLinksLg.some((l) => isLinkActive(pathname, l.href))}
+                    links={overflowLinksLg}
                     pathname={pathname}
                   />
                 </div>
-                {/* xl+: all primary + More for secondary only */}
+                {/* xl+: all primary + secondary inline — no More (nothing overflows) */}
                 <div className="hidden items-center gap-0.5 xl:flex">
                   {mainLinksXl.map((link) => {
                     const isActive = isLinkActive(pathname, link.href);
@@ -227,14 +223,6 @@ export default function Nav() {
                       </Link>
                     );
                   })}
-                  <MoreMenu
-                    moreRef={moreRef}
-                    moreOpen={moreOpen}
-                    setMoreOpen={setMoreOpen}
-                    secondaryActive={secondaryActive}
-                    links={SECONDARY_LINKS}
-                    pathname={pathname}
-                  />
                 </div>
               </div>
             </div>
