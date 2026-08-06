@@ -15,6 +15,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **[GROK] iOS app icons: clean orange ring + Local full-width LOCAL stripe (no phone) (2026-08-05) — IN PROGRESS.** Remove broken off-center nubs on remote orange mark; Local drops tiny phone, large LOCAL on full bottom white stripe. Branch `grok/ios-appicon-local-stripe`.
 - **[GROK] R2 fleet ST/CT pushover-parity card + iOS inline titles (2026-08-05) — IN PR #984.** Fleet card status/source/limits/top buckets; iOS tab roots `.inline` title; empty SF Symbol guards. Branch `grok/r2-fleet-ios-chrome`.
 - **[GROK] Orange brand + segmented History control + uncrowded nav (2026-08-05) — IN PR #999.** Favicon-matched `--um-accent` #f97316; History chips (24h/7d/30d/90d + More); Display menu; login restored; primary CTAs orange. Branch `grok/brand-orange-nav-ui`.
 - **[GROK] Fix auto-deploy race when main advances mid-build (2026-08-05) — IN PR.** ensure_mirror no longer requires origin/main tip == selected SHA; fetch exact SHA + ancestor check. Unblocks deploys failing after long BuildKit cache work while concurrent merges land.
