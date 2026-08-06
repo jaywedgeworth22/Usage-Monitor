@@ -16,7 +16,10 @@ public struct LocalRootView: View {
     @State private var showWipeConfirmation = false
     @State private var pathProviders = NavigationPath()
 
-    public init(settings: AppSettings = AppSettings()) {
+    /// Caller must supply a main-actor `AppSettings` (e.g. `@State` from the app
+    /// entry). No default `AppSettings()` here — its `@MainActor` init cannot run
+    /// as a nonisolated default argument expression.
+    public init(settings: AppSettings) {
         self.settings = settings
     }
 
