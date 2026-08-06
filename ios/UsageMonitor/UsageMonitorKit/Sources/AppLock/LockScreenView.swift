@@ -55,7 +55,7 @@ struct LockScreenView: View {
                     .controlSize(.large)
                     .tint(Theme.Colors.accent)
             } else {
-                Image(systemName: glyphSymbol)
+                Image(safeSystemName: glyphSymbol, fallback: "lock.fill")
                     .font(.system(size: glyphSize, weight: .regular))
                     .foregroundStyle(glyphTint)
                     .symbolRenderingMode(.hierarchical)
@@ -84,7 +84,7 @@ struct LockScreenView: View {
     @ViewBuilder private var controls: some View {
         Button(action: onUnlock) {
             HStack(spacing: Theme.Spacing.sm) {
-                Image(systemName: availability.symbolName)
+                Image(safeSystemName: availability.symbolName, fallback: "lock.fill")
                 Text(unlockTitle)
             }
             .font(Theme.Typography.body.weight(.semibold))

@@ -41,7 +41,7 @@ public struct ErrorState: View {
 
     public var body: some View {
         VStack(spacing: Theme.Spacing.lg) {
-            Image(systemName: systemImage)
+            Image(safeSystemName: systemImage, fallback: "exclamationmark.triangle.fill")
                 .font(.system(size: 32, weight: .semibold))
                 .foregroundStyle(Theme.Colors.warning)
                 .frame(width: 72, height: 72)
@@ -60,7 +60,7 @@ public struct ErrorState: View {
 
             if let actionTitle, let action {
                 Button(action: action) {
-                    Label(actionTitle, systemImage: actionSystemImage)
+                    Label(actionTitle, systemImage: SystemImage.name(actionSystemImage, fallback: "arrow.right.circle.fill"))
                         .font(Theme.Typography.callout.weight(.semibold))
                         .padding(.horizontal, Theme.Spacing.lg)
                         .padding(.vertical, Theme.Spacing.sm)

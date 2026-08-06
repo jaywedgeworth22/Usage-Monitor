@@ -109,7 +109,7 @@ private struct SecuritySection: View {
                 Label {
                     Text(lockTitle)
                 } icon: {
-                    Image(systemName: biometry.systemImage)
+                    Image(safeSystemName: biometry.systemImage, fallback: "lock.fill")
                 }
             }
             .tint(Theme.Colors.accent)
