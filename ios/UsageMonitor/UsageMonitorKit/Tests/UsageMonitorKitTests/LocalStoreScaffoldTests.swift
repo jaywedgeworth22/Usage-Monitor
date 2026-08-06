@@ -1,6 +1,9 @@
 import XCTest
 @testable import LocalStore
 @testable import LocalBudget
+@testable import LocalDataPlane
+@testable import LocalAdapters
+@testable import LocalSecrets
 
 final class LocalStoreScaffoldTests: XCTestCase {
     func testMigrationAppliesSchemaV1() async throws {
@@ -23,8 +26,8 @@ final class LocalStoreScaffoldTests: XCTestCase {
             LocalUsageSnapshot(
                 providerId: p.id,
                 totalCost: 12.5,
-                costScope: "calendar_month_to_date",
-                costWindowStart: BudgetEngine.utcMonthStart()
+                costWindowStart: BudgetEngine.utcMonthStart(),
+                costScope: "calendar_month_to_date"
             )
         )
         let snaps = try await store.listSnapshots(providerId: p.id)
@@ -54,7 +57,7 @@ final class BudgetEngineTests: XCTestCase {
             displayName: "OpenRouter",
             adapterKind: "openrouter"
         )
-        let plan = LocalProviderPlan(providerId: "p1", monthlyBudgetUsd: 100, fixedMonthlyCostUsd: nil)
+        let plan = LocalProviderPlan(providerId: "p1", fixedMonthlyCostUsd: nil, monthlyBudgetUsd: 100)
 
         // 1. Prefer calendar_month_to_date
         let cal = LocalUsageSnapshot(
@@ -159,4 +162,109 @@ final class BudgetEngineTests: XCTestCase {
         XCTAssertEqual(cal.component(.month, from: next), 2)
         XCTAssertEqual(cal.component(.day, from: next), 15)
     }
+}
+
+@MainActor
+final class LocalSeedTruthTests: XCTestCase {
+    func testSeedNeverInventspaidSubscriptions() async throws {
+        let store = SQLiteLocalStore.inMemory()
+        let model = LocalAppModel(store: store, secrets: InMemoryProviderSecrets())
+        try await store.open()
+        let added = try await model.seedMissingCatalogProviders()
+        XCTAssertGreaterThan(added, 10)
+
+        let subs = try await store.listSubscriptions()
+        XCTAssertTrue(subs.isEmpty, "Seed must not create subscriptions")
+        let charges = try await store.allCharges()
+        XCTAssertTrue(charges.isEmpty, "Seed must not materialize charges")
+
+        let providers = try await store.listProviders()
+        XCTAssertTrue(providers.allSatisfy { !$0.isActive }, "Seed shells must be inactive")
+        XCTAssertNotNil(providers.first { $0.name == "vercel" })
+        XCTAssertNotNil(providers.first { $0.name == "cloudflare" })
+        XCTAssertNotNil(providers.first { $0.name == "robinhood" })
+    }
+
+    func testScrubRemovesSeedGhostChargesOnly() async throws {
+        let store = SQLiteLocalStore.inMemory()
+        let model = LocalAppModel(store: store, secrets: InMemoryProviderSecrets())
+        try await store.open()
+
+        let vercel = LocalProvider(
+            name: "vercel",
+            displayName: "Vercel",
+            adapterKind: "subscription_only",
+            isActive: true
+        )
+        try await store.upsertProvider(vercel)
+        let ghost = LocalSubscription(
+            providerId: vercel.id,
+            name: "Vercel Pro",
+            costUsd: 20,
+            status: "active"
+        )
+        try await store.upsertSubscription(ghost)
+        let monthStart = BudgetEngine.utcMonthStart()
+        try await store.insertCharge(
+            LocalSubscriptionCharge(
+                subscriptionId: ghost.id,
+                providerId: vercel.id,
+                periodStart: monthStart,
+                periodEnd: BudgetEngine.nextUtcMonth(after: monthStart),
+                costUsd: 20
+            )
+        )
+
+        let cursor = LocalProvider(
+            name: "cursor",
+            displayName: "Cursor",
+            adapterKind: "subscription_only"
+        )
+        try await store.upsertProvider(cursor)
+        let intentional = LocalSubscription(
+            providerId: cursor.id,
+            name: "Cursor Team",
+            costUsd: 40,
+            status: "active"
+        )
+        try await store.upsertSubscription(intentional)
+        try await store.insertCharge(
+            LocalSubscriptionCharge(
+                subscriptionId: intentional.id,
+                providerId: cursor.id,
+                periodStart: monthStart,
+                periodEnd: BudgetEngine.nextUtcMonth(after: monthStart),
+                costUsd: 40
+            )
+        )
+
+        let scrubbed = try await model.scrubCatalogGuessCharges()
+        XCTAssertEqual(scrubbed, 1)
+
+        let subs = try await store.listSubscriptions()
+        let vercelSub = try XCTUnwrap(subs.first { $0.providerId == vercel.id })
+        XCTAssertEqual(vercelSub.status, "canceled")
+        let cursorSub = try XCTUnwrap(subs.first { $0.providerId == cursor.id })
+        XCTAssertEqual(cursorSub.status, "active")
+
+        let charges = try await store.allCharges()
+        XCTAssertEqual(charges.count, 1)
+        XCTAssertEqual(charges[0].subscriptionId, intentional.id)
+    }
+
+    func testCatalogHintsDoNotDefaultBrokerageOrUnusedHosting() {
+        XCTAssertNil(LocalProviderCatalog.entry(name: "robinhood")?.suggestedMonthlyUsd)
+        XCTAssertNil(LocalProviderCatalog.entry(name: "vercel")?.suggestedMonthlyUsd)
+        XCTAssertNil(LocalProviderCatalog.entry(name: "cloudflare")?.suggestedMonthlyUsd)
+    }
+}
+
+/// Test double — no Keychain.
+private final class InMemoryProviderSecrets: ProviderSecretStoring, @unchecked Sendable {
+    private var map: [String: ProviderCredentials] = [:]
+    func save(accountId: String, credentials: ProviderCredentials) throws {
+        map[accountId] = credentials
+    }
+    func load(accountId: String) throws -> ProviderCredentials? { map[accountId] }
+    func delete(accountId: String) throws { map[accountId] = nil }
 }

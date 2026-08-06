@@ -442,6 +442,68 @@ final class ManagementAPIClientTests: XCTestCase {
         XCTAssertTrue(receipt.success)
     }
 
+    func testProviderDeleteIssuesSessionOnlyDelete() async throws {
+        let harness = makeHarness()
+        installSessionCookie(in: harness)
+        ManagementURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/providers/provider-1")
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertNil(request.httpBody)
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            return .json(["success": true])
+        }
+
+        let receipt = try await harness.client.deleteProvider(id: "provider-1")
+        XCTAssertTrue(receipt.success)
+    }
+
+    func testSubscriptionDeleteIssuesSessionOnlyDelete() async throws {
+        let harness = makeHarness()
+        installSessionCookie(in: harness)
+        ManagementURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/subscriptions/subscription-1")
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertNil(request.httpBody)
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            return .json(["ok": true])
+        }
+
+        let receipt = try await harness.client.deleteSubscription(id: "subscription-1")
+        XCTAssertTrue(receipt.ok)
+    }
+
+    func testProviderCanDeleteHidesManagedCredentials() {
+        let free = ProviderManagementItem(
+            id: "p1",
+            name: "openrouter",
+            displayName: "OpenRouter",
+            type: "openrouter",
+            isActive: true,
+            refreshIntervalMin: 15,
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        XCTAssertTrue(free.canDelete)
+
+        let managed = ProviderManagementItem(
+            id: "p2",
+            name: "anthropic",
+            displayName: "Anthropic",
+            type: "anthropic",
+            isActive: true,
+            refreshIntervalMin: 15,
+            credentialManagement: .init(
+                source: "infisical",
+                scope: "st",
+                label: "Primary",
+                status: "ok",
+                alias: false,
+                readOnlyFields: ["isActive"]
+            ),
+            createdAt: "2026-08-01T00:00:00.000Z"
+        )
+        XCTAssertFalse(managed.canDelete)
+    }
+
     func testUsageSnapshotsSendsBoundedQuerySessionOnly() async throws {
         let harness = makeHarness()
         installSessionCookie(in: harness)

@@ -108,10 +108,11 @@ public final class LocalAppModel {
             }
         }()
 
-        // Poll adapters available on phone today (must match LocalAdapterRegistry).
+        // Poll adapters available on phone today.
+        let supportedPoll = Set(["openrouter", "deepseek", "openai", "anthropic", "hetzner"])
         let resolvedKind: String = {
             if adapterKind == "subscription_only" { return adapterKind }
-            if LocalAdapterRegistry.isSupportedPoll(adapterKind) { return adapterKind }
+            if supportedPoll.contains(adapterKind) { return adapterKind }
             return "subscription_only"
         }()
 
@@ -128,7 +129,9 @@ public final class LocalAppModel {
         plan.updatedAt = Date()
         try await store.upsertPlan(plan)
 
-        // Catalog `suggestedMonthlyUsd` is UI prefill only — never invent bills.
+        // Catalog `suggestedMonthlyUsd` is UI prefill only. Never fall back to it
+        // here — seed used to invent fake MTD charges (Vercel Pro $20, Workers $5,
+        // Robinhood Gold $5). Only an explicit cost from Add → Save creates a sub.
         if let explicitCost = subscriptionCostUsd {
             try await attachSubscription(
                 providerId: p.id,
@@ -143,7 +146,8 @@ public final class LocalAppModel {
     }
 
     /// Insert every catalog provider not already present as **inactive $0 shells**.
-    /// Never attaches subscriptions or invents spend.
+    /// Never attaches subscriptions or invents spend — catalog price hints are
+    /// for the Add form only.
     @discardableResult
     public func seedMissingCatalogProviders() async throws -> Int {
         let existing = Set(try await store.listProviders().map(\.name))
@@ -172,7 +176,8 @@ public final class LocalAppModel {
         ("robinhood", 5, ["Robinhood Gold"]),
     ]
 
-    /// Cancel known seed-invented subscriptions and delete their charges.
+    /// Cancel known seed-invented subscriptions and delete their charges so
+    /// Overview MTD stops counting fees the owner never paid.
     @discardableResult
     public func scrubCatalogGuessCharges(reloadAfter: Bool = true) async throws -> Int {
         let providers = try await store.listProviders()
@@ -267,50 +272,6 @@ public final class LocalAppModel {
         plan.monthlyBudgetUsd = monthlyBudgetUsd
         plan.updatedAt = Date()
         try await store.upsertPlan(plan)
-        try await reload()
-    }
-
-    public func setActive(providerId: String, isActive: Bool) async throws {
-        guard var p = try await store.getProvider(id: providerId) else { return }
-        p.isActive = isActive
-        p.updatedAt = Date()
-        try await store.upsertProvider(p)
-        try await reload()
-    }
-
-    /// Create or update the first active/considering subscription for a provider.
-    public func setRecurringFee(
-        providerId: String,
-        name: String,
-        costUsd: Double
-    ) async throws {
-        let existing = try await store.listSubscriptions().filter { $0.providerId == providerId }
-        if var sub = existing.first(where: { $0.status == "active" || $0.status == "considering" || $0.status == "paused" }) {
-            sub.name = name
-            sub.costUsd = max(0, costUsd)
-            sub.status = costUsd > 0 ? "active" : "considering"
-            sub.updatedAt = Date()
-            try await store.upsertSubscription(sub)
-            if costUsd > 0 {
-                _ = try await SubscriptionMaterializer.materialize(store: store)
-            }
-        } else {
-            try await attachSubscription(
-                providerId: providerId,
-                name: name,
-                costUsd: max(0, costUsd)
-            )
-        }
-        try await reload()
-    }
-
-    public func cancelRecurringFees(providerId: String) async throws {
-        let subs = try await store.listSubscriptions().filter { $0.providerId == providerId }
-        for var sub in subs where sub.status == "active" || sub.status == "considering" {
-            sub.status = "canceled"
-            sub.updatedAt = Date()
-            try await store.upsertSubscription(sub)
-        }
         try await reload()
     }
 
