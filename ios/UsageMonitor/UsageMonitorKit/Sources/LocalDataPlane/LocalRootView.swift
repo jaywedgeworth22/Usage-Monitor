@@ -3,25 +3,32 @@ import DesignSystem
 import LocalAdapters
 import LocalBudget
 import LocalStore
+import AppCore
 
-/// Full shell for **Local Usage Monitor** (Milestone A).
+/// Full shell for **Local Usage Monitor** — on-device money-truth that aims to
+/// match and exceed web/remote for personal poll + subscription tracking.
 public struct LocalRootView: View {
+    @Bindable var settings: AppSettings
     @State private var model = LocalAppModel()
     @State private var tab: Tab = .overview
     @State private var showAddProvider = false
-    /// Provider pending swipe/context-menu delete confirmation.
     @State private var pendingDeleteProvider: LocalProvider?
     @State private var showWipeConfirmation = false
+    @State private var pathProviders = NavigationPath()
 
-    public init() {}
+    public init(settings: AppSettings = AppSettings()) {
+        self.settings = settings
+    }
 
     public enum Tab: String, CaseIterable, Identifiable {
-        case overview, providers, settings
+        case overview, providers, projects, alerts, settings
         public var id: String { rawValue }
         var title: String {
             switch self {
             case .overview: return "Overview"
             case .providers: return "Providers"
+            case .projects: return "Projects"
+            case .alerts: return "Alerts"
             case .settings: return "Settings"
             }
         }
@@ -29,6 +36,8 @@ public struct LocalRootView: View {
             switch self {
             case .overview: return "chart.pie.fill"
             case .providers: return "server.rack"
+            case .projects: return "folder.fill"
+            case .alerts: return "bell.badge.fill"
             case .settings: return "gearshape.fill"
             }
         }
@@ -42,6 +51,16 @@ public struct LocalRootView: View {
             providersTab
                 .tabItem { Label(Tab.providers.title, systemImage: Tab.providers.systemImage) }
                 .tag(Tab.providers)
+            LocalProjectsTab(model: model)
+                .tabItem { Label(Tab.projects.title, systemImage: Tab.projects.systemImage) }
+                .tag(Tab.projects)
+            LocalAlertsTab(model: model) { providerId in
+                tab = .providers
+                pathProviders.append(providerId)
+            }
+            .tabItem { Label(Tab.alerts.title, systemImage: Tab.alerts.systemImage) }
+            .tag(Tab.alerts)
+            .badge(model.alerts.isEmpty ? 0 : model.alerts.count)
             settingsTab
                 .tabItem { Label(Tab.settings.title, systemImage: Tab.settings.systemImage) }
                 .tag(Tab.settings)
@@ -81,30 +100,56 @@ public struct LocalRootView: View {
                             .dsCard()
                     }
                     if let s = model.summary {
-                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                             Text("Month to date")
                                 .font(Theme.Typography.caption)
                                 .foregroundStyle(Theme.Colors.secondaryText)
-                            Text(formatUSD(s.totalSpentUsd))
+                            Text(CurrencyFormat.usd(s.totalSpentUsd))
                                 .font(Theme.Typography.hero)
+                                .monospacedDigit()
                                 .foregroundStyle(Theme.Colors.primaryText)
-                            if let budget = s.totalBudgetUsd {
-                                Text("of \(formatUSD(budget)) budgeted")
-                                    .font(Theme.Typography.callout)
-                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            if let budget = s.totalBudgetUsd, budget > 0 {
+                                LabeledBudgetMeter(
+                                    title: s.overBudget ? "Over budget" : "Budget used",
+                                    detail: "\(CurrencyFormat.usd(s.totalSpentUsd)) of \(CurrencyFormat.usd(budget))",
+                                    fraction: s.totalSpentUsd / budget,
+                                    status: s.overBudget ? .danger : (s.totalSpentUsd / budget >= 0.8 ? .warning : .ok)
+                                )
                             } else {
-                                Text("No budgets set — add providers and budgets in Providers")
+                                Text("No budgets set — open a provider to add one")
                                     .font(Theme.Typography.callout)
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
-                            if s.overBudget {
-                                Text("Over budget")
-                                    .font(Theme.Typography.captionEmphasis)
-                                    .foregroundStyle(Theme.Colors.danger)
+                            let projected = s.providers.compactMap(\.projectedEomUsd).reduce(0, +)
+                            if projected > 0.005 {
+                                Text("Projected EOM \(CurrencyFormat.usd(projected)) (pace estimate)")
+                                    .font(Theme.Typography.caption)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
                             }
+                            Text("API totals often omit tax. Fees you enter as subscriptions are exact.")
+                                .font(Theme.Typography.caption)
+                                .foregroundStyle(Theme.Colors.tertiaryText)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .dsCard()
+
+                        if !model.alerts.isEmpty {
+                            Button {
+                                tab = .alerts
+                            } label: {
+                                HStack {
+                                    Image(systemName: "bell.badge.fill")
+                                    Text("\(model.alerts.count) attention item\(model.alerts.count == 1 ? "" : "s")")
+                                        .font(Theme.Typography.callout.weight(.semibold))
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .foregroundStyle(Theme.Colors.warning)
+                                .padding(Theme.Spacing.md)
+                                .background(Theme.Colors.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
+                            }
+                        }
 
                         // Hide inactive $0 shells from Overview noise; full list is under Providers.
                         ForEach(
@@ -150,24 +195,35 @@ public struct LocalRootView: View {
     }
 
     private func providerSpendRow(_ row: BudgetEngine.ProviderSpend) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack {
-                Text(row.displayName)
-                    .font(Theme.Typography.callout.weight(.semibold))
-                Spacer()
-                Text(formatUSD(row.spentUsd))
-                    .font(Theme.Typography.callout.weight(.semibold))
-                    .foregroundStyle(color(for: row.level))
+        Button {
+            tab = .providers
+            pathProviders.append(row.providerId)
+        } label: {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                HStack {
+                    Text(row.displayName)
+                        .font(Theme.Typography.callout.weight(.semibold))
+                        .foregroundStyle(Theme.Colors.primaryText)
+                    Spacer()
+                    Text(CurrencyFormat.usd(row.spentUsd))
+                        .font(Theme.Typography.callout.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(color(for: row.level))
+                }
+                if let budget = row.monthlyBudgetUsd, budget > 0 {
+                    BudgetMeter(
+                        fraction: row.spentUsd / budget,
+                        status: row.level == .exceeded ? .danger : (row.level == .warning ? .warning : .ok)
+                    )
+                }
+                Text(detailLine(row))
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.tertiaryText)
+                    .multilineTextAlignment(.leading)
             }
-            if let budget = row.monthlyBudgetUsd, budget > 0 {
-                ProgressView(value: min(row.spentUsd / budget, 1.2), total: 1)
-                    .tint(color(for: row.level))
-            }
-            Text(detailLine(row))
-                .font(Theme.Typography.caption)
-                .foregroundStyle(Theme.Colors.tertiaryText)
+            .dsCard(padding: Theme.Spacing.md)
         }
-        .dsCard(padding: Theme.Spacing.md)
+        .buttonStyle(.plain)
     }
 
     private func detailLine(_ row: BudgetEngine.ProviderSpend) -> String {
@@ -194,12 +250,10 @@ public struct LocalRootView: View {
     // MARK: - Providers
 
     private var providersTab: some View {
-        NavigationStack {
+        NavigationStack(path: $pathProviders) {
             List {
                 ForEach(model.providers) { p in
-                    NavigationLink {
-                        ProviderDetailView(model: model, providerId: p.id)
-                    } label: {
+                    NavigationLink(value: p.id) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(p.displayName)
                             Text(providerRowSubtitle(p))
@@ -242,6 +296,9 @@ public struct LocalRootView: View {
                 }
             }
             .navigationTitle("Providers")
+            .navigationDestination(for: String.self) { id in
+                ProviderDetailView(model: model, providerId: id)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showAddProvider = true } label: {
@@ -285,6 +342,23 @@ public struct LocalRootView: View {
                     Text("Money-truth is local SQLite. Provider API keys stay in Keychain. No remote Usage Monitor server required.")
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                Section("Appearance") {
+                    Picker("Theme", selection: $settings.theme) {
+                        ForEach(AppTheme.allCases) { theme in
+                            Text(theme.label).tag(theme)
+                        }
+                    }
+                }
+                Section("Security") {
+                    Toggle("Require Face ID / passcode", isOn: $settings.appLockEnabled)
+                        .tint(Theme.Colors.accent)
+                }
+                Section("Backup") {
+                    LocalExportButton(model: model)
+                    Text("Exports providers, plans, fees, charges, and snapshots as JSON. Never includes API keys.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Also in this project") {
                     Text("**Usage Monitor** (other app) is the live-sync client for a self-hosted or owner server — use that if you run a VPS like the fleet.")
@@ -505,6 +579,8 @@ private struct ProviderDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var didSeedFields = false
     @State private var actionError: String?
+    @State private var historyPoints: [Double] = []
+    @State private var historyCaption: String?
 
     private var provider: LocalProvider? {
         model.providers.first { $0.id == providerId }
@@ -559,6 +635,24 @@ private struct ProviderDetailView: View {
                         Text("Spend (MTD)")
                     } footer: {
                         Text("Poll totals are provider-reported (taxes/VAT often missing). Subscription fees are what you enter here — include tax yourself if you want the full bill.")
+                    }
+                }
+
+                if historyPoints.count >= 2 {
+                    Section {
+                        SparklineCard(
+                            title: "Poll history (total cost)",
+                            value: historyCaption ?? "—",
+                            caption: "\(historyPoints.count) samples",
+                            points: historyPoints,
+                            status: .neutral
+                        )
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    } header: {
+                        Text("Snapshot history")
+                    } footer: {
+                        Text("On-device only — successive poll costs (not daily invoices).")
                     }
                 }
 
@@ -667,7 +761,10 @@ private struct ProviderDetailView: View {
         }
         .navigationTitle(provider?.displayName ?? "Provider")
         .navigationBarTitleDisplayMode(.inline)
-        .task { seedFieldsIfNeeded() }
+        .task {
+            seedFieldsIfNeeded()
+            await loadHistory()
+        }
         .confirmationDialog(
             "Delete this provider?",
             isPresented: $showDeleteConfirm,
@@ -692,5 +789,19 @@ private struct ProviderDetailView: View {
             feeText = subUsd.formatted(.number.precision(.fractionLength(0...2)))
         }
         feeName = "\(p.displayName) plan"
+    }
+
+    private func loadHistory() async {
+        guard let snaps = try? await model.snapshots(for: providerId, limit: 48) else {
+            historyPoints = []
+            return
+        }
+        // Oldest → newest for sparkline
+        let ordered = snaps.reversed()
+        let costs = ordered.compactMap(\.totalCost)
+        historyPoints = costs
+        if let last = costs.last {
+            historyCaption = CurrencyFormat.usd(last)
+        }
     }
 }

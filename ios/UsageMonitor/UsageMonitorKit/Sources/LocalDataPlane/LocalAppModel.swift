@@ -14,6 +14,8 @@ public final class LocalAppModel {
     public private(set) var summary: BudgetEngine.Summary?
     public private(set) var providers: [LocalProvider] = []
     public private(set) var subscriptions: [LocalSubscription] = []
+    public private(set) var projects: [LocalProject] = []
+    public private(set) var alerts: [LocalAlertItem] = []
     public private(set) var lastError: String?
     public private(set) var isRefreshing = false
     public private(set) var lastMaterializedCharges = 0
@@ -46,16 +48,24 @@ public final class LocalAppModel {
     public func reload() async throws {
         providers = try await store.listProviders()
         subscriptions = try await store.listSubscriptions()
+        projects = try await store.listProjects()
         let plans = try await loadPlans()
         let snaps = try await store.allSnapshots()
         let charges = try await store.allCharges()
-        summary = BudgetEngine.compute(
+        let computed = BudgetEngine.compute(
             providers: providers,
             plans: plans,
             snapshots: snaps,
             subscriptions: subscriptions,
             charges: charges
         )
+        summary = computed
+        alerts = LocalAlertBuilder.build(
+            summary: computed,
+            providers: providers,
+            projects: projects
+        )
+        lastError = nil
     }
 
     private func loadPlans() async throws -> [String: LocalProviderPlan] {
@@ -273,6 +283,91 @@ public final class LocalAppModel {
         plan.updatedAt = Date()
         try await store.upsertPlan(plan)
         try await reload()
+    }
+
+    public func setActive(providerId: String, isActive: Bool) async throws {
+        guard var p = try await store.getProvider(id: providerId) else { return }
+        p.isActive = isActive
+        p.updatedAt = Date()
+        try await store.upsertProvider(p)
+        try await reload()
+    }
+
+    /// Create or update the first active/considering/paused subscription for a provider.
+    public func setRecurringFee(providerId: String, name: String, costUsd: Double) async throws {
+        let existing = try await store.listSubscriptions().filter { $0.providerId == providerId }
+        if var sub = existing.first(where: {
+            $0.status == "active" || $0.status == "considering" || $0.status == "paused"
+        }) {
+            sub.name = name
+            sub.costUsd = max(0, costUsd)
+            sub.status = costUsd > 0 ? "active" : "considering"
+            sub.updatedAt = Date()
+            try await store.upsertSubscription(sub)
+            if costUsd > 0 {
+                _ = try await SubscriptionMaterializer.materialize(store: store)
+            }
+        } else {
+            try await attachSubscription(providerId: providerId, name: name, costUsd: max(0, costUsd))
+        }
+        try await reload()
+    }
+
+    public func cancelRecurringFees(providerId: String) async throws {
+        let subs = try await store.listSubscriptions().filter { $0.providerId == providerId }
+        for var sub in subs where sub.status == "active" || sub.status == "considering" {
+            sub.status = "canceled"
+            sub.updatedAt = Date()
+            try await store.upsertSubscription(sub)
+        }
+        try await reload()
+    }
+
+    // MARK: - Projects
+
+    public func upsertProject(name: String, description: String?, monthlyBudgetUsd: Double?, id: String? = nil) async throws {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw LocalWriteError.validation("Project name required") }
+        let now = Date()
+        if let id, var existing = projects.first(where: { $0.id == id }) {
+            existing.name = trimmed
+            existing.nameKey = trimmed.lowercased()
+            existing.description = description
+            existing.monthlyBudgetUsd = monthlyBudgetUsd
+            existing.updatedAt = now
+            try await store.upsertProject(existing)
+        } else {
+            var p = LocalProject(name: trimmed, description: description, monthlyBudgetUsd: monthlyBudgetUsd)
+            p.updatedAt = now
+            try await store.upsertProject(p)
+        }
+        try await reload()
+    }
+
+    public func deleteProject(id: String) async throws {
+        try await store.deleteProject(id: id)
+        try await reload()
+    }
+
+    /// Direct spend attributed to a project (subscription charges with projectId).
+    public func projectSpentUsd(projectId: String) async throws -> Double {
+        let charges = try await store.allCharges().filter { $0.projectId == projectId }
+        let monthStart = BudgetEngine.utcMonthStart()
+        return charges
+            .filter { $0.periodStart >= monthStart }
+            .reduce(0) { $0 + $1.costUsd }
+    }
+
+    // MARK: - Snapshots
+
+    public func snapshots(for providerId: String, limit: Int = 60) async throws -> [LocalUsageSnapshot] {
+        try await store.listSnapshots(providerId: providerId, limit: limit)
+    }
+
+    // MARK: - Export (no secrets)
+
+    public func exportPackageJSON() async throws -> Data {
+        try await LocalExportBuilder.build(store: store)
     }
 
     public func deleteProvider(id: String) async throws {

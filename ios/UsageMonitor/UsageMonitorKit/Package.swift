@@ -86,6 +86,8 @@ let package = Package(
             name: "LocalDataPlane",
             dependencies: [
                 "DesignSystem",
+                "AppCore",
+                "AppLock",
                 "LocalStore",
                 "LocalSecrets",
                 "LocalAdapters",

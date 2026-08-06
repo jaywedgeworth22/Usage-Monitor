@@ -129,6 +129,10 @@ targets:
       - package: UsageMonitorKit
         product: DesignSystem
       - package: UsageMonitorKit
+        product: AppCore
+      - package: UsageMonitorKit
+        product: AppLock
+      - package: UsageMonitorKit
         product: LocalStore
       - package: UsageMonitorKit
         product: LocalSecrets
