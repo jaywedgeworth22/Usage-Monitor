@@ -288,6 +288,64 @@ struct LocalExportButton: View {
     }
 }
 
+struct LocalImportButton: View {
+    @Bindable var model: LocalAppModel
+    @State private var showImporter = false
+    @State private var mode: LocalImportMode = .merge
+    @State private var message: String?
+    @State private var isImporting = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Picker("Import mode", selection: $mode) {
+                Text("Merge (skip existing)").tag(LocalImportMode.merge)
+                Text("Replace all data").tag(LocalImportMode.replace)
+            }
+            Button {
+                showImporter = true
+            } label: {
+                if isImporting {
+                    ProgressView()
+                } else {
+                    Label("Import export package…", systemImage: "square.and.arrow.down")
+                }
+            }
+            .disabled(isImporting)
+            if let message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+        }
+        .fileImporter(
+            isPresented: $showImporter,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            Task { await handle(result) }
+        }
+    }
+
+    private func handle(_ result: Result<[URL], Error>) async {
+        isImporting = true
+        defer { isImporting = false }
+        do {
+            let urls = try result.get()
+            guard let url = urls.first else { return }
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: url)
+            let r = try await model.importPackage(data: data, mode: mode)
+            message =
+                "Imported \(r.providers) providers, \(r.subscriptions) fees, \(r.charges) charges, \(r.snapshots) snapshots"
+                + (r.skipped > 0 ? " (\(r.skipped) skipped)" : "")
+                + ". Re-enter API keys."
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+}
+
 #if canImport(UIKit)
 private struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]

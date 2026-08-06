@@ -356,7 +356,8 @@ public struct LocalRootView: View {
                 }
                 Section("Backup") {
                     LocalExportButton(model: model)
-                    Text("Exports providers, plans, fees, charges, and snapshots as JSON. Never includes API keys.")
+                    LocalImportButton(model: model)
+                    Text("Export/import providers, plans, fees, charges, and snapshots as JSON. Never includes API keys — re-enter keys after import.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -430,6 +431,9 @@ private struct AddProviderSheet: View {
     @State private var selected: LocalProviderCatalogEntry?
     @State private var displayName = ""
     @State private var apiKey = ""
+    @State private var teamId = ""
+    @State private var accountSid = ""
+    @State private var apiKeySid = ""
     @State private var budgetText = ""
     @State private var subCostText = ""
     @State private var error: String?
@@ -469,6 +473,9 @@ private struct AddProviderSheet: View {
                                     displayName = entry.displayName
                                     subCostText = entry.suggestedMonthlyUsd.map { String(format: "%g", $0) } ?? ""
                                     apiKey = ""
+                                    teamId = ""
+                                    accountSid = ""
+                                    apiKeySid = ""
                                     budgetText = ""
                                 } label: {
                                     HStack {
@@ -496,11 +503,25 @@ private struct AddProviderSheet: View {
                         TextField("Display name", text: $displayName)
                         if entry.mode == .poll || entry.mode == .keyPlusSubscription {
                             SecureField(entry.keyFieldLabel, text: $apiKey)
+                            if entry.adapterKind == "xai" {
+                                TextField("xAI team id (required)", text: $teamId)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            }
+                            if entry.adapterKind == "twilio" {
+                                TextField("Account SID (required)", text: $accountSid)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                TextField("API Key SID (optional)", text: $apiKeySid)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            }
                             TextField("Monthly budget USD (optional)", text: $budgetText)
                                 .keyboardType(.decimalPad)
                         }
-                        if entry.mode == .subscription || entry.mode == .keyPlusSubscription {
-                            TextField("Monthly subscription USD", text: $subCostText)
+                        if entry.mode == .subscription || entry.mode == .keyPlusSubscription
+                            || entry.mode == .poll {
+                            TextField("Monthly subscription / fee USD (optional)", text: $subCostText)
                                 .keyboardType(.decimalPad)
                         }
                     }
@@ -553,13 +574,17 @@ private struct AddProviderSheet: View {
         error = nil
         guard let entry = selected else { return }
         do {
+            let fee = Double(subCostText)
             try await model.addFromCatalog(
                 entry: entry,
                 displayName: displayName,
                 apiKey: apiKey.isEmpty ? nil : apiKey,
                 monthlyBudgetUsd: Double(budgetText),
-                subscriptionCostUsd: Double(subCostText),
-                subscriptionName: entry.suggestedSubscriptionName
+                subscriptionCostUsd: fee.flatMap { $0 > 0 ? $0 : nil },
+                subscriptionName: entry.suggestedSubscriptionName,
+                teamId: teamId.isEmpty ? nil : teamId,
+                accountSid: accountSid.isEmpty ? nil : accountSid,
+                apiKeySid: apiKeySid.isEmpty ? nil : apiKeySid
             )
             dismiss()
         } catch {

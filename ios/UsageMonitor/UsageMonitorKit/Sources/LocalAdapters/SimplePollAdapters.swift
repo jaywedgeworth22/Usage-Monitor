@@ -429,6 +429,8 @@ public struct HetznerAdapter: ProviderAdapter, Sendable {
 public enum LocalAdapterRegistry {
     public static let supportedPollKinds: Set<String> = [
         "openrouter", "openai", "anthropic", "deepseek", "hetzner",
+        "apify", "firecrawl", "twelvedata", "pushover", "resend",
+        "stripe", "xai", "twilio",
     ]
 
     public static func isSupportedPoll(_ kind: String) -> Bool {
@@ -442,6 +444,14 @@ public enum LocalAdapterRegistry {
         case "openai": return OpenAIAdapter()
         case "anthropic": return AnthropicAdapter()
         case "hetzner": return HetznerAdapter()
+        case "apify": return ApifyAdapter()
+        case "firecrawl": return FirecrawlAdapter()
+        case "twelvedata": return TwelveDataAdapter()
+        case "pushover": return PushoverAdapter()
+        case "resend": return ResendAdapter()
+        case "stripe": return StripeAdapter()
+        case "xai": return XAIAdapter()
+        case "twilio": return TwilioAdapter()
         default:
             return UnsupportedLocalAdapter(kind: kind)
         }

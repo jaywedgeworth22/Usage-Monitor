@@ -45,9 +45,6 @@ public enum BudgetEngine {
     ) -> Summary {
         let monthStart = utcMonthStart(now)
         let nextMonth = nextUtcMonth(after: monthStart)
-        let elapsed = max(0, now.timeIntervalSince(monthStart))
-        let monthLen = max(1, nextMonth.timeIntervalSince(monthStart))
-        let fraction = elapsed / monthLen
 
         let snapsByProvider = Dictionary(grouping: snapshots, by: \.providerId)
         let chargesByProvider = Dictionary(grouping: charges, by: \.providerId)
@@ -83,12 +80,26 @@ public enum BudgetEngine {
             let budget = plan?.monthlyBudgetUsd
             let level = spendLevel(spent: spent, budget: budget)
 
-            var projected: Double?
-            if fraction >= 0.02 {
-                let remaining = max(0, 1 - fraction)
-                let varProj = (pollVariable / fraction) * remaining
-                projected = pollVariable + varProj + subCharges + planFixed
-            }
+            // Realistic EOM: pace *variable* poll usage; keep known fixed/sub
+            // discrete; add remaining *scheduled* active subscription charges
+            // still due this UTC month (not pure proportion of total spend).
+            let forecast = LocalForecast.project(
+                pollVariableUsd: pollVariable,
+                subscriptionChargesUsd: subCharges,
+                planFixedUsd: planFixed,
+                subscriptions: subs,
+                providerId: p.id,
+                now: now,
+                monthEnd: nextMonth
+            )
+            // Withhold early-month blow-up noise for pure variable-only rows
+            // with almost no clock progress (aligned with server day < 0.1).
+            let projected: Double? =
+                LocalForecast.fractionalUtcDay(of: now) < 0.1 && forecast.observedVariableUsd <= 0
+                ? (forecast.fixedAccruedUsd + forecast.remainingScheduledUsd > 0
+                    ? forecast.fixedAccruedUsd + forecast.remainingScheduledUsd
+                    : nil)
+                : forecast.projectedEomUsd
 
             rows.append(
                 ProviderSpend(
@@ -105,7 +116,9 @@ public enum BudgetEngine {
                     lastFetchAt: p.lastFetchAt,
                     lastFetchError: p.lastFetchError,
                     adapterKind: p.adapterKind,
-                    statusNote: nil
+                    statusNote: forecast.remainingScheduledUsd > 0.005
+                        ? String(format: "Includes $%.2f scheduled later this month", forecast.remainingScheduledUsd)
+                        : nil
                 )
             )
         }

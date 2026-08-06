@@ -65,7 +65,15 @@ public final class LocalAppModel {
             providers: providers,
             projects: projects
         )
+        LocalWidgetSnapshotWriter.write(from: computed)
         lastError = nil
+    }
+
+    public func importPackage(data: Data, mode: LocalImportMode) async throws -> LocalImportResult {
+        let result = try await LocalImportBuilder.importPackage(data: data, store: store, mode: mode)
+        _ = try await SubscriptionMaterializer.materialize(store: store)
+        try await reload()
+        return result
     }
 
     private func loadPlans() async throws -> [String: LocalProviderPlan] {
@@ -87,7 +95,10 @@ public final class LocalAppModel {
         apiKey: String?,
         monthlyBudgetUsd: Double?,
         subscriptionCostUsd: Double?,
-        subscriptionName: String?
+        subscriptionName: String?,
+        teamId: String? = nil,
+        accountSid: String? = nil,
+        apiKeySid: String? = nil
     ) async throws {
         let name = entry.name
         let existing = try await store.listProviders()
@@ -100,11 +111,25 @@ public final class LocalAppModel {
         if entry.mode == .poll && trimmedKey.isEmpty {
             throw LocalWriteError.validation("API key required for \(entry.displayName)")
         }
+        if entry.adapterKind == "xai", (teamId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw LocalWriteError.validation("xAI requires Management API team id")
+        }
+        if entry.adapterKind == "twilio", (accountSid ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw LocalWriteError.validation("Twilio requires Account SID")
+        }
 
         var keychainAccountId: String?
         if needsKey && !trimmedKey.isEmpty {
             let accountId = UUID().uuidString
-            try secrets.save(accountId: accountId, credentials: ProviderCredentials(apiKey: trimmedKey))
+            try secrets.save(
+                accountId: accountId,
+                credentials: ProviderCredentials(
+                    apiKey: trimmedKey,
+                    teamId: teamId?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    accountSid: accountSid?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    apiKeySid: apiKeySid?.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            )
             keychainAccountId = accountId
         }
 
