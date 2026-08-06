@@ -141,9 +141,13 @@ export const R2_RESUME_STORAGE_PCT = 65;
  */
 export const R2_SOFT_PRUNE_STORAGE_PCT = 50;
 
-/** Litestream LTX object key: .../prod.db/0001/00000000-00000001.ltx */
+/**
+ * Litestream LTX object key: .../prod.db/0001/00000000-00000001.ltx
+ * Groups: 1=prefix, 2=level, 3=minTx hex, 4=maxTx hex.
+ * Numbered groups only (tsconfig target predates named groups).
+ */
 export const LTX_OBJECT_KEY_RE =
-  /^(?<prefix>.+\/)(?<level>\d{4})\/(?<min>[0-9a-fA-F]+)-(?<max>[0-9a-fA-F]+)\.ltx$/;
+  /^(.+\/)(\d{4})\/([0-9a-fA-F]+)-([0-9a-fA-F]+)\.ltx$/;
 
 export interface R2BucketStorageSample {
   bucketName: string;
@@ -931,6 +935,8 @@ export interface R2ObjectListing {
   lastModified?: string;
 }
 
+type LtxListing = R2ObjectListing & { maxTx: number; minTx: number };
+
 /**
  * Pure planner: keep newest tip (highest max-txid) per Litestream LTX level;
  * delete the rest. Non-LTX keys are always kept. Exported for unit tests.
@@ -940,19 +946,19 @@ export function planLtxTipPrune(objects: R2ObjectListing[]): {
   delete: R2ObjectListing[];
   byLevel: Record<string, { keep: string; deleteCount: number; freeBytes: number }>;
 } {
-  const byLevel = new Map<string, R2ObjectListing & { maxTx: number; minTx: number }[]>();
+  const byLevel = new Map<string, LtxListing[]>();
   const other: R2ObjectListing[] = [];
   for (const obj of objects) {
     const m = LTX_OBJECT_KEY_RE.exec(obj.key);
-    if (!m?.groups) {
+    if (!m) {
       other.push(obj);
       continue;
     }
-    const levelKey = `${m.groups.prefix}${m.groups.level}`;
-    const entry = {
+    const levelKey = `${m[1]}${m[2]}`;
+    const entry: LtxListing = {
       ...obj,
-      minTx: Number.parseInt(m.groups.min, 16),
-      maxTx: Number.parseInt(m.groups.max, 16),
+      minTx: Number.parseInt(m[3], 16),
+      maxTx: Number.parseInt(m[4], 16),
     };
     const arr = byLevel.get(levelKey) ?? [];
     arr.push(entry);
