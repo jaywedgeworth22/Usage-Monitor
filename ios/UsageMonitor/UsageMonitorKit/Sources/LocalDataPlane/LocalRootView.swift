@@ -9,6 +9,9 @@ public struct LocalRootView: View {
     @State private var model = LocalAppModel()
     @State private var tab: Tab = .overview
     @State private var showAddProvider = false
+    /// Provider pending swipe/context-menu delete confirmation.
+    @State private var pendingDeleteProvider: LocalProvider?
+    @State private var showWipeConfirmation = false
 
     public init() {}
 
@@ -103,7 +106,13 @@ public struct LocalRootView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .dsCard()
 
-                        ForEach(s.providers, id: \.providerId) { row in
+                        // Hide inactive $0 shells from Overview noise; full list is under Providers.
+                        ForEach(
+                            s.providers.filter {
+                                $0.spentUsd > 0.000_5 || $0.pollVariableUsd > 0.000_5 || $0.isActive
+                            },
+                            id: \.providerId
+                        ) { row in
                             providerSpendRow(row)
                         }
                     } else if !model.isReady {
@@ -171,6 +180,17 @@ public struct LocalRootView: View {
         return parts.joined(separator: " · ")
     }
 
+    private func providerRowSubtitle(_ p: LocalProvider) -> String {
+        var parts = [p.adapterKind]
+        if !p.isActive { parts.append("inactive") }
+        if p.isPollable {
+            parts.append(p.canFetch ? "pollable" : "needs key")
+        } else {
+            parts.append("manual / fee")
+        }
+        return parts.joined(separator: " · ")
+    }
+
     // MARK: - Providers
 
     private var providersTab: some View {
@@ -182,16 +202,41 @@ public struct LocalRootView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(p.displayName)
-                            Text(p.adapterKind + (p.isActive ? "" : " · inactive"))
+                            Text(providerRowSubtitle(p))
                                 .font(Theme.Typography.caption)
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                     }
-                }
-                .onDelete { indexSet in
-                    Task {
-                        for i in indexSet {
-                            try? await model.deleteProvider(id: model.providers[i].id)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            pendingDeleteProvider = p
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        .accessibilityLabel("Delete \(p.displayName)")
+                    }
+                    .contextMenu {
+                        if p.canFetch {
+                            Button {
+                                Task { await model.poll(providerId: p.id) }
+                            } label: {
+                                Label("Fetch now", systemImage: "arrow.triangle.2.circlepath")
+                            }
+                        }
+                        Button {
+                            Task {
+                                try? await model.setActive(providerId: p.id, isActive: !p.isActive)
+                            }
+                        } label: {
+                            Label(
+                                p.isActive ? "Deactivate" : "Activate",
+                                systemImage: p.isActive ? "pause.circle" : "play.circle"
+                            )
+                        }
+                        Button(role: .destructive) {
+                            pendingDeleteProvider = p
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
                     }
                 }
@@ -203,6 +248,27 @@ public struct LocalRootView: View {
                         Image(systemName: "plus")
                     }
                 }
+            }
+            .confirmationDialog(
+                "Delete this provider?",
+                isPresented: Binding(
+                    get: { pendingDeleteProvider != nil },
+                    set: { if !$0 { pendingDeleteProvider = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pendingDeleteProvider
+            ) { provider in
+                Button("Delete \(provider.displayName)", role: .destructive) {
+                    Task {
+                        try? await model.deleteProvider(id: provider.id)
+                        pendingDeleteProvider = nil
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingDeleteProvider = nil
+                }
+            } message: { provider in
+                Text("“\(provider.displayName)” and its Keychain credentials will be removed from this phone.")
             }
         }
     }
@@ -225,7 +291,7 @@ public struct LocalRootView: View {
                         .font(Theme.Typography.caption)
                 }
                 Section("Catalog") {
-                    Text("\(LocalProviderCatalog.all.count) fleet providers available under + Add.")
+                    Text("\(LocalProviderCatalog.all.count) fleet providers under + Add. Seed only creates inactive $0 shells — never invents paid plans.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button("Seed missing fleet templates") {
@@ -234,17 +300,32 @@ public struct LocalRootView: View {
                             try? await model.reload()
                         }
                     }
+                    Button("Remove catalog-guess charges") {
+                        Task { _ = try? await model.scrubCatalogGuessCharges() }
+                    }
                 }
                 Section("Data") {
                     Button("Refresh all providers", role: nil) {
                         Task { await model.refreshAllDue(force: true) }
                     }
                     Button("Wipe all local data", role: .destructive) {
-                        Task { try? await model.wipeAll() }
+                        showWipeConfirmation = true
                     }
                 }
             }
             .navigationTitle("Settings")
+            .confirmationDialog(
+                "Wipe all local data?",
+                isPresented: $showWipeConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Wipe everything", role: .destructive) {
+                    Task { try? await model.wipeAll() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Removes every provider, plan, subscription charge, and Keychain API key on this phone.")
+            }
         }
     }
 
@@ -418,6 +499,12 @@ private struct AddProviderSheet: View {
 private struct ProviderDetailView: View {
     @Bindable var model: LocalAppModel
     let providerId: String
+    @State private var budgetText = ""
+    @State private var feeText = ""
+    @State private var feeName = ""
+    @State private var showDeleteConfirm = false
+    @State private var didSeedFields = false
+    @State private var actionError: String?
 
     private var provider: LocalProvider? {
         model.providers.first { $0.id == providerId }
@@ -430,34 +517,180 @@ private struct ProviderDetailView: View {
     var body: some View {
         List {
             if let p = provider {
-                Section("Provider") {
+                Section {
                     LabeledContent("Name", value: p.displayName)
                     LabeledContent("Adapter", value: p.adapterKind)
+                    Toggle("Active (poll / materialize)", isOn: Binding(
+                        get: { p.isActive },
+                        set: { next in
+                            Task {
+                                try? await model.setActive(providerId: providerId, isActive: next)
+                            }
+                        }
+                    ))
                     if let last = p.lastFetchAt {
                         LabeledContent("Last fetch", value: last.formatted())
                     }
-                    if let err = p.lastFetchError {
-                        Text(err).font(.caption).foregroundStyle(.secondary)
+                    if let err = p.lastFetchError, !err.isEmpty {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(Theme.Colors.warning)
+                    }
+                } header: {
+                    Text("Provider")
+                } footer: {
+                    Text(p.isPollable
+                         ? (p.canFetch
+                            ? "Phone can poll this adapter when Active."
+                            : "Poll adapter is available but no API key is stored — re-add with a key to fetch.")
+                         : "No phone poll for this adapter. Enter a recurring fee below (like a subscription on the web).")
+                }
+
+                if let s = spend {
+                    Section {
+                        LabeledContent("Total", value: CurrencyFormat.usd(s.spentUsd))
+                        LabeledContent("Poll variable", value: CurrencyFormat.usd(s.pollVariableUsd))
+                        LabeledContent("Subscriptions", value: CurrencyFormat.usd(s.subscriptionChargesUsd))
+                        LabeledContent("Plan fixed", value: CurrencyFormat.usd(s.planFixedUsd))
+                        if let b = s.monthlyBudgetUsd {
+                            LabeledContent("Budget", value: CurrencyFormat.usd(b))
+                        }
+                    } header: {
+                        Text("Spend (MTD)")
+                    } footer: {
+                        Text("Poll totals are provider-reported (taxes/VAT often missing). Subscription fees are what you enter here — include tax yourself if you want the full bill.")
                     }
                 }
-            }
-            if let s = spend {
-                Section("Spend (MTD)") {
-                    LabeledContent("Total", value: String(format: "$%.2f", s.spentUsd))
-                    LabeledContent("Poll variable", value: String(format: "$%.2f", s.pollVariableUsd))
-                    LabeledContent("Subscriptions", value: String(format: "$%.2f", s.subscriptionChargesUsd))
-                    LabeledContent("Plan fixed", value: String(format: "$%.2f", s.planFixedUsd))
-                    if let b = s.monthlyBudgetUsd {
-                        LabeledContent("Budget", value: String(format: "$%.2f", b))
+
+                Section {
+                    HStack {
+                        Text("$")
+                        TextField("No budget", text: $budgetText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Button("Save budget") {
+                        Task {
+                            let trimmed = budgetText.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let value: Double? = trimmed.isEmpty ? nil : Double(trimmed)
+                            do {
+                                try await model.setBudget(providerId: providerId, monthlyBudgetUsd: value)
+                                actionError = nil
+                            } catch {
+                                actionError = error.localizedDescription
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Monthly budget")
+                }
+
+                Section {
+                    TextField("Plan name", text: $feeName)
+                    HStack {
+                        Text("$")
+                        TextField("0 = no charge", text: $feeText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Button("Save recurring fee") {
+                        Task {
+                            let cost = Double(feeText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+                            let name = feeName.trimmingCharacters(in: .whitespacesAndNewlines)
+                            do {
+                                try await model.setRecurringFee(
+                                    providerId: providerId,
+                                    name: name.isEmpty ? "\(p.displayName) plan" : name,
+                                    costUsd: cost
+                                )
+                                actionError = nil
+                            } catch {
+                                actionError = error.localizedDescription
+                            }
+                        }
+                    }
+                    Button("Cancel recurring fees", role: .destructive) {
+                        Task {
+                            try? await model.cancelRecurringFees(providerId: providerId)
+                            feeText = ""
+                        }
+                    }
+                } header: {
+                    Text("Recurring fee")
+                } footer: {
+                    Text("Use this for Max/Pro, Workers Paid, Vercel Pro, etc. Leave $0 if you do not pay for this product.")
+                }
+
+                if p.isPollable {
+                    Section {
+                        if p.canFetch {
+                            Button {
+                                Task { await model.poll(providerId: providerId) }
+                            } label: {
+                                if model.isRefreshing {
+                                    ProgressView()
+                                } else {
+                                    Label("Fetch now", systemImage: "arrow.triangle.2.circlepath")
+                                }
+                            }
+                            .disabled(model.isRefreshing)
+                        } else {
+                            Label("Add an API key to enable Fetch", systemImage: "key")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    } footer: {
+                        Text(p.canFetch
+                             ? "Pulls latest usage/cost from the provider API. Not an invoice."
+                             : "Re-add this provider with a key, or track cost as a recurring fee above.")
+                    }
+                } else {
+                    Section {
+                        Label("No poll — subscription / push only", systemImage: "hand.raised")
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    } footer: {
+                        Text("This provider cannot be fetched on the phone. Do not expect a Fetch button that only fails.")
                     }
                 }
-            }
-            Section {
-                Button("Fetch now") {
-                    Task { await model.poll(providerId: providerId) }
+
+                Section {
+                    Button("Delete provider", role: .destructive) {
+                        showDeleteConfirm = true
+                    }
+                }
+
+                if let actionError {
+                    Section("Error") {
+                        Text(actionError).foregroundStyle(Theme.Colors.danger)
+                    }
                 }
             }
         }
         .navigationTitle(provider?.displayName ?? "Provider")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { seedFieldsIfNeeded() }
+        .confirmationDialog(
+            "Delete this provider?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                Task { try? await model.deleteProvider(id: providerId) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Removes this connection, Keychain key, and local history for it.")
+        }
+    }
+
+    private func seedFieldsIfNeeded() {
+        guard !didSeedFields, let p = provider else { return }
+        didSeedFields = true
+        if let b = spend?.monthlyBudgetUsd {
+            budgetText = b.formatted(.number.precision(.fractionLength(0...2)))
+        }
+        if let subUsd = spend?.subscriptionChargesUsd, subUsd > 0 {
+            feeText = subUsd.formatted(.number.precision(.fractionLength(0...2)))
+        }
+        feeName = "\(p.displayName) plan"
     }
 }

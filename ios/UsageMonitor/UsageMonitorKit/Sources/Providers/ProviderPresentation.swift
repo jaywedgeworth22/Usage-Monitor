@@ -20,11 +20,15 @@ extension ProviderBudgetStatus {
     var rowValue: String { CurrencyFormat.usd(spentUsd) }
 
     /// The small caption under the row value: utilisation for budgeted
-    /// providers, otherwise a coverage/"no budget" note.
+    /// providers, otherwise a coverage/"no budget" note. Partial coverage
+    /// gets an explicit cue — APIs often omit tax.
     var rowValueCaption: String {
         if hasBudget, let percentUsed {
-            return CurrencyFormat.percent(percentUsed)
+            let pct = CurrencyFormat.percent(percentUsed)
+            if !spendCoverage.isComplete { return "\(pct) · partial" }
+            return pct
         }
+        if !spendCoverage.isComplete { return "Partial · no budget" }
         return "No budget"
     }
 
