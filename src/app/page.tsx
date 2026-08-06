@@ -22,7 +22,8 @@ import HistoryWindowControl from "@/components/HistoryWindowControl";
 import {
   shouldShowDashboardSkeleton,
   useDashboardData,
-  spendPeriodLabel as computeSpendPeriodLabel,
+  historyRangeLabel,
+  mtdSpendLabel,
   type TimeframeOption,
 } from "@/hooks/useDashboardData";
 import { sumProviderFunds } from "@/lib/provider-financial-semantics";
@@ -33,14 +34,6 @@ import {
 } from "@/lib/provider-money-aggregation";
 import type { ProviderBudgetIntel } from "@/lib/format";
 import { deriveAccountStatus } from "@/lib/ui-status";
-
-function currentMtdMonthLabel(): string {
-  return new Date().toLocaleString(undefined, {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
 
 export default function DashboardPage() {
   const {
@@ -186,8 +179,8 @@ export default function DashboardPage() {
   } = portfolioMoney;
 
   // History/telemetry window label — not the MTD budget hero period.
-  const historyWindowLabel = useMemo(() => computeSpendPeriodLabel(timeframe), [timeframe]);
-  const mtdMonthLabel = useMemo(() => currentMtdMonthLabel(), []);
+  const historyWindowLabel = useMemo(() => historyRangeLabel(timeframe), [timeframe]);
+  const mtdMonthLabel = useMemo(() => mtdSpendLabel(), []);
 
   const incompleteCostProviderCount = useMemo(
     () =>
@@ -433,36 +426,40 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 sm:space-y-8">
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-100">Overview</h1>
-          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-            Press{" "}
-            <kbd className="rounded border border-gray-300 px-1 font-sans dark:border-gray-600">⌘K</kbd>
-            {" "}to jump anywhere
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
+            Month-to-date budgets (UTC)
             {lastUpdatedAt && (
-              <span className="hidden sm:inline">
-                {" · "}Updated{" "}
-                {new Date(lastUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              <span>
+                {" · "}
+                Updated{" "}
+                <time dateTime={new Date(lastUpdatedAt).toISOString()}>
+                  {new Date(lastUpdatedAt).toLocaleTimeString([], {
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })}
+                </time>
               </span>
             )}
+            <span className="hidden sm:inline">
+              {" · "}
+              <kbd className="rounded border border-gray-300 px-1 font-sans text-xs dark:border-gray-600">
+                ⌘K
+              </kbd>{" "}
+              to jump
+            </span>
           </p>
         </div>
-        <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end sm:justify-end sm:gap-3 lg:w-auto">
-          <HistoryWindowControl
-            value={timeframe as TimeframeOption}
-            onChange={(next) => setTimeframe(next)}
-            className="w-full sm:w-auto"
-          />
-          <button
-            type="button"
-            onClick={() => void refreshDashboard()}
-            disabled={refreshing}
-            className="min-h-10 shrink-0 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:border-gray-500 dark:hover:bg-gray-800 sm:min-h-11"
-          >
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => void refreshDashboard()}
+          disabled={refreshing}
+          className="min-h-11 shrink-0 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 shadow-sm hover:border-gray-400 hover:bg-gray-50 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:border-gray-500 dark:hover:bg-gray-800"
+        >
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
       </div>
 
       {/* Section jump links — especially useful on mobile long scrolls */}
@@ -475,7 +472,7 @@ export default function DashboardPage() {
           { href: "#attention", label: "Alerts" },
           { href: "#providers", label: "Providers" },
           { href: "#operations", label: "Ops" },
-          { href: "#portfolio", label: "More" },
+          { href: "#portfolio", label: "Charts" },
         ].map((item) => (
           <a
             key={item.href}
@@ -567,7 +564,12 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div id="portfolio" className="scroll-mt-20">
+      <div id="portfolio" className="scroll-mt-20 space-y-3">
+        <HistoryWindowControl
+          value={timeframe as TimeframeOption}
+          onChange={(next) => setTimeframe(next)}
+          className="w-full"
+        />
         <DashboardPortfolioSection
           portfolioOpen={portfolioOpen}
           onToggle={setPortfolioOpen}

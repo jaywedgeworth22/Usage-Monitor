@@ -23,29 +23,29 @@ public enum TimeframeOption: Hashable, Sendable {
     /// Picker label shown to the user.
     public var displayLabel: String {
         switch self {
-        case .rolling(let d) where d == 1:   return "Past 24 Hours"
-        case .rolling(let d) where d == 7:   return "Past Week"
-        case .rolling(let d) where d == 30:  return "Past 30 Days"
-        case .rolling(let d) where d == 90:  return "Past 3 Months"
-        case .rolling(let d) where d == 180: return "Past 6 Months"
-        case .rolling:                        return "All Time"
+        case .rolling(let d) where d == 1:   return "Past 24 hours"
+        case .rolling(let d) where d == 7:   return "Past 7 days"
+        case .rolling(let d) where d == 30:  return "Past 30 days"
+        case .rolling(let d) where d == 90:  return "Past 90 days"
+        case .rolling(let d) where d == 180: return "Past 180 days"
+        case .rolling:                        return "All time"
         case .calendarMonth(let y, let m):
+            if self == .currentMonth { return "This month" }
             return TimeframeOption.monthName(year: y, month: m)
         case .calendarYear(let y):
             return String(y)
         }
     }
 
-    /// Short label for the spend period header (e.g. summary card, nav title).
+    /// MTD budget surfaces only.
+    public var mtdSpendLabel: String { TimeframeOption.currentMonthName }
+
+    /// @deprecated Prefer mtdSpendLabel / displayLabel.
     public var periodLabel: String {
         switch self {
         case .calendarMonth(let y, let m):
             return TimeframeOption.monthName(year: y, month: m)
-        case .calendarYear(let y):
-            return String(y)
-        case .rolling:
-            // Rolling periods still show the provider cards' current-month
-            // spend; label as the current month name so they stay accurate.
+        case .calendarYear, .rolling:
             return TimeframeOption.currentMonthName
         }
     }

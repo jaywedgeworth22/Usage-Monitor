@@ -3,20 +3,30 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   type TimeframeOption,
+  currentMonthToken,
   generateMonthOptions,
   generateYearOptions,
-  timeframeDisplayLabel,
+  historyRangeLabel,
+  isCurrentCalendarMonth,
+  isPrimaryHistoryChip,
+  timeframeShortLabel,
 } from "@/hooks/useDashboardData";
 
+/** Primary rail: This month + rolling 7/30/90. */
 const QUICK: Array<{ value: TimeframeOption; short: string; full: string }> = [
-  { value: "1d", short: "24h", full: "Past 24 hours" },
-  { value: "7d", short: "7d", full: "Past week" },
+  {
+    value: "month:current" as TimeframeOption,
+    short: "This month",
+    full: "This calendar month (UTC)",
+  },
+  { value: "7d", short: "7d", full: "Past 7 days" },
   { value: "30d", short: "30d", full: "Past 30 days" },
-  { value: "90d", short: "90d", full: "Past 3 months" },
+  { value: "90d", short: "90d", full: "Past 90 days" },
 ];
 
 const MORE_ROLLING: Array<{ value: TimeframeOption; label: string }> = [
-  { value: "180d", label: "Past 6 months" },
+  { value: "1d", label: "Past 24 hours" },
+  { value: "180d", label: "Past 180 days" },
   { value: "all", label: "All time" },
 ];
 
@@ -29,7 +39,7 @@ type Props = {
 function MenuSection({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="py-1">
-      <p className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+      <p className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
         {label}
       </p>
       {children}
@@ -71,8 +81,8 @@ function MenuItem({
 /**
  * Chart/telemetry history range control.
  *
- * Quick rolling chips (24h / 7d / 30d / 90d) + a "More" menu for 180d, all-time,
- * calendar months, and calendar years. Does not affect MTD budget math.
+ * Primary: This month · 7d · 30d · 90d. More: 24h, 180d, all, calendar months/years.
+ * Does not affect MTD budget math — only charts, burn series, and usage-event lists.
  */
 export default function HistoryWindowControl({ value, onChange, className = "" }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -81,8 +91,8 @@ export default function HistoryWindowControl({ value, onChange, className = "" }
   const monthOptions = useMemo(() => generateMonthOptions(13), []);
   const yearOptions = useMemo(() => generateYearOptions(3), []);
 
-  const isQuick = QUICK.some((q) => q.value === value);
-  const moreActive = !isQuick;
+  const moreActive = !isPrimaryHistoryChip(value);
+  const currentMonth = currentMonthToken();
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -102,17 +112,20 @@ export default function HistoryWindowControl({ value, onChange, className = "" }
     };
   }, [menuOpen]);
 
+  function select(next: TimeframeOption) {
+    const resolved = (next as string) === "month:current" ? currentMonth : next;
+    onChange(resolved);
+    setMenuOpen(false);
+  }
+
   return (
     <div ref={rootRef} className={`flex min-w-0 flex-col gap-1.5 ${className}`}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span
-          id={labelId}
-          className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
-        >
-          History
+        <span id={labelId} className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+          Chart range
         </span>
-        <span className="text-[11px] text-gray-500 dark:text-gray-400">
-          Charts &amp; telemetry · not MTD budget
+        <span className="text-xs text-gray-500 dark:text-gray-400">
+          Charts &amp; usage history only · budgets stay month-to-date
         </span>
       </div>
 
@@ -122,18 +135,19 @@ export default function HistoryWindowControl({ value, onChange, className = "" }
         className="inline-flex max-w-full items-stretch rounded-xl border border-gray-200 bg-gray-100/90 p-1 shadow-sm dark:border-gray-700 dark:bg-gray-800/90"
       >
         {QUICK.map((q) => {
-          const active = value === q.value;
+          const token = (q.value as string) === "month:current" ? currentMonth : q.value;
+          const active =
+            (q.value as string) === "month:current"
+              ? isCurrentCalendarMonth(value)
+              : value === q.value;
           return (
             <button
-              key={q.value}
+              key={q.short}
               type="button"
               aria-pressed={active}
               title={q.full}
-              onClick={() => {
-                onChange(q.value);
-                setMenuOpen(false);
-              }}
-              className={`min-h-9 shrink-0 rounded-lg px-2.5 text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:min-h-10 sm:px-3 sm:text-sm ${
+              onClick={() => select(token)}
+              className={`min-h-10 shrink-0 rounded-lg px-2.5 text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:px-3 sm:text-sm ${
                 active
                   ? "bg-accent text-white shadow-sm"
                   : "text-gray-600 hover:bg-white/90 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900/70 dark:hover:text-gray-100"
@@ -152,15 +166,13 @@ export default function HistoryWindowControl({ value, onChange, className = "" }
             aria-pressed={moreActive}
             title="More history ranges"
             onClick={() => setMenuOpen((open) => !open)}
-            className={`flex min-h-9 max-w-[9rem] items-center gap-1 rounded-lg px-2.5 text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:min-h-10 sm:max-w-[11rem] sm:px-3 sm:text-sm ${
+            className={`flex min-h-10 max-w-[9.5rem] items-center gap-1 rounded-lg px-2.5 text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:max-w-[11rem] sm:px-3 sm:text-sm ${
               moreActive
                 ? "bg-accent text-white shadow-sm"
                 : "text-gray-600 hover:bg-white/90 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-900/70 dark:hover:text-gray-100"
             }`}
           >
-            <span className="truncate">
-              {moreActive ? timeframeDisplayLabel(value) : "More"}
-            </span>
+            <span className="truncate">{moreActive ? timeframeShortLabel(value) : "More"}</span>
             <svg
               className="h-3.5 w-3.5 shrink-0 opacity-80"
               fill="none"
@@ -175,7 +187,7 @@ export default function HistoryWindowControl({ value, onChange, className = "" }
           {menuOpen && (
             <div
               role="listbox"
-              aria-label="More history ranges"
+              aria-label="More chart ranges"
               className="absolute right-0 top-full z-50 mt-1.5 max-h-72 w-56 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
             >
               <MenuSection label="Rolling">
@@ -184,10 +196,7 @@ export default function HistoryWindowControl({ value, onChange, className = "" }
                     key={item.value}
                     label={item.label}
                     selected={value === item.value}
-                    onSelect={() => {
-                      onChange(item.value);
-                      setMenuOpen(false);
-                    }}
+                    onSelect={() => select(item.value)}
                   />
                 ))}
               </MenuSection>
@@ -196,12 +205,9 @@ export default function HistoryWindowControl({ value, onChange, className = "" }
                 {monthOptions.map(({ token, label }) => (
                   <MenuItem
                     key={token as string}
-                    label={label}
+                    label={token === currentMonth ? `${label} (this month)` : label}
                     selected={value === token}
-                    onSelect={() => {
-                      onChange(token);
-                      setMenuOpen(false);
-                    }}
+                    onSelect={() => select(token)}
                   />
                 ))}
               </MenuSection>
@@ -212,10 +218,7 @@ export default function HistoryWindowControl({ value, onChange, className = "" }
                     key={token as string}
                     label={label}
                     selected={value === token}
-                    onSelect={() => {
-                      onChange(token);
-                      setMenuOpen(false);
-                    }}
+                    onSelect={() => select(token)}
                   />
                 ))}
               </MenuSection>
@@ -223,6 +226,10 @@ export default function HistoryWindowControl({ value, onChange, className = "" }
           )}
         </div>
       </div>
+
+      <p className="sr-only" aria-live="polite">
+        Chart range set to {historyRangeLabel(value)}. Budget figures unchanged.
+      </p>
     </div>
   );
 }

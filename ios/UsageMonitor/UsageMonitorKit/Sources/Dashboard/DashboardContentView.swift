@@ -9,9 +9,6 @@ import Models
 struct DashboardContentView: View {
     let data: DashboardViewData
     let generatedAt: Date?
-    /// Portfolio telemetry timeframe — forwarded to telemetry sub-views.
-    /// Hero / stat tiles always show current-calendar-month data from budget-status.
-    var timeframe: TimeframeOption = .currentMonth
     /// Cross-tab open of a provider detail (wired by `DashboardRootView` via
     /// `AppEnvironment.openProvider`). Optional so previews stay standalone.
     var onSelectProvider: ((String) -> Void)? = nil
@@ -208,8 +205,7 @@ private struct AttentionCard: View {
         VStack(spacing: Theme.Spacing.lg) {
             DashboardContentView(
                 data: DashboardViewData(.sample),
-                generatedAt: BudgetStatusResponse.sample.generatedAtDate,
-                timeframe: .currentMonth
+                generatedAt: BudgetStatusResponse.sample.generatedAtDate
             )
         }
         .padding()
@@ -222,8 +218,7 @@ private struct AttentionCard: View {
         VStack(spacing: Theme.Spacing.lg) {
             DashboardContentView(
                 data: DashboardViewData(.sample),
-                generatedAt: BudgetStatusResponse.sample.generatedAtDate,
-                timeframe: .currentMonth
+                generatedAt: BudgetStatusResponse.sample.generatedAtDate
             )
         }
         .padding()

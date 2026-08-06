@@ -71,7 +71,8 @@ export function statusBadgeClasses(status: UiSemanticStatus): string {
     case "ok":
       return "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200";
     case "incomplete":
-      return "bg-orange-50 text-orange-800 dark:bg-orange-950/40 dark:text-orange-200";
+      // Slate — incomplete coverage is not budget risk (amber) or brand orange.
+      return "bg-slate-100 text-slate-700 dark:bg-slate-800/80 dark:text-slate-200";
     case "neutral":
     default:
       return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";

@@ -3,6 +3,7 @@ import {
   accountStatusLabel,
   deriveAccountStatus,
   spendAmountClass,
+  statusBadgeClasses,
 } from "@/lib/ui-status";
 
 describe("deriveAccountStatus", () => {
@@ -88,5 +89,12 @@ describe("accountStatusLabel", () => {
     expect(accountStatusLabel("warning")).toBe("Watch spend");
     expect(accountStatusLabel("exceeded")).toBe("Over budget");
     expect(accountStatusLabel("unconfigured")).toBe("No budget set");
+  });
+});
+
+describe("statusBadgeClasses", () => {
+  it("uses slate for incomplete (not brand orange)", () => {
+    expect(statusBadgeClasses("incomplete")).toContain("slate");
+    expect(statusBadgeClasses("incomplete")).not.toContain("orange");
   });
 });

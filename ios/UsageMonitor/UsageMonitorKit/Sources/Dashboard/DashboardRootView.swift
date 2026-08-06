@@ -21,9 +21,6 @@ public struct DashboardRootView: View {
     /// trap; the live app always provides it via `RootView`.
     @Environment(AppEnvironment.self) private var env: AppEnvironment?
 
-    /// Selected period for the portfolio telemetry panel.
-    /// The hero / budget-status data is always current-calendar-month regardless.
-    @State private var selectedTimeframe: TimeframeOption = .currentMonth
     @State private var intelligenceStore = IntelligenceStore()
 
     public init() {}
@@ -35,15 +32,7 @@ public struct DashboardRootView: View {
                 // Inline (centered compact) title — avoid large left-aligned title at rest.
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        // No secondary caption under the picker — it truncated
-                        // ("Budget is always this…") and read as product noise.
-                        // Scope is on the control’s accessibility label only.
-                        TimeframePicker(selection: $selectedTimeframe)
-                            .accessibilityHint(
-                                "Hero and budget totals stay on the current calendar month. This filter only applies to portfolio telemetry."
-                            )
-                    }
+                    // Dead Overview timeframe control removed (looked global, filtered nothing).
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             Task { await refresh() }
@@ -117,7 +106,6 @@ public struct DashboardRootView: View {
             DashboardContentView(
                 data: data,
                 generatedAt: store.state.value?.generatedAtDate,
-                timeframe: selectedTimeframe,
                 onSelectProvider: { id in env?.openProvider(id: id) }
             )
 

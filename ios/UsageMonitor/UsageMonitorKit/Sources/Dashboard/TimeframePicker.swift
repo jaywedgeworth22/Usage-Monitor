@@ -16,12 +16,12 @@ public struct TimeframePicker: View {
     @Binding public var selection: TimeframeOption
 
     private let rollingOptions: [(label: String, option: TimeframeOption)] = [
-        ("Past 24 Hours",  .rolling(days: 1)),
-        ("Past Week",      .rolling(days: 7)),
-        ("Past 30 Days",   .rolling(days: 30)),
-        ("Past 3 Months",  .rolling(days: 90)),
-        ("Past 6 Months",  .rolling(days: 180)),
-        ("All Time",       .rolling(days: 3650)),
+        ("Past 24 hours",  .rolling(days: 1)),
+        ("Past 7 days",    .rolling(days: 7)),
+        ("Past 30 days",   .rolling(days: 30)),
+        ("Past 90 days",   .rolling(days: 90)),
+        ("Past 180 days",  .rolling(days: 180)),
+        ("All time",       .rolling(days: 3650)),
     ]
 
     private let monthOptions: [TimeframeOption]
@@ -81,8 +81,9 @@ public struct TimeframePicker: View {
             }
             .foregroundStyle(.primary)
         }
-        .accessibilityLabel("Time period filter")
+        .accessibilityLabel("Chart range")
         .accessibilityValue(selection.displayLabel)
+        .accessibilityHint("Charts and usage history only. Budgets stay month-to-date.")
     }
 
     @ViewBuilder
