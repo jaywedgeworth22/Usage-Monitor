@@ -463,6 +463,10 @@ struct ProviderDetailView: View {
                     monospaced: false
                 )
             }
+            Text("Most providers omit sales tax, VAT, and invoice-only fees from usage APIs. Partial coverage means the number is incomplete — set fixed monthly cost or a subscription when you know the real bill.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dsCard()

@@ -53,8 +53,19 @@ public struct LocalProvider: Identifiable, Equatable, Sendable, Hashable {
         self.updatedAt = updatedAt
     }
 
+    /// True only when a real phone poll adapter exists for this row.
     public var isPollable: Bool {
-        adapterKind != "subscription_only"
+        Self.supportedPollAdapterKinds.contains(adapterKind)
+    }
+
+    /// Adapters registered in `LocalAdapterRegistry` (keep in sync).
+    public static let supportedPollAdapterKinds: Set<String> = [
+        "openrouter", "openai", "anthropic", "deepseek", "hetzner",
+    ]
+
+    /// Fetch is useful only when pollable *and* a Keychain credential exists.
+    public var canFetch: Bool {
+        isPollable && keychainAccountId != nil
     }
 }
 

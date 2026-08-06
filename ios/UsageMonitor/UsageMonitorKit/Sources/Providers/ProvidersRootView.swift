@@ -165,6 +165,21 @@ public struct ProvidersRootView: View {
                         .simultaneousGesture(TapGesture().onEnded {
                             Haptics.tap()
                         })
+                        .contextMenu {
+                            Button {
+                                path.append(ProviderRoute(id: provider.id))
+                            } label: {
+                                Label("Open details", systemImage: "doc.text")
+                            }
+                            Button {
+                                path.append(ProviderRoute(id: provider.id))
+                            } label: {
+                                Label("Edit budget / plan", systemImage: "slider.horizontal.3")
+                            }
+                            if !provider.spendCoverage.isComplete {
+                                Text("Spend may omit tax & invoice fees")
+                            }
+                        }
                     }
                 } header: {
                     Text(resultsHeaderText)
