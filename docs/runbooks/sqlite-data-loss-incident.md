@@ -25,7 +25,7 @@ Pausing (cgroup freeze) halts new writes and timers without closing a single
 descriptor. Stopping closes descriptors. Pause.
 
 ```bash
-sudo docker pause oracle-app-1
+sudo docker pause usage-monitor-app-1
 ```
 
 ## 2. Halt everything that could restart or replace the writer
@@ -45,7 +45,7 @@ Do NOT stop `usage-monitor.service` — it would stop the paused container.
 ## 3. Locate the live process and its deleted descriptors
 
 ```bash
-pid="$(sudo docker inspect --format '{{.State.Pid}}' oracle-app-1)"
+pid="$(sudo docker inspect --format '{{.State.Pid}}' usage-monitor-app-1)"
 sudo ls -l "/proc/${pid}/fd" | grep -F '/data/prod.db'
 ```
 
@@ -167,9 +167,9 @@ Only after the chosen candidate is validated:
 
 ```bash
 # The paused process's data is captured; it may now die.
-sudo docker unpause oracle-app-1
+sudo docker unpause usage-monitor-app-1
 sudo systemctl stop usage-monitor
-sudo docker update --restart=no oracle-app-1 || true
+sudo docker update --restart=no usage-monitor-app-1 || true
 
 # Preserve whatever sits at the pathname today (imposter or nothing):
 [ -e /data/prod.db ] && sudo mv /data/prod.db "${inc}/replaced-pathname.db"
@@ -200,7 +200,7 @@ Bring layers back one at a time, each verified before the next:
    `USAGE_SCHEDULER_ENABLED=false` in Infisical, `sudo
    /usr/local/sbin/usage-monitor-env-sync`, `sudo systemctl start
    usage-monitor`) and confirm replication resumes: litestream `replica sync`
-   lines in `sudo docker logs oracle-app-1`, a fresh
+   lines in `sudo docker logs usage-monitor-app-1`, a fresh
    `/data/.litestream-replica-status.json`, and
    `checks.backup.replicaOk=true`.
 2. **Readiness.** `curl -fsS https://usage.jays.services/api/ready?strict=1`

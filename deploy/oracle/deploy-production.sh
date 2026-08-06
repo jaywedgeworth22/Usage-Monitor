@@ -46,8 +46,27 @@ readonly EXPECTED_DATA_DEVICE="/dev/sdb"
 readonly PUBLIC_HOST="usage.jays.services"
 readonly PUBLIC_READY_URL="https://${PUBLIC_HOST}/api/ready?strict=1"
 readonly LEGACY_HEALTH_URL="https://api-usage-monitor.onrender.com/api/health"
-readonly APP_CONTAINER="oracle-app-1"
-readonly APP_NETWORK="oracle_internal"
+# Default target names after the 2026-08-06 rename (was oracle / oracle-app-1 /
+# oracle_internal — unclear next to Coolify unmanaged noise). Live values may
+# still be the legacy names until the first rename cutover completes.
+APP_CONTAINER="usage-monitor-app-1"
+APP_NETWORK="usage-monitor_internal"
+APP_COMPOSE_PROJECT="usage-monitor"
+LEGACY_APP_COMPOSE_PROJECT="oracle"
+LEGACY_APP_CONTAINER="oracle-app-1"
+LEGACY_APP_NETWORK="oracle_internal"
+
+# One-shot `docker run` MUST set --name. Unnamed runs get Docker random names
+# (e.g. epic_jackson) that show up as Coolify "unmanaged" noise and look like
+# mystery Usage Monitor resources. Prefix always usage-monitor-*.
+run_usage_monitor_oneshot() {
+  local kind="$1"
+  shift
+  local name="usage-monitor-${kind}-$$"
+  timeout 15 docker rm -f "${name}" >/dev/null 2>&1 || true
+  docker run --name "${name}" "$@"
+}
+
 readonly APP_IMAGE_REPOSITORY="usage-monitor"
 readonly COMPOSE_TIMEOUT_SECONDS=300
 readonly MIN_ROOT_FREE_BYTES=$((8 * 1024 * 1024 * 1024))
@@ -207,10 +226,40 @@ compose_for_revision() {
   timeout --signal=TERM --kill-after=30s "${COMPOSE_TIMEOUT_SECONDS}" \
     env USAGE_MONITOR_REVISION="${revision}" \
       docker compose \
-      --project-name oracle \
+      --project-name "${APP_COMPOSE_PROJECT}" \
       --env-file "${COMPOSE_INTERPOLATION_ENV}" \
       --file "${COMPOSE_FILE}" \
       "$@"
+}
+
+# Prefer the new usage-monitor project when both exist; otherwise use whichever
+# single app writer is live so preflight/cutover still work mid-rename.
+detect_live_app_identity() {
+  local new_count old_count
+  new_count="$(timeout 30 docker ps \
+    --filter "label=com.docker.compose.project=${APP_COMPOSE_PROJECT}" \
+    --filter 'label=com.docker.compose.service=app' \
+    --format '{{.ID}}' 2>/dev/null | awk 'NF { c+=1 } END { print c+0 }')"
+  old_count="$(timeout 30 docker ps \
+    --filter "label=com.docker.compose.project=${LEGACY_APP_COMPOSE_PROJECT}" \
+    --filter 'label=com.docker.compose.service=app' \
+    --format '{{.ID}}' 2>/dev/null | awk 'NF { c+=1 } END { print c+0 }')"
+  if [[ "${new_count}" == "1" ]]; then
+    APP_CONTAINER="usage-monitor-app-1"
+    APP_NETWORK="usage-monitor_internal"
+    APP_COMPOSE_PROJECT="usage-monitor"
+    return 0
+  fi
+  if [[ "${old_count}" == "1" ]]; then
+    APP_CONTAINER="${LEGACY_APP_CONTAINER}"
+    APP_NETWORK="${LEGACY_APP_NETWORK}"
+    APP_COMPOSE_PROJECT="${LEGACY_APP_COMPOSE_PROJECT}"
+    return 0
+  fi
+  # No running writer yet — target the new names for first boot / recovery.
+  APP_CONTAINER="usage-monitor-app-1"
+  APP_NETWORK="usage-monitor_internal"
+  APP_COMPOSE_PROJECT="usage-monitor"
 }
 
 fetch_public_ready() {
@@ -400,13 +449,45 @@ require_current_main() {
   exit 0
 }
 
+# Compose project was historically named "oracle" (containers oracle-app-1 /
+# oracle-caddy-1), which looked like an unrelated cloud leftover next to Coolify
+# unmanaged noise. Project name is now usage-monitor → usage-monitor-app-1 /
+# usage-monitor-caddy-1. Retire the legacy project once so port 80/443 and the
+# SQLite writer cannot double-bind during rename cutover.
+retire_legacy_oracle_compose_project_if_present() {
+  local legacy_ids
+  legacy_ids="$(timeout 30 docker ps -aq \
+    --filter 'label=com.docker.compose.project=oracle' 2>/dev/null || true)"
+  if [[ -z "${legacy_ids//[$'\t\n\r ']/}" ]]; then
+    return 0
+  fi
+  log "retiring legacy compose project name 'oracle' (renamed to usage-monitor for clarity)."
+  if [[ -f "${COMPOSE_FILE}" && -f "${COMPOSE_INTERPOLATION_ENV}" ]]; then
+    timeout --signal=TERM --kill-after=30s 120 \
+      docker compose \
+        --project-name oracle \
+        --env-file "${COMPOSE_INTERPOLATION_ENV}" \
+        --file "${COMPOSE_FILE}" \
+        down --timeout 60 --remove-orphans >/dev/null 2>&1 || true
+  fi
+  legacy_ids="$(timeout 30 docker ps -aq \
+    --filter 'label=com.docker.compose.project=oracle' 2>/dev/null || true)"
+  if [[ -n "${legacy_ids//[$'\t\n\r ']/}" ]]; then
+    # shellcheck disable=SC2086
+    timeout 60 docker stop ${legacy_ids} >/dev/null 2>&1 || true
+    # shellcheck disable=SC2086
+    timeout 60 docker rm ${legacy_ids} >/dev/null 2>&1 || true
+  fi
+}
+
 require_single_app_container() {
   local count
+  detect_live_app_identity
   count="$(timeout 30 docker ps \
-    --filter 'label=com.docker.compose.project=oracle' \
+    --filter "label=com.docker.compose.project=${APP_COMPOSE_PROJECT}" \
     --filter 'label=com.docker.compose.service=app' \
     --format '{{.ID}}' | awk 'NF { count += 1 } END { print count + 0 }')"
-  [[ "${count}" == "1" ]] || die "expected exactly one running Oracle app container, found ${count}"
+  [[ "${count}" == "1" ]] || die "expected exactly one running Usage Monitor app container (project=${APP_COMPOSE_PROJECT}), found ${count}"
 }
 
 verify_backup_path() {
@@ -473,7 +554,7 @@ list_garage_ltx_level_offline() {
   # Offline LTX under shared-host I/O has exceeded 90s; 180s bounds the hang
   # without failing a healthy replica tip listing.
   timeout --signal=TERM --kill-after=15s 180 \
-    docker run --rm --pull=never --read-only \
+    run_usage_monitor_oneshot "ltx-l${level}" --rm --pull=never --read-only \
       --network "${APP_NETWORK}" \
       --env-file "${RUNTIME_ENV}" \
       --user 1000:1000 \
@@ -816,12 +897,12 @@ build_and_verify_image() {
   [[ "${label}" == "${revision}" ]] || die "candidate image revision label does not match ${revision}"
 
   timeout --signal=TERM --kill-after=30s 180 \
-    docker run --rm --network none \
+    run_usage_monitor_oneshot preflight --rm --network none \
     -e STARTUP_PREFLIGHT_ONLY=true \
     -e LITESTREAM_REQUIRED=false \
     "${image}" >/dev/null
   timeout --signal=TERM --kill-after=15s 60 \
-    docker run --rm --network none --entrypoint test "${image}" -x /app/bin/litestream
+    run_usage_monitor_oneshot litestream-check --rm --network none --entrypoint test "${image}" -x /app/bin/litestream
 
   compose_for_revision "${revision}" config --quiet
   log "candidate image architecture, revision label, startup preflight, and stable compose config passed."
@@ -855,7 +936,7 @@ verify_target_migration_on_scratch() {
   create_sqlite_backup "${scratch_db}"
 
   timeout --signal=TERM --kill-after=30s 900 \
-    docker run --rm --network none \
+    run_usage_monitor_oneshot migrate-scratch --rm --network none \
     --user 1000:1000 \
     -e DATABASE_URL=file:/preflight/prod.db \
     -v "${SCRATCH_DIR}:/preflight" \
@@ -912,7 +993,7 @@ reload_caddy_proxy() {
   log "recreating Caddy so it loads the migrated USAGE_MONITOR_HOSTNAME."
   # Use PREVIOUS_SHA image/env path — Caddy does not depend on the app image.
   if ! timeout "${COMPOSE_TIMEOUT_SECONDS}" docker compose \
-    --project-name oracle \
+    --project-name "" \
     --env-file "${COMPOSE_INTERPOLATION_ENV}" \
     --file "${COMPOSE_FILE}" \
     up --detach --no-deps --no-build --force-recreate caddy >/dev/null; then
@@ -1223,9 +1304,16 @@ preflight_current_production
 require_current_main "${TARGET_SHA}"
 
 capture_pre_stop_backup_watermark
-log "stopping the sole app writer for the brief SQLite cutover."
-CUTOVER_STARTED=true
-compose_for_revision "${PREVIOUS_SHA}" stop --timeout 60 app
+# If still on legacy project name "oracle", stop that stack first; new ups use usage-monitor.
+if timeout 30 docker ps -q   --filter 'label=com.docker.compose.project=oracle'   --filter 'label=com.docker.compose.service=app' | grep -q .; then
+  log "stopping legacy project=oracle writer for rename cutover to usage-monitor."
+  CUTOVER_STARTED=true
+  timeout --signal=TERM --kill-after=30s 120     env USAGE_MONITOR_REVISION="${PREVIOUS_SHA}"       docker compose       --project-name oracle       --env-file "${COMPOSE_INTERPOLATION_ENV}"       --file "${COMPOSE_FILE}"       stop --timeout 60 app
+else
+  log "stopping the sole app writer for the brief SQLite cutover."
+  CUTOVER_STARTED=true
+  compose_for_revision "${PREVIOUS_SHA}" stop --timeout 60 app
+fi
 capture_quiescent_backup_watermark "${PREVIOUS_SHA}"
 
 install -d -o 1000 -g 1000 -m 0750 "${DEPLOY_BACKUP_DIR}"
@@ -1255,9 +1343,15 @@ if ! timeout 60 docker image inspect "${APP_IMAGE_REPOSITORY}:${TARGET_SHA}" >/d
 fi
 
 CANDIDATE_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+# Always land the candidate under the clear usage-monitor project name.
+APP_COMPOSE_PROJECT="usage-monitor"
+APP_CONTAINER="usage-monitor-app-1"
+APP_NETWORK="usage-monitor_internal"
 compose_for_revision "${TARGET_SHA}" up \
   --detach --no-deps --no-build --force-recreate app
 timeout 30 docker update --restart=no "${APP_CONTAINER}" >/dev/null
+# Drop any leftover oracle-* containers (caddy, stopped app) after rename.
+retire_legacy_oracle_compose_project_if_present
 
 wait_for_revision "${TARGET_SHA}" "${CANDIDATE_STARTED_AT}" "candidate"
 require_single_app_container

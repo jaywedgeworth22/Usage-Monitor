@@ -25,7 +25,7 @@ set -Eeuo pipefail
 umask 022
 export LC_ALL=C
 
-readonly APP_CONTAINER="oracle-app-1"
+readonly APP_CONTAINER="usage-monitor-app-1"
 readonly DB_CONTAINER_PATH="/data/prod.db"
 readonly STATUS_FILE="/data/.litestream-replica-status.json"
 # Matches the deploy gate's freshness budget (deploy-production.sh) and the

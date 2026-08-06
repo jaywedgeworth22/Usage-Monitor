@@ -1,4 +1,4 @@
-name: oracle
+name: usage-monitor
 
 # This file is installed root-owned at /etc/usage-monitor/compose.yaml.
 # Production deploys must use that installed copy, never a compose file from a

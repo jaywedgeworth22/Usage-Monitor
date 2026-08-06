@@ -136,18 +136,18 @@ From the Oracle VM:
 
 ```bash
 # Config parses + replica is wired:
-sudo docker exec oracle-app-1 /app/bin/litestream databases -config /app/litestream.yml
+sudo docker exec usage-monitor-app-1 /app/bin/litestream databases -config /app/litestream.yml
 
 # LTX files actually landed in R2 (tip listing; avoid `-level all`,
 # which lists thousands of compacted objects and can time out):
-sudo docker exec oracle-app-1 /app/bin/litestream ltx -config /app/litestream.yml /data/prod.db
+sudo docker exec usage-monitor-app-1 /app/bin/litestream ltx -config /app/litestream.yml /data/prod.db
 
 # The readiness heartbeat is fresh:
 cat /data/.litestream-replica-status.json
 curl -fsS https://usage.jays.services/api/ready?strict=1 | jq .checks.backup
 ```
 
-In `sudo docker logs oracle-app-1`, look for the
+In `sudo docker logs usage-monitor-app-1`, look for the
 `[start-with-litestream] replication ENABLED` line and a
 `[sqlite-pre-migration-backup] verified ...` line at boot, followed by
 litestream's own `replicating to type=s3 bucket=...` and periodic
@@ -197,7 +197,7 @@ container on the Oracle VM (R2 credentials and the `/data` disk are only
 reachable there):
 
 ```bash
-sudo docker exec oracle-app-1 bash scripts/litestream-restore.sh /data/prod.db.restored
+sudo docker exec usage-monitor-app-1 bash scripts/litestream-restore.sh /data/prod.db.restored
 
 # Verify:
 sudo sqlite3 /data/prod.db.restored 'PRAGMA integrity_check;'
@@ -240,7 +240,7 @@ a wrong `-config` path, a stale/incompatible LTX generation, or a
 read-permission gap only surfaces on the exact command an operator would type
 during an incident:
 
-1. `sudo docker exec oracle-app-1 bash scripts/litestream-restore.sh /data/prod.db.restore-drill`
+1. `sudo docker exec usage-monitor-app-1 bash scripts/litestream-restore.sh /data/prod.db.restore-drill`
 2. `sudo sqlite3 /data/prod.db.restore-drill 'PRAGMA integrity_check;'` — expect `ok`.
 3. Compare `SELECT count(*) FROM "UsageSnapshot";` (or another frequently-written
    table) between the restored file and the live `/data/prod.db` — restored count
@@ -254,11 +254,11 @@ during an incident:
 ## Monitoring
 
 ```bash
-sudo docker exec oracle-app-1 /app/bin/litestream ltx -config /app/litestream.yml /data/prod.db | tail
+sudo docker exec usage-monitor-app-1 /app/bin/litestream ltx -config /app/litestream.yml /data/prod.db | tail
 cat /data/.litestream-replica-status.json
 ```
 
-Or tail `sudo docker logs oracle-app-1` and watch for repeated `replica sync`
+Or tail `sudo docker logs usage-monitor-app-1` and watch for repeated `replica sync`
 lines without errors. The strict readiness endpoint
 (`/api/ready?strict=1` → `checks.backup`) and the fleet-sentry-monitor Sentry
 cron check-in both alert on replica failure independently.
