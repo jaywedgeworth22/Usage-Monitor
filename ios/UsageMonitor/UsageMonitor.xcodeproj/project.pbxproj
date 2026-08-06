@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		015574DB5733115F9AD66A42 /* LocalDataPlane in Frameworks */ = {isa = PBXBuildFile; productRef = 3D1EA8338E0268795F805F14 /* LocalDataPlane */; };
+		015574DB5733115F9AD66A42 /* LocalAdapters in Frameworks */ = {isa = PBXBuildFile; productRef = 6E9A2E2D92F2F0E964E1CD4E /* LocalAdapters */; };
 		0DAE1542F635F3A7312AFC3F /* PushScaffold in Frameworks */ = {isa = PBXBuildFile; productRef = 590BA6623B548785E8D8773F /* PushScaffold */; };
 		1BC7DDFCC842993EF462F71D /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 56712F7BC822DA0DB33B2F89 /* DesignSystem */; };
 		276F317A99A928209250BE5E /* UsageMonitorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B30FDC3F50A61E4D10BC24B /* UsageMonitorApp.swift */; };
@@ -17,22 +17,23 @@
 		3DB6F0FB952A4C7466662619 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01455828D3A2004E9EE6FCA6 /* Assets.xcassets */; };
 		3F00B7EA559035693708214F /* OfflineCacheSnapshotSink.swift in Sources */ = {isa = PBXBuildFile; fileRef = C81B7D14B31665FDA6183BF8 /* OfflineCacheSnapshotSink.swift */; };
 		42818448D29A8B5C06D4732C /* Networking in Frameworks */ = {isa = PBXBuildFile; productRef = DD0E3F28FEE2BA45E1360BC1 /* Networking */; };
-		4320540C5DEEAA5D0C2F25CB /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = C022422D070736B642E57F94 /* LocalStore */; };
+		4320540C5DEEAA5D0C2F25CB /* AppCore in Frameworks */ = {isa = PBXBuildFile; productRef = 9E541251A702EE58CB8F3BF3 /* AppCore */; };
 		43BB491704B8779FB0BAAD2A /* Models in Frameworks */ = {isa = PBXBuildFile; productRef = 578CB27F890CAE1DDEB4F688 /* Models */; };
 		484D7BC266DC175D2274DAD3 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = F8E4DDCCA164861B780DEDCC /* DesignSystem */; };
+		5A881DF7F756C82B4BAB59D7 /* LocalBudget in Frameworks */ = {isa = PBXBuildFile; productRef = 87FAB76F5E354143A475532D /* LocalBudget */; };
 		5C12427D9391EE93838A7FDA /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 01C1A13CED0B1B95124CBDC8 /* DesignSystem */; };
 		5D7B4982B98EF255980605B5 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 792B1B2FC84FE1924C7CD1A6 /* WidgetPresentation.swift */; };
 		653C8DD8CA2750953F698C58 /* WidgetShared in Frameworks */ = {isa = PBXBuildFile; productRef = 574A28A99BCD3C462CA17A0D /* WidgetShared */; };
-		6B2191AA76ABBB7C0B9E4EC9 /* LocalAdapters in Frameworks */ = {isa = PBXBuildFile; productRef = 6E9A2E2D92F2F0E964E1CD4E /* LocalAdapters */; };
+		6B2191AA76ABBB7C0B9E4EC9 /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = C022422D070736B642E57F94 /* LocalStore */; };
 		6CB37F405426D5B08943A367 /* Alerts in Frameworks */ = {isa = PBXBuildFile; productRef = BCBC6C1579802E15115FA523 /* Alerts */; };
 		8F40DA5814B26236048AE760 /* Settings in Frameworks */ = {isa = PBXBuildFile; productRef = EEF104AFE3B635560BB73E94 /* Settings */; };
 		9FC1AA41DEEF222CA0DD91F6 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 37C47BD409744EC363A5D9C3 /* DesignSystem */; };
 		A25988FF08C31D2498209FB2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DA93AC5DCCD01FBB2A560D25 /* Assets.xcassets */; };
 		A33EA13C79DE4913AEC1B6D2 /* BudgetWidgetIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 345CB985D932922EA66F6D73 /* BudgetWidgetIntent.swift */; };
-		A976B24560232E9756646779 /* LocalBudget in Frameworks */ = {isa = PBXBuildFile; productRef = 87FAB76F5E354143A475532D /* LocalBudget */; };
+		A976B24560232E9756646779 /* LocalSecrets in Frameworks */ = {isa = PBXBuildFile; productRef = 0368BE726DC57AFA46C92F87 /* LocalSecrets */; };
 		B0D9919838E639EB7D80FEEA /* OfflineCache in Frameworks */ = {isa = PBXBuildFile; productRef = DCDD9B886592E046087C8AB8 /* OfflineCache */; };
 		B82FFD609432C0928F46DA8F /* AccountChangeNotifyingTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB1864248318F2267ECF38E2 /* AccountChangeNotifyingTokenStore.swift */; };
-		C155B87B338BD9E084925657 /* LocalSecrets in Frameworks */ = {isa = PBXBuildFile; productRef = 0368BE726DC57AFA46C92F87 /* LocalSecrets */; };
+		C155B87B338BD9E084925657 /* AppLock in Frameworks */ = {isa = PBXBuildFile; productRef = BAF14D074525FC55D08ED25C /* AppLock */; };
 		C3186C23E4A15ACE7390C70A /* UsageMonitorWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F1AEB8CDA324975C39D57883 /* UsageMonitorWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C36A8008C72FC6F54DC9D91F /* AppCore in Frameworks */ = {isa = PBXBuildFile; productRef = BC8AFCFC7A57AE9488201CE1 /* AppCore */; };
 		C66672426BD66072764EF255 /* Models in Frameworks */ = {isa = PBXBuildFile; productRef = FB1941171577206B0A52D658 /* Models */; };
@@ -42,6 +43,7 @@
 		E813273A1FAAB7D3E13847EC /* UsageMonitorWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A4F16263E10D7A4C46F8FC1 /* UsageMonitorWidgetBundle.swift */; };
 		EAAD082FEEBCF157A5348BC7 /* LocalUsageMonitorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D22095A081B9D89B4CED0E /* LocalUsageMonitorApp.swift */; };
 		F3DA80422F5F65435C87288A /* Providers in Frameworks */ = {isa = PBXBuildFile; productRef = AF921547F127906DB1C7629D /* Providers */; };
+		FBADF6807BDA77B31864857E /* LocalDataPlane in Frameworks */ = {isa = PBXBuildFile; productRef = 3D1EA8338E0268795F805F14 /* LocalDataPlane */; };
 		FEE74AA132592406B60358C3 /* AppSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8C3B26815D2E6893A2F0BD4 /* AppSmokeTests.swift */; };
 		FF66F17C1AE42AF2DD556265 /* Dashboard in Frameworks */ = {isa = PBXBuildFile; productRef = 6CA467140AF00BE2F6D28D3F /* Dashboard */; };
 /* End PBXBuildFile section */
@@ -109,11 +111,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				484D7BC266DC175D2274DAD3 /* DesignSystem in Frameworks */,
-				4320540C5DEEAA5D0C2F25CB /* LocalStore in Frameworks */,
-				C155B87B338BD9E084925657 /* LocalSecrets in Frameworks */,
-				6B2191AA76ABBB7C0B9E4EC9 /* LocalAdapters in Frameworks */,
-				A976B24560232E9756646779 /* LocalBudget in Frameworks */,
-				015574DB5733115F9AD66A42 /* LocalDataPlane in Frameworks */,
+				4320540C5DEEAA5D0C2F25CB /* AppCore in Frameworks */,
+				C155B87B338BD9E084925657 /* AppLock in Frameworks */,
+				6B2191AA76ABBB7C0B9E4EC9 /* LocalStore in Frameworks */,
+				A976B24560232E9756646779 /* LocalSecrets in Frameworks */,
+				015574DB5733115F9AD66A42 /* LocalAdapters in Frameworks */,
+				5A881DF7F756C82B4BAB59D7 /* LocalBudget in Frameworks */,
+				FBADF6807BDA77B31864857E /* LocalDataPlane in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -371,6 +375,8 @@
 			name = LocalUsageMonitor;
 			packageProductDependencies = (
 				F8E4DDCCA164861B780DEDCC /* DesignSystem */,
+				9E541251A702EE58CB8F3BF3 /* AppCore */,
+				BAF14D074525FC55D08ED25C /* AppLock */,
 				C022422D070736B642E57F94 /* LocalStore */,
 				0368BE726DC57AFA46C92F87 /* LocalSecrets */,
 				6E9A2E2D92F2F0E964E1CD4E /* LocalAdapters */,
@@ -963,6 +969,10 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalBudget;
 		};
+		9E541251A702EE58CB8F3BF3 /* AppCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AppCore;
+		};
 		AC0DB39F15745ACE550BB82F /* ProjectBudgets */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ProjectBudgets;
@@ -970,6 +980,10 @@
 		AF921547F127906DB1C7629D /* Providers */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Providers;
+		};
+		BAF14D074525FC55D08ED25C /* AppLock */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AppLock;
 		};
 		BC8AFCFC7A57AE9488201CE1 /* AppCore */ = {
 			isa = XCSwiftPackageProductDependency;
