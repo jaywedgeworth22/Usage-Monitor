@@ -37,6 +37,7 @@ import { deriveGeminiBillingStatus } from "@/lib/gemini-key-status";
 import { providerConfigForServer } from "@/lib/provider-secret-config";
 import { subscriptionChargeIdempotencyKey } from "@/lib/subscription-charge-identity";
 import { isLegacyMistralSpendLimitCostSnapshot } from "@/lib/mistral-snapshot-quarantine";
+import { excludeInternalSystemProvidersWhere } from "@/lib/system-providers";
 import {
   resolveOpenRouterVerifiedCash,
   resolveOpenRouterVerifiedCashConfig,
@@ -741,6 +742,7 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
     latestScopeCostTimes,
   ] = await Promise.all([
     prisma.provider.findMany({
+      where: excludeInternalSystemProvidersWhere(),
       orderBy: { name: "asc" },
       select: {
         id: true,
@@ -2210,6 +2212,7 @@ async function computeProjectBudgetStatusUncached(now: Date): Promise<ProjectBud
     }),
     sumMonthToDateExternalCostAttribution(monthStartUtc(now), getExternalEventRawCutoff(now), now),
     prisma.provider.findMany({
+      where: excludeInternalSystemProvidersWhere(),
       select: {
         id: true,
         name: true,
