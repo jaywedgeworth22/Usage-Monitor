@@ -210,7 +210,9 @@ struct ProviderManagementInventoryView: View {
                 .listRowBackground(Color.clear)
             } else {
                 ProviderInventorySummarySection(providers: store.providers)
-                Section("Connections") {
+                // Title+footer requires header:/footer: form — SwiftUI has no
+                // Section(_ title:){…} footer:{…} overload (Footer would not be EmptyView).
+                Section {
                     ForEach(store.providers) { provider in
                         NavigationLink {
                             ProviderManagementDetailView(
@@ -247,6 +249,8 @@ struct ProviderManagementInventoryView: View {
                             }
                         }
                     }
+                } header: {
+                    Text("Connections")
                 } footer: {
                     Text("Swipe left or long-press to delete. Managed (Infisical) providers cannot be deleted — deactivate them instead.")
                 }

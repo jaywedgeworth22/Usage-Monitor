@@ -5,17 +5,32 @@ import DesignSystem
 /// entirely from DesignSystem tokens so it reads as the same native product in
 /// light and dark mode. Opacity matters for privacy: an opaque cover keeps the
 /// app-switcher snapshot from revealing spending data.
-struct LockScreenView: View {
-    let availability: AppLockAvailability
-    let phase: AppLockController.Phase
+///
+/// Public so LocalDataPlane's `LocalAppLockGate` can reuse the same cover
+/// without a remote `APIClient` / `AppEnvironment`.
+public struct LockScreenView: View {
+    public let availability: AppLockAvailability
+    public let phase: AppLockController.Phase
     /// When `false`, this is a passive privacy cover (e.g. app-switcher / an
     /// in-flight prompt) with no interactive controls or error copy.
-    let showsControls: Bool
-    let onUnlock: () -> Void
+    public let showsControls: Bool
+    public let onUnlock: () -> Void
+
+    public init(
+        availability: AppLockAvailability,
+        phase: AppLockController.Phase,
+        showsControls: Bool,
+        onUnlock: @escaping () -> Void
+    ) {
+        self.availability = availability
+        self.phase = phase
+        self.showsControls = showsControls
+        self.onUnlock = onUnlock
+    }
 
     @ScaledMetric(relativeTo: .largeTitle) private var glyphSize: CGFloat = 52
 
-    var body: some View {
+    public var body: some View {
         ZStack {
             // Opaque base + a soft accent glow keeps content underneath hidden.
             Theme.Colors.background.ignoresSafeArea()

@@ -17,6 +17,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **[GROK] Fix iOS Xcode build: ISO8601 public + Section title/footer + LockScreenView public (2026-08-06) — IN PR.** LocalExport needed public LocalStore.ISO8601; ProviderManagementInventory invalid Section("title"){ } footer; LocalAppLockGate needed public LockScreenView; LocalRootView drop @MainActor default AppSettings(). Both schemes BUILD SUCCEEDED. Branch `grok/ios-build-iso8601-section`.
 - **[GROK] Rename compose project oracle → usage-monitor (clear container names) (2026-08-06) — IN PR.** Containers usage-monitor-app-1 / usage-monitor-caddy-1; retire legacy oracle-app-*; deploy cutover handles mid-rename.
 - **[GROK] iOS app icons: clean orange ring + Local full-width LOCAL stripe (no phone) (2026-08-05) — IN PROGRESS.** Remove broken off-center nubs on remote orange mark; Local drops tiny phone, large LOCAL on full bottom white stripe. Branch `grok/ios-appicon-local-stripe`.
 - **[GROK] R2 fleet ST/CT pushover-parity card + iOS inline titles (2026-08-05) — IN PR #984.** Fleet card status/source/limits/top buckets; iOS tab roots `.inline` title; empty SF Symbol guards. Branch `grok/r2-fleet-ios-chrome`.
