@@ -288,29 +288,42 @@ struct ProviderDetailView: View {
     @ViewBuilder
     private func historySection(_ provider: ProviderBudgetStatus) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            // Range control only when full-access history is available or
-            // loading — without a session the pace estimate is not windowed.
             if showsHistoryRangeControl {
-                historyRangePicker
+                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                    HStack {
+                        Text("Reported spend history")
+                            .font(Theme.Typography.sectionHeader)
+                            .foregroundStyle(Theme.Colors.primaryText)
+                        Spacer()
+                        if depthStore.isReloadingHistory {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                    Picker("History range", selection: historyRangeBinding) {
+                        ForEach(SnapshotHistoryRange.allCases) { range in
+                            Text(range.shortLabel).tag(range)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(depthStore.isReloadingHistory)
+                    .accessibilityLabel("Snapshot history range")
+                    .accessibilityValue(depthStore.historyRange.displayLabel)
+                    .accessibilityHint("Does not change month-to-date budget totals.")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .dsCard()
             }
 
             if let points = depthStore.spendHistoryPoints,
                let latest = depthStore.latestRecordedSpend {
                 SparklineCard(
-                    title: "Reported spend history",
+                    title: showsHistoryRangeControl ? "" : "Reported spend history",
                     value: CurrencyFormat.usd(latest),
                     caption: depthStore.historyCaption,
                     points: points,
                     status: projectionStatus(provider)
                 )
                 .opacity(depthStore.isReloadingHistory ? 0.55 : 1)
-                .overlay(alignment: .topTrailing) {
-                    if depthStore.isReloadingHistory {
-                        ProgressView()
-                            .controlSize(.small)
-                            .padding(Theme.Spacing.sm)
-                    }
-                }
                 .accessibilityHint(
                     depthStore.isReloadingHistory
                         ? "Reloading history for \(depthStore.historyRange.displayLabel)"
@@ -320,15 +333,11 @@ struct ProviderDetailView: View {
                 SkeletonBlock(height: 120, radius: Theme.Radius.lg)
                     .accessibilityLabel("Loading reported spend history")
             } else {
-                // Estimated pace when history is unavailable (no session, empty
-                // window, or load failure). Session sign-in hint is separate.
                 paceCard(provider)
             }
         }
     }
 
-    /// True once a session-gated history read is in flight or has settled, so
-    /// the range control is not shown above the no-session pace fallback alone.
     private var showsHistoryRangeControl: Bool {
         if depthStore.isReloadingHistory { return true }
         switch depthStore.historyState {
@@ -337,27 +346,6 @@ struct ProviderDetailView: View {
         case .idle, .failed:
             return false
         }
-    }
-
-    /// Segmented control for the snapshot history window — same four options
-    /// as the website's Range select (7 days / 30 days / 90 days / 1 year).
-    private var historyRangePicker: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            Text("History range")
-                .font(Theme.Typography.caption)
-                .foregroundStyle(Theme.Colors.secondaryText)
-            Picker("History range", selection: historyRangeBinding) {
-                ForEach(SnapshotHistoryRange.allCases) { range in
-                    Text(range.shortLabel).tag(range)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(depthStore.isReloadingHistory)
-            .accessibilityLabel("Snapshot history range")
-            .accessibilityValue(depthStore.historyRange.displayLabel)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .dsCard()
     }
 
     private var historyRangeBinding: Binding<SnapshotHistoryRange> {

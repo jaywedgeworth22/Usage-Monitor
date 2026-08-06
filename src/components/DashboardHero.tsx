@@ -82,15 +82,15 @@ export default function DashboardHero({
           >
             {incomplete ? `Known ${mtdMonthLabel} spend` : `${mtdMonthLabel} spend`}
           </p>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Month-to-date budgets (UTC). History window below is separate.
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Month-to-date · UTC · chart range does not change this card
           </p>
         </div>
         <button
           type="button"
           onClick={onOpenGlobalBudget}
           className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          title="Set Global Budget"
+          title="Edit Global Budget"
         >
           <StatusBadge label={accountStatusLabel(accountStatus)} status={semantic} />
         </button>
@@ -121,7 +121,7 @@ export default function DashboardHero({
               style={{ width: `${meterPct}%` }}
             />
           </div>
-          <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm text-gray-500 dark:text-gray-400">
             <span className="tabular-nums">
               {formatCurrency(totalCost)} of {formatCurrency(totalBudgetUsd)}
               <span className="ml-1">· {budgetCaption}</span>
@@ -140,7 +140,7 @@ export default function DashboardHero({
               </span>
             )}
           </div>
-          <p className="text-[11px] text-accent">Tap to edit Global Budget</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Edit Global Budget</p>
         </button>
       ) : (
         <button
@@ -151,9 +151,9 @@ export default function DashboardHero({
           <span className="font-semibold text-gray-900 dark:text-gray-100">
             No Global Budget set
           </span>
-          <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
-            Tap to set a portfolio monthly cap — suggested from project budgets
-            when available, or any dollar amount.
+          <span className="mt-0.5 block text-sm text-gray-500 dark:text-gray-400">
+            Set a portfolio monthly cap — suggested from project budgets when
+            available, or any dollar amount.
           </span>
         </button>
       )}
@@ -170,32 +170,32 @@ export default function DashboardHero({
           <p className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-100">
             {formatCurrency(totalProjectedMonthlyCost)}
           </p>
-          <p className="mt-0.5 text-[11px] text-accent">View breakdown</p>
+          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">View breakdown</p>
         </button>
         <div>
           <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
-            History window
+            Chart range
           </p>
           <p className="mt-0.5 text-sm font-medium text-gray-700 dark:text-gray-200">
             {spendPeriodLabel}
           </p>
           <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
-            Charts &amp; telemetry only
+            Charts only · not MTD totals
           </p>
         </div>
         {(incompleteCostProviderCount > 0 || ambiguousCostFamilyCount > 0) && (
           <div className="col-span-2 sm:col-span-1">
-            <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
-              Coverage notes
+            <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
+              Coverage
             </p>
             {incompleteCostProviderCount > 0 && (
-              <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-300">
+              <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">
                 {incompleteCostProviderCount} incomplete cost
                 {incompleteCostProviderCount === 1 ? "" : "s"}
               </p>
             )}
             {ambiguousCostFamilyCount > 0 && (
-              <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-300">
+              <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">
                 {ambiguousCostFamilyCount} multi-key famil
                 {ambiguousCostFamilyCount === 1 ? "y" : "ies"} excluded
               </p>

@@ -26,10 +26,10 @@ public enum SnapshotHistoryRange: Int, CaseIterable, Identifiable, Sendable, Has
     /// Full label for captions and accessibility (e.g. "7 days", "1 year").
     public var displayLabel: String {
         switch self {
-        case .sevenDays: return "7 days"
-        case .thirtyDays: return "30 days"
-        case .ninetyDays: return "90 days"
-        case .oneYear: return "1 year"
+        case .sevenDays: return "Past 7 days"
+        case .thirtyDays: return "Past 30 days"
+        case .ninetyDays: return "Past 90 days"
+        case .oneYear: return "Past year"
         }
     }
 

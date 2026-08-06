@@ -189,8 +189,20 @@ body {
   --um-accent-soft: rgba(249, 115, 22, 0.14);
   --um-radius-lg: 1rem;
   --um-radius-xl: 1.25rem;
+  --um-success: #059669;
+  --um-warning: #d97706;
+  --um-danger: #dc2626;
+  --um-incomplete: #475569;
+  --um-surface: #ffffff;
+  --um-canvas: #f6f7f9;
 }
 .dark {
   --um-accent: #fb923c;
   --um-accent-soft: rgba(251, 146, 60, 0.18);
+  --um-success: #34d399;
+  --um-warning: #fbbf24;
+  --um-danger: #f87171;
+  --um-incomplete: #94a3b8;
+  --um-surface: #1f2937;
+  --um-canvas: #111827;
 }

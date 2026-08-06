@@ -23,9 +23,10 @@ describe("DashboardHero", () => {
     expect(html).toContain("$42.50");
     expect(html).toContain("On track");
     expect(html).toContain("Across 3 provider budgets");
-    expect(html).toContain("History window");
+    expect(html).toContain("Chart range");
     expect(html).toContain("Past 30 Days");
-    expect(html).toContain("Charts &amp; telemetry only");
+    expect(html).toContain("Charts only");
+    expect(html).toContain("Edit Global Budget");
     expect(html).toContain("role=\"meter\"");
   });
 

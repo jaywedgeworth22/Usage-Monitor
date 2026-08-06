@@ -1,7 +1,7 @@
 # Usage Monitor — UX panel: timeframe + professional polish (web + iOS)
 
 **Date:** 2026-08-05  
-**Status:** Design complete — implementation not started  
+**Status:** Implemented 2026-08-06 (web + iOS)  
 **Authors:** Expert panel (web product design, iOS product design, design systems / fintech) + synthesis (GROK)  
 **Owner ask:** Improve intuitiveness, aesthetic appeal, professional appearance; timeframe filter feels strange/illogical on **both** web and iOS.
 

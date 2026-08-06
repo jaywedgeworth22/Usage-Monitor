@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   combineAbortSignals,
+  currentMonthToken,
   DASHBOARD_LOAD_WATCHDOG_MS,
+  historyRangeLabel,
+  isCurrentCalendarMonth,
+  isPrimaryHistoryChip,
+  mtdSpendLabel,
   shouldShowDashboardSkeleton,
+  timeframeShortLabel,
   timeframeToDays,
 } from "@/hooks/useDashboardData";
 
@@ -116,5 +122,28 @@ describe("timeframeToDays", () => {
     expect(timeframeToDays("90d")).toBe(90);
     expect(timeframeToDays("180d")).toBe(180);
     expect(timeframeToDays("all")).toBe(3650);
+  });
+});
+
+describe("history range labels (honest to selection)", () => {
+  it("describes rolling windows without substituting MTD month names", () => {
+    expect(historyRangeLabel("7d")).toBe("Past 7 days");
+    expect(historyRangeLabel("30d")).toBe("Past 30 days");
+    expect(historyRangeLabel("90d")).toBe("Past 90 days");
+    expect(historyRangeLabel("1d")).toBe("Past 24 hours");
+    expect(historyRangeLabel("all")).toBe("All time");
+  });
+
+  it("labels the current calendar month as This month", () => {
+    const current = currentMonthToken();
+    expect(isCurrentCalendarMonth(current)).toBe(true);
+    expect(historyRangeLabel(current)).toBe("This month");
+    expect(isPrimaryHistoryChip(current)).toBe(true);
+    expect(isPrimaryHistoryChip("1d")).toBe(false);
+  });
+
+  it("keeps MTD spend label independent of rolling selection", () => {
+    expect(mtdSpendLabel().length).toBeGreaterThan(3);
+    expect(timeframeShortLabel("all")).toBe("All");
   });
 });

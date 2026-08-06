@@ -90,49 +90,120 @@ export function buildUsageEventsUrl(
 }
 
 /**
- * Human-readable label for a timeframe, used in picker options.
+ * Human-readable label for a history/chart range (picker + UI).
+ * Always describes the selected token — never substitutes MTD month for rolling.
  */
 export function timeframeDisplayLabel(tf: TimeframeOption): string {
   switch (tf as string) {
-    case "1d": return "Past 24 Hours";
-    case "7d": return "Past Week";
-    case "30d": return "Past 30 Days";
-    case "90d": return "Past 3 Months";
-    case "180d": return "Past 6 Months";
-    case "all": return "All Time";
+    case "1d":
+      return "Past 24 hours";
+    case "7d":
+      return "Past 7 days";
+    case "30d":
+      return "Past 30 days";
+    case "90d":
+      return "Past 90 days";
+    case "180d":
+      return "Past 180 days";
+    case "all":
+      return "All time";
   }
   if (isCalendarMonth(tf)) {
     const parsed = parseMonthToken(tf as string);
     if (!parsed) return tf as string;
+    if (tf === currentMonthToken()) return "This month";
     const date = new Date(Date.UTC(parsed.year, parsed.month - 1, 1));
-    return date.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    return date.toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    });
   }
   if (isCalendarYear(tf)) {
     const year = parseYearToken(tf as string);
-    return year ? String(year) : tf as string;
+    return year ? String(year) : (tf as string);
   }
   return tf as string;
 }
 
+/** Alias for chart/telemetry surfaces — same as timeframeDisplayLabel. */
+export function historyRangeLabel(tf: TimeframeOption): string {
+  return timeframeDisplayLabel(tf);
+}
+
+/** Compact label for the active "More" chip (e.g. "Jul 2026", "2025", "All"). */
+export function timeframeShortLabel(tf: TimeframeOption): string {
+  switch (tf as string) {
+    case "1d":
+      return "24h";
+    case "7d":
+      return "7d";
+    case "30d":
+      return "30d";
+    case "90d":
+      return "90d";
+    case "180d":
+      return "180d";
+    case "all":
+      return "All";
+  }
+  if (isCalendarMonth(tf)) {
+    const parsed = parseMonthToken(tf as string);
+    if (!parsed) return "Month";
+    if (tf === currentMonthToken()) return "This month";
+    const date = new Date(Date.UTC(parsed.year, parsed.month - 1, 1));
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+  }
+  if (isCalendarYear(tf)) {
+    const year = parseYearToken(tf as string);
+    return year ? String(year) : "Year";
+  }
+  return "More";
+}
+
+/** True when `tf` is the primary-rail "This month" selection (current UTC month). */
+export function isCurrentCalendarMonth(tf: TimeframeOption): boolean {
+  return isCalendarMonth(tf) && tf === currentMonthToken();
+}
+
+/** True when `tf` is one of the four primary chips (This month / 7d / 30d / 90d). */
+export function isPrimaryHistoryChip(tf: TimeframeOption): boolean {
+  if (tf === "7d" || tf === "30d" || tf === "90d") return true;
+  return isCurrentCalendarMonth(tf);
+}
+
 /**
- * Short label for the summary card "Spend" header — e.g. "August 2026",
- * "Past 30 Days", "2025". Always returns the current month name when the
- * passed timeframe is the current month or a rolling period (since the
- * provider cards are always current-month from budget-status).
+ * MTD budget surfaces only — always the current UTC calendar month name.
+ * Do not use for chart/history range display (use historyRangeLabel).
+ */
+export function mtdSpendLabel(): string {
+  return new Date().toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * @deprecated Prefer mtdSpendLabel() for budgets or historyRangeLabel(tf) for charts.
+ * Rolling/year/all → current month name (budget truth). Calendar month → that month.
  */
 export function spendPeriodLabel(tf: TimeframeOption): string {
   if (isCalendarMonth(tf)) {
     const parsed = parseMonthToken(tf as string);
-    if (!parsed) {
-      // Fallback: current month name
-      return new Date().toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-    }
+    if (!parsed) return mtdSpendLabel();
     const date = new Date(Date.UTC(parsed.year, parsed.month - 1, 1));
-    return date.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    return date.toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    });
   }
-  // For rolling periods the provider cards always show current calendar month;
-  // label them as such so they stay accurate.
-  return new Date().toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  return mtdSpendLabel();
 }
 
 /**
