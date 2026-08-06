@@ -427,6 +427,14 @@ public struct HetznerAdapter: ProviderAdapter, Sendable {
 // MARK: - Registry
 
 public enum LocalAdapterRegistry {
+    public static let supportedPollKinds: Set<String> = [
+        "openrouter", "openai", "anthropic", "deepseek", "hetzner",
+    ]
+
+    public static func isSupportedPoll(_ kind: String) -> Bool {
+        supportedPollKinds.contains(kind)
+    }
+
     public static func adapter(for kind: String) -> any ProviderAdapter {
         switch kind {
         case "openrouter": return OpenRouterAdapter()

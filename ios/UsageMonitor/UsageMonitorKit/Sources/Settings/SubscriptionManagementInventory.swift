@@ -78,7 +78,6 @@ final class SubscriptionManagementStore {
         }
     }
 
-    /// Permanently remove a subscription row (`DELETE /api/subscriptions/:id`).
     func delete(
         id: String,
         using client: APIClient,
@@ -86,9 +85,7 @@ final class SubscriptionManagementStore {
     ) async -> Bool {
         guard actionSubscriptionID == nil,
               subscriptions.contains(where: { $0.id == id })
-        else {
-            return false
-        }
+        else { return false }
         return await mutate(id: id, using: client, afterMutation: afterMutation) { client in
             _ = try await client.deleteSubscription(id: id)
         }
@@ -224,13 +221,19 @@ struct SubscriptionManagementInventoryView: View {
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
-                            .accessibilityLabel("Delete \(subscription.name)")
+                        }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                pendingDelete = subscription
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
                     }
                 } header: {
                     Text("Tracked plans")
                 } footer: {
-                    Text("Swipe left to delete. Pause, resume, and repurchase are on the detail screen. New purchases, cadence changes, external-billing links, and environment-knob edits remain on the web.")
+                    Text("Swipe left or long-press to delete. Pause, resume, and repurchase are on the detail screen. New purchases and external-billing links remain on the web.")
                 }
             }
 
@@ -270,12 +273,11 @@ struct SubscriptionManagementInventoryView: View {
                     pendingDelete = nil
                 }
             }
-            Button("Cancel", role: .cancel) {
-                pendingDelete = nil
-            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: { subscription in
-            Text("“\(subscription.name)” will be removed. Already-materialized charges stay in usage history; future periods will not be billed.")
+            Text("“\(subscription.name)” will be removed. Already-materialized charges stay in usage history.")
         }
+
     }
 }
 

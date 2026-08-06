@@ -312,6 +312,28 @@ public actor APIClient {
         )
     }
 
+    /// `DELETE /api/providers/:id` — remove a connection (blocked for Infisical-managed rows).
+    @discardableResult
+    public func deleteProvider(id: String) async throws -> ProviderDeleteReceipt {
+        try await send(
+            "/api/providers/\(id)",
+            method: .delete,
+            authorization: .session,
+            body: EmptyRequestBody()
+        )
+    }
+
+    /// `DELETE /api/subscriptions/:id`.
+    @discardableResult
+    public func deleteSubscription(id: String) async throws -> SubscriptionDeleteReceipt {
+        try await send(
+            "/api/subscriptions/\(id)",
+            method: .delete,
+            authorization: .session,
+            body: EmptyRequestBody()
+        )
+    }
+
     // MARK: - Project management (session-only)
 
     /// `POST /api/projects` — create a project. Session-cookie-only by server

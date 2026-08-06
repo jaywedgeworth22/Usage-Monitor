@@ -210,7 +210,7 @@ struct ProviderManagementInventoryView: View {
                 .listRowBackground(Color.clear)
             } else {
                 ProviderInventorySummarySection(providers: store.providers)
-                Section {
+                Section("Connections") {
                     ForEach(store.providers) { provider in
                         NavigationLink {
                             ProviderManagementDetailView(
@@ -232,11 +232,23 @@ struct ProviderManagementInventoryView: View {
                                 .accessibilityLabel("Delete \(provider.title)")
                             }
                         }
+                        .contextMenu {
+                            if provider.canFetch {
+                                Text("Pollable connection")
+                            } else {
+                                Text("Push / manual — no Fetch")
+                            }
+                            if provider.canDelete {
+                                Button(role: .destructive) {
+                                    pendingDelete = provider
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
                     }
-                } header: {
-                    Text("Connections")
                 } footer: {
-                    Text("Swipe left on a connection to delete it. Managed (Infisical) providers cannot be deleted — deactivate them instead.")
+                    Text("Swipe left or long-press to delete. Managed (Infisical) providers cannot be deleted — deactivate them instead.")
                 }
             }
 
@@ -276,12 +288,11 @@ struct ProviderManagementInventoryView: View {
                     pendingDelete = nil
                 }
             }
-            Button("Cancel", role: .cancel) {
-                pendingDelete = nil
-            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: { provider in
-            Text("“\(provider.title)” will be removed from the monitor. Providers with API-key attribution history cannot be deleted — deactivate them instead.")
+            Text("“\(provider.title)” will be removed. Providers with API-key attribution history cannot be deleted — deactivate instead.")
         }
+
     }
 }
 
@@ -342,13 +353,13 @@ private struct ProviderInventoryRow: View {
             VStack(alignment: .trailing, spacing: Theme.Spacing.xxs) {
                 Text(provider.spentUsd.map(CurrencyFormat.compactUSD) ?? "Unknown")
                     .font(Theme.Typography.callout.weight(.semibold))
-                Text("month to date")
+                Text(provider.inventoryStatusLabel)
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.secondaryText)
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(provider.title), \(provider.isActive ? "active" : "inactive"), \(rowDetail)")
+        .accessibilityLabel("\(provider.title), \(provider.inventoryStatusLabel), \(rowDetail)")
     }
 
     private var rowDetail: String {
@@ -392,7 +403,11 @@ private struct ProviderManagementDetailView: View {
                     isBusy: store.actionProviderID == provider.id,
                     requestActiveChange: requestActiveChange
                 )
-                fetchNowSection(provider)
+                if provider.canFetch {
+                    fetchNowSection(provider)
+                } else {
+                    manualOnlySection(provider)
+                }
                 ProviderSpendSection(provider: provider)
                 ProviderBudgetSection(
                     provider: provider,
@@ -549,7 +564,16 @@ private struct ProviderManagementDetailView: View {
             }
             .disabled(store.actionProviderID != nil)
         } footer: {
-            Text("Polls the provider immediately and records a fresh snapshot instead of waiting for the next scheduled refresh.")
+            Text("Polls the provider immediately and records a fresh snapshot. Reported totals may still omit taxes or fees the provider never exposes.")
+        }
+    }
+
+    private func manualOnlySection(_ provider: ProviderManagementItem) -> some View {
+        Section {
+            Label("Push / manual — no poll", systemImage: "hand.raised")
+                .foregroundStyle(Theme.Colors.secondaryText)
+        } footer: {
+            Text("This connection has no working usage poll. Track spend with a subscription fee, push events, or the web Settings form — a Fetch button would only fail.")
         }
     }
 
@@ -653,7 +677,7 @@ private struct ProviderSpendSection: View {
     let provider: ProviderManagementItem
 
     var body: some View {
-        Section("Current month") {
+        Section {
             LabeledContent("Spent", value: provider.spentUsd.map(CurrencyFormat.usd) ?? "Unknown")
             LabeledContent("Projected", value: provider.projectedEomUsd.map(CurrencyFormat.usd) ?? "Unknown")
             LabeledContent("Coverage", value: provider.spendCoverage?.label ?? "Unknown")
@@ -663,6 +687,21 @@ private struct ProviderSpendSection: View {
             if let date = provider.latestSnapshotDate {
                 LabeledContent("Last refresh", value: date.formatted(.relative(presentation: .named)))
             }
+        } header: {
+            Text("Current month")
+        } footer: {
+            Text(spendFooter)
+        }
+    }
+
+    private var spendFooter: String {
+        switch provider.spendCoverage {
+        case .complete:
+            return "Provider-reported totals. Sales tax, VAT, and invoice-only fees appear only when the provider includes them in the API."
+        case .partial, .legacyUnknown:
+            return "Partial coverage — usage and/or plan fees may be incomplete. Taxes and invoice adjustments often never appear in the API."
+        case .unknown, .none:
+            return "Spend is best-effort. Most APIs omit taxes and some fixed fees; set fixed monthly cost or a subscription when you know the real bill."
         }
     }
 }
