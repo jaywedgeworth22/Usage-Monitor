@@ -8,7 +8,7 @@ Owner: free tier, continuous all month, shallow history OK, no week-long pause.
 |-----|--------------------|--------------------|-----------------|
 | **Socratic Trade** | **15m** (well backed up) | **24h** | live only (+ tiny litestream cache) |
 | **Congress.Trade** | **15m** | **24h** | live only |
-| **Usage Monitor** | **1h** | **24h** | **1** pre-migrate + **1** deploy backup max |
+| **Usage Monitor** | **2h** (was 1h; 2026-08-06 tip-prune rollout) | **6h** (was 24h; multi-level LTX refilled free tier) | **1** pre-migrate + **1** deploy backup max |
 
 ### Do not
 

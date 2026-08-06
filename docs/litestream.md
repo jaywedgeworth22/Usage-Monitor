@@ -60,10 +60,12 @@ Local pre-migration snapshots on `/data` still exist.
   to run even when replication is never enabled — the binary just sits unused.
 - `litestream.yml` — the replica config: `/data/prod.db`, single S3-type replica
   populated entirely from `LITESTREAM_S3_*` env vars. **Disaster recovery only**
-  for this app: `snapshot.interval: 24h`, `snapshot.retention: 24h`,
-  `sync-interval: 1h`. Not multi-day continuous PITR — R2 is host/disk death
-  recovery, not “rewind to 3h42m ago.” Off-site backup health is observability
-  only on `/api/ready` (does not gate product readiness).
+  for this app: `snapshot.interval: 24h`, `snapshot.retention: 6h`,
+  `sync-interval: 2h`. Not multi-day continuous PITR — R2 is host/disk death
+  recovery, not “rewind to 3h42m ago.” Multi-level LTX under longer retention
+  re-breached the 10 GiB free tier (2026-08-04 / 2026-08-06); maintenance
+  tip-prunes non-tip LTX at 50% storage before the 70% kill. Off-site backup
+  health is observability only on `/api/ready` (does not gate product readiness).
 - `scripts/start-with-litestream.sh` — the container entrypoint. If all four
   required `LITESTREAM_S3_*` vars are set and `bin/litestream` exists: restores
   first if `/data/prod.db` doesn't exist yet (fresh disk or disaster recovery).
@@ -164,9 +166,13 @@ and strict readiness will fail).
 
 ### Free-tier growth (what to expect)
 
-R2 storage is **not** “one copy of `prod.db`.” With `retention: 24h` and
-`sync-interval: 15m`, history stays short so a <<1 GiB live DB stays far under
-70% of free tier. Multi-day retention is what filled 15+ GiB in August 2026.
+R2 storage is **not** “one copy of `prod.db`.” Litestream keeps multi-level LTX
+files for the retention window; a ~0.4 GiB DB can still fill ~9 GiB under a 24h
+window as L1/L2/L3 each hold large intermediates. Production uses
+`retention: 6h` + `sync-interval: 2h`, plus automatic tip-prune at 50% absolute
+storage (keep newest tip per level). Manual tip-prune (ops): delete non-tip
+`.ltx` under `api-usage-monitor/prod.db/{0000..0009}/`. Multi-day retention is
+what filled 15+ GiB in August 2026 — do not raise retention without measuring.
 
 
 ## Rollback host only (Render)

@@ -18,8 +18,10 @@ import {
   fetchR2FleetSummary,
   r2FreeTierFailClosedRequired,
   graphqlStorageSamplesAreFresh,
+  planLtxTipPrune,
   DEFAULT_R2_FREE_TIER_LIMITS,
   R2_DISABLED_FLAG_FILENAME,
+  R2_SOFT_PRUNE_STORAGE_PCT,
   __getR2FlagFilePathForTests,
   __resetR2UsageStateForTests,
 } from "../r2-usage";
@@ -113,6 +115,36 @@ describe("R2 usage monitoring & auto-disable", () => {
     );
     expect(over.mtdPct).toBeGreaterThanOrEqual(70);
     expect(over.onTrackToExceed).toBe(true);
+  });
+
+  it("planLtxTipPrune keeps highest max-txid tip per level", () => {
+    expect(R2_SOFT_PRUNE_STORAGE_PCT).toBe(50);
+    const plan = planLtxTipPrune([
+      {
+        key: "api-usage-monitor/prod.db/0001/0000000000000001-0000000000000010.ltx",
+        size: 100,
+      },
+      {
+        key: "api-usage-monitor/prod.db/0001/0000000000000011-0000000000000020.ltx",
+        size: 200,
+      },
+      {
+        key: "api-usage-monitor/prod.db/0002/0000000000000001-0000000000000015.ltx",
+        size: 300,
+      },
+      { key: "api-usage-monitor/prod.db/meta.txt", size: 5 },
+    ]);
+    expect(plan.delete.map((o) => o.key)).toEqual([
+      "api-usage-monitor/prod.db/0001/0000000000000001-0000000000000010.ltx",
+    ]);
+    expect(plan.keep.map((o) => o.key).sort()).toEqual(
+      [
+        "api-usage-monitor/prod.db/0001/0000000000000011-0000000000000020.ltx",
+        "api-usage-monitor/prod.db/0002/0000000000000001-0000000000000015.ltx",
+        "api-usage-monitor/prod.db/meta.txt",
+      ].sort()
+    );
+    expect(plan.delete.reduce((s, o) => s + o.size, 0)).toBe(100);
   });
 
   it("assesses storage absolute + ops absolute/pace at 70%", () => {

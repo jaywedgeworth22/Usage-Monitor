@@ -133,6 +133,22 @@ export const R2_GRAPHQL_STORAGE_MAX_AGE_MS = 90 * 60 * 1000;
 /** Auto-resume hysteresis: clear kill switch when live storage is below this. */
 export const R2_RESUME_STORAGE_PCT = 65;
 
+/**
+ * Soft tip-prune threshold: when live storage reaches this absolute share of the
+ * free tier, delete non-tip LTX per level (latest max-txid kept) before the 70%
+ * kill. Disaster recovery only needs the tip chain; multi-level LTX history is
+ * what re-breaches free tier every day (2026-08-04 / 2026-08-06).
+ */
+export const R2_SOFT_PRUNE_STORAGE_PCT = 50;
+
+/**
+ * Litestream LTX object key: .../prod.db/0001/00000000-00000001.ltx
+ * Groups: 1=prefix, 2=level, 3=minTx hex, 4=maxTx hex.
+ * Numbered groups only (tsconfig target predates named groups).
+ */
+export const LTX_OBJECT_KEY_RE =
+  /^(.+\/)(\d{4})\/([0-9a-fA-F]+)-([0-9a-fA-F]+)\.ltx$/;
+
 export interface R2BucketStorageSample {
   bucketName: string;
   bytes: number;
@@ -174,6 +190,11 @@ export interface FetchedR2UsageMetrics {
 let inMemoryLastDailyPushoverDate = "";
 let inMemoryEmergencyAlertSent = false;
 let cachedFallbackFlagDir: string | null = null;
+/** Live ListObjects inventory cache (declared early for test reset). */
+let liveS3ListCache: {
+  atMs: number;
+  value: { storageBytes: number; buckets: R2BucketStorageSample[] };
+} | null = null;
 
 function getFlagDir(): string {
   if (fs.existsSync("/data")) return "/data";
@@ -201,6 +222,7 @@ export function __getR2FlagFilePathForTests(filename: string): string {
 export function __resetR2UsageStateForTests(): void {
   inMemoryLastDailyPushoverDate = "";
   inMemoryEmergencyAlertSent = false;
+  liveS3ListCache = null;
   if (cachedFallbackFlagDir) {
     try {
       fs.rmSync(cachedFallbackFlagDir, { recursive: true, force: true });
@@ -907,6 +929,366 @@ export async function listR2BucketStorageViaS3(
   };
 }
 
+export interface R2ObjectListing {
+  key: string;
+  size: number;
+  lastModified?: string;
+}
+
+type LtxListing = R2ObjectListing & { maxTx: number; minTx: number };
+
+/**
+ * Pure planner: keep newest tip (highest max-txid) per Litestream LTX level;
+ * delete the rest. Non-LTX keys are always kept. Exported for unit tests.
+ */
+export function planLtxTipPrune(objects: R2ObjectListing[]): {
+  keep: R2ObjectListing[];
+  delete: R2ObjectListing[];
+  byLevel: Record<string, { keep: string; deleteCount: number; freeBytes: number }>;
+} {
+  const byLevel = new Map<string, LtxListing[]>();
+  const other: R2ObjectListing[] = [];
+  for (const obj of objects) {
+    const m = LTX_OBJECT_KEY_RE.exec(obj.key);
+    if (!m) {
+      other.push(obj);
+      continue;
+    }
+    const levelKey = `${m[1]}${m[2]}`;
+    const entry: LtxListing = {
+      ...obj,
+      minTx: Number.parseInt(m[3], 16),
+      maxTx: Number.parseInt(m[4], 16),
+    };
+    const arr = byLevel.get(levelKey) ?? [];
+    arr.push(entry);
+    byLevel.set(levelKey, arr);
+  }
+
+  const keep: R2ObjectListing[] = [...other];
+  const del: R2ObjectListing[] = [];
+  const summary: Record<string, { keep: string; deleteCount: number; freeBytes: number }> =
+    {};
+
+  for (const [levelKey, items] of [...byLevel.entries()].sort((a, b) =>
+    a[0].localeCompare(b[0])
+  )) {
+    const sorted = items.slice().sort((a, b) => {
+      if (a.maxTx !== b.maxTx) return a.maxTx - b.maxTx;
+      if (a.minTx !== b.minTx) return a.minTx - b.minTx;
+      return (a.lastModified ?? "").localeCompare(b.lastModified ?? "");
+    });
+    const tip = sorted[sorted.length - 1];
+    keep.push({ key: tip.key, size: tip.size, lastModified: tip.lastModified });
+    let freeBytes = 0;
+    for (const it of sorted.slice(0, -1)) {
+      del.push({ key: it.key, size: it.size, lastModified: it.lastModified });
+      freeBytes += it.size;
+    }
+    summary[levelKey] = {
+      keep: tip.key,
+      deleteCount: sorted.length - 1,
+      freeBytes,
+    };
+  }
+
+  return { keep, delete: del, byLevel: summary };
+}
+
+/**
+ * List full object keys+sizes for one bucket (Class A). Used by tip-prune.
+ */
+export async function listR2BucketObjectsViaS3(
+  creds: R2S3ListCredentials,
+  bucket: string,
+  fetchImpl: typeof fetch = fetch,
+  now: Date = new Date()
+): Promise<R2ObjectListing[]> {
+  const endpoint = creds.endpoint.replace(/\/$/, "");
+  const host = new URL(
+    /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(endpoint)
+      ? endpoint
+      : `https://${endpoint}`
+  ).host;
+  const region = creds.region === "auto" ? "us-east-1" : creds.region;
+  const service = "s3";
+  let continuation: string | undefined;
+  const objects: R2ObjectListing[] = [];
+  let pages = 0;
+
+  do {
+    pages += 1;
+    if (pages > 200) throw new Error(`ListObjectsV2 page cap for bucket ${bucket}`);
+    const qs = new URLSearchParams({ "list-type": "2", "max-keys": "1000" });
+    if (continuation) qs.set("continuation-token", continuation);
+    const canonicalUri = `/${bucket}`;
+    const queryPairs = [...qs.entries()]
+      .map(([k, v]) => [encodeURIComponent(k), encodeURIComponent(v)] as const)
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : 1));
+    const canonicalQuery = queryPairs.map(([k, v]) => `${k}=${v}`).join("&");
+    const amzDate = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+    const dateStamp = amzDate.slice(0, 8);
+    const payloadHash = sha256Hex("");
+    const canonicalHeaders =
+      `host:${host}\n` + `x-amz-content-sha256:${payloadHash}\n` + `x-amz-date:${amzDate}\n`;
+    const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+    const canonicalRequest = [
+      "GET",
+      canonicalUri,
+      canonicalQuery,
+      canonicalHeaders,
+      signedHeaders,
+      payloadHash,
+    ].join("\n");
+    const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+    const stringToSign = [
+      "AWS4-HMAC-SHA256",
+      amzDate,
+      credentialScope,
+      sha256Hex(canonicalRequest),
+    ].join("\n");
+    const kDate = hmac(`AWS4${creds.secretAccessKey}`, dateStamp);
+    const kRegion = hmac(kDate, region);
+    const kService = hmac(kRegion, service);
+    const kSigning = hmac(kService, "aws4_request");
+    const signature = hmac(kSigning, stringToSign).toString("hex");
+    const authorization =
+      `AWS4-HMAC-SHA256 Credential=${creds.accessKeyId}/${credentialScope}, ` +
+      `SignedHeaders=${signedHeaders}, Signature=${signature}`;
+    const url = `${endpoint.startsWith("http") ? endpoint : `https://${endpoint}`}/${bucket}?${canonicalQuery}`;
+    const res = await fetchImpl(url, {
+      method: "GET",
+      headers: {
+        host,
+        "x-amz-date": amzDate,
+        "x-amz-content-sha256": payloadHash,
+        authorization,
+      },
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(
+        `ListObjectsV2 ${bucket} HTTP ${res.status}: ${text.slice(0, 200)}`
+      );
+    }
+    // Parse Contents blocks for Key/Size/LastModified
+    const contentBlocks = text.match(/<Contents>[\s\S]*?<\/Contents>/g) ?? [];
+    for (const block of contentBlocks) {
+      const key = block.match(/<Key>([^<]*)<\/Key>/)?.[1];
+      const size = Number(block.match(/<Size>(\d+)<\/Size>/)?.[1] ?? 0);
+      const lastModified = block.match(/<LastModified>([^<]*)<\/LastModified>/)?.[1];
+      if (key) {
+        objects.push({
+          key,
+          size: Number.isFinite(size) ? size : 0,
+          lastModified,
+        });
+      }
+    }
+    const trunc = /<IsTruncated>\s*true\s*<\/IsTruncated>/i.test(text);
+    const next = text.match(
+      /<NextContinuationToken>([^<]+)<\/NextContinuationToken>/
+    );
+    continuation = trunc && next ? next[1] : undefined;
+  } while (continuation);
+
+  return objects;
+}
+
+/**
+ * DeleteObjects (up to 1000 keys per call). Class A. Returns deleted count.
+ */
+export async function deleteR2ObjectsViaS3(
+  creds: R2S3ListCredentials,
+  bucket: string,
+  keys: string[],
+  fetchImpl: typeof fetch = fetch,
+  now: Date = new Date()
+): Promise<{ deleted: number; errors: number }> {
+  if (keys.length === 0) return { deleted: 0, errors: 0 };
+  const endpoint = creds.endpoint.replace(/\/$/, "");
+  const host = new URL(
+    /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(endpoint)
+      ? endpoint
+      : `https://${endpoint}`
+  ).host;
+  const region = creds.region === "auto" ? "us-east-1" : creds.region;
+  const service = "s3";
+  let deleted = 0;
+  let errors = 0;
+  const BATCH = 500;
+
+  for (let i = 0; i < keys.length; i += BATCH) {
+    const batch = keys.slice(i, i + BATCH);
+    const body =
+      `<?xml version="1.0" encoding="UTF-8"?><Delete>` +
+      batch.map((k) => `<Object><Key>${escapeXml(k)}</Key></Object>`).join("") +
+      `</Delete>`;
+    const payload = Buffer.from(body, "utf8");
+    const payloadHash = sha256Hex(payload);
+    const amzDate = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+    const dateStamp = amzDate.slice(0, 8);
+    const canonicalUri = `/${bucket}`;
+    const canonicalQuery = "delete=";
+    const contentType = "application/xml";
+    const canonicalHeaders =
+      `content-type:${contentType}\n` +
+      `host:${host}\n` +
+      `x-amz-content-sha256:${payloadHash}\n` +
+      `x-amz-date:${amzDate}\n`;
+    const signedHeaders = "content-type;host;x-amz-content-sha256;x-amz-date";
+    const canonicalRequest = [
+      "POST",
+      canonicalUri,
+      canonicalQuery,
+      canonicalHeaders,
+      signedHeaders,
+      payloadHash,
+    ].join("\n");
+    const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+    const stringToSign = [
+      "AWS4-HMAC-SHA256",
+      amzDate,
+      credentialScope,
+      sha256Hex(canonicalRequest),
+    ].join("\n");
+    const kDate = hmac(`AWS4${creds.secretAccessKey}`, dateStamp);
+    const kRegion = hmac(kDate, region);
+    const kService = hmac(kRegion, service);
+    const kSigning = hmac(kService, "aws4_request");
+    const signature = hmac(kSigning, stringToSign).toString("hex");
+    const authorization =
+      `AWS4-HMAC-SHA256 Credential=${creds.accessKeyId}/${credentialScope}, ` +
+      `SignedHeaders=${signedHeaders}, Signature=${signature}`;
+    const url = `${endpoint.startsWith("http") ? endpoint : `https://${endpoint}`}/${bucket}?delete=`;
+    const res = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        host,
+        "content-type": contentType,
+        "x-amz-date": amzDate,
+        "x-amz-content-sha256": payloadHash,
+        authorization,
+      },
+      body: payload,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(
+        `DeleteObjects ${bucket} HTTP ${res.status}: ${text.slice(0, 200)}`
+      );
+    }
+    const delCount = (text.match(/<Deleted>/g) || []).length;
+    const errCount = (text.match(/<Error>/g) || []).length;
+    deleted += delCount || batch.length;
+    errors += errCount;
+  }
+  return { deleted, errors };
+}
+
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+export interface R2TipPruneResult {
+  attempted: boolean;
+  deletedObjects: number;
+  freedBytes: number;
+  keptObjects: number;
+  error?: string;
+}
+
+/**
+ * If live storage ≥ soft threshold, tip-prune Litestream LTX on the primary
+ * bucket. No-op when under threshold, missing creds, or nothing to delete.
+ */
+export async function pruneR2LtxTipsIfNeeded(
+  storageBytes: number,
+  fetchImpl: typeof fetch = fetch,
+  now: Date = new Date(),
+  env: Record<string, string | undefined> = process.env,
+  limits: R2UsageLimits = DEFAULT_R2_FREE_TIER_LIMITS,
+  softPct: number = R2_SOFT_PRUNE_STORAGE_PCT
+): Promise<R2TipPruneResult> {
+  const mtdPct = (storageBytes / limits.storageBytes) * 100;
+  if (mtdPct < softPct) {
+    return { attempted: false, deletedObjects: 0, freedBytes: 0, keptObjects: 0 };
+  }
+  const creds = resolveR2S3ListCredentials(env);
+  if (!creds) {
+    return {
+      attempted: false,
+      deletedObjects: 0,
+      freedBytes: 0,
+      keptObjects: 0,
+      error: "S3 list credentials unavailable for tip-prune",
+    };
+  }
+  const bucket = (
+    env.LITESTREAM_S3_BUCKET ||
+    env.AWS_S3_BUCKET_NAME ||
+    ""
+  ).trim();
+  if (!bucket) {
+    return {
+      attempted: false,
+      deletedObjects: 0,
+      freedBytes: 0,
+      keptObjects: 0,
+      error: "no primary litestream bucket for tip-prune",
+    };
+  }
+
+  try {
+    const objects = await listR2BucketObjectsViaS3(creds, bucket, fetchImpl, now);
+    const plan = planLtxTipPrune(objects);
+    if (plan.delete.length === 0) {
+      return {
+        attempted: true,
+        deletedObjects: 0,
+        freedBytes: 0,
+        keptObjects: plan.keep.length,
+      };
+    }
+    const freedBytes = plan.delete.reduce((s, o) => s + o.size, 0);
+    const { deleted, errors } = await deleteR2ObjectsViaS3(
+      creds,
+      bucket,
+      plan.delete.map((o) => o.key),
+      fetchImpl,
+      now
+    );
+    invalidateLiveR2StorageCache();
+    console.warn(
+      `[r2-usage] tip-prune ${bucket}: deleted=${deleted} errors=${errors} ` +
+        `freedGiB=${(freedBytes / (1024 * 1024 * 1024)).toFixed(3)} ` +
+        `kept=${plan.keep.length} (storage was ${mtdPct.toFixed(1)}% ≥ soft ${softPct}%)`
+    );
+    return {
+      attempted: true,
+      deletedObjects: deleted,
+      freedBytes,
+      keptObjects: plan.keep.length,
+      error: errors > 0 ? `${errors} DeleteObjects errors` : undefined,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[r2-usage] tip-prune failed: ${message}`);
+    return {
+      attempted: true,
+      deletedObjects: 0,
+      freedBytes: 0,
+      keptObjects: 0,
+      error: message,
+    };
+  }
+}
+
 /** In-process cache for live ListObjects inventory (Class A). Default 6h. */
 const LIVE_S3_LIST_CACHE_MS = (() => {
   const raw = process.env.R2_LIVE_LIST_CACHE_HOURS?.trim();
@@ -914,29 +1296,32 @@ const LIVE_S3_LIST_CACHE_MS = (() => {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n * 3600_000) : 6 * 3600_000;
 })();
 
-let liveS3ListCache: {
-  atMs: number;
-  value: { storageBytes: number; buckets: R2BucketStorageSample[] };
-} | null = null;
+/**
+ * While kill-switch is on, re-list at most this often so an external tip-prune
+ * can auto-resume within an hour. The previous 24h killed-cache stuck storage
+ * at the pre-prune value and blocked resume after ops deleted LTX.
+ */
+const LIVE_S3_LIST_CACHE_WHILE_KILLED_MS = 60 * 60 * 1000;
+
+/** Test/ops: drop the live ListObjects cache so the next check re-lists. */
+export function invalidateLiveR2StorageCache(): void {
+  liveS3ListCache = null;
+}
 
 export async function fetchLiveR2StorageViaS3(
   fetchImpl: typeof fetch = fetch,
   now: Date = new Date(),
   env: Record<string, string | undefined> = process.env
 ): Promise<{ storageBytes: number; buckets: R2BucketStorageSample[] } | null> {
-  // When R2 writes are already killed, listing every maintenance tick (15m) only
-  // burns Class A ListObjects with no kill decision left to make. Prefer cache /
-  // GraphQL until writes resume.
-  if (isR2AutoDisabled() && LIVE_S3_LIST_CACHE_MS > 0 && liveS3ListCache) {
-    if (now.getTime() - liveS3ListCache.atMs < Math.max(LIVE_S3_LIST_CACHE_MS, 24 * 3600_000)) {
+  // Cache ListObjects (Class A). While killed, cap cache at 1h so tip-prunes
+  // are visible for auto-resume without listing every 15m maintenance tick.
+  if (LIVE_S3_LIST_CACHE_MS > 0 && liveS3ListCache) {
+    const maxAge = isR2AutoDisabled()
+      ? Math.min(LIVE_S3_LIST_CACHE_MS, LIVE_S3_LIST_CACHE_WHILE_KILLED_MS)
+      : LIVE_S3_LIST_CACHE_MS;
+    if (now.getTime() - liveS3ListCache.atMs < maxAge) {
       return liveS3ListCache.value;
     }
-  } else if (
-    LIVE_S3_LIST_CACHE_MS > 0 &&
-    liveS3ListCache &&
-    now.getTime() - liveS3ListCache.atMs < LIVE_S3_LIST_CACHE_MS
-  ) {
-    return liveS3ListCache.value;
   }
 
   const creds = resolveR2S3ListCredentials(env);
@@ -1407,6 +1792,41 @@ export async function runR2UsageCheck(
 
   assessment.storageIsLive = storageIsLive;
   assessment.storageSampleStale = storageSampleStale;
+
+  // Soft tip-prune before kill: multi-level LTX history is DR-optional; free
+  // tier is not. Re-list after a successful prune so kill/resume use new bytes.
+  if (
+    storageIsLive &&
+    assessment.storage.mtdPct >= R2_SOFT_PRUNE_STORAGE_PCT &&
+    isLitestreamR2Endpoint()
+  ) {
+    const prune = await pruneR2LtxTipsIfNeeded(
+      assessment.storage.actual,
+      fetchImpl,
+      now
+    );
+    if (prune.attempted && prune.deletedObjects > 0) {
+      const refreshed = await fetchLiveR2StorageViaS3(fetchImpl, now);
+      if (refreshed) {
+        const opsA = assessment.classA.actual;
+        const opsB = assessment.classB.actual;
+        assessment = assessR2Usage(
+          refreshed.storageBytes,
+          opsA,
+          opsB,
+          DEFAULT_R2_FREE_TIER_LIMITS,
+          now,
+          {
+            metricsSource: "live_s3_storage+graphql_ops",
+            buckets: refreshed.buckets,
+            metricsError: assessment.metricsError,
+          }
+        );
+        assessment.storageIsLive = true;
+        storageIsLive = true;
+      }
+    }
+  }
 
   // Kill only on trustworthy measurements — never on stale GraphQL storage alone.
   // Storage kill requires a trustworthy sample: live S3 list, or fresh GraphQL

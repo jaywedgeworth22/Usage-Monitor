@@ -152,29 +152,66 @@ node "${REPO_ROOT}/scripts/migrate-safe.mjs"
 if [[ "${litestream_enabled}" == "true" && "${litestream_endpoint_is_r2}" == "true" ]]; then
   # R2 path: run litestream as a sibling of npm so the free-tier kill switch can
   # stop replication mid-cycle without taking the app down. A watcher polls the
-  # flag file every 30s and SIGTERMs litestream when it appears (Node maintenance
-  # writes it when GraphQL metrics hit 70% free tier).
+  # flag every 30s: stop litestream when killed, and RESTART it after the flag
+  # is cleared (auto-resume after tip-prune) without requiring a container bounce.
   log "starting litestream replicate (R2) as supervised sibling of npm start."
-  "${LITESTREAM_BIN}" replicate -config "${LITESTREAM_CONFIG}" &
-  LITESTREAM_PID=$!
+  LITESTREAM_PID_FILE="$(mktemp /tmp/um-litestream-pid.XXXXXX)"
+  start_r2_litestream() {
+    "${LITESTREAM_BIN}" replicate -config "${LITESTREAM_CONFIG}" &
+    echo $! >"${LITESTREAM_PID_FILE}"
+    log "litestream started pid=$(cat "${LITESTREAM_PID_FILE}")"
+  }
+  stop_r2_litestream() {
+    local pid=""
+    if [[ -f "${LITESTREAM_PID_FILE}" ]]; then
+      pid="$(cat "${LITESTREAM_PID_FILE}" 2>/dev/null || true)"
+    fi
+    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+      log "stopping litestream pid=${pid}"
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+    fi
+    : >"${LITESTREAM_PID_FILE}"
+  }
+  r2_kill_active() {
+    [[ "${LITESTREAM_EMERGENCY_DISABLE:-false}" == "true" \
+      || "${R2_WRITES_DISABLED:-false}" == "true" \
+      || -f "/data/r2-disabled-70pct.flag" ]]
+  }
+  start_r2_litestream
   (
-    while kill -0 "${LITESTREAM_PID}" 2>/dev/null; do
-      if [[ "${LITESTREAM_EMERGENCY_DISABLE:-false}" == "true" || "${R2_WRITES_DISABLED:-false}" == "true" || -f "/data/r2-disabled-70pct.flag" ]]; then
-        log "R2 free-tier kill switch tripped — stopping litestream pid=${LITESTREAM_PID}."
-        kill "${LITESTREAM_PID}" 2>/dev/null || true
-        wait "${LITESTREAM_PID}" 2>/dev/null || true
-        log "litestream stopped; app continues without R2 replication."
-        exit 0
+    was_killed=false
+    while true; do
+      if r2_kill_active; then
+        if [[ "${was_killed}" != "true" ]]; then
+          log "R2 free-tier kill switch active — stopping litestream."
+          stop_r2_litestream
+          was_killed=true
+        fi
+      else
+        pid=""
+        if [[ -f "${LITESTREAM_PID_FILE}" ]]; then
+          pid="$(cat "${LITESTREAM_PID_FILE}" 2>/dev/null || true)"
+        fi
+        if [[ -z "${pid}" ]] || ! kill -0 "${pid}" 2>/dev/null; then
+          if [[ "${was_killed}" == "true" ]]; then
+            log "R2 kill cleared — restarting litestream."
+          else
+            log "litestream not running (unexpected exit) — restarting."
+          fi
+          start_r2_litestream
+          was_killed=false
+        fi
       fi
       sleep 30
     done
   ) &
   R2_WATCH_PID=$!
   cleanup_r2_litestream() {
-    log "shutting down R2 litestream sibling (pid=${LITESTREAM_PID}) and watcher."
+    log "shutting down R2 litestream sibling and watcher."
     kill "${R2_WATCH_PID}" 2>/dev/null || true
-    kill "${LITESTREAM_PID}" 2>/dev/null || true
-    wait "${LITESTREAM_PID}" 2>/dev/null || true
+    stop_r2_litestream
+    rm -f "${LITESTREAM_PID_FILE}" 2>/dev/null || true
   }
   trap cleanup_r2_litestream SIGTERM SIGINT EXIT
   # npm start as the foreground process (receives container SIGTERM via trap).

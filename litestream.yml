@@ -24,11 +24,14 @@
 #   is not a product requirement). Keep history short and sync infrequent so
 #   storage stays well under 70% of the 10 GiB free tier.
 
-# One snapshot per day; keep only ~1 day of history so GC drops old LTX quickly.
-# (Was 48h, then 168h, then 720h — all too large for free-tier R2.)
+# Shallow PITR only — free-tier R2 cannot hold multi-level LTX for a full day.
+# A ~0.4 GiB DB with L1/L2/L3 full-window files × 24h ≈ 9 GiB (2026-08-06 breach).
+# 6h retention + 2h sync keeps latest disaster recovery without re-breaching 70%.
+# Maintenance tip-prunes non-tip LTX at 50% as a safety net (see r2-usage.ts).
+# (Was 24h/48h/168h/720h retention — all too large for free-tier R2.)
 snapshot:
   interval: 24h
-  retention: 24h
+  retention: 6h
 
 dbs:
   - path: /data/prod.db
@@ -42,8 +45,7 @@ dbs:
       secret-access-key: ${LITESTREAM_S3_SECRET_ACCESS_KEY}
       # One multipart part at a time for reliability on constrained links.
       concurrency: 1
-      # Upload WAL at most every hour. Class A (List/Put) burns free-tier ops;
-      # this is disaster recovery only (host/disk death), not continuous PITR.
-      # Owner 2026-08-05: infrequent is fine; re-entering keys beats R2 drama.
-      # (Was 1s → 60s → 15m → 1h.)
-      sync-interval: 1h
+      # Disaster recovery only (host/disk death), not continuous PITR.
+      # Owner: infrequent is fine; free-tier survival beats multi-hour rewind.
+      # (Was 1s → 60s → 15m → 1h → 2h.)
+      sync-interval: 2h

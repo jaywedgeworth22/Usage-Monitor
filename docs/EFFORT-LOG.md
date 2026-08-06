@@ -17,6 +17,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **[GROK] R2 free-tier refill: tip-prune + 6h retention + litestream auto-resume (2026-08-06) — PR #1022 / HOST OPS DONE.** Live prune 8.92→0.40 GiB; kill cleared; litestream live sync=2h retention=6h; soft tip-prune@50% + watcher resume in PR.
 - **[GROK] Rename compose project oracle → usage-monitor (clear container names) (2026-08-06) — IN PR.** Containers usage-monitor-app-1 / usage-monitor-caddy-1; retire legacy oracle-app-*; deploy cutover handles mid-rename.
 - **[GROK] iOS app icons: clean orange ring + Local full-width LOCAL stripe (no phone) (2026-08-05) — IN PROGRESS.** Remove broken off-center nubs on remote orange mark; Local drops tiny phone, large LOCAL on full bottom white stripe. Branch `grok/ios-appicon-local-stripe`.
 - **[GROK] R2 fleet ST/CT pushover-parity card + iOS inline titles (2026-08-05) — IN PR #984.** Fleet card status/source/limits/top buckets; iOS tab roots `.inline` title; empty SF Symbol guards. Branch `grok/r2-fleet-ios-chrome`.
