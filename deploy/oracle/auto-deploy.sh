@@ -78,12 +78,20 @@ block_revision() {
 recover_current_app_if_stopped() {
   local revision="$1"
   local container_ids count container_id restart_policy body
+  # Accept either the clear usage-monitor project name or the legacy oracle name
+  # until the first rename cutover lands.
   if ! container_ids="$(timeout 30 docker ps \
-    --filter 'label=com.docker.compose.project=oracle' \
+    --filter 'label=com.docker.compose.project=usage-monitor' \
     --filter 'label=com.docker.compose.service=app' \
     --format '{{.ID}}')"; then
     log "Docker state is temporarily unavailable."
     return 75
+  fi
+  if [[ -z "${container_ids//[$'\t\n\r ']/}" ]]; then
+    container_ids="$(timeout 30 docker ps \
+      --filter 'label=com.docker.compose.project=oracle' \
+      --filter 'label=com.docker.compose.service=app' \
+      --format '{{.ID}}' 2>/dev/null || true)"
   fi
   count="$(awk 'NF { count += 1 } END { print count + 0 }' <<<"${container_ids}")"
   if [[ "${count}" == "1" ]]; then

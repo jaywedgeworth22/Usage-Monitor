@@ -369,7 +369,7 @@ function runRestoreCase({
   const restoreMarker = path.join(caseDir, "restore-started");
   const harness = `
 set -Eeuo pipefail
-APP_CONTAINER=oracle-app-1
+APP_CONTAINER=usage-monitor-app-1
 DATA_DIR="$CASE_DIR_VALUE"
 DB_PATH="$CASE_DIR_VALUE/prod.db"
 TARGET_SHA="${"a".repeat(40)}"
@@ -525,8 +525,8 @@ try {
 
   const successfulRestore = runRestoreCase();
   assert.equal(successfulRestore.result.status, 0, successfulRestore.result.stderr);
-  assert.match(successfulRestore.commands, /docker exec oracle-app-1 \/usr\/bin\/timeout --signal=TERM --kill-after=30s 900 \/app\/bin\/litestream restore/);
-  assert.match(successfulRestore.commands, /docker top oracle-app-1 -eo pid,args ww/);
+  assert.match(successfulRestore.commands, /docker exec usage-monitor-app-1 \/usr\/bin\/timeout --signal=TERM --kill-after=30s 900 \/app\/bin\/litestream restore/);
+  assert.match(successfulRestore.commands, /docker top usage-monitor-app-1 -eo pid,args ww/);
   assert.match(successfulRestore.commands, /-integrity-check quick/);
   assert.doesNotMatch(successfulRestore.commands, /-integrity-check full/);
   assert.equal((successfulRestore.commands.match(/PRAGMA integrity_check/g) ?? []).length, 1);
