@@ -35,7 +35,7 @@ import {
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_RETENTION = 3;
+const DEFAULT_RETENTION = 1; // free-tier disk: one pre-migrate snapshot is enough
 const MAX_RETENTION = 10;
 const BACKUP_DIRECTORY = ".pre-migration-backups";
 
