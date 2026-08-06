@@ -255,7 +255,7 @@ private struct SubscriptionInventoryRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Spacing.sm) {
-            Image(systemName: statusSymbol)
+            Image(safeSystemName: statusSymbol, fallback: "circle")
                 .font(.title3)
                 .foregroundStyle(status.tint)
                 .frame(width: 28)

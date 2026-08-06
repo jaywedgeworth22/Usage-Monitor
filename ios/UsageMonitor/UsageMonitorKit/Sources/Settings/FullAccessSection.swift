@@ -194,7 +194,7 @@ private struct AccessCapabilityRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Spacing.sm) {
-            Image(systemName: systemImage)
+            Image(safeSystemName: systemImage, fallback: "circle")
                 .foregroundStyle(status.tint)
                 .frame(width: 24)
                 .accessibilityHidden(true)

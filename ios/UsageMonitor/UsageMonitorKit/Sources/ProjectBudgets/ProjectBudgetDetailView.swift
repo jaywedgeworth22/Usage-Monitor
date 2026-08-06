@@ -212,7 +212,7 @@ private struct CaveatRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Spacing.md) {
-            Image(systemName: symbol)
+            Image(safeSystemName: symbol, fallback: "info.circle")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(status.tint)
                 .frame(width: 28)

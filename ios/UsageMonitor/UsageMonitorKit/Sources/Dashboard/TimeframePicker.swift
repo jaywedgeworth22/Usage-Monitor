@@ -41,7 +41,10 @@ public struct TimeframePicker: View {
                     Button {
                         selection = item.option
                     } label: {
-                        Label(item.label, systemImage: selection == item.option ? "checkmark" : "")
+                        // Never pass systemImage: "" — SF Symbols logs
+                        // "No symbol named '' found" once per unselected row
+                        // (×22 options × every menu re-render = log spam).
+                        menuRowLabel(item.label, selected: selection == item.option)
                     }
                 }
             }
@@ -52,7 +55,7 @@ public struct TimeframePicker: View {
                     Button {
                         selection = option
                     } label: {
-                        Label(option.displayLabel, systemImage: selection == option ? "checkmark" : "")
+                        menuRowLabel(option.displayLabel, selected: selection == option)
                     }
                 }
             }
@@ -63,7 +66,7 @@ public struct TimeframePicker: View {
                     Button {
                         selection = option
                     } label: {
-                        Label(option.displayLabel, systemImage: selection == option ? "checkmark" : "")
+                        menuRowLabel(option.displayLabel, selected: selection == option)
                     }
                 }
             }
@@ -80,6 +83,15 @@ public struct TimeframePicker: View {
         }
         .accessibilityLabel("Time period filter")
         .accessibilityValue(selection.displayLabel)
+    }
+
+    @ViewBuilder
+    private func menuRowLabel(_ title: String, selected: Bool) -> some View {
+        if selected {
+            Label(title, systemImage: "checkmark")
+        } else {
+            Text(title)
+        }
     }
 }
 

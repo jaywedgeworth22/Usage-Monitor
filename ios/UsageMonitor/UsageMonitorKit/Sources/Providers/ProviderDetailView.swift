@@ -529,7 +529,7 @@ struct ProviderDetailView: View {
             VStack(spacing: Theme.Spacing.sm) {
                 ForEach(alerts) { alert in
                     HStack(alignment: .top, spacing: Theme.Spacing.md) {
-                        Image(systemName: alert.symbolName)
+                        Image(safeSystemName: alert.symbolName, fallback: "bell.badge")
                             .font(.callout.weight(.semibold))
                             .foregroundStyle(Theme.SemanticStatus(alert.severity).tint)
                             .frame(width: 26)
