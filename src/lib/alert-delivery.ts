@@ -17,6 +17,10 @@ import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
 import { resolveAnomalyConfig } from "@/lib/anomaly-detection";
 import { loadSpendAnomaliesByProjectId } from "@/lib/anomaly-loader";
 import { loadSubscriptionInsightAlerts } from "@/lib/subscription-insights";
+import {
+  PROJECT_BUDGETS_PROVIDER_DISPLAY_NAME as PROJECT_ALERTS_PROVIDER_DISPLAY_NAME,
+  PROJECT_BUDGETS_PROVIDER_NAME as PROJECT_ALERTS_PROVIDER_NAME,
+} from "@/lib/system-providers";
 
 export type AlertDeliveryChannel =
   | { kind: "slack"; url: string }
@@ -198,8 +202,7 @@ const SEVERITY_RANK: Record<AlertSeverity, number> = {
 // inactive system row — same pattern as the self-seeded "Agent Sync Relay"
 // catalog row (ensure-agent-sync-provider.ts) — carries every per-project
 // incident with `scope` = project id, reusing the machinery unchanged.
-const PROJECT_ALERTS_PROVIDER_NAME = "project-budgets";
-const PROJECT_ALERTS_PROVIDER_DISPLAY_NAME = "Project Budgets";
+// Name constants: PROJECT_ALERTS_PROVIDER_* from @/lib/system-providers.
 // S1c: unassigned-spend info alerts only fire above this default floor (and
 // only once at least one project exists — with zero projects, ALL spend is
 // unassigned by definition and alerting would be pure noise).
@@ -2313,10 +2316,25 @@ export async function deliverProviderAlerts(options: {
   // falsely resolved by a transient error).
   let projectAlertsEvaluated = false;
   if (!options.db) {
-    const existingProjectProvider = await db.provider.findFirst({
+    let existingProjectProvider = await db.provider.findFirst({
       where: { name: PROJECT_ALERTS_PROVIDER_NAME },
       select: ALERT_EVALUATION_PROVIDER_SELECT,
     });
+    // Never an operator connection / poll target — self-heal if someone toggled it on.
+    if (existingProjectProvider?.isActive) {
+      existingProjectProvider = await db.provider.update({
+        where: { id: existingProjectProvider.id },
+        data: {
+          isActive: false,
+          refreshIntervalMin: Math.max(
+            existingProjectProvider.refreshIntervalMin ?? 0,
+            1440
+          ),
+          alertConfigGeneration: { increment: 1 },
+        },
+        select: ALERT_EVALUATION_PROVIDER_SELECT,
+      });
+    }
     if (!readBoolEnvValue(process.env, "ALERT_PROJECT_BUDGETS_ENABLED", true)) {
       // Disabled: evaluate as empty so any previously-open incidents resolve.
       projectAlertsProvider = existingProjectProvider;

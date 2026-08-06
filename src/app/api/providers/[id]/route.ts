@@ -45,6 +45,7 @@ import {
   projectProviderBillingAccountMatches,
 } from "@/lib/provider-billing-account";
 import { hasValidDashboardSession, shouldEnforceDashboardSession } from "@/lib/auth";
+import { isInternalSystemProviderName } from "@/lib/system-providers";
 
 function decryptKey(encryptedKey: string | null): string | null {
   if (!encryptedKey) return null;
@@ -134,6 +135,10 @@ export async function GET(
   })]);
 
   if (!provider) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  // Internal system anchors (project-budgets alert carrier) are not operator-facing.
+  if (isInternalSystemProviderName(provider.name)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -364,6 +369,15 @@ export async function PUT(
   });
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (isInternalSystemProviderName(existing.name)) {
+    return NextResponse.json(
+      {
+        error:
+          "This is an internal system provider (not a connection) and cannot be edited",
+      },
+      { status: 403 }
+    );
   }
 
   let input;
@@ -637,6 +651,15 @@ export async function DELETE(
   const existing = await prisma.provider.findUnique({ where: { id } });
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (isInternalSystemProviderName(existing.name)) {
+    return NextResponse.json(
+      {
+        error:
+          "This is an internal system provider (not a connection) and cannot be deleted",
+      },
+      { status: 403 }
+    );
   }
 
   if (hasStPrimaryCredentialOwnership(
