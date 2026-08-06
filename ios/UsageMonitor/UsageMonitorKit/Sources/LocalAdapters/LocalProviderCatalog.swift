@@ -140,8 +140,8 @@ public enum LocalProviderCatalog {
             category: "Hosting",
             mode: .keyPlusSubscription,
             adapterKind: "subscription_only",
-            help: "Workers Paid etc. Track $5 Workers or other plan fees as subscriptions.",
-            suggestedMonthlyUsd: 5,
+            help: "Track Workers Paid or other plan fees only if you actually pay them. Free tier and unused accounts should stay $0.",
+            suggestedMonthlyUsd: nil,
             suggestedSubscriptionName: "Workers Paid"
         ),
         .init(
@@ -159,9 +159,9 @@ public enum LocalProviderCatalog {
             category: "Hosting",
             mode: .subscription,
             adapterKind: "subscription_only",
-            help: "FOCUS/project billing is server-side. Track Pro plan here.",
-            suggestedMonthlyUsd: 20,
-            suggestedSubscriptionName: "Vercel Pro"
+            help: "FOCUS/project billing is server-side. Leave $0 unless you pay for Pro/Enterprise — do not invent a Pro fee.",
+            suggestedMonthlyUsd: nil,
+            suggestedSubscriptionName: "Vercel plan"
         ),
         .init(
             name: "hetzner",
@@ -353,8 +353,8 @@ public enum LocalProviderCatalog {
             category: "Brokerage",
             mode: .subscription,
             adapterKind: "subscription_only",
-            help: "Push-primary on fleet; track Gold or similar here.",
-            suggestedMonthlyUsd: 5,
+            help: "Brokerage account balance is not a usage cost. Only add a fee if you pay Robinhood Gold (or similar) — leave $0 otherwise.",
+            suggestedMonthlyUsd: nil,
             suggestedSubscriptionName: "Robinhood Gold"
         ),
 

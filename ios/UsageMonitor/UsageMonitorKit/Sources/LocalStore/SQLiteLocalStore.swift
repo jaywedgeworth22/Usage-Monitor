@@ -296,6 +296,15 @@ public actor SQLiteLocalStore: LocalStoring {
 
     // MARK: - Charges
 
+    /// Remove charge rows for one subscription (Local-only cleanup of seed ghosts).
+    public func deleteCharges(subscriptionId: String) throws {
+        try requireOpen()
+        try exec(
+            "DELETE FROM subscription_charge WHERE subscription_id = ?",
+            bind: { sqlite3_bind_text($0, 1, subscriptionId, -1, SQLITE_TRANSIENT) }
+        )
+    }
+
     public func insertCharge(_ c: LocalSubscriptionCharge) throws {
         try requireOpen()
         try exec(

@@ -78,6 +78,22 @@ final class SubscriptionManagementStore {
         }
     }
 
+    /// Permanently remove a subscription row (`DELETE /api/subscriptions/:id`).
+    func delete(
+        id: String,
+        using client: APIClient,
+        afterMutation: ManagementMutationHandler
+    ) async -> Bool {
+        guard actionSubscriptionID == nil,
+              subscriptions.contains(where: { $0.id == id })
+        else {
+            return false
+        }
+        return await mutate(id: id, using: client, afterMutation: afterMutation) { client in
+            _ = try await client.deleteSubscription(id: id)
+        }
+    }
+
     private func mutate(
         id: String,
         using client: APIClient,
@@ -154,6 +170,7 @@ struct SubscriptionManagementInventoryView: View {
     let client: APIClient
     let afterMutation: ManagementMutationHandler
     @State private var store = SubscriptionManagementStore()
+    @State private var pendingDelete: SubscriptionSummary?
 
     var body: some View {
         List {
@@ -201,11 +218,19 @@ struct SubscriptionManagementInventoryView: View {
                         } label: {
                             SubscriptionInventoryRow(subscription: subscription)
                         }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                pendingDelete = subscription
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .accessibilityLabel("Delete \(subscription.name)")
+                        }
                     }
                 } header: {
                     Text("Tracked plans")
                 } footer: {
-                    Text("Pause, resume, and repurchase are available natively. New purchases, cadence changes, external-billing links, and environment-knob edits remain on the web because those flows require additional server-validated context.")
+                    Text("Swipe left to delete. Pause, resume, and repurchase are on the detail screen. New purchases, cadence changes, external-billing links, and environment-knob edits remain on the web.")
                 }
             }
 
@@ -224,6 +249,32 @@ struct SubscriptionManagementInventoryView: View {
         }
         .task {
             await store.loadIfNeeded(using: client)
+        }
+        .confirmationDialog(
+            "Delete this subscription?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { subscription in
+            Button("Delete \(subscription.name)", role: .destructive) {
+                Task {
+                    let success = await store.delete(
+                        id: subscription.id,
+                        using: client,
+                        afterMutation: afterMutation
+                    )
+                    success ? Haptics.success() : Haptics.error()
+                    pendingDelete = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDelete = nil
+            }
+        } message: { subscription in
+            Text("“\(subscription.name)” will be removed. Already-materialized charges stay in usage history; future periods will not be billed.")
         }
     }
 }

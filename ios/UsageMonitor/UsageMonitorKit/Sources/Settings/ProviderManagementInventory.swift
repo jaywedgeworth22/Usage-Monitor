@@ -109,6 +109,23 @@ final class ProviderManagementStore {
         }
     }
 
+    /// Delete a provider. Callers must only offer this when `canDelete` is true.
+    func delete(
+        providerID: String,
+        using client: APIClient,
+        afterMutation: ManagementMutationHandler
+    ) async -> Bool {
+        guard actionProviderID == nil,
+              let provider = providers.first(where: { $0.id == providerID }),
+              provider.canDelete
+        else {
+            return false
+        }
+        return await mutate(providerID: providerID, using: client, afterMutation: afterMutation) { client in
+            _ = try await client.deleteProvider(id: providerID)
+        }
+    }
+
     private func mutate(
         providerID: String,
         using client: APIClient,
@@ -164,6 +181,7 @@ struct ProviderManagementInventoryView: View {
     let client: APIClient
     let afterMutation: ManagementMutationHandler
     @State private var store = ProviderManagementStore()
+    @State private var pendingDelete: ProviderManagementItem?
 
     var body: some View {
         List {
@@ -192,7 +210,7 @@ struct ProviderManagementInventoryView: View {
                 .listRowBackground(Color.clear)
             } else {
                 ProviderInventorySummarySection(providers: store.providers)
-                Section("Connections") {
+                Section {
                     ForEach(store.providers) { provider in
                         NavigationLink {
                             ProviderManagementDetailView(
@@ -204,7 +222,21 @@ struct ProviderManagementInventoryView: View {
                         } label: {
                             ProviderInventoryRow(provider: provider)
                         }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if provider.canDelete {
+                                Button(role: .destructive) {
+                                    pendingDelete = provider
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                .accessibilityLabel("Delete \(provider.title)")
+                            }
+                        }
                     }
+                } header: {
+                    Text("Connections")
+                } footer: {
+                    Text("Swipe left on a connection to delete it. Managed (Infisical) providers cannot be deleted — deactivate them instead.")
                 }
             }
 
@@ -223,6 +255,32 @@ struct ProviderManagementInventoryView: View {
         }
         .task {
             await store.loadIfNeeded(using: client)
+        }
+        .confirmationDialog(
+            "Delete this provider?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { provider in
+            Button("Delete \(provider.title)", role: .destructive) {
+                Task {
+                    let success = await store.delete(
+                        providerID: provider.id,
+                        using: client,
+                        afterMutation: afterMutation
+                    )
+                    success ? Haptics.success() : Haptics.error()
+                    pendingDelete = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDelete = nil
+            }
+        } message: { provider in
+            Text("“\(provider.title)” will be removed from the monitor. Providers with API-key attribution history cannot be deleted — deactivate them instead.")
         }
     }
 }

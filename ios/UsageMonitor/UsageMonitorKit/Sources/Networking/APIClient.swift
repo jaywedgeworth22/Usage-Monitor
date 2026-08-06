@@ -372,6 +372,27 @@ public actor APIClient {
         )
     }
 
+    /// `DELETE /api/providers/:id` — remove a provider. Infisical-managed and
+    /// key-attribution-history providers return 409.
+    @discardableResult
+    public func deleteProvider(id: String) async throws -> ProviderDeleteReceipt {
+        try await sendWithoutBody(
+            "/api/providers/\(id)",
+            method: .delete,
+            authorization: .session
+        )
+    }
+
+    /// `DELETE /api/subscriptions/:id` — remove a tracked subscription row.
+    @discardableResult
+    public func deleteSubscription(id: String) async throws -> SubscriptionDeleteReceipt {
+        try await sendWithoutBody(
+            "/api/subscriptions/\(id)",
+            method: .delete,
+            authorization: .session
+        )
+    }
+
     // MARK: - Provider read depth (session-only)
 
     /// `GET /api/snapshots?providerId=&days=` — real recorded usage history

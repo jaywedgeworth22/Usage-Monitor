@@ -9,6 +9,9 @@ public struct LocalRootView: View {
     @State private var model = LocalAppModel()
     @State private var tab: Tab = .overview
     @State private var showAddProvider = false
+    /// Provider pending swipe-delete confirmation (nil when dialog is idle).
+    @State private var pendingDeleteProvider: LocalProvider?
+    @State private var showWipeConfirmation = false
 
     public init() {}
 
@@ -103,7 +106,11 @@ public struct LocalRootView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .dsCard()
 
-                        ForEach(s.providers, id: \.providerId) { row in
+                        // Hide inactive $0 shells from Overview noise; full list is under Providers.
+                        ForEach(
+                            s.providers.filter { $0.spentUsd > 0.000_5 || $0.pollVariableUsd > 0.000_5 || $0.isActive },
+                            id: \.providerId
+                        ) { row in
                             providerSpendRow(row)
                         }
                     } else if !model.isReady {
@@ -187,12 +194,14 @@ public struct LocalRootView: View {
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                     }
-                }
-                .onDelete { indexSet in
-                    Task {
-                        for i in indexSet {
-                            try? await model.deleteProvider(id: model.providers[i].id)
+                    // Swipe left → Delete button → confirmation (no full-swipe auto-delete).
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            pendingDeleteProvider = p
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
+                        .accessibilityLabel("Delete \(p.displayName)")
                     }
                 }
             }
@@ -203,6 +212,27 @@ public struct LocalRootView: View {
                         Image(systemName: "plus")
                     }
                 }
+            }
+            .confirmationDialog(
+                "Delete this provider?",
+                isPresented: Binding(
+                    get: { pendingDeleteProvider != nil },
+                    set: { if !$0 { pendingDeleteProvider = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pendingDeleteProvider
+            ) { provider in
+                Button("Delete \(provider.displayName)", role: .destructive) {
+                    Task {
+                        try? await model.deleteProvider(id: provider.id)
+                        pendingDeleteProvider = nil
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingDeleteProvider = nil
+                }
+            } message: { provider in
+                Text("“\(provider.displayName)” and its Keychain credentials will be removed from this phone. Local history for this provider is deleted.")
             }
         }
     }
@@ -225,7 +255,7 @@ public struct LocalRootView: View {
                         .font(Theme.Typography.caption)
                 }
                 Section("Catalog") {
-                    Text("\(LocalProviderCatalog.all.count) fleet providers available under + Add.")
+                    Text("\(LocalProviderCatalog.all.count) fleet providers available under + Add. Seed only creates inactive shells — it never invents paid subscriptions.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button("Seed missing fleet templates") {
@@ -234,17 +264,34 @@ public struct LocalRootView: View {
                             try? await model.reload()
                         }
                     }
+                    Button("Remove catalog-guess charges") {
+                        Task {
+                            _ = try? await model.scrubCatalogGuessCharges()
+                        }
+                    }
                 }
                 Section("Data") {
                     Button("Refresh all providers", role: nil) {
                         Task { await model.refreshAllDue(force: true) }
                     }
                     Button("Wipe all local data", role: .destructive) {
-                        Task { try? await model.wipeAll() }
+                        showWipeConfirmation = true
                     }
                 }
             }
             .navigationTitle("Settings")
+            .confirmationDialog(
+                "Wipe all local data?",
+                isPresented: $showWipeConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Wipe everything", role: .destructive) {
+                    Task { try? await model.wipeAll() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Removes every provider, plan, subscription charge, and Keychain API key stored on this phone. This cannot be undone.")
+            }
         }
     }
 
@@ -299,7 +346,7 @@ private struct AddProviderSheet: View {
                         Button("Seed all fleet templates (no API keys)") {
                             Task { await seed() }
                         }
-                        Text("Adds subscription/manual shells for every catalog provider that does not need a key on first save. Pollable LLMs (OpenRouter, OpenAI, …) still need a key via Add.")
+                        Text("Seed (Settings) only adds inactive $0 shells. Enter a monthly fee only for plans you actually pay — catalog price hints are optional prefill, not real bills.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         if let seedMessage {

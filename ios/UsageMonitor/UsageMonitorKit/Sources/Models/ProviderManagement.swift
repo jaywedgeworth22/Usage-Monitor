@@ -150,8 +150,31 @@ public struct ProviderManagementItem: Codable, Hashable, Sendable, Identifiable 
         !(credentialManagement?.readOnlyFields.contains("isActive") ?? false)
     }
 
+    /// Matches web Settings: Infisical-managed rows cannot be deleted (server 409).
+    public var canDelete: Bool {
+        credentialManagement == nil
+    }
+
     public var latestSnapshotDate: Date? {
         latestSnapshot.flatMap { ISO8601DateParser.date(from: $0.fetchedAt) }
+    }
+}
+
+/// Response from `DELETE /api/providers/:id` (`{ "success": true }`).
+public struct ProviderDeleteReceipt: Codable, Hashable, Sendable {
+    public var success: Bool
+
+    public init(success: Bool) {
+        self.success = success
+    }
+}
+
+/// Response from `DELETE /api/subscriptions/:id` (`{ "ok": true }`).
+public struct SubscriptionDeleteReceipt: Codable, Hashable, Sendable {
+    public var ok: Bool
+
+    public init(ok: Bool) {
+        self.ok = ok
     }
 }
 

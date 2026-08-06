@@ -33,6 +33,8 @@ public final class LocalAppModel {
         do {
             try await store.open()
             schemaVersion = await store.schemaVersion
+            // Heal seed-invented catalog-guess fees before materialize.
+            _ = try await scrubCatalogGuessCharges(reloadAfter: false)
             lastMaterializedCharges = try await SubscriptionMaterializer.materialize(store: store)
             try await reload()
             isReady = true
@@ -127,60 +129,77 @@ public final class LocalAppModel {
         plan.updatedAt = Date()
         try await store.upsertPlan(plan)
 
-        let subCost = subscriptionCostUsd ?? 0
-        if entry.mode != .poll || subCost > 0 {
-            if subCost > 0 || entry.mode == .subscription {
-                let cost = max(0, subscriptionCostUsd ?? entry.suggestedMonthlyUsd ?? 0)
-                if cost > 0 || entry.mode == .subscription {
-                    try await attachSubscription(
-                        providerId: p.id,
-                        name: subscriptionName
-                            ?? entry.suggestedSubscriptionName
-                            ?? "\(entry.displayName) plan",
-                        costUsd: cost
-                    )
-                }
-            }
+        // Catalog `suggestedMonthlyUsd` is UI prefill only. Never fall back to it
+        // here — seed used to invent fake MTD charges (Vercel Pro $20, Workers $5,
+        // Robinhood Gold $5). Only an explicit cost from Add → Save creates a sub.
+        if let explicitCost = subscriptionCostUsd {
+            try await attachSubscription(
+                providerId: p.id,
+                name: subscriptionName
+                    ?? entry.suggestedSubscriptionName
+                    ?? "\(entry.displayName) plan",
+                costUsd: max(0, explicitCost)
+            )
         }
 
         try await reload()
     }
 
-    /// Insert every catalog provider not already present.
-    /// Poll-only entries without a key become inactive shells so historical fleet
-    /// coverage is complete; attach keys later via delete+re-add or future edit UI.
+    /// Insert every catalog provider not already present as **inactive $0 shells**.
+    /// Never attaches subscriptions or invents spend — catalog price hints are
+    /// for the Add form only.
     @discardableResult
     public func seedMissingCatalogProviders() async throws -> Int {
         let existing = Set(try await store.listProviders().map(\.name))
         var added = 0
         for entry in LocalProviderCatalog.all {
             if existing.contains(entry.name) { continue }
-            if entry.mode == .poll {
-                // Shell without key — not pollable until key is added.
-                var p = LocalProvider(
-                    name: entry.name,
-                    displayName: entry.displayName,
-                    adapterKind: "subscription_only",
-                    category: entry.category,
-                    isActive: false
-                )
-                p.updatedAt = Date()
-                try await store.upsertProvider(p)
-                try await store.upsertPlan(LocalProviderPlan(providerId: p.id))
-                added += 1
-                continue
-            }
-            try await addFromCatalog(
-                entry: entry,
+            var p = LocalProvider(
+                name: entry.name,
                 displayName: entry.displayName,
-                apiKey: nil,
-                monthlyBudgetUsd: nil,
-                subscriptionCostUsd: entry.suggestedMonthlyUsd,
-                subscriptionName: entry.suggestedSubscriptionName
+                adapterKind: "subscription_only",
+                category: entry.category,
+                isActive: false
             )
+            p.updatedAt = Date()
+            try await store.upsertProvider(p)
+            try await store.upsertPlan(LocalProviderPlan(providerId: p.id))
             added += 1
         }
         return added
+    }
+
+    /// Historical seed ghosts only (pre-fix catalog auto-charged these).
+    private static let seedGhostSignatures: [(providerName: String, costUsd: Double, subNames: Set<String>)] = [
+        ("cloudflare", 5, ["Workers Paid"]),
+        ("vercel", 20, ["Vercel Pro"]),
+        ("robinhood", 5, ["Robinhood Gold"]),
+    ]
+
+    /// Cancel known seed-invented subscriptions and delete their charges so
+    /// Overview MTD stops counting fees the owner never paid.
+    @discardableResult
+    public func scrubCatalogGuessCharges(reloadAfter: Bool = true) async throws -> Int {
+        let providers = try await store.listProviders()
+        let byProviderName = Dictionary(uniqueKeysWithValues: providers.map { ($0.name, $0) })
+        var scrubbed = 0
+        for ghost in Self.seedGhostSignatures {
+            guard let p = byProviderName[ghost.providerName] else { continue }
+            let subs = try await store.listSubscriptions().filter { $0.providerId == p.id }
+            for var sub in subs {
+                guard sub.status == "active",
+                      abs(sub.costUsd - ghost.costUsd) < 0.005,
+                      ghost.subNames.contains(sub.name)
+                else { continue }
+                sub.status = "canceled"
+                sub.updatedAt = Date()
+                try await store.upsertSubscription(sub)
+                try await store.deleteCharges(subscriptionId: sub.id)
+                scrubbed += 1
+            }
+        }
+        if reloadAfter { try await reload() }
+        return scrubbed
     }
 
     public func addOpenRouterProvider(
