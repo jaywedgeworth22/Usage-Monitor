@@ -61,6 +61,8 @@ public struct LocalProvider: Identifiable, Equatable, Sendable, Hashable {
     /// Adapters registered in `LocalAdapterRegistry` (keep in sync).
     public static let supportedPollAdapterKinds: Set<String> = [
         "openrouter", "openai", "anthropic", "deepseek", "hetzner",
+        "apify", "firecrawl", "twelvedata", "pushover", "resend",
+        "stripe", "xai", "twilio",
     ]
 
     /// Fetch is useful only when pollable *and* a Keychain credential exists.

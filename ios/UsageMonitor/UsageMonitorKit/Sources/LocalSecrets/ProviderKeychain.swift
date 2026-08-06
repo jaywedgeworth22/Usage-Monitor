@@ -3,9 +3,49 @@ import Security
 
 /// Keychain storage for provider API keys (Local Usage Monitor only).
 /// Never write secrets into SQLite / LocalStore.
-public struct ProviderCredentials: Sendable, Equatable {
+public struct ProviderCredentials: Sendable, Equatable, Codable {
     public var apiKey: String
-    public init(apiKey: String) { self.apiKey = apiKey }
+    /// xAI Management API team id (optional).
+    public var teamId: String?
+    /// Twilio Account SID (optional; key may be Auth Token or API Key secret).
+    public var accountSid: String?
+    /// Twilio API Key SID when using key+secret instead of auth token.
+    public var apiKeySid: String?
+
+    public init(
+        apiKey: String,
+        teamId: String? = nil,
+        accountSid: String? = nil,
+        apiKeySid: String? = nil
+    ) {
+        self.apiKey = apiKey
+        self.teamId = teamId
+        self.accountSid = accountSid
+        self.apiKeySid = apiKeySid
+    }
+
+    /// JSON when extra fields present; plain UTF-8 key for simple credentials (legacy).
+    public func encoded() throws -> Data {
+        if teamId == nil, accountSid == nil, apiKeySid == nil {
+            return Data(apiKey.utf8)
+        }
+        return try JSONEncoder().encode(self)
+    }
+
+    public static func decoded(from data: Data) throws -> ProviderCredentials {
+        if let json = try? JSONDecoder().decode(ProviderCredentials.self, from: data),
+           !json.apiKey.isEmpty {
+            return json
+        }
+        guard let key = String(data: data, encoding: .utf8), !key.isEmpty else {
+            throw ProviderKeychainError.osStatus(errSecDecode)
+        }
+        // Avoid treating "{" as a bare key that is invalid JSON credentials.
+        if key.first == "{" {
+            throw ProviderKeychainError.osStatus(errSecDecode)
+        }
+        return ProviderCredentials(apiKey: key)
+    }
 }
 
 public protocol ProviderSecretStoring: Sendable {
@@ -22,7 +62,7 @@ public struct ProviderKeychainStore: ProviderSecretStoring, Sendable {
     public init() {}
 
     public func save(accountId: String, credentials: ProviderCredentials) throws {
-        let data = Data(credentials.apiKey.utf8)
+        let data = try credentials.encoded()
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -49,11 +89,10 @@ public struct ProviderKeychainStore: ProviderSecretStoring, Sendable {
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess, let data = item as? Data,
-              let key = String(data: data, encoding: .utf8) else {
+        guard status == errSecSuccess, let data = item as? Data else {
             throw ProviderKeychainError.osStatus(status)
         }
-        return ProviderCredentials(apiKey: key)
+        return try ProviderCredentials.decoded(from: data)
     }
 
     public func delete(accountId: String) throws {

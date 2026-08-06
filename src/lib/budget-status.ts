@@ -1440,18 +1440,23 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       providerCanonicalKey: canonicalProviderKey(p.name),
       geminiBillingIncomplete,
     });
+    // Only *active* rows forecast remaining charges. Managed/paused history
+    // stays in MTD accrual via materializer events; inventing future charges
+    // for non-active status overstates EOM (aligns with materializer filter).
     const forecastedRenewals = planSubscriptionRenewals(
-      p.subscriptions.map((sub) => ({
-        id: sub.id,
-        providerId: p.id,
-        name: sub.name,
-        costUsd: sub.costUsd,
-        currency: sub.currency,
-        interval: sub.interval,
-        intervalCount: sub.intervalCount,
-        nextRenewalAt: sub.nextRenewalAt,
-        autoRenew: sub.autoRenew,
-      })),
+      p.subscriptions
+        .filter((sub) => sub.status === "active")
+        .map((sub) => ({
+          id: sub.id,
+          providerId: p.id,
+          name: sub.name,
+          costUsd: sub.costUsd,
+          currency: sub.currency,
+          interval: sub.interval,
+          intervalCount: sub.intervalCount,
+          nextRenewalAt: sub.nextRenewalAt,
+          autoRenew: sub.autoRenew,
+        })),
       now
     );
     const forecastedSubscriptionRenewalsUsd = forecastedRenewals.reduce(

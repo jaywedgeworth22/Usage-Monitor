@@ -88,6 +88,7 @@ let package = Package(
                 "DesignSystem",
                 "AppCore",
                 "AppLock",
+                "WidgetShared",
                 "LocalStore",
                 "LocalSecrets",
                 "LocalAdapters",
