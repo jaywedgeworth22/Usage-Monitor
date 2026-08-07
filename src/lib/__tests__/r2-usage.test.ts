@@ -444,7 +444,8 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(body).toContain("token=test_usage_api_token");
     expect(body).not.toContain("token=test_api_token");
     const params = new URLSearchParams(body);
-    expect(params.get("message")).toContain("(sent from Usage Monitor)");
+    // Own free tier under UM logo — no sent-from footer.
+    expect(params.get("message")).not.toContain("(sent from");
   });
 
   it("formats daily Pushover summary message cleanly", () => {
