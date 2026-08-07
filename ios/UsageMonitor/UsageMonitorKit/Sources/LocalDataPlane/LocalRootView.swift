@@ -339,7 +339,7 @@ public struct LocalRootView: View {
         NavigationStack {
             List {
                 Section("This app") {
-                    LabeledContent("Product", value: "On-device self-host")
+                    LabeledContent("Product", value: "on-device self-host")
                     LabeledContent("Schema", value: "v\(model.schemaVersion)")
                     LabeledContent("Providers", value: "\(model.providers.count)")
                     Text("Money-truth is local SQLite. Provider API keys stay in Keychain. No remote Usage Monitor server required.")
