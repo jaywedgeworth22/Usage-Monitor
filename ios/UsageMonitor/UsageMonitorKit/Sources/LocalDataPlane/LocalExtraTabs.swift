@@ -230,6 +230,7 @@ private struct ProjectEditorSheet: View {
                 }
             }
             .navigationTitle(existing == nil ? "Add project" : "Edit project")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
