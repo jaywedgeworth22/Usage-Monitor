@@ -81,7 +81,7 @@ public struct LockScreenView: View {
 
     private var textBlock: some View {
         VStack(spacing: Theme.Spacing.sm) {
-            Text("Usage Monitor")
+            Text(AppProductName.displayName)
                 .font(Theme.Typography.title)
                 .foregroundStyle(Theme.Colors.primaryText)
             // Suppressed in the passive privacy-cover state (unlocked but the

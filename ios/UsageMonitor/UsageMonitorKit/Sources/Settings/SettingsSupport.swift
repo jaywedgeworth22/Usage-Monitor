@@ -65,10 +65,11 @@ enum AppInfo {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—"
     }
 
+    /// Plain user-facing app name (Usage Client Monitor / Usage Local Monitor).
     static var displayName: String {
         (Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String)
             ?? (Bundle.main.infoDictionary?["CFBundleName"] as? String)
-            ?? "Usage Monitor"
+            ?? "App"
     }
 }
 

@@ -5,7 +5,7 @@ import WidgetShared
 /// Writes BudgetEngine summary into the **Local** app-group widget file.
 /// Uses a dedicated group id so Local never overwrites the remote client widget.
 public enum LocalAppGroup {
-    public static let identifier = "group.services.jays.local.usage.monitor"
+    public static let identifier = "group.services.jays.usage.local.monitor"
 
     public static var containerURL: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)

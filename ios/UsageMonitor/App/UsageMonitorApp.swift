@@ -55,7 +55,7 @@ struct UsageMonitorApp: App {
             // AppLockGate sits outside RootView, so give it the environment too.
             .environment(environment)
             .environment(pushRouter)
-            // Widget deep link (usagemonitor://<tab>) → select that tab.
+            // Widget deep link (usageclientmonitor://<tab>) → select that tab.
             .onOpenURL { url in
                 if let tab = appTab(from: url) { selection = tab }
             }
@@ -98,9 +98,9 @@ struct UsageMonitorApp: App {
         )
     }
 
-    /// Map a widget/app deep-link URL (`usagemonitor://dashboard`) to a tab.
+    /// Map a widget/app deep-link URL (`usageclientmonitor://dashboard`) to a tab.
     private func appTab(from url: URL) -> AppTab? {
-        guard url.scheme == "usagemonitor" else { return nil }
+        guard url.scheme == "usageclientmonitor" else { return nil }
         let key = url.host ?? url.pathComponents.last(where: { $0 != "/" }) ?? ""
         return AppTab(rawValue: key)
     }

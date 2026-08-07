@@ -414,7 +414,7 @@ merge when CI is green. A remote branch with no PR is unfinished. Canonical:
 bash scripts/ios-ship-testflight.sh
 ```
 
-Fleet: `/Users/jay/apps/ios-fleet/README.md`. Bundle `services.jays.usage.monitor`, team `CC8UTF7ATG`.
+Fleet: `/Users/jay/apps/ios-fleet/README.md`. Bundles `services.jays.usage.client.monitor` (Usage Client Monitor) + `services.jays.usage.local.monitor` (Usage Local Monitor), team `CC8UTF7ATG`.
 
 ## Fleet UI copy
 

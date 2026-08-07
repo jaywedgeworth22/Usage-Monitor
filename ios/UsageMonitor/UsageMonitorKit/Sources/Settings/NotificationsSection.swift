@@ -66,7 +66,7 @@ struct NotificationsSection: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(model.hasApnsToken ? "APNs Remote Push Registered" : "Enable Remote Push (APNs)")
                                 .foregroundStyle(Theme.Colors.primaryText)
-                            Text(model.hasApnsToken ? "Token saved to server for native iOS push alerts." : "Register device token with Usage Monitor server.")
+                            Text(model.hasApnsToken ? "Token saved to server for native iOS push alerts." : "Register device token with your \(AppInfo.displayName) server.")
                                 .font(Theme.Typography.caption)
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
@@ -90,7 +90,7 @@ struct NotificationsSection: View {
         }
         switch model.authorizationStatus {
         case .denied:
-            return "Usage Monitor can't send notifications until you allow them in iOS Settings. Local/background alerts still require a read token; remote push only when the server has this device registered."
+            return "\(AppInfo.displayName) can't send notifications until you allow them in iOS Settings. Local/background alerts still require a read token; remote push only when the server has this device registered."
         case .notDetermined:
             return "You'll be asked to allow notifications. Local alerts use background refresh with a read token; remote push is scaffolded until the server registers the device."
         default:
