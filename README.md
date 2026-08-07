@@ -54,13 +54,13 @@ build. CI uses the same pinned Node version from `.node-version`.
 
 - **Next.js** (App Router) — web framework
 - **Prisma** (SQLite) — ORM + database (dedicated `/data` block volume on the production VM)
-- **Oracle Cloud A1 VM** (Docker + Caddy) — production deployment (see `DEPLOY.md` and `deploy/oracle/README.md`); Render is retired/suspended as a rollback host only
+- **Hetzner NBG1 / Coolify** (`167.233.254.55`, `fleet-hetzner-nbg1`) — production (see `DEPLOY.md`, `/Users/jay/apps/COOLIFY.md`); Oracle A1 scripts under `deploy/oracle/` are legacy; Render is retired/suspended as a rollback host only
 - **Sentry** — error monitoring (Sentry Health card)
 
 ## Docs
 
 - **[AGENTS.md](AGENTS.md)** — agent-facing guide (schema, auth, ingest flows, env vars)
-- **[DEPLOY.md](DEPLOY.md)** — deployment guide (Oracle production; Render runbook retired to `deploy/render/RETIRED-rollback.md`)
+- **[DEPLOY.md](DEPLOY.md)** — deployment guide (Hetzner/Coolify production IP `167.233.254.55`; Render runbook retired to `deploy/render/RETIRED-rollback.md`)
 - **[docs/litestream.md](docs/litestream.md)** — backup and restore runbook
 - **[docs/release-maintenance.md](docs/release-maintenance.md)** — why one-time
   data repairs/seeds remain explicit and what safe marker automation requires
