@@ -1,6 +1,9 @@
 # Usage Monitor — agent notes
 
-Next.js + Prisma (**SQLite**, not Postgres — deployed on Oracle Cloud Always Free / production VPS with a persistent disk at `/data`, no separate DB resource; see `deploy/oracle/deploy-production.sh`) app at `usage.jays.services`. It tracks API usage/cost three ways: **poll adapters**
+Next.js + Prisma (**SQLite**, not Postgres — production on **Hetzner NBG1**
+Coolify host **`167.233.254.55`** / `fleet-hetzner-nbg1`, app uuid
+`yagelvqux9e8l1kztif7bf2o`, volume at `/data`; SSH `root@167.233.254.55` with
+`~/.ssh/hetzner`. Legacy Oracle scripts under `deploy/oracle/` are historical.) app at `usage.jays.services`. It tracks API usage/cost three ways: **poll adapters**
 (`src/lib/adapters/*`, one per provider) that snapshot into `UsageSnapshot`; **pushed
 telemetry** from other apps into `ExternalUsageEvent` via `POST /api/ingest/usage`; and
 **OTLP metrics** from Claude Code (or any OTLP exporter) via `POST /api/otlp/v1/metrics`,
@@ -341,9 +344,9 @@ required whenever `LITESTREAM_REQUIRED=true` or `NODE_ENV=production` — a bare
 npm run verify   # eslint, tsc, vitest, migration/backup/startup checks, build
 ```
 
-Deploys to the Oracle production host happen automatically via the
-`usage-monitor-auto-deploy.timer` once a merge to `main` passes all preflight
-gates (see `DEPLOY.md` and `deploy/oracle/README.md`).
+Deploys: Coolify/GitHub on Hetzner (`167.233.254.55`). Legacy Oracle
+`usage-monitor-auto-deploy.timer` docs remain in `deploy/oracle/README.md` for
+history; prefer Coolify + `DEPLOY.md` / fleet `COOLIFY.md`.
 
 ## Cursor Cloud specific instructions
 

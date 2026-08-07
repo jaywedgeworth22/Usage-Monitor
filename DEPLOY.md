@@ -1,12 +1,19 @@
 # Deployment Guide
 
-**Production is the Oracle Cloud `VM.Standard.A1.Flex` host** running Docker +
-Caddy behind Cloudflare at `usage.jays.services`. The authoritative runbook —
-installation, the auto-deploy timer, preflight gates, deploy-transaction
-acceptance, backup monitoring, and rollback rules — is
-**[`deploy/oracle/README.md`](deploy/oracle/README.md)**. This file records the
-operational invariants every operator and agent must know, plus the
-environment variable reference.
+**Production (2026-08-07+):** Hetzner **cx43 NBG1** host running Coolify + the
+fleet, public IP **`167.233.254.55`** (hostname `fleet-hetzner-nbg1`, Tailscale
+`100.69.77.26`). App Coolify uuid **`yagelvqux9e8l1kztif7bf2o`**. SSH:
+`root@167.233.254.55` with `~/.ssh/hetzner` or this Mac’s `id_ed25519` (see
+`~/.ssh/config` Host `coolify` / `host.jays.services` / `fleet-hetzner-nbg1`).
+Public edge: Cloudflare → `usage.jays.services`.
+
+Fleet ops sheet: `/Users/jay/apps/COOLIFY.md` and Socratic
+`docs/rollouts/2026-08-07-hetzner-fleet-cutover.md`.
+
+**Legacy Oracle** runbook (auto-deploy timer, preflight, litestream host
+scripts) remains under **[`deploy/oracle/README.md`](deploy/oracle/README.md)**
+for history / emergency reference — **Oracle is not the live writer** after the
+Hetzner cutover.
 
 The former Render deployment is **retired and suspended as a rollback host
 only**; its historical runbook lives in

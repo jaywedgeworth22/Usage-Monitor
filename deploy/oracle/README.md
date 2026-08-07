@@ -1,4 +1,12 @@
-# Oracle A1 deployment
+# Oracle A1 deployment (LEGACY — not live production)
+
+> **2026-08-07:** Production Usage Monitor runs on **Hetzner NBG1** Coolify host
+> **`167.233.254.55`** (`fleet-hetzner-nbg1`, Tailscale `100.69.77.26`). SSH:
+> `root@167.233.254.55` with `~/.ssh/hetzner`. See `/Users/jay/apps/COOLIFY.md`
+> and Socratic `docs/rollouts/2026-08-07-hetzner-fleet-cutover.md`.
+>
+> This Oracle runbook is retained for historical preflight/deploy script
+> reference only. Do not treat Oracle as the sole writer.
 
 The production candidate is one `VM.Standard.A1.Flex` VM with a separate block
 volume mounted at `/data`. `usage-monitor.service` refuses to start unless that
