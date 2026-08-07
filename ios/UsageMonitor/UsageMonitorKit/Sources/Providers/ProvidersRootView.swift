@@ -182,7 +182,7 @@ public struct ProvidersRootView: View {
                                 Haptics.tap()
                                 path.append(ProviderRoute(id: provider.id))
                             } label: {
-                                Label("Edit budget / plan", systemImage: "slider.horizontal.3")
+                                Label("Edit Budget / Plan", systemImage: "slider.horizontal.3")
                             }
                             if !provider.spendCoverage.isComplete {
                                 Text("Spend may omit tax & invoice fees")
@@ -235,13 +235,13 @@ public struct ProvidersRootView: View {
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.secondaryText)
                 if overCount > 0 {
-                    StatusBadge("\(overCount) over", status: .danger, systemImage: "exclamationmark.octagon.fill")
+                    StatusBadge("\(overCount) Over", status: .danger, systemImage: "exclamationmark.octagon.fill")
                 }
                 if warnCount > 0 {
-                    StatusBadge("\(warnCount) warning", status: .warning, systemImage: "gauge.with.dots.needle.67percent")
+                    StatusBadge("\(warnCount) Warning", status: .warning, systemImage: "gauge.with.dots.needle.67percent")
                 }
                 if overCount == 0 && warnCount == 0 {
-                    StatusBadge("All on track", status: .ok, systemImage: "checkmark.circle.fill")
+                    StatusBadge("All on Track", status: .ok, systemImage: "checkmark.circle.fill")
                 }
             }
         }

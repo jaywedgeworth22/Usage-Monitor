@@ -13,7 +13,7 @@ struct IntelligenceSection: View {
 
             if store.requiresSession {
                 VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                    Text("Full dashboard access required")
+                    Text("Full Dashboard Access Required")
                         .font(Theme.Typography.callout.weight(.semibold))
                     Text("Sign in with the dashboard password in Settings to load LLM burn, Claude cost check, and key attribution.")
                         .font(Theme.Typography.caption)
@@ -50,7 +50,7 @@ struct LlmBurnCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            Text("LLM burn")
+            Text("LLM Burn")
                 .font(Theme.Typography.sectionHeader)
             Text("Trailing window — analytics only, not cash.")
                 .font(Theme.Typography.caption)
@@ -84,7 +84,7 @@ struct ClaudeCostLiteCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            Text("Claude cost check")
+            Text("Claude Cost Check")
                 .font(Theme.Typography.sectionHeader)
             Text("OTLP cost vs LiteLLM derivation (analytics).")
                 .font(Theme.Typography.caption)
@@ -122,7 +122,7 @@ struct KeyAttributionLiteCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            Text("Key attribution")
+            Text("Key Attribution")
                 .font(Theme.Typography.sectionHeader)
             if let s = response.summary {
                 Text("\(s.matchedIdentities ?? 0) matched · \(s.unattributedKeys ?? 0) unattributed")

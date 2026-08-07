@@ -195,7 +195,7 @@ struct ProjectBudgetsContentView: View {
             // Do not repeat the tab title ("Projects") as an in-content header;
             // the navigation bar already names the screen.
             HStack {
-                Text("Month to date")
+                Text("Month to Date")
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.secondaryText)
                 Spacer()
@@ -229,7 +229,7 @@ struct ProjectsRollupCard: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                    Text("All projects")
+                    Text("All Projects")
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Colors.secondaryText)
                     Text(rollup.totalSpentDisplay)

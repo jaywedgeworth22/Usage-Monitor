@@ -13,7 +13,7 @@ struct TopProvidersCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            SectionHeader("Top providers", subtitle: "Month to date") {
+            SectionHeader("Top Providers", subtitle: "Month to date") {
                 if totalCount > providers.count {
                     Text("\(totalCount) total")
                         .font(Theme.Typography.captionEmphasis)
@@ -75,7 +75,7 @@ private struct ProviderMeterRow: View {
                             .font(Theme.Typography.caption)
                             .monospacedDigit()
                             .foregroundStyle(Theme.Colors.secondaryText)
-                        StatusBadge("No budget", status: .neutral)
+                        StatusBadge("No Budget", status: .neutral)
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("\(provider.title), \(CurrencyFormat.usd(provider.spentUsd)) spent, no budget set")

@@ -49,23 +49,36 @@ struct DashboardContentView: View {
     private var statsGrid: some View {
         LazyVGrid(columns: columns, spacing: Theme.Spacing.md) {
             StatTile(
-                label: "Projected end of month",
+                label: "Projected End of Month",
                 value: CurrencyFormat.compactUSD(data.projectedEom),
                 secondary: projectedSecondary,
                 systemImage: "chart.line.uptrend.xyaxis",
                 status: .init(data.projectionStatus)
             )
 
-            StatTile(
-                label: data.remaining < 0 ? "Over budget" : "Remaining",
-                value: CurrencyFormat.compactUSD(abs(data.remaining)),
-                secondary: data.hasBudget ? "of \(CurrencyFormat.compactUSD(data.totalBudget))" : "no budget set",
-                systemImage: data.remaining < 0 ? "exclamationmark.triangle.fill" : "banknote",
-                status: data.remaining < 0 ? .danger : (data.hasBudget ? .ok : .neutral)
-            )
+            // Without a configured budget, remaining = 0 − spent (negative) and
+            // must not show a dollar "Over Budget" figure — value is the answer
+            // "no budget set" (sentence case per fleet UI copy rules).
+            if data.hasBudget {
+                StatTile(
+                    label: data.remaining < 0 ? "Over Budget" : "Remaining",
+                    value: CurrencyFormat.compactUSD(abs(data.remaining)),
+                    secondary: "of \(CurrencyFormat.compactUSD(data.totalBudget))",
+                    systemImage: data.remaining < 0 ? "exclamationmark.triangle.fill" : "banknote",
+                    status: data.remaining < 0 ? .danger : .ok
+                )
+            } else {
+                StatTile(
+                    label: "Budget",
+                    value: "no budget set",
+                    secondary: nil,
+                    systemImage: "banknote",
+                    status: .neutral
+                )
+            }
 
             StatTile(
-                label: "Needs attention",
+                label: "Needs Attention",
                 value: "\(data.overBudgetProviders.count + data.warningProviders.count)",
                 secondary: attentionSecondary,
                 systemImage: "bell.badge",
@@ -74,7 +87,7 @@ struct DashboardContentView: View {
 
             if data.hasApiEquivalentSavings {
                 StatTile(
-                    label: "Saved vs API rates",
+                    label: "Saved vs API Rates",
                     value: CurrencyFormat.compactUSD(data.apiEquivalentSavings),
                     secondary: "vs \(CurrencyFormat.compactUSD(data.estimatedApiEquivalent))",
                     systemImage: "sparkles",
@@ -82,7 +95,7 @@ struct DashboardContentView: View {
                 )
             } else {
                 StatTile(
-                    label: "Providers tracked",
+                    label: "Providers Tracked",
                     value: "\(data.providers.count)",
                     secondary: "\(data.configuredProviderCount) with budgets",
                     systemImage: "square.grid.2x2",
@@ -95,6 +108,7 @@ struct DashboardContentView: View {
     private var projectedSecondary: String? {
         // Prefer the two-part composition so users see subscriptions are included
         // (or still missing from server data), not only budget over/under.
+        // Secondary lines are *values* → sentence/lower case (ST fleet rule).
         if data.hasSubscriptionProjectionComponent {
             return "usage + subscriptions"
         }
@@ -149,7 +163,7 @@ struct ProjectedCostBreakdownCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             SectionHeader(
-                "Projected end of month",
+                "Projected End of Month",
                 subtitle: "Usage paced to month end + known subscription charges"
             )
 
@@ -163,17 +177,17 @@ struct ProjectedCostBreakdownCard: View {
 
             VStack(spacing: Theme.Spacing.sm) {
                 breakdownRow(
-                    label: "Usage (extrapolated)",
+                    label: "Usage (Extrapolated)",
                     detail: "Variable spend paced across the UTC month",
                     value: data.projectedVariableUsage
                 )
                 breakdownRow(
-                    label: "Fixed accrued MTD",
+                    label: "Fixed Accrued MTD",
                     detail: "Subscription and fixed charges already on the books",
                     value: data.projectedFixedAccrued
                 )
                 breakdownRow(
-                    label: "Known renewals remaining",
+                    label: "Known Renewals Remaining",
                     detail: "Scheduled subscription bills still due this month",
                     value: data.projectedKnownRenewals
                 )
@@ -225,7 +239,7 @@ private struct AttentionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            SectionHeader("Needs attention")
+            SectionHeader("Needs Attention")
 
             VStack(spacing: Theme.Spacing.sm) {
                 ForEach(providers) { provider in

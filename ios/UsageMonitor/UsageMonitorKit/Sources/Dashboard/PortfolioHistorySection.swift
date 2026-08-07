@@ -13,7 +13,7 @@ struct PortfolioHistorySection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             SectionHeader(
-                "Chart range",
+                "Chart Range",
                 subtitle: "Usage history only · budgets stay month-to-date"
             )
 
@@ -34,7 +34,7 @@ struct PortfolioHistorySection: View {
     private var content: some View {
         if store.requiresSession {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                Text("Full access required for history")
+                Text("Full Access Required for History")
                     .font(Theme.Typography.callout.weight(.semibold))
                 Text("Sign in with the dashboard password in Settings to load usage history for the selected range.")
                     .font(Theme.Typography.caption)

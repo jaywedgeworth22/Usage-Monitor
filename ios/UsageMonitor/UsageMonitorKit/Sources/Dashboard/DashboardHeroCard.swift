@@ -46,7 +46,7 @@ struct DashboardHeroCard: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            Label("Spent this month", systemImage: "creditcard.fill")
+            Label("Spent This Month", systemImage: "creditcard.fill")
                 .font(Theme.Typography.caption)
                 .foregroundStyle(Theme.Colors.secondaryText)
                 .labelStyle(.titleAndIcon)
@@ -55,12 +55,13 @@ struct DashboardHeroCard: View {
         }
     }
 
+    /// Status chip next to the hero — Title Case (heading/chip), not a value.
     private var statusText: String {
         switch data.overallStatus {
-        case .exceeded: return "Over budget"
-        case .warning: return "Watch spend"
-        case .ok: return "On track"
-        case .unconfigured: return "No budget set"
+        case .exceeded: return "Over Budget"
+        case .warning: return "Watch Spend"
+        case .ok: return "On Track"
+        case .unconfigured: return "No Budget Set"
         }
     }
 
