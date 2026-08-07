@@ -155,6 +155,97 @@ describe("PROVIDER_ALERT_CODES runtime list", () => {
   });
 });
 
+describe("buildProviderAlertState renewal milestones (7d / 3d / 1d)", () => {
+  const basePlan = {
+    billingMode: "actual",
+    fixedMonthlyCostUsd: null,
+    monthlyBudgetUsd: null,
+    monthlyRequestLimit: null,
+    lowBalanceUsd: null,
+    lowCredits: null,
+    mustKeepFunded: false,
+    billingInterval: "month" as const,
+  };
+
+  function stateAt(nowIso: string, renewalIso: string) {
+    return buildProviderAlertState(
+      {
+        isActive: true,
+        refreshIntervalMin: 60,
+        snapshotExpected: false,
+        plan: { ...basePlan, renewalDate: renewalIso },
+        latestSnapshot: null,
+      },
+      new Date(nowIso)
+    );
+  }
+
+  it("emits scoped renewal_due only on exact 7 / 3 / 1 day milestones", () => {
+    // Exactly 7 days out
+    const d7 = stateAt("2026-08-01T12:00:00.000Z", "2026-08-08T12:00:00.000Z");
+    expect(d7.alerts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "renewal_due",
+          scope: "renewal-7d",
+          severity: "info",
+        }),
+      ])
+    );
+    expect(d7.alerts.find((a) => a.code === "renewal_due")?.message).toContain("7 days");
+
+    // Exactly 3 days out
+    const d3 = stateAt("2026-08-05T12:00:00.000Z", "2026-08-08T12:00:00.000Z");
+    expect(d3.alerts.find((a) => a.code === "renewal_due")).toMatchObject({
+      scope: "renewal-3d",
+      severity: "info",
+    });
+
+    // Exactly 1 day out
+    const d1 = stateAt("2026-08-07T12:00:00.000Z", "2026-08-08T12:00:00.000Z");
+    expect(d1.alerts.find((a) => a.code === "renewal_due")).toMatchObject({
+      scope: "renewal-1d",
+      severity: "warning",
+    });
+    expect(d1.alerts.find((a) => a.code === "renewal_due")?.message).toContain("1 day");
+  });
+
+  it("does not emit renewal_due on non-milestone days inside the old 7-day window", () => {
+    // 5 days out — previously would have alerted under continuous 7-day window
+    const d5 = stateAt("2026-08-03T12:00:00.000Z", "2026-08-08T12:00:00.000Z");
+    expect(d5.alerts.some((a) => a.code === "renewal_due")).toBe(false);
+  });
+
+  it("still emits renewal_overdue when the date has passed", () => {
+    const overdue = stateAt("2026-08-10T12:00:00.000Z", "2026-08-08T12:00:00.000Z");
+    // monthly roll-forward may advance past dates when interval is set — use no interval
+    const state = buildProviderAlertState(
+      {
+        isActive: true,
+        refreshIntervalMin: 60,
+        snapshotExpected: false,
+        plan: {
+          billingMode: "actual",
+          fixedMonthlyCostUsd: null,
+          monthlyBudgetUsd: null,
+          monthlyRequestLimit: null,
+          lowBalanceUsd: null,
+          lowCredits: null,
+          mustKeepFunded: false,
+          billingInterval: null,
+          renewalDate: "2026-08-01T12:00:00.000Z",
+        },
+        latestSnapshot: null,
+      },
+      new Date("2026-08-10T12:00:00.000Z")
+    );
+    expect(state.alerts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "renewal_overdue" })])
+    );
+    void overdue;
+  });
+});
+
 describe("buildProjectBudgetAlerts (S1)", () => {
   const projects = [
     { id: "proj-a", name: "Alpha", monthlyBudgetUsd: 100, spentUsd: 120 },

@@ -133,7 +133,19 @@ const WARNING_ENTER_RATIO = 0.8;
 const WARNING_CLEAR_RATIO = 0.75;
 /** Stay in exceeded until spend drops below this (hysteresis clear). */
 const EXCEEDED_CLEAR_RATIO = 0.95;
-const RENEWAL_WARNING_DAYS = 7;
+/**
+ * Distinct calendar-day milestones for upcoming subscription/plan charges.
+ * Each milestone uses `scope: renewal-{N}d` so alert delivery can fire a
+ * separate Pushover (and resolve between milestones) instead of one sticky
+ * 7-day window that never re-notifies at 3d/1d.
+ */
+export const RENEWAL_NOTICE_DAYS = [7, 3, 1] as const;
+export type RenewalNoticeDay = (typeof RENEWAL_NOTICE_DAYS)[number];
+
+/** True when remaining days (ceil) is an exact renewal notice milestone. */
+export function isRenewalNoticeDay(daysUntilRenewal: number): daysUntilRenewal is RenewalNoticeDay {
+  return (RENEWAL_NOTICE_DAYS as readonly number[]).includes(daysUntilRenewal);
+}
 
 /**
  * Map spend/budget ratio to a budget alert tier with optional hysteresis.
@@ -341,15 +353,18 @@ export function buildProviderAlertState(
       alerts.push({
         code: "renewal_overdue",
         severity: "critical",
-        message: "Plan renewal date has passed.",
+        message: "Plan renewal date has passed — a subscription charge may already be overdue.",
       });
-    } else if (daysUntilRenewal <= RENEWAL_WARNING_DAYS) {
+    } else if (isRenewalNoticeDay(daysUntilRenewal)) {
+      // 7d / 3d / 1d only — separate scope so Pushover fires at each milestone.
       alerts.push({
         code: "renewal_due",
-        severity: "warning",
-        message: `Plan renews in ${daysUntilRenewal} day${
-          daysUntilRenewal === 1 ? "" : "s"
-        }.`,
+        severity: daysUntilRenewal === 1 ? "warning" : "info",
+        scope: `renewal-${daysUntilRenewal}d`,
+        message:
+          daysUntilRenewal === 1
+            ? "Plan renews in 1 day — possible subscription charge tomorrow."
+            : `Plan renews in ${daysUntilRenewal} days — possible subscription charge.`,
       });
     }
   }

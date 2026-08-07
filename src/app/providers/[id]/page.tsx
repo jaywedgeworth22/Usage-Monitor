@@ -623,7 +623,10 @@ export default function ProviderDetailPage() {
               {formatUsd(provider.receiptCashPaidUsd ?? 0)}
             </dd>
             <dd className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
-              {provider.receiptCashEventCount ?? 0} exact receipt{provider.receiptCashEventCount === 1 ? "" : "s"}
+              {provider.receiptCashEventCount ?? 0} exact receipt
+              {provider.receiptCashEventCount === 1 ? "" : "s"}
+              {" · "}
+              matches existing cash are evidence-only (no double-count)
             </dd>
           </div>
           <div>

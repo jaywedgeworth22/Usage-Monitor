@@ -105,7 +105,12 @@ export function ReceiptInboxCard({ data }: { data: ReceiptInboxSummary }) {
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {data.configured ? <>{count} need review · last receipt <time suppressHydrationWarning dateTime={data.latestReceivedAt ?? undefined}>{relativeTime(data.latestReceivedAt)}</time></> : "Forwarded receipts are not connected yet"}
             </p>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Evidence only; review is required before any cost is recorded.</p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Evidence only — review before any cost is recorded. If a receipt{" "}
+              <strong className="font-medium text-gray-600 dark:text-gray-300">matches existing cash</strong>{" "}
+              (subscription or prepaid already in the system), keep it as evidence and do{" "}
+              <strong className="font-medium text-gray-600 dark:text-gray-300">not double-count</strong> spend.
+            </p>
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
