@@ -134,13 +134,22 @@ final class SettingsFeatureTests: XCTestCase {
             readiness: .init(
                 ok: false,
                 status: "degraded",
-                checks: .init(database: .init(ok: true), scheduler: .init(ok: false))
+                checks: .init(
+                    database: .init(ok: true),
+                    scheduler: .init(ok: false),
+                    backup: .init(ok: false)
+                )
             ),
             fetchedAt: Date()
         )
         XCTAssertEqual(degraded.overallStatus, .warning)
         XCTAssertEqual(degraded.overallLabel, "Degraded")
-        XCTAssertEqual(degraded.dependencyChecks.count, 2)
+        // Database + Scheduler + Backup (observability) — backup restored to the list.
+        XCTAssertEqual(degraded.dependencyChecks.count, 3)
+        let backup = degraded.dependencyChecks.first { $0.name == "Backup (off-site)" }
+        XCTAssertNotNil(backup)
+        XCTAssertEqual(backup?.ok, false)
+        XCTAssertEqual(backup?.gatesService, false)
 
         let down = ServerStatusSnapshot(
             health: .init(ok: false, status: "fail"),

@@ -152,26 +152,34 @@ public struct ProvidersRootView: View {
             } else {
                 Section {
                     ForEach(results) { provider in
-                        NavigationLink(value: ProviderRoute(id: provider.id)) {
+                        // Use Button + path, not NavigationLink + simultaneousGesture.
+                        // A TapGesture on NavigationLink steals the activation gesture:
+                        // the row greys ~30% of taps (haptic fires) but navigation
+                        // only wins a small fraction of the time.
+                        Button {
+                            Haptics.tap()
+                            path.append(ProviderRoute(id: provider.id))
+                        } label: {
                             ProviderRow(
                                 title: provider.title,
                                 subtitle: provider.rowSubtitle,
                                 value: provider.rowValue,
                                 valueCaption: provider.rowValueCaption,
                                 status: provider.semanticStatus,
-                                showsChevron: false
+                                showsChevron: true
                             )
                         }
-                        .simultaneousGesture(TapGesture().onEnded {
-                            Haptics.tap()
-                        })
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
                         .contextMenu {
                             Button {
+                                Haptics.tap()
                                 path.append(ProviderRoute(id: provider.id))
                             } label: {
                                 Label("Open details", systemImage: "doc.text")
                             }
                             Button {
+                                Haptics.tap()
                                 path.append(ProviderRoute(id: provider.id))
                             } label: {
                                 Label("Edit budget / plan", systemImage: "slider.horizontal.3")

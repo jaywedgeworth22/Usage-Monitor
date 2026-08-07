@@ -146,10 +146,15 @@ final class ProviderPresentationTests: XCTestCase {
     func testHasRenewalContext() {
         let sub = ProviderBudgetStatus(
             id: "p", name: "p", displayName: "P",
-            subscriptionMonthToDateUsd: 30, spentUsd: 30
+            subscriptionMonthToDateUsd: 30, spentUsd: 30, projectedEomUsd: 30
         )
         XCTAssertTrue(sub.hasRenewalContext)
-        XCTAssertFalse(ProviderBudgetStatus.sampleOk.hasRenewalContext)
+        // Any non-zero projected EOM surfaces the usage+subscription parts card.
+        XCTAssertTrue(ProviderBudgetStatus.sampleOk.hasRenewalContext)
+        let empty = ProviderBudgetStatus(
+            id: "z", name: "z", displayName: "Z", spentUsd: 0, projectedEomUsd: 0
+        )
+        XCTAssertFalse(empty.hasRenewalContext)
     }
 }
 

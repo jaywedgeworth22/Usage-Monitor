@@ -22,6 +22,7 @@ public struct DashboardRootView: View {
     @Environment(AppEnvironment.self) private var env: AppEnvironment?
 
     @State private var intelligenceStore = IntelligenceStore()
+    @State private var portfolioHistoryStore = PortfolioHistoryStore()
 
     public init() {}
 
@@ -32,7 +33,8 @@ public struct DashboardRootView: View {
                 // Inline (centered compact) title — avoid large left-aligned title at rest.
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    // Dead Overview timeframe control removed (looked global, filtered nothing).
+                    // Chart range lives in-content (PortfolioHistorySection), not the nav bar —
+                    // a toolbar picker looked global and used to filter nothing.
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             Task { await refresh() }
@@ -67,8 +69,10 @@ public struct DashboardRootView: View {
                 }
                 .task(id: env?.accessIdentityRevision) { [apiClient = env?.apiClient] in
                     intelligenceStore.reset()
+                    portfolioHistoryStore.reset()
                     if let apiClient {
                         await intelligenceStore.loadIfNeeded(using: apiClient)
+                        await portfolioHistoryStore.loadIfNeeded(using: apiClient)
                     }
                 }
         }
@@ -107,6 +111,19 @@ public struct DashboardRootView: View {
                 data: data,
                 generatedAt: store.state.value?.generatedAtDate,
                 onSelectProvider: { id in env?.openProvider(id: id) }
+            )
+
+            PortfolioHistorySection(
+                store: portfolioHistoryStore,
+                onOpenSettings: { env?.selectTab?(.settings) },
+                onSelectTimeframe: { option in
+                    Task {
+                        await portfolioHistoryStore.selectTimeframe(
+                            option,
+                            using: env?.apiClient
+                        )
+                    }
+                }
             )
 
             IntelligenceSection(
@@ -183,6 +200,7 @@ public struct DashboardRootView: View {
         await store.refresh()
         if let apiClient = env?.apiClient {
             await intelligenceStore.refresh(using: apiClient)
+            await portfolioHistoryStore.refresh(using: apiClient)
         }
         if store.lastError == nil {
             Haptics.success()

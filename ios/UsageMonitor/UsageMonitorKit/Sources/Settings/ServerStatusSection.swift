@@ -104,17 +104,30 @@ struct ServerStatusSection: View {
             LabeledContent("Uptime", value: UptimeFormat.string(fromSeconds: uptime))
         }
 
-        ForEach(snapshot.dependencyChecks, id: \.name) { check in
+        ForEach(snapshot.dependencyChecks) { check in
             LabeledContent(check.name) {
                 StatusBadge(
-                    check.ok ? "OK" : "Down",
-                    status: check.ok ? .ok : .danger,
-                    systemImage: check.ok ? "checkmark" : "xmark"
+                    dependencyLabel(check),
+                    status: dependencyStatus(check),
+                    systemImage: check.ok ? "checkmark" : (check.gatesService ? "xmark" : "exclamationmark")
                 )
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(check.name): \(check.ok ? "OK" : "Down")")
+            .accessibilityLabel("\(check.name): \(dependencyLabel(check))")
         }
+    }
+
+    /// Service-gating checks fail hard ("Down"); observability-only checks
+    /// (backup free-tier lag) fail soft ("Lagging") so red backup is not
+    /// mistaken for an app outage.
+    private func dependencyLabel(_ check: ServerStatusSnapshot.DependencyCheck) -> String {
+        if check.ok { return "OK" }
+        return check.gatesService ? "Down" : "Lagging"
+    }
+
+    private func dependencyStatus(_ check: ServerStatusSnapshot.DependencyCheck) -> Theme.SemanticStatus {
+        if check.ok { return .ok }
+        return check.gatesService ? .danger : .warning
     }
 
     private func versionText(version: String, commit: String?) -> String {
