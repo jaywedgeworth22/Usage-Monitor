@@ -68,4 +68,64 @@ final class LocalForecastTests: XCTestCase {
         )
         XCTAssertEqual(remaining, 0, accuracy: 0.001)
     }
+
+    func testBudgetEngineSummaryExposesProjectionParts() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = cal.date(from: DateComponents(year: 2026, month: 8, day: 15, hour: 12))!
+        let monthStart = BudgetEngine.utcMonthStart(now)
+
+        let provider = LocalProvider(
+            id: "p1",
+            name: "openrouter",
+            displayName: "OpenRouter",
+            adapterKind: "openrouter",
+            isActive: true
+        )
+        let plan = LocalProviderPlan(providerId: "p1", monthlyBudgetUsd: 200)
+        let snap = LocalUsageSnapshot(
+            providerId: "p1",
+            fetchedAt: now,
+            totalCost: 50,
+            fixedCostIncludedUsd: 0,
+            costScope: "calendar_month_to_date",
+            costWindowStart: monthStart
+        )
+        let sub = LocalSubscription(
+            providerId: "p1",
+            name: "Pro",
+            costUsd: 20,
+            currentPeriodStart: monthStart,
+            nextRenewalAt: cal.date(from: DateComponents(year: 2026, month: 8, day: 20))!,
+            autoRenew: true,
+            status: "active"
+        )
+        let charge = LocalSubscriptionCharge(
+            subscriptionId: sub.id,
+            providerId: "p1",
+            periodStart: monthStart,
+            periodEnd: cal.date(from: DateComponents(year: 2026, month: 9, day: 1))!,
+            costUsd: 20
+        )
+
+        let summary = BudgetEngine.compute(
+            providers: [provider],
+            plans: ["p1": plan],
+            snapshots: [snap],
+            subscriptions: [sub],
+            charges: [charge],
+            now: now
+        )
+
+        XCTAssertEqual(summary.providers.count, 1)
+        let row = summary.providers[0]
+        XCTAssertEqual(row.fixedAccruedUsd, 20, accuracy: 0.01)
+        XCTAssertEqual(row.remainingScheduledUsd, 20, accuracy: 0.01)
+        XCTAssertGreaterThan(row.pacedVariableUsd, 40)
+        XCTAssertEqual(summary.totalFixedAccruedUsd, row.fixedAccruedUsd, accuracy: 0.001)
+        XCTAssertEqual(summary.totalRemainingScheduledUsd, row.remainingScheduledUsd, accuracy: 0.001)
+        XCTAssertEqual(summary.configuredBudgetCount, 1)
+        XCTAssertTrue(summary.hasBudget)
+        XCTAssertNotNil(summary.remainingUsd)
+    }
 }

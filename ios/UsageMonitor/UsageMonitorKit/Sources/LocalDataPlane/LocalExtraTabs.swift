@@ -18,7 +18,7 @@ struct LocalAlertsTab: View {
             Group {
                 if model.alerts.isEmpty {
                     ContentUnavailableView(
-                        "All clear",
+                        "All Clear",
                         systemImage: "checkmark.seal.fill",
                         description: Text("Budget and fetch issues show up here. Phone-local rules only — no fleet Slack/PagerDuty.")
                     )
@@ -90,11 +90,41 @@ struct LocalProjectsTab: View {
             List {
                 if model.projects.isEmpty {
                     ContentUnavailableView(
-                        "No projects",
+                        "No Projects",
                         systemImage: "folder",
                         description: Text("Tag spend with project budgets (direct charges only). Residual % allocation stays on the web.")
                     )
                 } else {
+                    Section {
+                        let totalSpent = spentByProject.values.reduce(0, +)
+                        let budgeted = model.projects.compactMap(\.monthlyBudgetUsd).filter { $0 > 0 }
+                        let totalBudget = budgeted.reduce(0, +)
+                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                            Text("All Projects")
+                                .font(Theme.Typography.caption)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                            Text(CurrencyFormat.usd(totalSpent))
+                                .font(Theme.Typography.hero)
+                                .monospacedDigit()
+                            if totalBudget > 0 {
+                                LabeledBudgetMeter(
+                                    title: "Budget",
+                                    detail: "\(CurrencyFormat.usd(totalSpent)) of \(CurrencyFormat.usd(totalBudget))",
+                                    fraction: totalSpent / totalBudget,
+                                    status: meterStatus(spent: totalSpent, budget: totalBudget)
+                                )
+                            } else {
+                                Text("no budget set")
+                                    .font(Theme.Typography.caption)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            Text("\(model.projects.count) project\(model.projects.count == 1 ? "" : "s") · direct charges only")
+                                .font(Theme.Typography.caption)
+                                .foregroundStyle(Theme.Colors.tertiaryText)
+                        }
+                        .padding(.vertical, Theme.Spacing.xxs)
+                    }
+
                     ForEach(model.projects) { project in
                         Button {
                             editProject = project
@@ -118,7 +148,7 @@ struct LocalProjectsTab: View {
                                         status: meterStatus(spent: spent, budget: budget)
                                     )
                                 } else {
-                                    Text("No budget")
+                                    Text("no budget set")
                                         .font(Theme.Typography.caption)
                                         .foregroundStyle(Theme.Colors.secondaryText)
                                 }

@@ -12,12 +12,23 @@ public enum BudgetEngine {
         public var spentUsd: Double
         public var monthlyBudgetUsd: Double?
         public var projectedEomUsd: Double?
+        /// EOM composition (web parity: paced variable + fixed accrued + known renewals).
+        public var pacedVariableUsd: Double
+        public var fixedAccruedUsd: Double
+        public var remainingScheduledUsd: Double
         public var level: SpendLevel
         public var isActive: Bool
         public var lastFetchAt: Date?
         public var lastFetchError: String?
         public var adapterKind: String
         public var statusNote: String?
+
+        public var hasBudget: Bool { (monthlyBudgetUsd ?? 0) > 0 }
+
+        public var percentUsed: Double? {
+            guard let b = monthlyBudgetUsd, b > 0 else { return nil }
+            return spentUsd / b
+        }
     }
 
     public enum SpendLevel: String, Sendable, Equatable {
@@ -33,6 +44,25 @@ public enum BudgetEngine {
         public var totalSpentUsd: Double
         public var totalBudgetUsd: Double?
         public var overBudget: Bool
+        /// Combined EOM projection parts (web / remote dashboard parity).
+        public var totalProjectedEomUsd: Double
+        public var totalPacedVariableUsd: Double
+        public var totalFixedAccruedUsd: Double
+        public var totalRemainingScheduledUsd: Double
+        public var exceededCount: Int
+        public var warningCount: Int
+        public var configuredBudgetCount: Int
+
+        public var hasBudget: Bool { (totalBudgetUsd ?? 0) > 0 }
+
+        public var remainingUsd: Double? {
+            guard let b = totalBudgetUsd, b > 0 else { return nil }
+            return b - totalSpentUsd
+        }
+
+        public var hasSubscriptionProjectionComponent: Bool {
+            totalFixedAccruedUsd > 0.005 || totalRemainingScheduledUsd > 0.005
+        }
     }
 
     public static func compute(
@@ -111,6 +141,9 @@ public enum BudgetEngine {
                     spentUsd: spent,
                     monthlyBudgetUsd: budget,
                     projectedEomUsd: projected,
+                    pacedVariableUsd: forecast.pacedVariableUsd,
+                    fixedAccruedUsd: forecast.fixedAccruedUsd,
+                    remainingScheduledUsd: forecast.remainingScheduledUsd,
                     level: level,
                     isActive: p.isActive,
                     lastFetchAt: p.lastFetchAt,
@@ -125,16 +158,27 @@ public enum BudgetEngine {
 
         rows.sort { $0.spentUsd > $1.spentUsd }
         let totalSpent = rows.reduce(0.0) { $0 + $1.spentUsd }
-        let budgets = rows.compactMap(\.monthlyBudgetUsd)
+        let budgets = rows.compactMap(\.monthlyBudgetUsd).filter { $0 > 0 }
         let totalBudget: Double? = budgets.isEmpty ? nil : budgets.reduce(0, +)
         let over = rows.contains { $0.level == .exceeded }
+        let totalProjected = rows.compactMap(\.projectedEomUsd).reduce(0.0, +)
+        let totalPaced = rows.reduce(0.0) { $0 + $1.pacedVariableUsd }
+        let totalFixed = rows.reduce(0.0) { $0 + $1.fixedAccruedUsd }
+        let totalRenew = rows.reduce(0.0) { $0 + $1.remainingScheduledUsd }
 
         return Summary(
             monthStart: monthStart,
             providers: rows,
             totalSpentUsd: totalSpent,
             totalBudgetUsd: totalBudget,
-            overBudget: over
+            overBudget: over,
+            totalProjectedEomUsd: totalProjected,
+            totalPacedVariableUsd: totalPaced,
+            totalFixedAccruedUsd: totalFixed,
+            totalRemainingScheduledUsd: totalRenew,
+            exceededCount: rows.filter { $0.level == .exceeded }.count,
+            warningCount: rows.filter { $0.level == .warning }.count,
+            configuredBudgetCount: budgets.count
         )
     }
 

@@ -102,70 +102,22 @@ public struct LocalRootView: View {
                             .foregroundStyle(Theme.Colors.danger)
                             .dsCard()
                     }
-                    if let s = model.summary {
-                        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                            Text("Month to Date")
-                                .font(Theme.Typography.caption)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                            Text(CurrencyFormat.usd(s.totalSpentUsd))
-                                .font(Theme.Typography.hero)
-                                .monospacedDigit()
-                                .foregroundStyle(Theme.Colors.primaryText)
-                            if let budget = s.totalBudgetUsd, budget > 0 {
-                                LabeledBudgetMeter(
-                                    title: s.overBudget ? "Over Budget" : "Budget Used",
-                                    detail: "\(CurrencyFormat.usd(s.totalSpentUsd)) of \(CurrencyFormat.usd(budget))",
-                                    fraction: s.totalSpentUsd / budget,
-                                    status: s.overBudget ? .danger : (s.totalSpentUsd / budget >= 0.8 ? .warning : .ok)
-                                )
-                            } else {
-                                // Value/answer copy — no fake $ remaining when unbudgeted.
-                                Text("no budget set")
-                                    .font(Theme.Typography.callout.weight(.semibold))
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                                Text("Open a provider to add one.")
-                                    .font(Theme.Typography.caption)
-                                    .foregroundStyle(Theme.Colors.tertiaryText)
-                            }
-                            let projected = s.providers.compactMap(\.projectedEomUsd).reduce(0, +)
-                            if projected > 0.005 {
-                                Text("Projected EOM \(CurrencyFormat.usd(projected)) (pace estimate)")
-                                    .font(Theme.Typography.caption)
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                            }
-                            Text("API totals often omit tax. Fees you enter as subscriptions are exact.")
-                                .font(Theme.Typography.caption)
-                                .foregroundStyle(Theme.Colors.tertiaryText)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .dsCard()
-
-                        if !model.alerts.isEmpty {
-                            Button {
-                                tab = .alerts
-                            } label: {
-                                HStack {
-                                    Image(systemName: "bell.badge.fill")
-                                    Text("\(model.alerts.count) attention item\(model.alerts.count == 1 ? "" : "s")")
-                                        .font(Theme.Typography.callout.weight(.semibold))
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption.weight(.semibold))
-                                }
-                                .foregroundStyle(Theme.Colors.warning)
-                                .padding(Theme.Spacing.md)
-                                .background(Theme.Colors.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.md))
-                            }
-                        }
-
-                        // Hide inactive $0 shells from Overview noise; full list is under Providers.
-                        ForEach(
-                            s.providers.filter {
-                                $0.spentUsd > 0.000_5 || $0.pollVariableUsd > 0.000_5 || $0.isActive
+                    if let s = model.summary, !s.providers.isEmpty {
+                        LocalOverviewContent(
+                            summary: s,
+                            alertCount: model.alerts.count,
+                            onOpenProvider: { id in
+                                tab = .providers
+                                pathProviders.append(id)
                             },
-                            id: \.providerId
-                        ) { row in
-                            providerSpendRow(row)
+                            onOpenAlerts: { tab = .alerts },
+                            onAddProvider: { showAddProvider = true }
+                        )
+                        if !model.subscriptions.filter({ $0.status == "active" && $0.costUsd > 0 }).isEmpty {
+                            LocalRecurringFeesCard(
+                                subscriptions: model.subscriptions,
+                                providers: model.providers
+                            )
                         }
                     } else if !model.isReady {
                         ProgressView("Opening local store…")
@@ -174,16 +126,17 @@ public struct LocalRootView: View {
                     } else {
                         EmptyState(
                             systemImage: "iphone",
-                            title: "No providers yet",
-                            message: "Add OpenRouter (Management key) or a subscription-only provider.",
-                            actionTitle: "Add provider"
+                            title: "No Providers Yet",
+                            message: "Add OpenRouter (Management key) or a subscription-only provider — same money model as the web (poll + fees).",
+                            actionTitle: "Add Provider"
                         ) { showAddProvider = true }
                     }
                 }
                 .padding(Theme.Spacing.lg)
             }
             .dsScreenBackground()
-            .navigationTitle("Local Usage Monitor")
+            .navigationTitle("Overview")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -195,114 +148,24 @@ public struct LocalRootView: View {
                             Image(systemName: "arrow.clockwise")
                         }
                     }
+                    .accessibilityLabel("Refresh")
                 }
             }
             .refreshable { await model.refreshAllDue(force: true) }
         }
     }
 
-    private func providerSpendRow(_ row: BudgetEngine.ProviderSpend) -> some View {
-        Button {
-            tab = .providers
-            pathProviders.append(row.providerId)
-        } label: {
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                HStack {
-                    Text(row.displayName)
-                        .font(Theme.Typography.callout.weight(.semibold))
-                        .foregroundStyle(Theme.Colors.primaryText)
-                    Spacer()
-                    Text(CurrencyFormat.usd(row.spentUsd))
-                        .font(Theme.Typography.callout.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(color(for: row.level))
-                }
-                if let budget = row.monthlyBudgetUsd, budget > 0 {
-                    BudgetMeter(
-                        fraction: row.spentUsd / budget,
-                        status: row.level == .exceeded ? .danger : (row.level == .warning ? .warning : .ok)
-                    )
-                }
-                Text(detailLine(row))
-                    .font(Theme.Typography.caption)
-                    .foregroundStyle(Theme.Colors.tertiaryText)
-                    .multilineTextAlignment(.leading)
-            }
-            .dsCard(padding: Theme.Spacing.md)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func detailLine(_ row: BudgetEngine.ProviderSpend) -> String {
-        var parts = [
-            "poll \(formatUSD(row.pollVariableUsd))",
-            "subs \(formatUSD(row.subscriptionChargesUsd))",
-            "fixed \(formatUSD(row.planFixedUsd))",
-        ]
-        if let err = row.lastFetchError { parts.append(err) }
-        return parts.joined(separator: " · ")
-    }
-
-    private func providerRowSubtitle(_ p: LocalProvider) -> String {
-        var parts = [p.adapterKind]
-        if !p.isActive { parts.append("inactive") }
-        if p.isPollable {
-            parts.append(p.canFetch ? "pollable" : "needs key")
-        } else {
-            parts.append("manual / fee")
-        }
-        return parts.joined(separator: " · ")
-    }
-
     // MARK: - Providers
 
     private var providersTab: some View {
         NavigationStack(path: $pathProviders) {
-            List {
-                ForEach(model.providers) { p in
-                    NavigationLink(value: p.id) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(p.displayName)
-                            Text(providerRowSubtitle(p))
-                                .font(Theme.Typography.caption)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            pendingDeleteProvider = p
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                        .accessibilityLabel("Delete \(p.displayName)")
-                    }
-                    .contextMenu {
-                        if p.canFetch {
-                            Button {
-                                Task { await model.poll(providerId: p.id) }
-                            } label: {
-                                Label("Fetch now", systemImage: "arrow.triangle.2.circlepath")
-                            }
-                        }
-                        Button {
-                            Task {
-                                try? await model.setActive(providerId: p.id, isActive: !p.isActive)
-                            }
-                        } label: {
-                            Label(
-                                p.isActive ? "Deactivate" : "Activate",
-                                systemImage: p.isActive ? "pause.circle" : "play.circle"
-                            )
-                        }
-                        Button(role: .destructive) {
-                            pendingDeleteProvider = p
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-                }
-            }
+            LocalProvidersListContent(
+                model: model,
+                onAdd: { showAddProvider = true },
+                onRequestDelete: { pendingDeleteProvider = $0 }
+            )
             .navigationTitle("Providers")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: String.self) { id in
                 ProviderDetailView(model: model, providerId: id)
             }
@@ -311,6 +174,7 @@ public struct LocalRootView: View {
                     Button { showAddProvider = true } label: {
                         Image(systemName: "plus")
                     }
+                    .accessibilityLabel("Add Provider")
                 }
             }
             .confirmationDialog(
@@ -342,11 +206,31 @@ public struct LocalRootView: View {
     private var settingsTab: some View {
         NavigationStack {
             List {
-                Section("This app") {
+                Section("This App") {
                     LabeledContent("Product", value: "on-device self-host")
                     LabeledContent("Schema", value: "v\(model.schemaVersion)")
                     LabeledContent("Providers", value: "\(model.providers.count)")
+                    LabeledContent("Subscriptions", value: "\(model.subscriptions.filter { $0.status == "active" }.count) active")
                     Text("Money-truth is local SQLite. Provider API keys stay in Keychain. No remote Usage Monitor server required.")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                Section("Subscriptions") {
+                    let active = model.subscriptions.filter { $0.status == "active" && $0.costUsd > 0 }
+                    if active.isEmpty {
+                        Text("no active recurring fees")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    } else {
+                        ForEach(active.sorted { $0.costUsd > $1.costUsd }) { sub in
+                            LabeledContent(sub.name, value: CurrencyFormat.usd(sub.costUsd))
+                        }
+                        LabeledContent(
+                            "Monthly Run-Rate",
+                            value: CurrencyFormat.usd(active.reduce(0) { $0 + $1.costUsd })
+                        )
+                    }
+                    Text("Edit fees on each provider detail (Recurring Fee). Materializer posts one charge per billing period into MTD spend.")
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
@@ -358,7 +242,7 @@ public struct LocalRootView: View {
                     }
                 }
                 Section("Security") {
-                    Toggle("Require Face ID / passcode", isOn: $settings.appLockEnabled)
+                    Toggle("Require Face ID / Passcode", isOn: $settings.appLockEnabled)
                         .tint(Theme.Colors.accent)
                 }
                 Section("Backup") {
@@ -368,7 +252,7 @@ public struct LocalRootView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Section("Also in this project") {
+                Section("Also in This Project") {
                     Text("**Usage Monitor** (other app) is the live-sync client for a self-hosted or owner server — use that if you run a VPS like the fleet.")
                         .font(Theme.Typography.caption)
                 }
@@ -376,32 +260,33 @@ public struct LocalRootView: View {
                     Text("\(LocalProviderCatalog.all.count) fleet providers under + Add. Seed only creates inactive $0 shells — never invents paid plans.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("Seed missing fleet templates") {
+                    Button("Seed Missing Fleet Templates") {
                         Task {
                             _ = try? await model.seedMissingCatalogProviders()
                             try? await model.reload()
                         }
                     }
-                    Button("Remove catalog-guess charges") {
+                    Button("Remove Catalog-Guess Charges") {
                         Task { _ = try? await model.scrubCatalogGuessCharges() }
                     }
                 }
                 Section("Data") {
-                    Button("Refresh all providers", role: nil) {
+                    Button("Refresh All Providers", role: nil) {
                         Task { await model.refreshAllDue(force: true) }
                     }
-                    Button("Wipe all local data", role: .destructive) {
+                    Button("Wipe All Local Data", role: .destructive) {
                         showWipeConfirmation = true
                     }
                 }
             }
             .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
             .confirmationDialog(
-                "Wipe all local data?",
+                "Wipe All Local Data?",
                 isPresented: $showWipeConfirmation,
                 titleVisibility: .visible
             ) {
-                Button("Wipe everything", role: .destructive) {
+                Button("Wipe Everything", role: .destructive) {
                     Task { try? await model.wipeAll() }
                 }
                 Button("Cancel", role: .cancel) {}
@@ -409,22 +294,6 @@ public struct LocalRootView: View {
                 Text("Removes every provider, plan, subscription charge, and Keychain API key on this phone.")
             }
         }
-    }
-
-    private func color(for level: BudgetEngine.SpendLevel) -> Color {
-        switch level {
-        case .ok: return Theme.Colors.success
-        case .warning: return Theme.Colors.warning
-        case .exceeded: return Theme.Colors.danger
-        case .unconfigured: return Theme.Colors.secondaryText
-        }
-    }
-
-    private func formatUSD(_ v: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencyCode = "USD"
-        return f.string(from: NSNumber(value: v)) ?? String(format: "$%.2f", v)
     }
 }
 
@@ -657,16 +526,31 @@ private struct ProviderDetailView: View {
                 if let s = spend {
                     Section {
                         LabeledContent("Total", value: CurrencyFormat.usd(s.spentUsd))
-                        LabeledContent("Poll variable", value: CurrencyFormat.usd(s.pollVariableUsd))
+                        LabeledContent("Poll Variable", value: CurrencyFormat.usd(s.pollVariableUsd))
                         LabeledContent("Subscriptions", value: CurrencyFormat.usd(s.subscriptionChargesUsd))
-                        LabeledContent("Plan fixed", value: CurrencyFormat.usd(s.planFixedUsd))
+                        LabeledContent("Plan Fixed", value: CurrencyFormat.usd(s.planFixedUsd))
                         if let b = s.monthlyBudgetUsd {
                             LabeledContent("Budget", value: CurrencyFormat.usd(b))
+                        } else {
+                            LabeledContent("Budget", value: "no budget set")
                         }
                     } header: {
                         Text("Spend (MTD)")
                     } footer: {
                         Text("Poll totals are provider-reported (taxes/VAT often missing). Subscription fees are what you enter here — include tax yourself if you want the full bill.")
+                    }
+
+                    if let proj = s.projectedEomUsd, proj > 0.005 {
+                        Section {
+                            LabeledContent("Projected EOM", value: CurrencyFormat.usd(proj))
+                            LabeledContent("Usage (Extrapolated)", value: CurrencyFormat.usd(s.pacedVariableUsd))
+                            LabeledContent("Fixed Accrued MTD", value: CurrencyFormat.usd(s.fixedAccruedUsd))
+                            LabeledContent("Known Renewals Remaining", value: CurrencyFormat.usd(s.remainingScheduledUsd))
+                        } header: {
+                            Text("EOM Projection Parts")
+                        } footer: {
+                            Text("Same composition as the web: paced variable usage + fixed accrued + known subscription renewals still due this UTC month.")
+                        }
                     }
                 }
 
@@ -695,7 +579,7 @@ private struct ProviderDetailView: View {
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                     }
-                    Button("Save budget") {
+                    Button("Save Budget") {
                         Task {
                             let trimmed = budgetText.trimmingCharacters(in: .whitespacesAndNewlines)
                             let value: Double? = trimmed.isEmpty ? nil : Double(trimmed)
@@ -708,7 +592,7 @@ private struct ProviderDetailView: View {
                         }
                     }
                 } header: {
-                    Text("Monthly budget")
+                    Text("Monthly Budget")
                 }
 
                 Section {
@@ -719,7 +603,7 @@ private struct ProviderDetailView: View {
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                     }
-                    Button("Save recurring fee") {
+                    Button("Save Recurring Fee") {
                         Task {
                             let cost = Double(feeText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
                             let name = feeName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -735,14 +619,14 @@ private struct ProviderDetailView: View {
                             }
                         }
                     }
-                    Button("Cancel recurring fees", role: .destructive) {
+                    Button("Cancel Recurring Fees", role: .destructive) {
                         Task {
                             try? await model.cancelRecurringFees(providerId: providerId)
                             feeText = ""
                         }
                     }
                 } header: {
-                    Text("Recurring fee")
+                    Text("Recurring Fee")
                 } footer: {
                     Text("Use this for Max/Pro, Workers Paid, Vercel Pro, etc. Leave $0 if you do not pay for this product.")
                 }
@@ -756,7 +640,7 @@ private struct ProviderDetailView: View {
                                 if model.isRefreshing {
                                     ProgressView()
                                 } else {
-                                    Label("Fetch now", systemImage: "arrow.triangle.2.circlepath")
+                                    Label("Fetch Now", systemImage: "arrow.triangle.2.circlepath")
                                 }
                             }
                             .disabled(model.isRefreshing)
@@ -779,7 +663,7 @@ private struct ProviderDetailView: View {
                 }
 
                 Section {
-                    Button("Delete provider", role: .destructive) {
+                    Button("Delete Provider", role: .destructive) {
                         showDeleteConfirm = true
                     }
                 }
