@@ -418,6 +418,41 @@ const CATALOG: Record<CatalogProviderName, ProviderIntegrationProfile> = {
     limitations: ["Non-USD plan prices remain in their owner currency and are never mislabeled as USD; discounts, tax, and accrued invoice totals are unavailable.", "Automatic backup images are not priced again because the server backup add-on already represents that charge."],
     source: "src/lib/adapters/hetzner.ts",
   }),
+  backblaze: defineProfile({
+    name: "backblaze", displayName: "Backblaze B2", category: "Infrastructure", mode: "partial",
+    summary: "Inventories B2 buckets and file versions for storage footprint and estimates storage MTD from public B2 pricing without claiming invoice spend or download charges.",
+    reads: [
+      "Buckets visible to the application key (listBuckets or a single scoped bucket).",
+      "File version inventory per bucket via list_file_versions, including hidden versions that still bill until permanently deleted.",
+      "Derived storage bytes/GB, free-allowance-adjusted billable GB, and pro-rated catalog storage MTD.",
+    ],
+    stores: [
+      "Minimized bucket identity, file-version counts, and storage totals; credentials, object payloads, and full list responses are not persisted as content.",
+    ],
+    credentialInputs: [
+      "Application Key ID.",
+      "Application Key (prefer a dedicated read-only key with listBuckets + listFiles; do not reuse write/delete backup keys).",
+      "Optional soft storage cap GB and catalog price / free-allowance overrides.",
+    ],
+    billing: {
+      visibility: "metadata",
+      summary: "Storage MTD is a public-catalog estimate pro-rated by UTC month; download bandwidth and Class A/B transactions are not included. Not an invoice.",
+    },
+    canAdd: [
+      "Download and Class A/B transaction usage if Backblaze exposes a supported account usage API.",
+      "Invoice totals if a billing-history endpoint becomes available.",
+    ],
+    cannotAdd: [
+      "Console Caps & Alerts hard limits cannot be set or read via the public API.",
+      "Download egress and Class A/B API transaction spend cannot be reconstructed from inventory APIs alone.",
+    ],
+    limitations: [
+      "totalCost is public storage price × billable GB × UTC month fraction only.",
+      "totalRequests is whole megabytes of storage so request-limit budgets can soft-cap footprint.",
+      "Very large buckets may truncate inventory at a safety max file-version count.",
+    ],
+    source: "src/lib/adapters/backblaze.ts",
+  }),
   coolify: defineProfile({
     name: "coolify", displayName: "Coolify", category: "Infrastructure", mode: "health-only",
     summary: "Reads server reachability/usability and application deployment status from a Coolify instance's REST API; this is service-health monitoring of self-hosted infrastructure, not a third-party billing account.",

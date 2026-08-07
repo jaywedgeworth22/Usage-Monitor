@@ -541,6 +541,40 @@ const CREDENTIAL_MAPPINGS: readonly CredentialMapping[] = [
         : {}),
     }),
   },
+  {
+    // Fleet read-only monitor key (listBuckets + listFiles). Prefer dedicated
+    // BACKBLAZE_* monitor credentials over per-app write backup keys.
+    scope: "shared",
+    providerName: "backblaze",
+    attempts: [{
+      source: "shared",
+      required: ["BACKBLAZE_APPLICATION_KEY", "BACKBLAZE_APPLICATION_KEY_ID"],
+      optional: ["BACKBLAZE_STORAGE_CAP_GB", "BACKBLAZE_STORAGE_PRICE_PER_GB"],
+    }, {
+      source: "shared",
+      required: ["B2_MONITOR_APPLICATION_KEY", "B2_MONITOR_KEY_ID"],
+      optional: ["BACKBLAZE_STORAGE_CAP_GB", "BACKBLAZE_STORAGE_PRICE_PER_GB"],
+    }],
+    build: (values) => {
+      const appKey =
+        values.get("BACKBLAZE_APPLICATION_KEY") ??
+        values.get("B2_MONITOR_APPLICATION_KEY");
+      const keyId =
+        values.get("BACKBLAZE_APPLICATION_KEY_ID") ??
+        values.get("B2_MONITOR_KEY_ID") ??
+        values.get("BACKBLAZE_KEY_ID");
+      const cap = values.get("BACKBLAZE_STORAGE_CAP_GB");
+      const price = values.get("BACKBLAZE_STORAGE_PRICE_PER_GB");
+      return {
+        apiKey: appKey,
+        publicConfig: {
+          applicationKeyId: keyId ?? "",
+          ...(cap ? { storageCapGb: cap } : {}),
+          ...(price ? { storagePricePerGbMonth: price } : {}),
+        },
+      };
+    },
+  },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -577,6 +611,13 @@ const SECRET_NAME_TO_PROVIDER: ReadonlyMap<string, string> = new Map<string, str
   ["RENDER_API_TOKEN", "render"],
   ["HETZNER_API_TOKEN", "hetzner"],
   ["HETZNER_API_KEY", "hetzner"],
+  ["BACKBLAZE_APPLICATION_KEY", "backblaze"],
+  ["BACKBLAZE_APPLICATION_KEY_ID", "backblaze"],
+  ["BACKBLAZE_KEY_ID", "backblaze"],
+  ["B2_MONITOR_APPLICATION_KEY", "backblaze"],
+  ["B2_MONITOR_KEY_ID", "backblaze"],
+  ["B2_APPLICATION_KEY", "backblaze"],
+  ["B2_KEY_ID", "backblaze"],
   ["CLOUDFLARE_API_TOKEN", "cloudflare"],
   ["CLOUDFLARE_API_KEY", "cloudflare"],
   ["CLOUDFLARE_GLOBAL_API_KEY", "cloudflare"],

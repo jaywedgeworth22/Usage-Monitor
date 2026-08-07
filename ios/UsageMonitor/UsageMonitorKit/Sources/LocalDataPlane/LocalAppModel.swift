@@ -144,7 +144,7 @@ public final class LocalAppModel {
         }()
 
         // Poll adapters available on phone today.
-        let supportedPoll = Set(["openrouter", "deepseek", "openai", "anthropic", "hetzner"])
+        let supportedPoll = Set(["openrouter", "deepseek", "openai", "anthropic", "hetzner", "backblaze"])
         let resolvedKind: String = {
             if adapterKind == "subscription_only" { return adapterKind }
             if supportedPoll.contains(adapterKind) { return adapterKind }

@@ -54,6 +54,7 @@ describe("usageUnitLabelForProvider", () => {
     expect(usageUnitLabelForProvider("sentry")).toBe("Events");
     expect(usageUnitLabelForProvider("pushover")).toBe("Messages");
     expect(usageUnitLabelForProvider("twelvedata")).toBe("API credits");
+    expect(usageUnitLabelForProvider("backblaze")).toBe("Storage (MB)");
   });
 
   it("resolves by canonical provider key, not raw casing", () => {

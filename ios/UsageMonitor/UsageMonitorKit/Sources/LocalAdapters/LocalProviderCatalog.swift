@@ -173,6 +173,15 @@ public enum LocalProviderCatalog {
             help: "Polls inventory + public pricing catalog; pro-rates into estimated MTD (not an invoice). One token per Hetzner project."
         ),
         .init(
+            name: "backblaze",
+            displayName: "Backblaze B2",
+            category: "Hosting",
+            mode: .poll,
+            adapterKind: "backblaze",
+            keyFieldLabel: "keyId:applicationKey",
+            help: "Polls B2 bucket + file-version inventory; estimates storage MTD from public pricing (not an invoice). Prefer a read-only key (listBuckets + listFiles). Paste as keyId:applicationKey."
+        ),
+        .init(
             name: "oracle",
             displayName: "Oracle Cloud Infrastructure",
             category: "Hosting",

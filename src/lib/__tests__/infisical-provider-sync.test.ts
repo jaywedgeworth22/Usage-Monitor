@@ -123,6 +123,12 @@ const ALLOWLIST: Record<Scope, readonly string[]> = {
     // App-scope mappings with sharedFallback also register their secret names
     // on the shared source (Wave H / E2 admin + management keys).
     "ANTHROPIC_ADMIN_KEY",
+    "B2_MONITOR_APPLICATION_KEY",
+    "B2_MONITOR_KEY_ID",
+    "BACKBLAZE_APPLICATION_KEY",
+    "BACKBLAZE_APPLICATION_KEY_ID",
+    "BACKBLAZE_STORAGE_CAP_GB",
+    "BACKBLAZE_STORAGE_PRICE_PER_GB",
     "COOLIFY_API_TOKEN",
     "COOLIFY_HOST",
     "LANGFUSE_BASE_URL",

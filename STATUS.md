@@ -54,3 +54,7 @@ Updated: 2026-07-21
 
 Open a PR, resolve hosted review/checks, merge, and verify the deployed server SHA separately.
 The native binary still needs a real-device/App Store archive and TestFlight receipt before it is shipped.
+
+## Current (2026-08-07 GROK)
+
+- Backblaze B2 builtin provider (web + iOS Local storage inventory / catalog MTD estimate) on branch `grok/backblaze-usage-monitor`.
