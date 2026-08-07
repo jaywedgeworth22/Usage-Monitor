@@ -257,6 +257,48 @@ final class LocalSeedTruthTests: XCTestCase {
         XCTAssertNil(LocalProviderCatalog.entry(name: "vercel")?.suggestedMonthlyUsd)
         XCTAssertNil(LocalProviderCatalog.entry(name: "cloudflare")?.suggestedMonthlyUsd)
     }
+
+    func testCatalogNamingAndConnectionAbilities() {
+        // OpenAI API vs ChatGPT subscription (parity with Claude split).
+        XCTAssertEqual(LocalProviderCatalog.entry(name: "openai")?.displayName, "OpenAI (API)")
+        XCTAssertEqual(LocalProviderCatalog.entry(name: "openai-chatgpt-sub")?.displayName, "ChatGPT (subscription)")
+        XCTAssertEqual(LocalProviderCatalog.entry(name: "anthropic-claude-sub")?.displayName, "Claude (subscription)")
+        // xAI is the API product — no "/ Grok" on the label; SuperGrok is separate.
+        XCTAssertEqual(LocalProviderCatalog.entry(name: "xai")?.displayName, "xAI")
+        XCTAssertFalse(LocalProviderCatalog.entry(name: "xai")!.displayName.contains("Grok"))
+        XCTAssertEqual(LocalProviderCatalog.entry(name: "xai-supergrok-sub")?.displayName, "SuperGrok (subscription)")
+        XCTAssertEqual(LocalProviderCatalog.entry(name: "custom")?.displayName, "Custom / Other")
+
+        // User-facing summary never exposes internal adapterKind "subscription_only".
+        for entry in LocalProviderCatalog.all {
+            XCTAssertFalse(
+                entry.connectionSummary.lowercased().contains("subscription_only"),
+                "\(entry.name) leaked subscription_only into UI"
+            )
+            XCTAssertFalse(entry.abilities.isEmpty, "\(entry.name) needs abilities")
+        }
+
+        // Pollable adapters surface poll ability chips.
+        let openrouter = try XCTUnwrap(LocalProviderCatalog.entry(name: "openrouter"))
+        XCTAssertTrue(openrouter.abilities.contains(.pollCost))
+        XCTAssertTrue(openrouter.isPhonePollable)
+    }
+
+    func testEnsureCatalogIsIdempotentAndAddsChatGPT() async throws {
+        let store = SQLiteLocalStore.inMemory()
+        let model = LocalAppModel(store: store, secrets: InMemoryProviderSecrets())
+        try await store.open()
+        let first = try await model.ensureCatalogProviders()
+        let second = try await model.ensureCatalogProviders()
+        XCTAssertGreaterThan(first, 10)
+        XCTAssertEqual(second, 0, "Second ensure must not duplicate")
+        let names = Set(try await store.listProviders().map(\.name))
+        XCTAssertTrue(names.contains("openai-chatgpt-sub"))
+        XCTAssertTrue(names.contains("xai-supergrok-sub"))
+        let xai = try XCTUnwrap(try await store.listProviders().first { $0.name == "xai" })
+        XCTAssertEqual(xai.displayName, "xAI")
+        XCTAssertEqual(xai.adapterKind, "xai")
+    }
 }
 
 /// Test double — no Keychain.

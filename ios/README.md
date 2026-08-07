@@ -90,5 +90,6 @@ ASC: create an App Store Connect app with bundle ID
 **Local Usage Monitor** ships a fleet-aligned catalog (LLM, hosting, market data, infra).
 
 - **Poll (API key):** OpenRouter, OpenAI org costs, DeepSeek balance, Anthropic Admin cost report
-- **Subscription / manual:** Claude Max, Cloudflare Workers, Cursor, FMP, Tiingo, Sentry, etc.
-- **+ → Seed all fleet templates** adds non-key rows in one tap; then edit costs / add keys
+- **API vs chat split:** OpenAI (API) + ChatGPT (subscription); Anthropic (API) + Claude (subscription); xAI + SuperGrok (subscription).
+- **Connection chips:** Polls Cost / Polls Balance / Recurring Fee / Optional Key / Fee Only — never raw `subscription_only`.
+- **+ → Add Missing Providers** creates inactive $0 cards for every known service (private SQLite; survives app updates; no keys/fees invented).

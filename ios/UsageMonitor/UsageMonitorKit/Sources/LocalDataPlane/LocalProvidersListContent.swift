@@ -2,6 +2,7 @@ import SwiftUI
 import DesignSystem
 import LocalStore
 import LocalBudget
+import LocalAdapters
 
 /// Providers list with web/remote parity: search, status filter, sort, spend rows.
 struct LocalProvidersListContent: View {
@@ -260,12 +261,19 @@ struct LocalProvidersListContent: View {
                 break
             }
         }
-        var parts = [p.adapterKind]
+        // Prefer catalog connection summary over internal adapterKind (never "subscription_only").
+        if let summary = LocalProviderCatalog.entry(name: p.name)?.connectionSummary {
+            var parts = [summary]
+            if !p.isActive { parts.append("inactive") }
+            if p.isPollable && !p.canFetch { parts.append("needs key") }
+            return parts.joined(separator: " · ")
+        }
+        var parts: [String] = []
         if !p.isActive { parts.append("inactive") }
         if p.isPollable {
-            parts.append(p.canFetch ? "pollable" : "needs key")
+            parts.append(p.canFetch ? "polls cost" : "needs key")
         } else {
-            parts.append("manual / fee")
+            parts.append("recurring fee")
         }
         return parts.joined(separator: " · ")
     }
