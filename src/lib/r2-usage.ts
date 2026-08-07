@@ -464,22 +464,73 @@ export function enforceR2AutoDisable(reason: string): void {
 
 
 
+/** This process's product identity for Pushover footers. */
+export const R2_SENDER_APP_LABEL = "Usage Monitor";
+
+/** Append `(sent from APP)` once so the runner is visible next to the subject logo. */
+export function appendSentFromFooter(
+  body: string,
+  senderLabel: string = R2_SENDER_APP_LABEL
+): string {
+  const footer = `(sent from ${senderLabel})`;
+  const trimmed = body.replace(/\s+$/u, "");
+  if (trimmed.endsWith(footer)) return trimmed;
+  return `${trimmed}\n${footer}`;
+}
+
+/**
+ * Pushover application token for a SUBJECT free-tier account (logo on phone).
+ * When this host messages about ST/CT free tiers, use their tokens; for own
+ * free tier prefer PUSHOVER_USAGE_API_TOKEN.
+ */
+export function resolveSubjectPushoverAppToken(
+  subject: "um" | "st" | "ct" = "um"
+): string {
+  const primary: Record<"um" | "st" | "ct", string[]> = {
+    um: ["PUSHOVER_USAGE_API_TOKEN", "PUSHOVER_UM_API_TOKEN", "PUSHOVER_API_TOKEN"],
+    st: ["PUSHOVER_ST_API_TOKEN"],
+    ct: ["PUSHOVER_CT_API_TOKEN"],
+  };
+  for (const key of primary[subject]) {
+    const v = process.env[key]?.trim();
+    if (v) return v;
+  }
+  // Fallbacks: generic host tokens last (may wrong-logo).
+  return (
+    process.env.PUSHOVER_APP_TOKEN?.trim() ||
+    process.env.PUSHOVER_USAGE_API_TOKEN?.trim() ||
+    process.env.PUSHOVER_ST_API_TOKEN?.trim() ||
+    process.env.PUSHOVER_CT_API_TOKEN?.trim() ||
+    ""
+  );
+}
+
+/** Own backup line: shallow R2 + Hetzner ~24h volume floor. */
+export function formatOwnBackupRegimenLine(input: {
+  killEngaged: boolean;
+  litestreamUsesR2?: boolean;
+}): string {
+  if (input.killEngaged) {
+    return "Backup: R2 litestream paused (free-tier kill). Hetzner volume snapshots remain the ~24h PITR floor.";
+  }
+  if (input.litestreamUsesR2 === false) {
+    return "Backup: Litestream endpoint is not R2 — confirm host backup path. Hetzner ~24h floor still applies.";
+  }
+  return "Backup: own litestream→R2 (1h/24h policy) + Hetzner ~24h volume floor.";
+}
+
 export async function sendPushoverNotification(
   title: string,
   message: string,
   priority: number = 0,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  opts?: { subject?: "um" | "st" | "ct" }
 ): Promise<{ ok: boolean; status?: number; error?: string }> {
   const userKey = process.env.PUSHOVER_USER_KEY;
-  // Prefer the Usage Monitor-owned app token so R2 free-tier alerts are
-  // attributed to this product, not Socratic/Congress tokens that may also
-  // exist on a shared host env.
-  const apiToken =
-    process.env.PUSHOVER_USAGE_API_TOKEN ||
-    process.env.PUSHOVER_API_TOKEN ||
-    process.env.PUSHOVER_APP_TOKEN ||
-    process.env.PUSHOVER_ST_API_TOKEN ||
-    process.env.PUSHOVER_CT_API_TOKEN;
+  // Prefer the SUBJECT product's app token so R2 free-tier alerts show that
+  // product's logo (own free tier → Usage Monitor token).
+  const apiToken = resolveSubjectPushoverAppToken(opts?.subject ?? "um");
+  const body = appendSentFromFooter(message, R2_SENDER_APP_LABEL);
 
   if (!userKey || !apiToken) {
     return {
@@ -493,7 +544,7 @@ export async function sendPushoverNotification(
     token: apiToken,
     user: userKey,
     title,
-    message,
+    message: body,
     priority: String(priority),
   });
 
@@ -586,10 +637,16 @@ export function formatDailyPushoverMessage(
     `Litestream→R2: ${assessment.litestreamUsesR2 ? "yes" : "no"}`,
     topBuckets.length ? `Top buckets:\n${topBuckets.join("\n")}` : null,
     `Status: ${statusStr}`,
+    formatOwnBackupRegimenLine({
+      killEngaged: disabled,
+      litestreamUsesR2: assessment.litestreamUsesR2,
+    }),
   ]
     .filter(Boolean)
     .join("\n");
 
+  // Footer is applied at send time so tests can assert body content without
+  // double-append; sendPushoverNotification always stamps (sent from …).
   return { title, body };
 }
 
@@ -1885,14 +1942,18 @@ export async function runR2UsageCheck(
       `Source: ${assessment.metricsSource}`,
       `Litestream→R2: ${assessment.litestreamUsesR2 ? "yes (replication stopped/blocked)" : "no (endpoint not detected as R2)"}`,
       `Flag: /data/${R2_DISABLED_FLAG_FILENAME}`,
-      `This alert is from Usage Monitor (PUSHOVER_USAGE_API_TOKEN), not a peer app.`,
+      formatOwnBackupRegimenLine({
+        killEngaged: true,
+        litestreamUsesR2: assessment.litestreamUsesR2,
+      }),
     ].join("\n");
 
     const res = await sendPushoverNotification(
       alertTitle,
       alertBody,
       1,
-      fetchImpl
+      fetchImpl,
+      { subject: "um" }
     );
     if (res.ok) {
       recordR2EmergencyAlertSent();
@@ -1904,13 +1965,24 @@ export async function runR2UsageCheck(
     }
   }
 
+  // Fleet digest stagger: UM prefers UTC hour 8 (ST=14, CT=20) so three daily
+  // free-tier digests don't land minutes apart. After the preferred hour, the
+  // next maintenance tick still sends once (watermark) so a missed 08Z is fine.
   const todayStr = now.toISOString().slice(0, 10);
-  if (getLastDailyPushoverDate() !== todayStr) {
+  const digestUtcHour = Number(process.env.R2_USAGE_DIGEST_UTC_HOUR ?? "8");
+  const hourOk =
+    !Number.isFinite(digestUtcHour) ||
+    digestUtcHour < 0 ||
+    digestUtcHour > 23 ||
+    now.getUTCHours() >= digestUtcHour;
+  if (getLastDailyPushoverDate() !== todayStr && hourOk) {
     const { title, body } = formatDailyPushoverMessage(
       assessment,
       isR2AutoDisabled()
     );
-    const res = await sendPushoverNotification(title, body, 0, fetchImpl);
+    const res = await sendPushoverNotification(title, body, 0, fetchImpl, {
+      subject: "um",
+    });
     if (res.ok) {
       recordDailyPushoverSent(todayStr);
     }

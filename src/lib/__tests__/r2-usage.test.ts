@@ -443,6 +443,8 @@ describe("R2 usage monitoring & auto-disable", () => {
     // Prefer PUSHOVER_USAGE_API_TOKEN over generic PUSHOVER_API_TOKEN.
     expect(body).toContain("token=test_usage_api_token");
     expect(body).not.toContain("token=test_api_token");
+    const params = new URLSearchParams(body);
+    expect(params.get("message")).toContain("(sent from Usage Monitor)");
   });
 
   it("formats daily Pushover summary message cleanly", () => {
@@ -460,6 +462,8 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(body).toContain("R2 Storage:");
     expect(body).toContain("Class A Ops:");
     expect(body).toContain("Status: ✅ OK");
+    expect(body).toContain("Backup:");
+    expect(body).toContain("Hetzner");
   });
 
   it("does not auto-disable when GraphQL credentials are missing", async () => {

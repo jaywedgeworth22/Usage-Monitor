@@ -17,6 +17,8 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **[2026-08-06][GROK] R2 subject Pushover identity + sent-from + fleet stagger + own backup line — IN PROGRESS / landing.** Subject free-tier → that app's PUSHOVER_* token; footer `(sent from APP)`; peer checks UTC phase; digests UM≥08/ST=14/CT≥20; Hetzner 24h floor. Branch `grok/r2-pushover-subject-identity`.
+
 - **[GROK] Rename compose project oracle → usage-monitor (clear container names) (2026-08-06) — IN PR.** Containers usage-monitor-app-1 / usage-monitor-caddy-1; retire legacy oracle-app-*; deploy cutover handles mid-rename.
 - **[GROK] iOS app icons: clean orange ring + Local full-width LOCAL stripe (no phone) (2026-08-05) — IN PROGRESS.** Remove broken off-center nubs on remote orange mark; Local drops tiny phone, large LOCAL on full bottom white stripe. Branch `grok/ios-appicon-local-stripe`.
 - **[GROK] R2 fleet ST/CT pushover-parity card + iOS inline titles (2026-08-05) — IN PR #984.** Fleet card status/source/limits/top buckets; iOS tab roots `.inline` title; empty SF Symbol guards. Branch `grok/r2-fleet-ios-chrome`.
