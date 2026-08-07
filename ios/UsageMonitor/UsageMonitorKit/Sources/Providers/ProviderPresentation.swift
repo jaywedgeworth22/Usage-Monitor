@@ -94,9 +94,15 @@ extension ProviderBudgetStatus {
         return raw.filter { $0.amount > 0.005 }.sorted { $0.amount > $1.amount }
     }
 
-    /// Whether a subscription/renewal context is worth surfacing.
+    /// Whether projection-part / subscription context is worth surfacing.
+    /// Always show when there is any projected EOM so usage-vs-subscription
+    /// composition is explicit (even when renewals are currently $0).
     var hasRenewalContext: Bool {
-        subscriptionMonthToDateUsd > 0.005 || forecastedSubscriptionRenewalsUsd > 0.005
+        projectedEomUsd > 0.005
+            || subscriptionMonthToDateUsd > 0.005
+            || forecastedSubscriptionRenewalsUsd > 0.005
+            || fixedAccruedUsd > 0.005
+            || fixedMonthlyCostUsd > 0.005
     }
 }
 

@@ -81,6 +81,39 @@ final class DashboardViewDataTests: XCTestCase {
         XCTAssertEqual(data.projectedOverageFraction!, 155.70 / 570, accuracy: 0.0001)
     }
 
+    func testProjectedEomSplitsUsageAndSubscriptionParts() {
+        // Explicit two-part composition: paced usage + fixed accrued + known renewals.
+        let response = makeResponse(
+            budget: 500,
+            providers: [
+                provider(
+                    spent: 100,
+                    projected: 250,
+                    budget: 300,
+                    status: .ok,
+                    fixedAccrued: 40,
+                    renewals: 60,
+                    projectedVariable: 150
+                ),
+                provider(
+                    spent: 50,
+                    projected: 100,
+                    budget: 200,
+                    status: .ok,
+                    fixedAccrued: 0,
+                    renewals: 0,
+                    projectedVariable: 100
+                ),
+            ]
+        )
+        let data = DashboardViewData(response)
+        XCTAssertEqual(data.projectedEom, 350, accuracy: 0.001)
+        XCTAssertEqual(data.projectedVariableUsage, 250, accuracy: 0.001)
+        XCTAssertEqual(data.projectedFixedAccrued, 40, accuracy: 0.001)
+        XCTAssertEqual(data.projectedKnownRenewals, 60, accuracy: 0.001)
+        XCTAssertTrue(data.hasSubscriptionProjectionComponent)
+    }
+
     // MARK: - Status
 
     func testOverallStatusFollowsProviderStatusesNotProjectSummary() {
@@ -317,12 +350,18 @@ final class DashboardViewDataTests: XCTestCase {
         budget: Double?,
         status: BudgetLevel,
         coverage: CostCoverage = .complete,
-        projectedStatus: BudgetLevel? = nil
+        projectedStatus: BudgetLevel? = nil,
+        fixedAccrued: Double = 0,
+        renewals: Double = 0,
+        projectedVariable: Double? = nil
     ) -> ProviderBudgetStatus {
         ProviderBudgetStatus(
             id: id, name: name, displayName: name,
             monthlyBudgetUsd: budget,
             spendCoverage: coverage,
+            fixedAccruedUsd: fixedAccrued,
+            forecastedSubscriptionRenewalsUsd: renewals,
+            projectedVariableUsageUsd: projectedVariable,
             spentUsd: spent,
             projectedEomUsd: projected,
             remainingUsd: budget.map { $0 - spent },

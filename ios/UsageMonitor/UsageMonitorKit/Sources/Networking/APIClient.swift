@@ -472,6 +472,18 @@ public actor APIClient {
         try await get("/api/key-attribution", authorization: .session)
     }
 
+    /// `GET /api/usage-events` summary for the Overview chart-range card.
+    /// Session-gated (dashboard password). Query items come from
+    /// `TimeframeOption.usageEventsQueryItems` so changing the range reloads.
+    public func usageEventsSummary(
+        queryItems: [URLQueryItem]
+    ) async throws -> UsageEventsSummary {
+        try await get(
+            "/api/usage-events",
+            queryItems: queryItems,
+            authorization: .session
+        )
+    }
 
     // MARK: - Request plumbing
 

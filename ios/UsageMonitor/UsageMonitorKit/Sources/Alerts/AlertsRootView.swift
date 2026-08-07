@@ -145,13 +145,12 @@ public struct AlertsRootView: View {
                     .padding(.vertical, Theme.Spacing.sm)
             } else {
                 ForEach(filtered) { item in
+                    // Avoid simultaneousGesture on NavigationLink — it greys
+                    // the row and often fails to push the detail.
                     NavigationLink(value: item) {
                         AlertCard(item: item)
                     }
                     .buttonStyle(.plain)
-                    .simultaneousGesture(TapGesture().onEnded {
-                        Haptics.selection()
-                    })
                 }
             }
         }

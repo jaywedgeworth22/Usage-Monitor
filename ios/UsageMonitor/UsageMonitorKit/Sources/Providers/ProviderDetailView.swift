@@ -221,7 +221,7 @@ struct ProviderDetailView: View {
             StatTile(
                 label: "Projected",
                 value: CurrencyFormat.usd(provider.projectedEomUsd),
-                secondary: "end of month",
+                secondary: providerProjectionSecondary(provider),
                 systemImage: "chart.line.uptrend.xyaxis",
                 status: projectionStatus(provider)
             )
@@ -409,19 +409,44 @@ struct ProviderDetailView: View {
 
     private func renewalCard(_ provider: ProviderBudgetStatus) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            SectionHeader("Subscriptions & renewals")
+            SectionHeader(
+                "EOM projection parts",
+                subtitle: "Usage pace + fixed accrued + known renewals"
+            )
+            DetailStatRow(
+                label: "Usage (extrapolated)",
+                value: CurrencyFormat.usd(provider.resolvedProjectedVariableUsageUsd)
+            )
+            DetailStatRow(
+                label: "Fixed accrued MTD",
+                value: CurrencyFormat.usd(provider.resolvedFixedAccruedUsd)
+            )
+            DetailStatRow(
+                label: "Known renewals remaining",
+                value: CurrencyFormat.usd(provider.resolvedForecastedSubscriptionRenewalsUsd)
+            )
             if provider.subscriptionMonthToDateUsd > 0.005 {
                 DetailStatRow(label: "Subscription this month", value: CurrencyFormat.usd(provider.subscriptionMonthToDateUsd))
             }
-            if provider.forecastedSubscriptionRenewalsUsd > 0.005 {
-                DetailStatRow(label: "Forecast renewals", value: CurrencyFormat.usd(provider.forecastedSubscriptionRenewalsUsd))
-            }
             if provider.fixedMonthlyCostUsd > 0.005 {
-                DetailStatRow(label: "Fixed monthly cost", value: CurrencyFormat.usd(provider.fixedMonthlyCostUsd))
+                DetailStatRow(label: "Plan fixed monthly", value: CurrencyFormat.usd(provider.fixedMonthlyCostUsd))
             }
+            Text("Projected \(CurrencyFormat.usd(provider.projectedEomUsd)) = usage + fixed + renewals. Subscriptions with a next bill this month appear under renewals even before they charge.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dsCard()
+    }
+
+    private func providerProjectionSecondary(_ provider: ProviderBudgetStatus) -> String {
+        let renew = provider.resolvedForecastedSubscriptionRenewalsUsd
+        let fixed = provider.resolvedFixedAccruedUsd
+        if renew > 0.005 || fixed > 0.005 {
+            return "usage + subs"
+        }
+        return "usage pace · EOM"
     }
 
     // MARK: - Data quality

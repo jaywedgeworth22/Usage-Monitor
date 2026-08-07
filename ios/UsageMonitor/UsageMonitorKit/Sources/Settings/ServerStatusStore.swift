@@ -26,16 +26,37 @@ struct ServerStatusSnapshot: Equatable, Sendable {
         return "Operational"
     }
 
+    /// One dependency row for the Settings checklist.
+    ///
+    /// `gatesService` is false for observability-only checks (off-site backup):
+    /// those may be red/amber without meaning the app itself is down, and they
+    /// never flip the header badge to Offline.
+    struct DependencyCheck: Equatable, Sendable, Identifiable {
+        var id: String { name }
+        var name: String
+        var ok: Bool
+        /// When false, a failing check is labeled "Lagging" / warning, not "Down" / danger.
+        var gatesService: Bool
+    }
+
     /// The named dependency checks that were reported, in display order.
-    var dependencyChecks: [(name: String, ok: Bool)] {
+    var dependencyChecks: [DependencyCheck] {
         guard let checks = readiness?.checks else { return [] }
-        var rows: [(String, Bool)] = []
-        if let c = checks.database { rows.append(("Database", c.ok)) }
-        if let c = checks.scheduler { rows.append(("Scheduler", c.ok)) }
-        // Off-site backup is observability-only (no longer gates /api/ready ok);
-        // omit it from the compact green/red server checklist so a calm R2
-        // free-tier lag does not look like an app outage.
-        if let c = checks.startup { rows.append(("Startup", c.ok)) }
+        var rows: [DependencyCheck] = []
+        if let c = checks.database {
+            rows.append(.init(name: "Database", ok: c.ok, gatesService: true))
+        }
+        if let c = checks.scheduler {
+            rows.append(.init(name: "Scheduler", ok: c.ok, gatesService: true))
+        }
+        // Off-site backup is observability-only (does not gate /api/ready ok).
+        // Still show it so free-tier lag is visible — but as a non-catastrophic row.
+        if let c = checks.backup {
+            rows.append(.init(name: "Backup (off-site)", ok: c.ok, gatesService: false))
+        }
+        if let c = checks.startup {
+            rows.append(.init(name: "Startup", ok: c.ok, gatesService: true))
+        }
         return rows
     }
 }
