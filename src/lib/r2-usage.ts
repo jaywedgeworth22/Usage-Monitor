@@ -467,13 +467,19 @@ export function enforceR2AutoDisable(reason: string): void {
 /** This process's product identity for Pushover footers. */
 export const R2_SENDER_APP_LABEL = "Usage Monitor";
 
-/** Append `(sent from APP)` once so the runner is visible next to the subject logo. */
+/**
+ * Append `(sent from APP)` only when the subject logo is not this product
+ * (owner: footer is noise when UM messages under the UM Pushover token).
+ */
 export function appendSentFromFooter(
   body: string,
+  subject: "um" | "st" | "ct" = "um",
+  sender: "um" | "st" | "ct" = "um",
   senderLabel: string = R2_SENDER_APP_LABEL
 ): string {
-  const footer = `(sent from ${senderLabel})`;
   const trimmed = body.replace(/\s+$/u, "");
+  if (subject === sender) return trimmed;
+  const footer = `(sent from ${senderLabel})`;
   if (trimmed.endsWith(footer)) return trimmed;
   return `${trimmed}\n${footer}`;
 }
@@ -529,8 +535,10 @@ export async function sendPushoverNotification(
   const userKey = process.env.PUSHOVER_USER_KEY;
   // Prefer the SUBJECT product's app token so R2 free-tier alerts show that
   // product's logo (own free tier → Usage Monitor token).
-  const apiToken = resolveSubjectPushoverAppToken(opts?.subject ?? "um");
-  const body = appendSentFromFooter(message, R2_SENDER_APP_LABEL);
+  const subject = opts?.subject ?? "um";
+  const apiToken = resolveSubjectPushoverAppToken(subject);
+  // Footer only when speaking under another product's logo (e.g. ST/CT subject).
+  const body = appendSentFromFooter(message, subject, "um", R2_SENDER_APP_LABEL);
 
   if (!userKey || !apiToken) {
     return {
@@ -645,8 +653,7 @@ export function formatDailyPushoverMessage(
     .filter(Boolean)
     .join("\n");
 
-  // Footer is applied at send time so tests can assert body content without
-  // double-append; sendPushoverNotification always stamps (sent from …).
+  // Footer is applied at send time only when subject ≠ Usage Monitor.
   return { title, body };
 }
 
