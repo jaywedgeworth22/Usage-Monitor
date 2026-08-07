@@ -110,12 +110,15 @@ describe("middleware matcher — /api/export/daily-rollups exclusion (bearer rea
   });
 });
 
-describe("middleware public install assets", () => {  it("serves the PWA shell without a dashboard session", () => {
+describe("middleware public install assets", () => {
+  it("serves the PWA shell without a dashboard session", () => {
     for (const path of [
       "/manifest.webmanifest",
       "/sw.js",
       "/pwa-icon/192",
       "/pwa-icon/512",
+      "/brand/icon-64.png",
+      "/brand/icon-192.png",
     ]) {
       expect(isSessionGated(path)).toBe(false);
     }
@@ -125,6 +128,7 @@ describe("middleware public install assets", () => {  it("serves the PWA shell w
     expect(isSessionGated("/manifest.webmanifest.backup")).toBe(true);
     expect(isSessionGated("/sw.js.map")).toBe(true);
     expect(isSessionGated("/pwa-icons/192")).toBe(true);
+    expect(isSessionGated("/branded/icon.png")).toBe(true);
   });
 });
 

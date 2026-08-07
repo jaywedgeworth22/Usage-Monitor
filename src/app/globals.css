@@ -195,8 +195,8 @@ body {
 }
 
 /* Design tokens (web ↔ iOS accent parity).
- * Brand mark / favicon: orange-500 → amber-600 (#f97316 → #d97706), same as
- * src/app/icon.tsx and src/app/apple-icon.tsx. Nav logo uses bg-accent. */
+ * Brand mark / favicon: iOS client AppIcon (public/brand/, app/icon.png,
+ * app/apple-icon.png). Accent orange matches the icon field (#f97316). */
 :root {
   --um-accent: #f97316;
   --um-accent-soft: rgba(249, 115, 22, 0.14);
