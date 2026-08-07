@@ -20,8 +20,8 @@ total spend).
 
 | App target | Bundle ID | Role |
 |---|---|---|
-| **UsageMonitor** | `services.jays.usage.monitor` | Remote live-sync client (owner + server self-hosters). §§1–9. |
-| **LocalUsageMonitor** | `services.jays.local.usage.monitor` | On-device self-host product. §10 + design doc. |
+| **UsageMonitor** (Usage Client Monitor) | `services.jays.usage.client.monitor` | Remote live-sync client (owner + server self-hosters). §§1–9. |
+| **LocalUsageMonitor** (Usage Local Monitor) | `services.jays.usage.local.monitor` | On-device self-host product. §10 + design doc. |
 
 See `ios/README.md` and
 `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`.
@@ -306,8 +306,8 @@ files under `UsageMonitorKitTests` for their own logic.
 |---|---|---|---|---|---|
 | **AppLock** | `Sources/AppLock/AppLockGate.swift` | `AppLockGate<Content> { … }` (wraps `RootView` in the app target) | `AppCore`, `DesignSystem` | Signature stays `AppLockGate { <content> }`. Read `env.settings.appLockEnabled`; gate with `LAContext.evaluatePolicy`, re-lock on `scenePhase == .background`; pass-through when disabled. `NSFaceIDUsageDescription` already in Info.plist. | Pass-through starter |
 | **OfflineCache** | `Sources/OfflineCache/` (`BudgetDiskCache`, `WidgetSnapshotBuilder`) | `BudgetDiskCache` (`save`/`load`/`clear`), `WidgetSnapshotBuilder.snapshot(from:maxMeters:)` | `Models`, `Networking`, `WidgetShared` | Model-free of AppCore. The app's `OfflineCacheSnapshotSink` (in `App/`) adapts it to `BudgetSnapshotSink` — writes disk cache + widget snapshot on each success, feeds offline first paint. | Working starter |
-| **WidgetShared** | `Sources/WidgetShared/` (`WidgetSnapshot`, `AppGroup`, `SharedStore`) | `WidgetSnapshot` (+ `.placeholder`), `AppGroup` (`identifier`, `containerURL`, `defaults`), `SharedStore.shared` (`read`/`write`) | `DesignSystem` | App group id `group.services.jays.usage.monitor` must match both `.entitlements`. Degrade gracefully (no force-unwrap) when the container is absent. | Working |
-| **Widget UI** | `UsageMonitorWidget/` (app extension, **not** a Kit target) | `UsageMonitorWidgetBundle` (`@main`), `BudgetSummaryWidget`, `BudgetTimelineProvider` (`AppIntentConfiguration`), `SelectBudgetIntent` / `BudgetFocusEntity` | `WidgetShared`, `DesignSystem` | Reads real cached data via `SharedStore.shared.read() ?? .empty`. **Edit Widget** chooses **Overall** (provider-scoped account totals + top provider meters) or a **project** budget (from `WidgetSnapshot.projects`). Missing project id falls back to Overall. Deep links: `usagemonitor://dashboard` / `usagemonitor://projects`. | Working (small/medium, configurable) |
+| **WidgetShared** | `Sources/WidgetShared/` (`WidgetSnapshot`, `AppGroup`, `SharedStore`) | `WidgetSnapshot` (+ `.placeholder`), `AppGroup` (`identifier`, `containerURL`, `defaults`), `SharedStore.shared` (`read`/`write`) | `DesignSystem` | App group id `group.services.jays.usage.client.monitor` must match both `.entitlements`. Degrade gracefully (no force-unwrap) when the container is absent. | Working |
+| **Widget UI** | `UsageMonitorWidget/` (app extension, **not** a Kit target) | `UsageMonitorWidgetBundle` (`@main`), `BudgetSummaryWidget`, `BudgetTimelineProvider` (`AppIntentConfiguration`), `SelectBudgetIntent` / `BudgetFocusEntity` | `WidgetShared`, `DesignSystem` | Reads real cached data via `SharedStore.shared.read() ?? .empty`. **Edit Widget** chooses **Overall** (provider-scoped account totals + top provider meters) or a **project** budget (from `WidgetSnapshot.projects`). Missing project id falls back to Overall. Deep links: `usageclientmonitor://dashboard` / `usageclientmonitor://projects`. | Working (small/medium, configurable) |
 | **PushScaffold** | `Sources/PushScaffold/PushScaffold.swift` | `PushScaffold` enum (`requestAuthorization()`, `configureNotificationCategories()`, `scheduleAlertNotifications(for:)`) | `AppCore`, `Models`, `Networking` | Called from launch. **Local notifications only — remote push (APNs) is NOT implemented.** There is no server device-enrollment endpoint and no APNs sender, so the app must not claim `aps-environment` or `UIBackgroundModes: remote-notification`; `PushScaffoldTests` enforces both. Delivery is `BGTaskScheduler` (`UIBackgroundModes: fetch` + `BGTaskSchedulerPermittedIdentifiers`) → `AlertNotifier.deliver` → `scheduleAlertNotifications`. Adding remote push means adding the server side first, then the client against that real contract. | Working (local only) |
 
 ---
@@ -340,7 +340,7 @@ depend on both AppCore and the integration modules.
 
 ---
 
-## 10. Local Usage Monitor (separate app) — addendum
+## 10. Usage Local Monitor (separate app) — addendum
 
 **Authority:** `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`.
 This section binds the **LocalUsageMonitor** app target only. §§1–9 bind
@@ -350,8 +350,8 @@ This section binds the **LocalUsageMonitor** app target only. §§1–9 bind
 
 | App | Xcode scheme | Money-truth | App group |
 |---|---|---|---|
-| **UsageMonitor** | `UsageMonitor` | Remote server SQLite via HTTPS | `group.services.jays.usage.monitor` |
-| **LocalUsageMonitor** | `LocalUsageMonitor` | On-device GRDB (PR-2+) | `group.services.jays.local.usage.monitor` |
+| **UsageMonitor** (Usage Client Monitor) | `UsageMonitor` | Remote server SQLite via HTTPS | `group.services.jays.usage.client.monitor` |
+| **LocalUsageMonitor** (Usage Local Monitor) | `LocalUsageMonitor` | On-device GRDB (PR-2+) | `group.services.jays.usage.local.monitor` |
 
 - **Do not** merge these into one binary with a runtime switch.
 - Local app must **not** link remote money write paths (`APIClient` mutations,
@@ -411,5 +411,5 @@ Materializer     → LocalStore             subscription_charge rows (planned)
    **UsageMonitor** client talking to a server).
 5. Any PR that ports server money math must cite design §2.3 and add golden
    vector tests before merge.
-6. Deep links use scheme `localusagemonitor://` (remote client keeps
-   `usagemonitor://`).
+6. Deep links: Usage Local Monitor uses `usagelocalmonitor://`; Usage Client
+   Monitor uses `usageclientmonitor://`.

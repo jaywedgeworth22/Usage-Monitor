@@ -535,7 +535,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.widget;
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.client.monitor.widget;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -551,13 +551,13 @@
 				DEVELOPMENT_TEAM = CC8UTF7ATG;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = LocalApp/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Local Usage Monitor";
+				INFOPLIST_KEY_CFBundleDisplayName = "Usage Local Monitor";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.local.usage.monitor;
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.local.monitor;
 				PRODUCT_NAME = LocalUsageMonitor;
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
@@ -704,7 +704,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.widgettests;
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.client.monitor.widgettests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -720,13 +720,13 @@
 				DEVELOPMENT_TEAM = CC8UTF7ATG;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = LocalApp/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Local Usage Monitor";
+				INFOPLIST_KEY_CFBundleDisplayName = "Usage Local Monitor";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.local.usage.monitor;
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.local.monitor;
 				PRODUCT_NAME = LocalUsageMonitor;
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
@@ -744,13 +744,13 @@
 				DEVELOPMENT_TEAM = CC8UTF7ATG;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = App/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Usage Monitor";
+				INFOPLIST_KEY_CFBundleDisplayName = "Usage Client Monitor";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor;
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.client.monitor;
 				PRODUCT_NAME = UsageMonitor;
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
@@ -768,7 +768,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.client.monitor.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/UsageMonitor.app/UsageMonitor";
@@ -785,13 +785,13 @@
 				DEVELOPMENT_TEAM = CC8UTF7ATG;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = App/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Usage Monitor";
+				INFOPLIST_KEY_CFBundleDisplayName = "Usage Client Monitor";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor;
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.client.monitor;
 				PRODUCT_NAME = UsageMonitor;
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
@@ -809,7 +809,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.client.monitor.tests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/UsageMonitor.app/UsageMonitor";
@@ -828,7 +828,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.widget;
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.client.monitor.widget;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -844,7 +844,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.widgettests;
+				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.client.monitor.widgettests;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

@@ -137,7 +137,7 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertEqual(content.budgetUsd, WidgetSnapshot.placeholder.totalBudgetUsd)
         XCTAssertEqual(content.meters.count, 3)
         XCTAssertFalse(content.fellBackToOverall)
-        XCTAssertEqual(content.deepLink?.absoluteString, "usagemonitor://dashboard")
+        XCTAssertEqual(content.deepLink?.absoluteString, "usageclientmonitor://dashboard")
     }
 
     func testContentProjectUsesProjectMeter() {
@@ -150,7 +150,7 @@ final class WidgetPresentationTests: XCTestCase {
         XCTAssertEqual(content.spentUsd, 180, accuracy: 0.001)
         XCTAssertEqual(content.budgetUsd, 400, accuracy: 0.001)
         XCTAssertTrue(content.meters.isEmpty)
-        XCTAssertEqual(content.deepLink?.absoluteString, "usagemonitor://projects")
+        XCTAssertEqual(content.deepLink?.absoluteString, "usageclientmonitor://projects")
     }
 
     func testContentMissingProjectFallsBackToOverall() {

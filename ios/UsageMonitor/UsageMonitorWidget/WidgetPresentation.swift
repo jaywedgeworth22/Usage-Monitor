@@ -91,7 +91,7 @@ enum WidgetPresentation {
                     overBudget: over,
                     warning: warn,
                     meters: [],
-                    deepLink: URL(string: "usagemonitor://projects"),
+                    deepLink: URL(string: "usageclientmonitor://projects"),
                     fellBackToOverall: false
                 )
             }
@@ -115,7 +115,7 @@ enum WidgetPresentation {
             overBudget: snapshot.overBudget,
             warning: snapshot.warning,
             meters: Array(snapshot.topMeters.prefix(maxMeters)),
-            deepLink: URL(string: "usagemonitor://dashboard"),
+            deepLink: URL(string: "usageclientmonitor://dashboard"),
             fellBackToOverall: fellBack
         )
     }

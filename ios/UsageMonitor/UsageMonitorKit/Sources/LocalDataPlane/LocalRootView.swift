@@ -5,7 +5,7 @@ import LocalBudget
 import LocalStore
 import AppCore
 
-/// Full shell for **Local Usage Monitor** — on-device money-truth that aims to
+/// Full shell for **Usage Local Monitor** — on-device money-truth that aims to
 /// match and exceed web/remote for personal poll + subscription tracking.
 public struct LocalRootView: View {
     @Bindable var settings: AppSettings
@@ -81,7 +81,7 @@ public struct LocalRootView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                    // Always-visible product identity (home-screen: "Local Usage Monitor").
+                    // Always-visible product identity (home-screen: "Usage Local Monitor").
                     HStack(spacing: Theme.Spacing.sm) {
                         Image(systemName: "iphone")
                             .font(.system(size: 14, weight: .semibold))
@@ -211,7 +211,7 @@ public struct LocalRootView: View {
                     LabeledContent("Schema", value: "v\(model.schemaVersion)")
                     LabeledContent("Providers", value: "\(model.providers.count)")
                     LabeledContent("Subscriptions", value: "\(model.subscriptions.filter { $0.status == "active" }.count) active")
-                    Text("Money-truth is local SQLite. Provider API keys stay in Keychain. No remote Usage Monitor server required.")
+                    Text("Money-truth is local SQLite. Provider API keys stay in Keychain. No remote server required.")
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
@@ -253,7 +253,7 @@ public struct LocalRootView: View {
                         .foregroundStyle(.secondary)
                 }
                 Section("Also in This Project") {
-                    Text("**Usage Monitor** (other app) is the live-sync client for a self-hosted or owner server — use that if you run a VPS like the fleet.")
+                    Text("**Usage Client Monitor** is the other app: a live-sync client for a server you host yourself (or the owner fleet). Use that when you run a VPS.")
                         .font(Theme.Typography.caption)
                 }
                 Section("Providers Catalog") {

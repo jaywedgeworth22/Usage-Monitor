@@ -90,7 +90,7 @@ private struct AppearanceSection: View {
         } header: {
             Text("Appearance")
         } footer: {
-            Text("Choose how Usage Monitor looks. \"System\" follows your device's Light/Dark setting.")
+            Text("Choose how \(AppInfo.displayName) looks. \"System\" follows your device's Light/Dark setting.")
         }
     }
 }
