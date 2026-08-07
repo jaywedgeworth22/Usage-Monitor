@@ -18,7 +18,9 @@ describe("OperationsOverview cards", () => {
     }));
     expect(html).toContain("Receipt inbox");
     expect(html).toContain("Not configured");
-    expect(html).toContain("review is required before any cost is recorded");
+    expect(html).toContain("review before any cost is recorded");
+    expect(html).toContain("matches existing cash");
+    expect(html).toContain("not double-count");
     expect(html).not.toContain("$0");
   });
 
