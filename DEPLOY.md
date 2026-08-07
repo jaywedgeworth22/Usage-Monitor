@@ -35,28 +35,29 @@ deliberate rollback.
    `/etc/usage-monitor/host.env` holds only deploy-written host state
    (`USAGE_MONITOR_REVISION`). No production SSH key or cloud credential is
    stored in GitHub; the deploy model is pull-based.
-3. **Backups replicate to Cloudflare R2** (bucket name `usage-monitor-prod-v3`
-   enforced by deploy env preflight; endpoint
-   `https://<account-id>.r2.cloudflarestorage.com`). Litestream continuously
-   replicates `/data/prod.db` there. **Hetzner/Coolify Garage is retired** (PR
-   #869). Layered backup story: same-disk pre-migration snapshots → deploy-time
-   offline snapshots (up to five retained) → Litestream/R2 PITR with 15-minute
-   external verification and weekly restore drills. R2 free-tier monitoring
-   and 70% auto-shutoff: `docs/litestream.md`.
+3. **Backups replicate to Backblaze B2** (bucket `jays-usage-monitor-eu`,
+   endpoint `https://s3.eu-central-003.backblazeb2.com`). Litestream continuously
+   replicates `/data/prod.db` there. **Cloudflare R2 is historic freeze only**
+   (do not delete until B2 restore is proven). **Hetzner/Coolify Garage is
+   retired** (PR #869). Layered backup story: same-disk pre-migration snapshots
+   (retention 1) → deploy-time offline snapshots → Litestream/B2 DR with
+   external verification. R2 free-tier monitoring still watches historic R2;
+   the 70% kill switch only stops litestream when the endpoint is R2, not B2.
+   See `docs/litestream.md`.
 4. **Deploys are automatic and gated.** The
    `usage-monitor-auto-deploy.timer` polls GitHub once per minute and deploys
    only when all preflight gates pass: exact `main` SHA with valid signature,
    merged-PR provenance, green GitHub Actions (`verify`, `gitleaks`,
    `Analyze JavaScript and TypeScript`), healthy current database / sole
-   scheduler / R2 replica / `/data` headroom / public readiness, and the
+   scheduler / backup replica / `/data` headroom / public readiness, and the
    Render retirement proof (service user-suspended, auto-deploy disabled,
    `USAGE_SCHEDULER_ENABLED=false`, verified live through Render's API).
    `/etc/usage-monitor/auto-deploy.paused` freezes deployments while present.
 5. **Rollback never restores an old database over new writes.** Automatic
    rollback changes code/image only. A full host rollback requires quiescing
-   Oracle and restoring the latest verified R2 lineage before
-   transferring writer authority — never just re-point DNS at Render's stale
-   database.
+   the writer and restoring the latest verified **B2** lineage (or historic R2
+   during cutover) before transferring writer authority — never just re-point
+   DNS at a stale host.
 
 ## Verify a deployment
 
@@ -216,16 +217,16 @@ defaults and valid values for local development.
   requests receive `429` with the same backoff. Generic `/api/ingest/usage`
   remains available. Restore `true` only after the database stays healthy and a
   controlled OTLP ingest/replay succeeds.
-- `LITESTREAM_S3_*` (Cloudflare R2 replica credentials; set all four required
+- `LITESTREAM_S3_*` (Backblaze B2 replica credentials; set all four required
   values together or none—partial configuration fails startup. Production
-  targets bucket `usage-monitor-prod-v3` on
-  `*.r2.cloudflarestorage.com`; see `litestream.yml` and `docs/litestream.md`.
-  Optional unified `AWS_*` names are normalized at startup.)
+  targets bucket `jays-usage-monitor-eu` on
+  `https://s3.eu-central-003.backblazeb2.com`; see `litestream.yml` and
+  `docs/litestream.md`. Optional unified `AWS_*` names are normalized at startup.)
 - `LITESTREAM_REQUIRED` (production: `true`; readiness fails if replication
   is absent or the replica side-channel is unhealthy)
-- `R2_USAGE_ACCOUNT_ID` / `R2_USAGE_API_TOKEN` (optional but required for free-tier
-  auto-shutoff; Account Analytics Read. Fallbacks: `CLOUDFLARE_JAY_*` or
-  `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`)
+- `R2_USAGE_ACCOUNT_ID` / `R2_USAGE_API_TOKEN` (optional; watches **historic** R2
+  free-tier; kill switch only stops litestream when endpoint is R2, not B2.
+  Fallbacks: `CLOUDFLARE_JAY_*` or `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`)
 
 ## SSL/TLS
 - Cloudflare proxy: enabled for `usage.jays.services`
@@ -250,17 +251,17 @@ Every deploy transaction additionally keeps the previous full-SHA image and
 up to five verified offline SQLite snapshots for automatic code rollback.
 
 [Litestream](https://litestream.io/) continuously replicates `/data/prod.db`
-to **Cloudflare R2** (configured bucket `usage-monitor-prod-v3`) with
-disaster-recovery restore points (24 h snapshot retention, 24 h snapshot
-interval, 15 m sync-interval — not continuous second-scale PITR; see
-`litestream.yml`). The external singleton at
+to **Backblaze B2** (bucket `jays-usage-monitor-eu`) with disaster-recovery
+restore points (24 h snapshot retention, 24 h snapshot interval, 1 h
+sync-interval — not continuous second-scale PITR; see `litestream.yml`).
+**Cloudflare R2 remains historic** until the owner deletes it after B2 is
+proven. The external singleton at
 `/Users/jay/apps/fleet-sentry-monitor/monitor.py` verifies replica freshness
-and restorability every 15 minutes and runs a weekly full-integrity restore
-drill (see "Backup monitoring" in `deploy/oracle/README.md`). Full setup,
-verification, free-tier shutoff, and disaster-recovery restore steps live in
-`docs/litestream.md`. Relevant files: `scripts/fetch-litestream.sh`
-(build-time binary download), `scripts/start-with-litestream.sh` (startup
-wrapper), `scripts/litestream-restore.sh` (manual restore).
+and restorability (see "Backup monitoring" in `deploy/oracle/README.md`). Full
+setup and disaster-recovery restore steps live in `docs/litestream.md`.
+Relevant files: `scripts/fetch-litestream.sh` (build-time binary download),
+`scripts/start-with-litestream.sh` (startup wrapper),
+`scripts/litestream-restore.sh` (manual restore).
 
 ## Release-time data maintenance
 

@@ -808,7 +808,17 @@ preflight_current_production() {
   [[ -n "${backup_bucket}" ]] || backup_bucket="$(read_env_value "${RUNTIME_ENV}" AWS_S3_BUCKET_NAME)"
   [[ "${scheduler}" == "true" ]] || die_host "USAGE_SCHEDULER_ENABLED must be exactly true"
   [[ "${backup_required}" == "true" ]] || die_host "LITESTREAM_REQUIRED must be exactly true"
-  [[ "${backup_bucket}" == "usage-monitor-prod-v3" ]] || die_host "production must use S3/R2 bucket usage-monitor-prod-v3"
+  # Primary off-site replica is Backblaze B2 (2026-08-07). R2 bucket
+  # usage-monitor-prod-v3 remains historic-only until owner deletes it.
+  case "${backup_bucket}" in
+    jays-usage-monitor-eu) ;;
+    usage-monitor-prod-v3)
+      log "WARNING: still on historic R2 bucket usage-monitor-prod-v3; migrate LITESTREAM_S3_* to B2 jays-usage-monitor-eu"
+      ;;
+    *)
+      die_host "production LITESTREAM_S3_BUCKET must be jays-usage-monitor-eu (B2 primary); got '${backup_bucket}'"
+      ;;
+  esac
   # Production denies the USAGE_INGEST_TOKEN fallback for bearer reads
   # (src/lib/ingest-auth.ts resolveUsageReadToken), so without a dedicated
   # read token every budget-status / subscriptions GET bearer consumer 503s

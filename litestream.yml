@@ -14,29 +14,30 @@
 #     S3 endpoint set (R2 always sets one) Litestream falls back to us-east-1 and
 #     R2 accepts any region for SigV4.
 #
-# Production target: Cloudflare R2 (PR #869). Hetzner/Coolify Garage is retired.
+# Production target (2026-08-07): Backblaze B2 bucket jays-usage-monitor-eu
+# (S3-compatible EU). Cloudflare R2 remains a historic freeze — do not delete
+# until B2 restore has been proven for a full week. Litestream 0.5 only supports
+# ONE active replica per DB, so R2 is not dual-written; it is read-only archive.
 #
 # Backup philosophy for THIS app (usage monitor, not a trading ledger):
 #   Disaster recovery only — survive disk death / host loss. Same-disk
-#   pre-migration snapshots + deploy offline snapshots cover schema rollbacks.
-#   Continuous second-scale LTX / multi-day PITR is not worth R2 free-tier cost
-#   and does not match the restore need ("yesterday's DB" is fine; "3h42m ago"
-#   is not a product requirement). Keep history short and sync infrequent so
-#   storage stays well under 70% of the 10 GiB free tier.
+#   pre-migration snapshots (retention 1) cover schema rollbacks. B2 has no
+#   10 GiB free-tier trap, so retention/sync can stay modest without thrashing.
 
-# Shallow PITR only — free-tier R2 cannot hold multi-level LTX for a full day.
-# A ~0.4 GiB DB with L1/L2/L3 full-window files × 24h ≈ 9 GiB (2026-08-06 breach).
-# 6h retention + 2h sync keeps latest disaster recovery without re-breaching 70%.
-# Maintenance tip-prunes non-tip LTX at 50% as a safety net (see r2-usage.ts).
-# (Was 24h/48h/168h/720h retention — all too large for free-tier R2.)
 snapshot:
   interval: 24h
-  retention: 6h
+  # B2 is not free-tier–capped like R2; 24h retention is enough for DR.
+  retention: 24h
 
 dbs:
   - path: /data/prod.db
     replica:
       type: s3
+      # Expected production values (Infisical prod):
+      #   LITESTREAM_S3_BUCKET=jays-usage-monitor-eu
+      #   LITESTREAM_S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
+      #   LITESTREAM_S3_REGION=eu-central-003
+      #   keys: fleet-usage-monitor-backup (write) — NOT the monitor read-only key
       bucket: ${LITESTREAM_S3_BUCKET}
       path: api-usage-monitor/prod.db
       region: ${LITESTREAM_S3_REGION}
@@ -46,6 +47,5 @@ dbs:
       # One multipart part at a time for reliability on constrained links.
       concurrency: 1
       # Disaster recovery only (host/disk death), not continuous PITR.
-      # Owner: infrequent is fine; free-tier survival beats multi-hour rewind.
-      # (Was 1s → 60s → 15m → 1h → 2h.)
-      sync-interval: 2h
+      # B2 is Class A cost-tolerant vs R2 free tier; 1h is a good DR cadence.
+      sync-interval: 1h

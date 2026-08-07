@@ -1,15 +1,18 @@
-# Litestream WAL Replication (Oracle A1 production → Cloudflare R2)
+# Litestream WAL Replication (production → Backblaze B2)
 
 Continuous SQLite backup via [Litestream](https://litestream.io) **0.5.x**. Streams
-writes to `/data/prod.db` as LTX files. **Production is the Oracle A1 VM**
-(Docker + Caddy, see `deploy/oracle/README.md`), replicating to **Cloudflare R2**
-(live Infisical bucket is `usage-monitor-bucket` on the Jay CF account;
+writes to `/data/prod.db` as LTX files. **Production** (Coolify/Hetzner or
+legacy Oracle compose path) replicates to **Backblaze B2** (bucket
+`jays-usage-monitor-eu`, S3 endpoint `https://s3.eu-central-003.backblazeb2.com`,
 object prefix `api-usage-monitor/prod.db` in `litestream.yml`).
 
-**Hetzner/Coolify Garage is retired** as the production replica (switch completed
-in PR #869, 2026-08-01: “Do not use retired Hetzner Garage endpoints”). Older
-runbooks and the `deploy/coolify/garage.compose.yaml` file are historical only
-— do not point production `LITESTREAM_S3_*` at Garage.
+**Cloudflare R2 is historic freeze only** (bucket `usage-monitor-prod-v3` and any
+older R2 lineages). Leave R2 objects in place until B2 restore has been proven
+for a full week, then owner may delete R2. Litestream 0.5 supports **one active
+replica** — do not dual-write R2 and B2 from the same host.
+
+**Hetzner/Coolify Garage is retired** as a replica (PR #869). Do not point
+production `LITESTREAM_S3_*` at Garage.
 
 The suspended Render service is a deliberate, owner-directed rollback host only
 (see `render.yaml` and `deploy/render/RETIRED-rollback.md`). If ever revived, it
@@ -90,20 +93,25 @@ Local pre-migration snapshots on `/data` still exist.
   `deploy/oracle/README.md`). Without it, a required backup reports
   `env_active_unverified` and strict readiness fails.
 
-## Production setup (Oracle → Cloudflare R2)
+## Production setup (host → Backblaze B2)
 
 Runtime config lives in the Infisical `usage-monitor` project (env `prod`) as
 the sole source of truth — see `DEPLOY.md` "Runtime env: Infisical is the
 source of truth" and `deploy/oracle/README.md`. Set there:
 
 ```
-LITESTREAM_S3_BUCKET=usage-monitor-prod-v3
-LITESTREAM_S3_REGION=auto
-LITESTREAM_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
-LITESTREAM_S3_ACCESS_KEY_ID=...
-LITESTREAM_S3_SECRET_ACCESS_KEY=...
+# Primary (B2) — write key fleet-usage-monitor-backup (not the read-only monitor key)
+LITESTREAM_S3_BUCKET=jays-usage-monitor-eu
+LITESTREAM_S3_REGION=eu-central-003
+LITESTREAM_S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
+LITESTREAM_S3_ACCESS_KEY_ID=...   # B2_UM_KEY_ID
+LITESTREAM_S3_SECRET_ACCESS_KEY=...  # B2_UM_APPLICATION_KEY
 LITESTREAM_REQUIRED=true
 ```
+
+**R2 free-tier kill** (`/data/r2-disabled-70pct.flag`, `R2_WRITES_DISABLED`) only
+disables litestream when the endpoint hostname is R2. On B2 it is ignored so a
+historic R2 trip cannot stop B2 DR.
 
 Infisical may also set the unified `AWS_*` names (`AWS_S3_ENDPOINT`,
 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET_NAME`,
@@ -117,11 +125,10 @@ full configuration when the verified binary is unavailable.
 `us-east-1`, which R2 accepts for SigV4). Prefer `auto` to be explicit.
 
 Deploy env preflight (`deploy/oracle/usage-monitor-sync-env.sh`) requires the
-bucket name `usage-monitor-prod-v3`. **Account-wide free-tier analytics** count
-**every** R2 bucket on the Cloudflare account (including receipt-inbox and any
-legacy names such as `usage-monitor-bucket`). If inventory shows a different
-large bucket, fix Infisical/env or reclaim that bucket — free tier is not
-per-bucket.
+B2 bucket name `jays-usage-monitor-eu` (or historic R2 `usage-monitor-prod-v3`
+during cutover only). **Account-wide free-tier analytics** still count every
+**R2** bucket on the Cloudflare account for the historic free-tier card; that
+does not apply to B2 storage.
 
 The S3 uploader is intentionally limited to one multipart part at a time in
 `litestream.yml` (`concurrency: 1`) for reliability on constrained links.

@@ -74,13 +74,17 @@ if (( configured_keys > 0 && configured_keys < ${#REQUIRED_KEYS[@]} )); then
   exit 1
 fi
 
-# Cloudflare R2 free-tier kill switch applies when the replica endpoint is R2
-# (production). The Coolify-hosted Garage replica is retired/gone — production
-# litestream targets R2 only. Detect R2 by endpoint hostname.
+# Cloudflare R2 free-tier kill switch applies ONLY when the replica endpoint is
+# R2. Production primary is Backblaze B2 (jays-usage-monitor-eu, 2026-08-07);
+# R2 is historic freeze and must not gate B2 replication.
 litestream_endpoint_is_r2=false
+litestream_endpoint_is_b2=false
 endpoint_lc="$(printf '%s' "${LITESTREAM_S3_ENDPOINT:-}" | tr '[:upper:]' '[:lower:]')"
 if [[ "${endpoint_lc}" == *"r2.cloudflarestorage.com"* || "${endpoint_lc}" == *".r2.cloudflare.com"* ]]; then
   litestream_endpoint_is_r2=true
+fi
+if [[ "${endpoint_lc}" == *"backblazeb2.com"* ]]; then
+  litestream_endpoint_is_b2=true
 fi
 
 r2_free_tier_kill=false
@@ -98,10 +102,12 @@ if (( configured_keys == ${#REQUIRED_KEYS[@]} )); then
   if [[ "${r2_free_tier_kill}" == "true" && "${litestream_endpoint_is_r2}" == "true" ]]; then
     log "WARNING: Litestream replication disabled via R2 free-tier kill switch (70% threshold)."
     log "Delete /data/r2-disabled-70pct.flag and clear LITESTREAM_EMERGENCY_DISABLE to resume after pruning R2."
+    log "Prefer switching LITESTREAM_S3_* to Backblaze B2 (jays-usage-monitor-eu) — R2 kill does not apply to B2."
     litestream_enabled=false
+  elif [[ "${r2_free_tier_kill}" == "true" && "${litestream_endpoint_is_b2}" == "true" ]]; then
+    log "R2 free-tier kill switch is set, but Litestream endpoint is Backblaze B2 — leaving replication ENABLED."
   elif [[ "${r2_free_tier_kill}" == "true" && "${litestream_endpoint_is_r2}" != "true" ]]; then
     log "R2 free-tier kill switch is set, but Litestream endpoint is not R2 — leaving replication ENABLED."
-    log "Production should use Cloudflare R2 (Coolify Garage is retired)."
   fi
 elif [[ "${LITESTREAM_REQUIRED:-false}" == "true" ]]; then
   log "ERROR: LITESTREAM_REQUIRED=true but no replica credentials are configured."
@@ -115,7 +121,7 @@ fi
 
 if [[ "${litestream_enabled}" == "true" ]]; then
   export LITESTREAM_ACTIVE=true
-  log "replication ENABLED (LITESTREAM_S3_* set, bin/litestream present, r2_endpoint=${litestream_endpoint_is_r2})."
+  log "replication ENABLED (LITESTREAM_S3_* set, bin/litestream present, r2=${litestream_endpoint_is_r2}, b2=${litestream_endpoint_is_b2})."
 
   if [[ ! -f "${DB_PATH}" ]]; then
     log "no local DB at ${DB_PATH} — attempting restore from replica (no-op if none exists yet)."

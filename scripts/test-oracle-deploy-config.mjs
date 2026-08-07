@@ -114,7 +114,7 @@ for (const [pattern, message] of [
   [/flock -w 10/, "host deployment lock"],
   [/EXPECTED_DATA_UUID/, "pinned data-volume UUID"],
   [/USAGE_SCHEDULER_ENABLED/, "sole scheduler guard"],
-  [/usage-monitor-prod-v3/, "exact Garage lineage guard"],
+  [/jays-usage-monitor-eu/, "B2 primary bucket guard"],
   [/commit\.verification\.verified/, "verified GitHub commit guard"],
   [/merge_commit_sha/, "merged PR guard"],
   [/GITHUB_ACTIONS_APP_ID/, "trusted GitHub Actions app guard"],

@@ -140,23 +140,23 @@ try {
     );
   }
 
-  const garageKeepsReplicating = run({
+  const b2KeepsReplicating = run({
     LITESTREAM_REQUIRED: "true",
     LITESTREAM_BIN_PATH: fakeBinary,
-    LITESTREAM_S3_BUCKET: "usage-monitor-prod-v3",
-    LITESTREAM_S3_ENDPOINT: "https://garage.example.com:9443",
+    LITESTREAM_S3_BUCKET: "jays-usage-monitor-eu",
+    LITESTREAM_S3_ENDPOINT: "https://s3.eu-central-003.backblazeb2.com",
     LITESTREAM_S3_ACCESS_KEY_ID: "access",
     LITESTREAM_S3_SECRET_ACCESS_KEY: "secret",
     LITESTREAM_EMERGENCY_DISABLE: "true",
   });
-  expectStatus("r2 free-tier kill leaves Garage enabled", garageKeepsReplicating, 0);
+  expectStatus("r2 free-tier kill leaves B2 enabled", b2KeepsReplicating, 0);
   if (
     !/preflight OK \(replication true; r2_endpoint=false; r2_kill=true\)/.test(
-      garageKeepsReplicating.stdout
+      b2KeepsReplicating.stdout
     )
   ) {
     throw new Error(
-      `r2 free-tier kill leaves Garage enabled: expected enabled preflight, got:\n${garageKeepsReplicating.stdout}`
+      `r2 free-tier kill leaves B2 enabled: expected enabled preflight, got:\n${b2KeepsReplicating.stdout}`
     );
   }
 
