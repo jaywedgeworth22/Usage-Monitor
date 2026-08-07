@@ -9,12 +9,46 @@ enum LocalHTTP {
         headers: [String: String],
         timeout: TimeInterval = 30
     ) async throws -> (status: Int, json: [String: Any]?) {
+        try await requestJSON(url: url, method: "GET", headers: headers, body: nil, timeout: timeout)
+    }
+
+    /// POST JSON body and decode object response (used by Backblaze B2 Native API).
+    static func postJSON(
+        url: String,
+        headers: [String: String],
+        body: [String: Any],
+        timeout: TimeInterval = 30
+    ) async throws -> (status: Int, json: [String: Any]?) {
+        let data = try JSONSerialization.data(withJSONObject: body, options: [])
+        return try await requestJSON(
+            url: url,
+            method: "POST",
+            headers: headers,
+            body: data,
+            timeout: timeout
+        )
+    }
+
+    private static func requestJSON(
+        url: String,
+        method: String,
+        headers: [String: String],
+        body: Data?,
+        timeout: TimeInterval
+    ) async throws -> (status: Int, json: [String: Any]?) {
         guard let u = URL(string: url) else {
             throw AdapterRunError.configuration("Bad URL: \(url)")
         }
         var req = URLRequest(url: u, timeoutInterval: timeout)
+        req.httpMethod = method
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
         req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let body {
+            req.httpBody = body
+            if req.value(forHTTPHeaderField: "Content-Type") == nil {
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
+        }
         let data: Data
         let response: URLResponse
         do {
@@ -28,8 +62,8 @@ enum LocalHTTP {
             throw AdapterRunError.transport("Non-HTTP response")
         }
         if !(200...299).contains(http.statusCode) {
-            let body = String(data: data, encoding: .utf8)
-            throw AdapterRunError.httpStatus(http.statusCode, body)
+            let bodyText = String(data: data, encoding: .utf8)
+            throw AdapterRunError.httpStatus(http.statusCode, bodyText)
         }
         let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         return (http.statusCode, obj)
@@ -424,11 +458,159 @@ public struct HetznerAdapter: ProviderAdapter, Sendable {
     }
 }
 
+// MARK: - Backblaze B2 (storage inventory + catalog MTD estimate)
+
+/// Authorizes with applicationKeyId:applicationKey, lists buckets + file
+/// versions, estimates storage MTD from public B2 pricing. Not an invoice —
+/// download / Class A-B transactions are out of band (console Caps & Alerts).
+public struct BackblazeAdapter: ProviderAdapter, Sendable {
+    public let adapterKind = "backblaze"
+    public init() {}
+
+    private static let defaultPricePerGb = 0.006
+    private static let defaultFreeGb = 10.0
+    private static let listPageSize = 1000
+
+    public func fetchUsage(credentials: ProviderCredentials) async throws -> LocalUsageResult {
+        let raw = credentials.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else {
+            throw AdapterRunError.configuration("Backblaze application key empty")
+        }
+
+        let keyId: String
+        let appKey: String
+        if let colon = raw.firstIndex(of: ":") {
+            keyId = String(raw[..<colon]).trimmingCharacters(in: .whitespacesAndNewlines)
+            appKey = String(raw[raw.index(after: colon)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if let sid = credentials.apiKeySid?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !sid.isEmpty {
+            // Reuse apiKeySid slot for Application Key ID (same dual-field pattern as Twilio).
+            keyId = sid
+            appKey = raw
+        } else {
+            throw AdapterRunError.configuration(
+                "Backblaze needs keyId:applicationKey in the API key field (or Application Key ID + key)"
+            )
+        }
+        guard !keyId.isEmpty, !appKey.isEmpty else {
+            throw AdapterRunError.configuration("Backblaze key id or application key empty")
+        }
+
+        let basic = Data("\(keyId):\(appKey)".utf8).base64EncodedString()
+        let (_, authJson) = try await LocalHTTP.getJSON(
+            url: "https://api.backblazeb2.com/b2api/v2/b2_authorize_account",
+            headers: ["Authorization": "Basic \(basic)"]
+        )
+        guard let apiUrl = authJson?["apiUrl"] as? String,
+              let token = authJson?["authorizationToken"] as? String,
+              let accountId = authJson?["accountId"] as? String,
+              !apiUrl.isEmpty, !token.isEmpty
+        else {
+            throw AdapterRunError.invalidResponse("Backblaze authorize missing apiUrl/token")
+        }
+        let base = apiUrl.hasSuffix("/") ? String(apiUrl.dropLast()) : apiUrl
+
+        let buckets: [[String: Any]]
+        if let list = try? await LocalHTTP.postJSON(
+            url: "\(base)/b2api/v2/b2_list_buckets",
+            headers: [
+                "Authorization": token,
+                "Content-Type": "application/json",
+            ],
+            body: ["accountId": accountId]
+        ), let rows = list.json?["buckets"] as? [[String: Any]] {
+            buckets = rows
+        } else if let allowed = authJson?["allowed"] as? [String: Any],
+                  let bid = allowed["bucketId"] as? String,
+                  let bname = allowed["bucketName"] as? String {
+            buckets = [["bucketId": bid, "bucketName": bname]]
+        } else {
+            throw AdapterRunError.invalidResponse("Backblaze could not list buckets")
+        }
+
+        var totalBytes: Int64 = 0
+        var totalVersions = 0
+        var bucketCount = 0
+
+        for bucket in buckets {
+            guard let bucketId = bucket["bucketId"] as? String else { continue }
+            bucketCount += 1
+            var startName: String? = nil
+            var startId: String? = nil
+            var pages = 0
+            while pages < 50 {
+                pages += 1
+                var body: [String: Any] = [
+                    "bucketId": bucketId,
+                    "maxFileCount": Self.listPageSize,
+                ]
+                if let startName { body["startFileName"] = startName }
+                if let startId { body["startFileId"] = startId }
+                guard let page = try? await LocalHTTP.postJSON(
+                    url: "\(base)/b2api/v2/b2_list_file_versions",
+                    headers: [
+                        "Authorization": token,
+                        "Content-Type": "application/json",
+                    ],
+                    body: body
+                ), let files = page.json?["files"] as? [[String: Any]] else {
+                    break
+                }
+                for file in files {
+                    totalVersions += 1
+                    if let len = LocalHTTP.num(file["contentLength"]), len > 0 {
+                        totalBytes += Int64(len)
+                    }
+                }
+                guard let next = page.json?["nextFileName"] as? String, !next.isEmpty else {
+                    break
+                }
+                startName = next
+                startId = page.json?["nextFileId"] as? String
+            }
+        }
+
+        let totalGb = Double(totalBytes) / (1024.0 * 1024.0 * 1024.0)
+        let billableGb = max(0, totalGb - Self.defaultFreeGb)
+        let monthlyRunRate = billableGb * Self.defaultPricePerGb
+
+        let now = Date()
+        let monthStart = LocalHTTP.utcMonthStart(now)
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        let nextMonth = cal.date(byAdding: .month, value: 1, to: monthStart) ?? now
+        let monthMs = max(1, nextMonth.timeIntervalSince(monthStart))
+        let elapsed = min(monthMs, max(0, now.timeIntervalSince(monthStart)))
+        let fraction = elapsed / monthMs
+        let estimatedMtd = monthlyRunRate * fraction
+        let storageMb = Int((Double(totalBytes) / (1024.0 * 1024.0)).rounded())
+
+        return LocalUsageResult(
+            totalCost: estimatedMtd,
+            costWindowStart: monthStart,
+            costWindowEnd: now,
+            costScope: .calendarMonthToDate,
+            totalRequests: storageMb,
+            credits: max(0, Self.defaultFreeGb - totalGb),
+            costCoverageCaveat: LocalCostCoverageCaveat(
+                code: "backblaze_storage_catalog_prorated",
+                message:
+                    "Estimated storage MTD from public B2 price × inventoried file versions, pro-rated by UTC month. Not an invoice. Download/Class A-B not included."
+            ),
+            fetchedAt: now,
+            statusNote: String(
+                format: "%d bucket(s), %d version(s), %.2f GB stored; monthly storage run-rate ≈ $%.4f",
+                bucketCount, totalVersions, totalGb, monthlyRunRate
+            )
+        )
+    }
+}
+
 // MARK: - Registry
 
 public enum LocalAdapterRegistry {
     public static let supportedPollKinds: Set<String> = [
-        "openrouter", "openai", "anthropic", "deepseek", "hetzner",
+        "openrouter", "openai", "anthropic", "deepseek", "hetzner", "backblaze",
         "apify", "firecrawl", "twelvedata", "pushover", "resend",
         "stripe", "xai", "twilio",
     ]
@@ -444,6 +626,7 @@ public enum LocalAdapterRegistry {
         case "openai": return OpenAIAdapter()
         case "anthropic": return AnthropicAdapter()
         case "hetzner": return HetznerAdapter()
+        case "backblaze": return BackblazeAdapter()
         case "apify": return ApifyAdapter()
         case "firecrawl": return FirecrawlAdapter()
         case "twelvedata": return TwelveDataAdapter()

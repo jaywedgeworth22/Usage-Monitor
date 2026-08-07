@@ -60,7 +60,7 @@ public struct LocalProvider: Identifiable, Equatable, Sendable, Hashable {
 
     /// Adapters registered in `LocalAdapterRegistry` (keep in sync).
     public static let supportedPollAdapterKinds: Set<String> = [
-        "openrouter", "openai", "anthropic", "deepseek", "hetzner",
+        "openrouter", "openai", "anthropic", "deepseek", "hetzner", "backblaze",
         "apify", "firecrawl", "twelvedata", "pushover", "resend",
         "stripe", "xai", "twilio",
     ]
