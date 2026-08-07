@@ -17,7 +17,6 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
-- **[2026-08-07][GROK] iOS no-budget card + Title Case copy (ST e4e229e0 parity) — IN PROGRESS.** Branch `grok/ios-no-budget-card-title-case`.
 - **[2026-08-07][GROK] Backblaze B2 provider web + iOS Local — PR #1033 (auto-merge).** Builtin adapter + Local poll; branch `grok/backblaze-usage-monitor`.
 - **[2026-08-06][GROK] R2 subject Pushover identity + sent-from + fleet stagger + own backup line — IN PROGRESS / landing.** Subject free-tier → that app's PUSHOVER_* token; footer `(sent from APP)`; peer checks UTC phase; digests UM≥08/ST=14/CT≥20; Hetzner 24h floor. Branch `grok/r2-pushover-subject-identity`.
 
@@ -34,6 +33,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 - **[OWNER ACTION REQUIRED] P0 deleted-live-SQLite recovery (2026-08-01) — ACTIVE INCIDENT / DO NOT RESTART.** At `2026-08-01T14:34:50Z`, a manual root command unlinked `/data/prod.db`, its WAL/SHM, and multiple backup patterns while `oracle-app-1` remained live. The healthy old container is now serving from deleted open inodes; restart/deploy can destroy the freshest state. Freeze traffic/scheduler, pause the container, capture the open DB+WAL descriptors into root-only incident storage, build and verify a disposable recovery candidate, atomically restore the pathname, then re-enable service/backups/scheduler/deploy in stages. CODEX made no production mutation and posted the evidence to `#agent-sync`; coordinated recovery remains owner/unclaimed work.
 
 ## Deployed
+- **[2026-08-07][GROK] iOS no-budget card + Title Case + FLEET-UI-COPY canon — MERGED #1042 + #1044.** No $ when unbudgeted; Title Case headings/buttons; sentence values. Canon: docs/FLEET-UI-COPY.md.
 - **[2026-08-07][GROK] iOS: Providers tap reliability, backup status restore, projects multi-app, timeframe wire, split EOM projections — MERGED PR #1036.** Providers Button+path taps; Backup Lagging (not app Down); chart range → usage-events; EOM split usage+fixed+renewals; seeded ST+UM projects live.
 - **[GROK] Fix iOS Xcode build: ISO8601 public + Section title/footer + LockScreenView public (2026-08-06) — MERGED PR #1024.** LocalExport needed public LocalStore.ISO8601; ProviderManagementInventory invalid Section("title"){ } footer; LocalAppLockGate needed public LockScreenView; LocalRootView drop @MainActor default AppSettings(). Both schemes BUILD SUCCEEDED. Squash `cac46b64`.
 - **[GROK] R2 free-tier refill: tip-prune + 6h retention + litestream auto-resume (2026-08-06) — MERGED #1022 / HOST OPS DONE.** Live prune 8.92→0.40 GiB; kill cleared; litestream sync=2h retention=6h live; soft tip-prune@50% + watcher resume + js-yaml 4.3.1 override.
