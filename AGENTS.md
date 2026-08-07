@@ -412,3 +412,7 @@ bash scripts/ios-ship-testflight.sh
 ```
 
 Fleet: `/Users/jay/apps/ios-fleet/README.md`. Bundle `services.jays.usage.monitor`, team `CC8UTF7ATG`.
+
+## Fleet UI copy
+
+Owner copy rules (Title Case headings/buttons; sentence-case values; lowercase compact money; always-inline iOS nav titles; ticker logos): `docs/FLEET-UI-COPY.md` (canonical live board: `/Users/jay/apps/FLEET-UI-COPY.md`).
