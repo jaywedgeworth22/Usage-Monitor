@@ -272,7 +272,7 @@ systemctl is-failed usage-monitor-auto-deploy.service
 Production Litestream targets **Cloudflare R2** (not Hetzner/Coolify Garage —
 retired in PR #869). Confirm Infisical `LITESTREAM_S3_ENDPOINT` is
 `https://<account-id>.r2.cloudflarestorage.com` and the bucket name matches the
-env preflight (`usage-monitor-prod-v3`). Free-tier storage is **account-wide**
+env preflight (`jays-usage-monitor-eu` B2 primary; historic R2 allowed during cutover). Free-tier storage (R2 card) is **account-wide**
 across every R2 bucket; see `docs/litestream.md`.
 
 ## Backup monitoring

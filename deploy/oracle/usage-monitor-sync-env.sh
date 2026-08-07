@@ -126,8 +126,18 @@ if missing_keys and not bucket:
 errors = []
 if vals.get("LITESTREAM_REQUIRED") != "true":
     errors.append("LITESTREAM_REQUIRED must be true")
-if bucket != "usage-monitor-prod-v3":
-    errors.append("LITESTREAM_S3_BUCKET/AWS_S3_BUCKET_NAME must be usage-monitor-prod-v3")
+# B2 primary (2026-08-07). R2 usage-monitor-prod-v3 is historic freeze only.
+if bucket not in ("jays-usage-monitor-eu", "usage-monitor-prod-v3"):
+    errors.append(
+        "LITESTREAM_S3_BUCKET/AWS_S3_BUCKET_NAME must be jays-usage-monitor-eu "
+        "(B2 primary) or historic R2 usage-monitor-prod-v3 during cutover"
+    )
+endpoint = (vals.get("LITESTREAM_S3_ENDPOINT") or vals.get("AWS_S3_ENDPOINT") or "").lower()
+if bucket == "jays-usage-monitor-eu" and "backblazeb2.com" not in endpoint:
+    errors.append(
+        "B2 bucket jays-usage-monitor-eu requires a backblazeb2.com S3 endpoint "
+        "(e.g. https://s3.eu-central-003.backblazeb2.com)"
+    )
 sched = vals.get("USAGE_SCHEDULER_ENABLED")
 if sched not in (None, "", "true"):
     errors.append("USAGE_SCHEDULER_ENABLED must be true when set")

@@ -18,6 +18,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 
 ## In Progress
 - **[2026-08-07][GROK] Local catalog connect wave 2 — IN PROGRESS.** ChatGPT row, connection abilities UX, rename seed, ensure-all providers persist, flesh catalog. Branch `grok/local-catalog-connect-wave2`.
+- **[2026-08-07][GROK] Litestream primary → Backblaze B2 (leave R2 historic) — IN PROGRESS.** Bucket jays-usage-monitor-eu; preflight accepts B2; R2 kill does not stop B2. Branch `grok/litestream-b2-primary`.
 - **[2026-08-07][GROK] Local iOS ↔ web parity wave 1 — IN PROGRESS.** Overview hero/stats/EOM split, providers search/filter/sort, projects rollup + subs money surface. Branch `grok/local-web-parity-wave1`.
 - **[2026-08-07][GROK] Backblaze B2 provider web + iOS Local — PR #1033 (auto-merge).** Builtin adapter + Local poll; branch `grok/backblaze-usage-monitor`.
 - **[2026-08-06][GROK] R2 subject Pushover identity + sent-from + fleet stagger + own backup line — IN PROGRESS / landing.** Subject free-tier → that app's PUSHOVER_* token; footer `(sent from APP)`; peer checks UTC phase; digests UM≥08/ST=14/CT≥20; Hetzner 24h floor. Branch `grok/r2-pushover-subject-identity`.
