@@ -41,9 +41,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       # Cloudflare's automated-traffic protection returns 403 to GitHub-hosted
       # runners. The host transaction separately verifies the public proxied
-      # URL; this independent observer pins the reserved Oracle origin while
+      # URL; this independent observer pins the Hetzner Coolify origin (fleet-hetzner-nbg1) while
       # retaining the production hostname for SNI and certificate validation.
-      ORACLE_ORIGIN_IPV4: "141.148.182.224"
+      PRODUCTION_ORIGIN_IPV4: "167.233.254.55"
     steps:
       - name: Validate exact main revision
         shell: bash
@@ -91,30 +91,31 @@ jobs:
             fi
 
             if body=$(curl -fsS --max-time 15 \
-              --resolve "usage.jays.services:443:${ORACLE_ORIGIN_IPV4}" \
+              --resolve "usage.jays.services:443:${PRODUCTION_ORIGIN_IPV4}" \
               "$ready_url" 2>/dev/null) &&
+              # Backup is observability-only (env_active_unverified is normal when
+              # external replica verification is not configured). Gate on app ok +
+              # exact revision + sole writer/scheduler/startup, matching /api/ready.
               jq -e --arg revision "$TARGET_SHA" '
                 .status == "ready" and
+                .ok == true and
                 .revision == $revision and
                 .checks.database.ok == true and
-                .checks.backup.ok == true and
-                .checks.backup.required == true and
-                .checks.backup.active == true and
                 .checks.startup.active == true and
                 .checks.scheduler.ok == true and
                 .checks.scheduler.required == true and
                 .checks.scheduler.lastTickSucceeded == true and
                 .checks.scheduler.lastTickCompletedAt != null
               ' >/dev/null <<<"$body"; then
-              echo "Oracle production is ready at exact revision $TARGET_SHA."
+              echo "Hetzner production is ready at exact revision $TARGET_SHA."
               {
-                echo '### Oracle production deployment'
+                echo '### Hetzner production deployment'
                 echo
                 printf '%s\n' "- Revision: \`$TARGET_SHA\`"
                 echo '- Database: healthy'
-                echo '- Garage backup: required and active'
+                echo '- Backup: observability only (not a deploy gate)'
                 echo '- Scheduler: required with a successful tick'
-                echo '- Oracle origin TLS/readiness: healthy'
+                echo '- Hetzner origin TLS/readiness: healthy'
                 echo '- Public proxied readiness: verified separately by the host transaction and UptimeRobot'
               } >> "$GITHUB_STEP_SUMMARY"
               exit 0

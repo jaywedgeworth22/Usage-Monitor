@@ -283,7 +283,11 @@ export function getRuntimeIdentity(): {
     service: process.env.RENDER_SERVICE_NAME || "usage-monitor",
     version: packageJson.version,
     revision:
-      process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT_SHA || null,
+      process.env.RENDER_GIT_COMMIT ||
+      process.env.GIT_COMMIT_SHA ||
+      // Coolify injects SOURCE_COMMIT for each deployment.
+      process.env.SOURCE_COMMIT ||
+      null,
     environment: process.env.NODE_ENV || "development",
   };
 }

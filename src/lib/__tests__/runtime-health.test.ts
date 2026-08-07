@@ -125,6 +125,16 @@ describe("runtime health state", () => {
     });
   });
 
+  it("reads Coolify SOURCE_COMMIT when Render/GitHub commit env is unset", () => {
+    vi.stubEnv("RENDER_GIT_COMMIT", "");
+    vi.stubEnv("GIT_COMMIT_SHA", "");
+    vi.stubEnv("SOURCE_COMMIT", "deadbeefcafebabe");
+
+    expect(getRuntimeIdentity()).toMatchObject({
+      revision: "deadbeefcafebabe",
+    });
+  });
+
   it("requires the startup wrapper in production mode and on Litestream-required hosts", () => {
     // Plain test/dev mode without Litestream: not required.
     expect(getStartupRuntimeStatus()).toEqual({
