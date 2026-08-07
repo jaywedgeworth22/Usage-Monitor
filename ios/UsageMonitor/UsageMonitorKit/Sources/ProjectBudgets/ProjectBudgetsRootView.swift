@@ -45,6 +45,7 @@ public struct ProjectBudgetsRootView: View {
                 onAdd: managementStore.canManage ? { editorContext = .add } : nil
             )
             .navigationTitle(AppTab.projects.title)
+            .navigationBarTitleDisplayMode(.inline)
             // Inline (centered compact) title — avoid large left-aligned title at rest.
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $detailID) { id in
@@ -385,6 +386,7 @@ struct ProjectBudgetCard: View {
             onRefresh: {}, onRetry: {}, onSelect: { _ in }
         )
         .navigationTitle("Projects")
+            .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -397,6 +399,7 @@ struct ProjectBudgetCard: View {
             onRefresh: {}, onRetry: {}, onSelect: { _ in }
         )
         .navigationTitle("Projects")
+            .navigationBarTitleDisplayMode(.inline)
     }
     .preferredColorScheme(.dark)
 }
@@ -410,6 +413,7 @@ struct ProjectBudgetCard: View {
             onRefresh: {}, onRetry: {}, onSelect: { _ in }
         )
         .navigationTitle("Projects")
+            .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -420,6 +424,7 @@ struct ProjectBudgetCard: View {
             lastError: nil, onRefresh: {}, onRetry: {}, onSelect: { _ in }, onAdd: {}
         )
         .navigationTitle("Projects")
+            .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -430,6 +435,7 @@ struct ProjectBudgetCard: View {
             lastError: nil, onRefresh: {}, onRetry: {}, onSelect: { _ in }, onAdd: {}
         )
         .navigationTitle("Projects")
+            .navigationBarTitleDisplayMode(.inline)
     }
     .preferredColorScheme(.dark)
 }

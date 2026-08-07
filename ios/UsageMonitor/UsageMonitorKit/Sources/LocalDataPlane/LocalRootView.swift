@@ -544,7 +544,7 @@ private struct ProviderDetailView: View {
                         }
                     ))
                     if let last = p.lastFetchAt {
-                        LabeledContent("Last fetch", value: last.formatted())
+                        LabeledContent("Last Fetch", value: last.formatted())
                     }
                     if let err = p.lastFetchError, !err.isEmpty {
                         Text(err)
