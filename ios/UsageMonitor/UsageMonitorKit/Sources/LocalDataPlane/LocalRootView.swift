@@ -256,17 +256,16 @@ public struct LocalRootView: View {
                     Text("**Usage Monitor** (other app) is the live-sync client for a self-hosted or owner server — use that if you run a VPS like the fleet.")
                         .font(Theme.Typography.caption)
                 }
-                Section("Catalog") {
-                    Text("\(LocalProviderCatalog.all.count) fleet providers under + Add. Seed only creates inactive $0 shells — never invents paid plans.")
+                Section("Providers Catalog") {
+                    Text("\(LocalProviderCatalog.all.count) known services. “Add Missing Providers” creates inactive empty cards (no fees, no keys) so you can fill them in. Safe to re-run; data stays on this phone across app updates.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Button("Seed Missing Fleet Templates") {
+                    Button("Add Missing Providers") {
                         Task {
-                            _ = try? await model.seedMissingCatalogProviders()
-                            try? await model.reload()
+                            _ = try? await model.ensureCatalogProviders()
                         }
                     }
-                    Button("Remove Catalog-Guess Charges") {
+                    Button("Remove Incorrect Catalog Fees") {
                         Task { _ = try? await model.scrubCatalogGuessCharges() }
                     }
                 }
@@ -331,10 +330,10 @@ private struct AddProviderSheet: View {
                 if selected == nil {
                     Section {
                         TextField("Search providers", text: $search)
-                        Button("Seed all fleet templates (no API keys)") {
+                        Button("Add Missing Providers") {
                             Task { await seed() }
                         }
-                        Text("Adds subscription/manual shells for every catalog provider that does not need a key on first save. Pollable LLMs (OpenRouter, OpenAI, …) still need a key via Add.")
+                        Text("Creates empty cards for every known service that isn’t on this phone yet — no keys, no fees invented. Your data stays in the app’s private storage across updates.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         if let seedMessage {
@@ -358,9 +357,10 @@ private struct AddProviderSheet: View {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(entry.displayName)
                                                 .foregroundStyle(.primary)
-                                            Text(modeLabel(entry.mode))
+                                            Text(entry.connectionSummary)
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
+                                                .lineLimit(2)
                                         }
                                         Spacer()
                                         Image(systemName: "chevron.right")
@@ -372,19 +372,24 @@ private struct AddProviderSheet: View {
                         }
                     }
                 } else if let entry = selected {
-                    Section(entry.displayName) {
+                    Section {
                         Text(entry.help)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        FlowAbilityChips(abilities: entry.abilities)
+                    } header: {
+                        Text("What This Phone Can Do")
+                    }
+                    Section(entry.displayName) {
                         TextField("Display name", text: $displayName)
                         if entry.mode == .poll || entry.mode == .keyPlusSubscription {
                             SecureField(entry.keyFieldLabel, text: $apiKey)
-                            if entry.adapterKind == "xai" {
-                                TextField("xAI team id (required)", text: $teamId)
+                            if entry.requiresTeamId || entry.adapterKind == "xai" {
+                                TextField("Team id (required for xAI)", text: $teamId)
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
                             }
-                            if entry.adapterKind == "twilio" {
+                            if entry.requiresAccountSid || entry.adapterKind == "twilio" {
                                 TextField("Account SID (required)", text: $accountSid)
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
@@ -397,7 +402,7 @@ private struct AddProviderSheet: View {
                         }
                         if entry.mode == .subscription || entry.mode == .keyPlusSubscription
                             || entry.mode == .poll {
-                            TextField("Monthly subscription / fee USD (optional)", text: $subCostText)
+                            TextField("Monthly fee USD (optional)", text: $subCostText)
                                 .keyboardType(.decimalPad)
                         }
                     }
@@ -406,7 +411,8 @@ private struct AddProviderSheet: View {
                     }
                 }
             }
-            .navigationTitle(selected == nil ? "Add provider" : "Configure")
+            .navigationTitle(selected == nil ? "Add Provider" : "Configure")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(selected == nil ? "Cancel" : "Back") {
@@ -427,19 +433,13 @@ private struct AddProviderSheet: View {
         }
     }
 
-    private func modeLabel(_ mode: LocalProviderMode) -> String {
-        switch mode {
-        case .poll: return "API poll (cost/balance)"
-        case .subscription: return "Subscription / manual"
-        case .keyPlusSubscription: return "Key optional · track subscription"
-        }
-    }
-
     private func seed() async {
         error = nil
         do {
-            let n = try await model.seedMissingCatalogProviders()
-            seedMessage = n == 0 ? "Catalog already fully seeded." : "Added \(n) providers."
+            let n = try await model.ensureCatalogProviders()
+            seedMessage = n == 0
+                ? "All known services already have a card on this phone."
+                : "Added \(n) provider card\(n == 1 ? "" : "s") (inactive, $0)."
             try? await model.reload()
         } catch {
             self.error = error.localizedDescription
@@ -465,6 +465,31 @@ private struct AddProviderSheet: View {
             dismiss()
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+}
+
+// MARK: - Ability chips
+
+private struct FlowAbilityChips: View {
+    let abilities: [LocalConnectionAbility]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(abilities, id: \.self) { ability in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(ability.chipLabel)
+                        .font(Theme.Typography.caption.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Theme.Colors.accentSoft, in: Capsule())
+                        .foregroundStyle(Theme.Colors.accent)
+                    Text(ability.detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 }
@@ -496,7 +521,20 @@ private struct ProviderDetailView: View {
             if let p = provider {
                 Section {
                     LabeledContent("Name", value: p.displayName)
-                    LabeledContent("Adapter", value: p.adapterKind)
+                    if let entry = LocalProviderCatalog.entry(name: p.name) {
+                        LabeledContent("Connection", value: entry.connectionSummary)
+                        Text(entry.help)
+                            .font(.caption)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                        FlowAbilityChips(abilities: entry.abilities)
+                    } else {
+                        LabeledContent(
+                            "Connection",
+                            value: p.isPollable
+                                ? (p.canFetch ? "polls when active" : "pollable · needs key")
+                                : "recurring fee only"
+                        )
+                    }
                     Toggle("Active (poll / materialize)", isOn: Binding(
                         get: { p.isActive },
                         set: { next in

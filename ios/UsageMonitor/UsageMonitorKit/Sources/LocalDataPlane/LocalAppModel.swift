@@ -37,6 +37,9 @@ public final class LocalAppModel {
             schemaVersion = await store.schemaVersion
             // Heal seed-invented catalog-guess fees before materialize.
             _ = try await scrubCatalogGuessCharges(reloadAfter: false)
+            // Ensure every catalog service exists as a durable local row (SQLite
+            // in app container — survives app updates; never ships secrets).
+            _ = try await ensureCatalogProviders(reloadAfter: false)
             lastMaterializedCharges = try await SubscriptionMaterializer.materialize(store: store)
             try await reload()
             isReady = true
@@ -133,30 +136,28 @@ public final class LocalAppModel {
             keychainAccountId = accountId
         }
 
-        let adapterKind: String = {
-            switch entry.mode {
-            case .poll: return entry.adapterKind
-            case .subscription: return "subscription_only"
-            case .keyPlusSubscription:
-                // Key stored for future poll ports; spend via subscription if set.
-                return entry.adapterKind == "subscription_only" ? "subscription_only" : entry.adapterKind
-            }
-        }()
-
-        // Poll adapters available on phone today.
-        let supportedPoll = Set(["openrouter", "deepseek", "openai", "anthropic", "hetzner", "backblaze"])
-        let resolvedKind: String = {
-            if adapterKind == "subscription_only" { return adapterKind }
-            if supportedPoll.contains(adapterKind) { return adapterKind }
-            return "subscription_only"
+        // Prefer catalog-resolved kind (poll when phone can poll; else fee-only).
+        let resolvedKind = entry.isPhonePollable
+            ? entry.resolvedAdapterKind
+            : (entry.mode == .subscription ? "subscription_only" : entry.resolvedAdapterKind)
+        // If no phone poll yet, still store the product adapter kind when known so
+        // future poll ports activate without re-adding — but never pretend we can fetch.
+        let storeKind: String = {
+            if entry.isPhonePollable { return resolvedKind }
+            if entry.mode == .subscription { return "subscription_only" }
+            // keyPlus / server-only: keep slug for identity, mark non-pollable kinds as fee-only for fetch gates
+            return LocalProviderCatalogEntry.phonePollAdapterKinds.contains(entry.adapterKind)
+                ? entry.adapterKind
+                : "subscription_only"
         }()
 
         var p = LocalProvider(
             name: name,
             displayName: (displayName?.isEmpty == false ? displayName! : entry.displayName),
-            adapterKind: resolvedKind,
+            adapterKind: storeKind,
             category: entry.category,
-            keychainAccountId: keychainAccountId
+            keychainAccountId: keychainAccountId,
+            nonSecretConfigJSON: Self.connectionProfileJSON(for: entry)
         )
         p.updatedAt = Date()
         try await store.upsertProvider(p)
@@ -180,28 +181,89 @@ public final class LocalAppModel {
         try await reload()
     }
 
-    /// Insert every catalog provider not already present as **inactive $0 shells**.
+    /// Insert every catalog provider not already present as **inactive $0 shells**,
+    /// and heal display names / connection profiles for existing catalog rows.
     /// Never attaches subscriptions or invents spend — catalog price hints are
-    /// for the Add form only.
+    /// for the Add form only. Data lives in on-device SQLite (survives app updates;
+    /// not App Store–shared; no API keys).
     @discardableResult
-    public func seedMissingCatalogProviders() async throws -> Int {
-        let existing = Set(try await store.listProviders().map(\.name))
+    public func ensureCatalogProviders(reloadAfter: Bool = true) async throws -> Int {
+        let existing = try await store.listProviders()
+        let byName = Dictionary(uniqueKeysWithValues: existing.map { ($0.name, $0) })
         var added = 0
         for entry in LocalProviderCatalog.all {
-            if existing.contains(entry.name) { continue }
+            if var p = byName[entry.name] {
+                // Heal catalog renames (e.g. "xAI / Grok" → "xAI") and connection profile.
+                var changed = false
+                // Heal known catalog renames without clobbering truly custom names.
+                let healNames: Set<String> = [
+                    "xAI / Grok", "xAI/Grok", "Custom / other", "OpenAI",
+                    "Anthropic (API / Admin)", "Anthropic", "Oracle Cloud Infrastructure",
+                ]
+                if p.displayName != entry.displayName,
+                   healNames.contains(p.displayName)
+                    || p.displayName == LocalProviderCatalog.preferredDisplayName(forName: entry.name)
+                {
+                    p.displayName = entry.displayName
+                    changed = true
+                }
+                // Upgrade adapter kind when phone gained a poll adapter and row is fee-only shell.
+                let preferred = entry.isPhonePollable ? entry.resolvedAdapterKind : "subscription_only"
+                if p.adapterKind == "subscription_only", entry.isPhonePollable, p.keychainAccountId == nil {
+                    p.adapterKind = preferred
+                    changed = true
+                }
+                if p.nonSecretConfigJSON != Self.connectionProfileJSON(for: entry) {
+                    p.nonSecretConfigJSON = Self.connectionProfileJSON(for: entry)
+                    changed = true
+                }
+                if p.category != entry.category {
+                    p.category = entry.category
+                    changed = true
+                }
+                if changed {
+                    p.updatedAt = Date()
+                    try await store.upsertProvider(p)
+                }
+                continue
+            }
             var p = LocalProvider(
                 name: entry.name,
                 displayName: entry.displayName,
-                adapterKind: "subscription_only",
+                adapterKind: entry.isPhonePollable ? entry.resolvedAdapterKind : "subscription_only",
                 category: entry.category,
-                isActive: false
+                isActive: false,
+                nonSecretConfigJSON: Self.connectionProfileJSON(for: entry)
             )
             p.updatedAt = Date()
             try await store.upsertProvider(p)
             try await store.upsertPlan(LocalProviderPlan(providerId: p.id))
             added += 1
         }
+        if reloadAfter { try await reload() }
         return added
+    }
+
+    /// Alias kept for older call sites / buttons.
+    @discardableResult
+    public func seedMissingCatalogProviders() async throws -> Int {
+        try await ensureCatalogProviders(reloadAfter: true)
+    }
+
+    private static func connectionProfileJSON(for entry: LocalProviderCatalogEntry) -> String {
+        let abilities = entry.abilities.map(\.rawValue)
+        let payload: [String: Any] = [
+            "catalogName": entry.name,
+            "mode": entry.mode.rawValue,
+            "abilities": abilities,
+            "connectionSummary": entry.connectionSummary,
+            "isPhonePollable": entry.isPhonePollable,
+            "help": entry.help,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let s = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return s
     }
 
     /// Historical seed ghosts only (pre-fix catalog auto-charged these).
