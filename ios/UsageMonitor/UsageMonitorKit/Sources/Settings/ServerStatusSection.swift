@@ -78,7 +78,7 @@ struct ServerStatusSection: View {
             Button {
                 Task { await onReload() }
             } label: {
-                Label("Try again", systemImage: "arrow.clockwise")
+                Label("Try Again", systemImage: "arrow.clockwise")
                     .font(Theme.Typography.caption.weight(.semibold))
             }
             .buttonStyle(.borderless)

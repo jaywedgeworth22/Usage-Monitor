@@ -104,7 +104,7 @@ public struct LocalRootView: View {
                     }
                     if let s = model.summary {
                         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                            Text("Month to date")
+                            Text("Month to Date")
                                 .font(Theme.Typography.caption)
                                 .foregroundStyle(Theme.Colors.secondaryText)
                             Text(CurrencyFormat.usd(s.totalSpentUsd))
@@ -113,15 +113,19 @@ public struct LocalRootView: View {
                                 .foregroundStyle(Theme.Colors.primaryText)
                             if let budget = s.totalBudgetUsd, budget > 0 {
                                 LabeledBudgetMeter(
-                                    title: s.overBudget ? "Over budget" : "Budget used",
+                                    title: s.overBudget ? "Over Budget" : "Budget Used",
                                     detail: "\(CurrencyFormat.usd(s.totalSpentUsd)) of \(CurrencyFormat.usd(budget))",
                                     fraction: s.totalSpentUsd / budget,
                                     status: s.overBudget ? .danger : (s.totalSpentUsd / budget >= 0.8 ? .warning : .ok)
                                 )
                             } else {
-                                Text("No budgets set — open a provider to add one")
-                                    .font(Theme.Typography.callout)
+                                // Value/answer copy — no fake $ remaining when unbudgeted.
+                                Text("no budget set")
+                                    .font(Theme.Typography.callout.weight(.semibold))
                                     .foregroundStyle(Theme.Colors.secondaryText)
+                                Text("Open a provider to add one.")
+                                    .font(Theme.Typography.caption)
+                                    .foregroundStyle(Theme.Colors.tertiaryText)
                             }
                             let projected = s.providers.compactMap(\.projectedEomUsd).reduce(0, +)
                             if projected > 0.005 {

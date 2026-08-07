@@ -81,6 +81,20 @@ final class DashboardViewDataTests: XCTestCase {
         XCTAssertEqual(data.projectedOverageFraction!, 155.70 / 570, accuracy: 0.0001)
     }
 
+    /// Without any provider budgets, remaining is 0 − spent (negative). UI must
+    /// not treat that as "Over Budget $X" — only `hasBudget` gates the dollar card.
+    func testNoBudgetDoesNotImplyConfiguredRemaining() {
+        let response = makeResponse(
+            budget: 0,
+            providers: [provider(spent: 42, projected: 80, budget: nil, status: .unconfigured)]
+        )
+        let data = DashboardViewData(response)
+        XCTAssertFalse(data.hasBudget)
+        XCTAssertEqual(data.totalBudget, 0, accuracy: 0.001)
+        XCTAssertEqual(data.remaining, -42, accuracy: 0.001) // raw math
+        // Presentation contract: only show currency remaining when hasBudget.
+    }
+
     func testProjectedEomSplitsUsageAndSubscriptionParts() {
         // Explicit two-part composition: paced usage + fixed accrued + known renewals.
         let response = makeResponse(

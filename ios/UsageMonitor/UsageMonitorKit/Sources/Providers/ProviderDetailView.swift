@@ -51,7 +51,7 @@ struct ProviderDetailView: View {
         .toolbar {
             if provider != nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Edit budget") {
+                    Button("Edit Budget") {
                         Haptics.tap()
                         showBudgetEditor = true
                     }
@@ -173,7 +173,7 @@ struct ProviderDetailView: View {
     @ViewBuilder
     private func budgetCard(_ provider: ProviderBudgetStatus) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            SectionHeader("Budget", subtitle: provider.hasBudget ? "Month to date" : nil) {
+            SectionHeader("Budget", subtitle: provider.hasBudget ? "Month to Date" : nil) {
                 Button {
                     Haptics.tap()
                     showBudgetEditor = true
@@ -227,11 +227,19 @@ struct ProviderDetailView: View {
             )
             if let remaining = provider.remainingUsd {
                 StatTile(
-                    label: remaining < 0 ? "Over by" : "Remaining",
+                    label: remaining < 0 ? "Over By" : "Remaining",
                     value: CurrencyFormat.usd(abs(remaining)),
-                    secondary: provider.hasBudget ? "of budget" : nil,
+                    secondary: "of budget",
                     systemImage: remaining < 0 ? "exclamationmark.triangle.fill" : "banknote",
                     status: remaining < 0 ? .danger : .ok
+                )
+            } else {
+                StatTile(
+                    label: "Budget",
+                    value: "no budget set",
+                    secondary: nil,
+                    systemImage: "banknote",
+                    status: .neutral
                 )
             }
             if provider.hasBudget, let percent = provider.percentUsed {
@@ -244,7 +252,7 @@ struct ProviderDetailView: View {
                 )
             } else if provider.estimatedApiEquivalentUsd > 0 {
                 StatTile(
-                    label: "API-equivalent",
+                    label: "API-Equivalent",
                     value: CurrencyFormat.usd(provider.estimatedApiEquivalentUsd),
                     secondary: "list-price value",
                     systemImage: "tag.fill"
@@ -271,7 +279,7 @@ struct ProviderDetailView: View {
 
     private func compositionCard(_ provider: ProviderBudgetStatus) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            SectionHeader("Spend breakdown", subtitle: "How this month's \(CurrencyFormat.usd(provider.spentUsd)) is made up")
+            SectionHeader("Spend Breakdown", subtitle: "How this month's \(CurrencyFormat.usd(provider.spentUsd)) is made up")
             SpendCompositionBar(components: provider.spendComponents)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -410,26 +418,26 @@ struct ProviderDetailView: View {
     private func renewalCard(_ provider: ProviderBudgetStatus) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             SectionHeader(
-                "EOM projection parts",
+                "EOM Projection Parts",
                 subtitle: "Usage pace + fixed accrued + known renewals"
             )
             DetailStatRow(
-                label: "Usage (extrapolated)",
+                label: "Usage (Extrapolated)",
                 value: CurrencyFormat.usd(provider.resolvedProjectedVariableUsageUsd)
             )
             DetailStatRow(
-                label: "Fixed accrued MTD",
+                label: "Fixed Accrued MTD",
                 value: CurrencyFormat.usd(provider.resolvedFixedAccruedUsd)
             )
             DetailStatRow(
-                label: "Known renewals remaining",
+                label: "Known Renewals Remaining",
                 value: CurrencyFormat.usd(provider.resolvedForecastedSubscriptionRenewalsUsd)
             )
             if provider.subscriptionMonthToDateUsd > 0.005 {
-                DetailStatRow(label: "Subscription this month", value: CurrencyFormat.usd(provider.subscriptionMonthToDateUsd))
+                DetailStatRow(label: "Subscription This Month", value: CurrencyFormat.usd(provider.subscriptionMonthToDateUsd))
             }
             if provider.fixedMonthlyCostUsd > 0.005 {
-                DetailStatRow(label: "Plan fixed monthly", value: CurrencyFormat.usd(provider.fixedMonthlyCostUsd))
+                DetailStatRow(label: "Plan Fixed Monthly", value: CurrencyFormat.usd(provider.fixedMonthlyCostUsd))
             }
             Text("Projected \(CurrencyFormat.usd(provider.projectedEomUsd)) = usage + fixed + renewals. Subscriptions with a next bill this month appear under renewals even before they charge.")
                 .font(Theme.Typography.caption)
@@ -443,35 +451,37 @@ struct ProviderDetailView: View {
     private func providerProjectionSecondary(_ provider: ProviderBudgetStatus) -> String {
         let renew = provider.resolvedForecastedSubscriptionRenewalsUsd
         let fixed = provider.resolvedFixedAccruedUsd
+        // Secondary is a value → sentence case.
         if renew > 0.005 || fixed > 0.005 {
             return "usage + subs"
         }
-        return "usage pace · EOM"
+        return "usage pace · eom"
     }
 
     // MARK: - Data quality
 
     private func dataQualityCard(_ provider: ProviderBudgetStatus) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-            SectionHeader("Data quality")
+            SectionHeader("Data Quality")
             DetailStatRow(
-                label: "Spend coverage",
+                label: "Spend Coverage",
                 value: provider.spendCoverage.label,
                 valueStatus: .init(coverage: provider.spendCoverage),
                 monospaced: false
             )
             if provider.pushedMonthToDateUsd > 0.005 {
-                DetailStatRow(label: "Reported (pushed)", value: CurrencyFormat.usd(provider.pushedMonthToDateUsd))
+                DetailStatRow(label: "Reported (Pushed)", value: CurrencyFormat.usd(provider.pushedMonthToDateUsd))
             }
             if provider.receiptCashPaidUsd > 0.005 {
-                DetailStatRow(label: "Cash paid (receipts)", value: CurrencyFormat.usd(provider.receiptCashPaidUsd))
+                DetailStatRow(label: "Cash Paid (Receipts)", value: CurrencyFormat.usd(provider.receiptCashPaidUsd))
             }
             if provider.estimatedApiEquivalentUsd > 0.005 {
-                DetailStatRow(label: "API-equivalent value", value: CurrencyFormat.usd(provider.estimatedApiEquivalentUsd))
+                DetailStatRow(label: "API-Equivalent Value", value: CurrencyFormat.usd(provider.estimatedApiEquivalentUsd))
             }
             if let fetched = provider.snapshotFetchedDate {
                 DetailStatRow(
-                    label: "Snapshot updated",
+                    label: "Snapshot Updated",
+                    // Relative times are values → keep lower/sentence from system formatter.
                     value: fetched.formatted(.relative(presentation: .named)),
                     monospaced: false
                 )

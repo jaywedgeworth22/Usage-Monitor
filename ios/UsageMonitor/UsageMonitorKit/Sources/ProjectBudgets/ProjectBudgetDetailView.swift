@@ -51,7 +51,7 @@ struct ProjectBudgetDetailView: View {
                     systemImage: statusSymbol
                 )
                 if presentation.isOverBudget {
-                    StatusBadge("Over budget", status: .danger, systemImage: "exclamationmark.octagon.fill")
+                    StatusBadge("Over Budget", status: .danger, systemImage: "exclamationmark.octagon.fill")
                 }
             }
         }

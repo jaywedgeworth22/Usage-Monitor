@@ -26,7 +26,7 @@ public struct ErrorState: View {
         actionTitle: String? = nil,
         actionSystemImage: String = "arrow.right.circle.fill",
         action: (() -> Void)? = nil,
-        retryTitle: String? = "Try again",
+        retryTitle: String? = "Try Again",
         retry: (() -> Void)? = nil
     ) {
         self.systemImage = systemImage

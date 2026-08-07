@@ -131,7 +131,7 @@ struct TokenConnectionSection: View {
                 Button(role: .destructive) {
                     model.showRemoveConfirmation = true
                 } label: {
-                    Label("Remove token", systemImage: "trash")
+                    Label("Remove Token", systemImage: "trash")
                 }
             }
         } header: {
@@ -144,7 +144,7 @@ struct TokenConnectionSection: View {
             isPresented: $model.showRemoveConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Remove token", role: .destructive) { model.removeToken() }
+            Button("Remove Token", role: .destructive) { model.removeToken() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Budget data will stop loading until you enter a token again. The token is only stored on this device.")
@@ -185,7 +185,7 @@ struct TokenConnectionSection: View {
                         .foregroundStyle(Theme.Colors.accent)
                 }
                 Spacer()
-                StatusBadge("Not checked", status: .neutral)
+                StatusBadge("Not Checked", status: .neutral)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("API token configured, not verified this session")

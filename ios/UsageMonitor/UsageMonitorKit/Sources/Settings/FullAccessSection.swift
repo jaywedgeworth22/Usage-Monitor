@@ -49,7 +49,7 @@ struct FullAccessSection: View {
                 Button(role: .destructive) {
                     showSignOutConfirmation = true
                 } label: {
-                    Label("Sign out of full access", systemImage: "rectangle.portrait.and.arrow.right")
+                    Label("Sign Out of Full Access", systemImage: "rectangle.portrait.and.arrow.right")
                 }
                 .disabled(store.isAuthenticating)
             } else {
@@ -111,11 +111,11 @@ struct FullAccessSection: View {
             }
         }
         .confirmationDialog(
-            "Sign out of full access?",
+            "Sign Out of Full Access?",
             isPresented: $showSignOutConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Sign out", role: .destructive, action: signOut)
+            Button("Sign Out", role: .destructive, action: signOut)
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Your read token, if configured, stays in the Keychain. Native management actions will require the dashboard password again.")

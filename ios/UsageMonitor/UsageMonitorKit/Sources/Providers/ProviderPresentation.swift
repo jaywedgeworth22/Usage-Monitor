@@ -34,34 +34,35 @@ extension ProviderBudgetStatus {
 
     /// A one-line human status used as the row subtitle.
     var rowSubtitle: String {
+        // List subtitles are values → sentence/lower case (not Title Case headings).
         switch status {
         case .exceeded:
             if let remainingUsd, remainingUsd < 0 {
-                return "Over by \(CurrencyFormat.usd(abs(remainingUsd)))"
+                return "over by \(CurrencyFormat.usd(abs(remainingUsd)))"
             }
-            return "Over budget"
+            return "over budget"
         case .warning:
             if let remainingUsd {
                 return "\(CurrencyFormat.usd(remainingUsd)) left"
             }
-            return "Approaching budget"
+            return "approaching budget"
         case .ok:
             if let remainingUsd {
                 return "\(CurrencyFormat.usd(remainingUsd)) left"
             }
-            return "On track"
+            return "on track"
         case .unconfigured:
-            return "Not budgeted · \(CurrencyFormat.usd(spentUsd)) spent"
+            return "not budgeted · \(CurrencyFormat.usd(spentUsd)) spent"
         }
     }
 
-    /// Short label for the header status badge.
+    /// Short label for the header status badge (chip → Title Case).
     var statusLabel: String {
         switch status {
-        case .exceeded: return "Over budget"
-        case .warning: return "Approaching budget"
-        case .ok: return "On track"
-        case .unconfigured: return "No budget set"
+        case .exceeded: return "Over Budget"
+        case .warning: return "Approaching Budget"
+        case .ok: return "On Track"
+        case .unconfigured: return "No Budget Set"
         }
     }
 
