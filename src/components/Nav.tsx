@@ -34,22 +34,19 @@ function isLinkActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-/** Brand mark: orange rounded square + white usage bars (matches favicon / apple-icon). */
+/** Brand mark: same orange circuit/sync app icon as favicon + iOS client. */
 function BrandMark({ className = "h-8 w-8" }: { className?: string }) {
   return (
-    <div
-      className={`flex shrink-0 items-center justify-center rounded-lg bg-accent ${className}`}
+    // eslint-disable-next-line @next/next/no-img-element -- static brand asset; avoid layout shift from next/image
+    <img
+      src="/brand/icon-64.png"
+      alt=""
+      width={32}
+      height={32}
+      className={`shrink-0 rounded-lg ${className}`}
       aria-hidden="true"
-    >
-      <svg className="h-[62.5%] w-[62.5%] text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-        />
-      </svg>
-    </div>
+      decoding="async"
+    />
   );
 }
 

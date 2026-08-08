@@ -17,6 +17,8 @@ export const isPublicPath = (pathname: string) => {
   ];
   if (publicAssetPaths.includes(pathname)) return true;
   if (pathname === "/pwa-icon" || pathname.startsWith("/pwa-icon/")) return true;
+  // Brand mark used on the public login page (and optional offline shell).
+  if (pathname === "/brand" || pathname.startsWith("/brand/")) return true;
 
   const publicPaths = [
     "/login",
