@@ -17,6 +17,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **[GROK] Mobile nav brand label always visible ("Usage Monitor") — IN PR #1063 2026-08-09.** Nav currently hides title below sm; show icon+text on mobile. Website: Usage Monitor; iOS apps keep CFBundleDisplayName (Usage Client/Local Monitor).
 - **[GROK] Hetzner deploy observer + Coolify SOURCE_COMMIT revision (2026-08-07) — IN PR.** Pin PRODUCTION_ORIGIN_IPV4=167.233.254.55; drop backup.ok gate on observer; identity reads SOURCE_COMMIT. PR queue #1041/#1035/#1021 already merged.
 - **[2026-08-07][GROK] Local catalog connect wave 2 — IN PROGRESS.** ChatGPT row, connection abilities UX, rename seed, ensure-all providers persist, flesh catalog. Branch `grok/local-catalog-connect-wave2`.
 - **[2026-08-07][GROK] Litestream primary → Backblaze B2 (leave R2 historic) — IN PROGRESS.** Bucket jays-usage-monitor-eu; preflight accepts B2; R2 kill does not stop B2. Branch `grok/litestream-b2-primary`.
