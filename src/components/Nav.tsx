@@ -135,9 +135,18 @@ export default function Nav() {
             that overflowed mid breakpoints → overlapping text ("MoreLight", etc.).
           */}
           <div className="flex h-14 min-h-14 items-center gap-2 sm:h-16 sm:gap-3">
-            <Link href="/" className="flex shrink-0 items-center gap-2">
+            <Link
+              href="/"
+              className="flex min-w-0 shrink-0 items-center gap-2"
+              aria-label="Usage Monitor home"
+            >
               <BrandMark />
-              <span className="hidden text-base font-semibold tracking-tight text-gray-900 dark:text-gray-100 sm:inline">
+              {/*
+                Always show the product name next to the icon — including mobile.
+                iOS apps use CFBundleDisplayName (Usage Client Monitor /
+                Usage Local Monitor); the website brand is plain "Usage Monitor".
+              */}
+              <span className="truncate text-sm font-semibold tracking-tight text-gray-900 dark:text-gray-100 sm:text-base">
                 Usage Monitor
               </span>
             </Link>
