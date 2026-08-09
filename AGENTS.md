@@ -1,5 +1,13 @@
 # Usage Monitor — agent notes
 
+## Codex Cloud protocol bootstrap
+
+Run `bash .codex/setup.sh` during cloud provisioning and `bash .codex/maintenance.sh` on
+resume. Cloud agent-phase coordination requires regular runtime variables
+`SLACK_BOT_TOKEN` and `GH_TOKEN`; setup-only secrets are removed before the agent runs.
+Use `scripts/codex-coordination.sh` for Slack reads/posts and GitHub access. Apple Notes is
+Mac-only; cloud completion notes must include a handoff body for local publication.
+
 Next.js + Prisma (**SQLite**, not Postgres — production on **Hetzner NBG1**
 Coolify host **`167.233.254.55`** / `fleet-hetzner-nbg1`, app uuid
 `yagelvqux9e8l1kztif7bf2o`, volume at `/data`; SSH `root@167.233.254.55` with
@@ -433,4 +441,3 @@ refresh on every change). Helper auto-injects/refreshes it.
 **Always** write/update living Completion notes for substantial work; update in place.
 Folder **Coding**, pin when able. Helper: `/Users/jay/apps/apple-notes-coding.sh`
 (`--update`). Canonical: `/Users/jay/apps/AGENT-SYNC.md` § Apple Notes.
-
