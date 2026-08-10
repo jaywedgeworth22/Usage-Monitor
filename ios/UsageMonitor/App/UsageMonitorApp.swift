@@ -7,6 +7,7 @@ import ProjectBudgets
 import Settings
 import AppLock
 import Networking
+import Models
 import OfflineCache
 import PushScaffold
 import WidgetShared
@@ -38,13 +39,29 @@ struct UsageMonitorApp: App {
     init() {
         // The shared BudgetStore transparently persists every successful
         // response to disk (offline-first) and to the widget app group.
-        _environment = State(
-            initialValue: AppEnvironment(
-                settings: AppSettings(sharedDefaults: AppGroup.defaults),
-                tokenStore: AccountChangeNotifyingTokenStore(),
-                snapshotSink: OfflineCacheSnapshotSink()
+        // `-ScreenshotDemo` paints fixture budget data (no live network) for ASC.
+        if ScreenshotDemo.isEnabled {
+            let settings = AppSettings(sharedDefaults: AppGroup.defaults)
+            settings.appLockEnabled = false
+            _environment = State(
+                initialValue: AppEnvironment(
+                    settings: settings,
+                    tokenStore: InMemoryTokenStore(token: "screenshot-demo-token"),
+                    snapshotSink: ScreenshotDemoSnapshotSink()
+                )
             )
-        )
+            if let tab = ScreenshotDemo.preferredTab {
+                _selection = State(initialValue: tab)
+            }
+        } else {
+            _environment = State(
+                initialValue: AppEnvironment(
+                    settings: AppSettings(sharedDefaults: AppGroup.defaults),
+                    tokenStore: AccountChangeNotifyingTokenStore(),
+                    snapshotSink: OfflineCacheSnapshotSink()
+                )
+            )
+        }
     }
 
     var body: some Scene {
@@ -66,6 +83,9 @@ struct UsageMonitorApp: App {
                 pushRouter.consume()
             }
             .task {
+                if ScreenshotDemo.isEnabled {
+                    environment.budgetStore.seedScreenshotFixture(.sample)
+                }
                 await AlertNotifier.activateAccountScope(
                     AlertNotifier.currentAccountScopeID(hostOverride: environment.settings.baseHost)
                 )

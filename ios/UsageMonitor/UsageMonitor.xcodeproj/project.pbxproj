@@ -27,6 +27,7 @@
 		6B2191AA76ABBB7C0B9E4EC9 /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = C022422D070736B642E57F94 /* LocalStore */; };
 		6CB37F405426D5B08943A367 /* Alerts in Frameworks */ = {isa = PBXBuildFile; productRef = BCBC6C1579802E15115FA523 /* Alerts */; };
 		8F40DA5814B26236048AE760 /* Settings in Frameworks */ = {isa = PBXBuildFile; productRef = EEF104AFE3B635560BB73E94 /* Settings */; };
+		98CCE4B03A6799D8B4584385 /* ScreenshotDemoSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E62F2FB6F8366000FC474EBD /* ScreenshotDemoSupport.swift */; };
 		9FC1AA41DEEF222CA0DD91F6 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 37C47BD409744EC363A5D9C3 /* DesignSystem */; };
 		A25988FF08C31D2498209FB2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DA93AC5DCCD01FBB2A560D25 /* Assets.xcassets */; };
 		A33EA13C79DE4913AEC1B6D2 /* BudgetWidgetIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 345CB985D932922EA66F6D73 /* BudgetWidgetIntent.swift */; };
@@ -100,6 +101,7 @@
 		CCA5B2DBBB9F3790B7052B0B /* UsageMonitorTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = UsageMonitorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF0A3F2520A92A49204A46CD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DA93AC5DCCD01FBB2A560D25 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		E62F2FB6F8366000FC474EBD /* ScreenshotDemoSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotDemoSupport.swift; sourceTree = "<group>"; };
 		EB1864248318F2267ECF38E2 /* AccountChangeNotifyingTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountChangeNotifyingTokenStore.swift; sourceTree = "<group>"; };
 		F1AEB8CDA324975C39D57883 /* UsageMonitorWidgetExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = UsageMonitorWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		FCD5897C4158EE40F3B5B676 /* UsageMonitor.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = UsageMonitor.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -240,6 +242,7 @@
 				EB1864248318F2267ECF38E2 /* AccountChangeNotifyingTokenStore.swift */,
 				DA93AC5DCCD01FBB2A560D25 /* Assets.xcassets */,
 				C81B7D14B31665FDA6183BF8 /* OfflineCacheSnapshotSink.swift */,
+				E62F2FB6F8366000FC474EBD /* ScreenshotDemoSupport.swift */,
 				2B30FDC3F50A61E4D10BC24B /* UsageMonitorApp.swift */,
 			);
 			path = App;
@@ -503,6 +506,7 @@
 			files = (
 				B82FFD609432C0928F46DA8F /* AccountChangeNotifyingTokenStore.swift in Sources */,
 				3F00B7EA559035693708214F /* OfflineCacheSnapshotSink.swift in Sources */,
+				98CCE4B03A6799D8B4584385 /* ScreenshotDemoSupport.swift in Sources */,
 				276F317A99A928209250BE5E /* UsageMonitorApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -40,6 +40,15 @@ public final class LocalAppModel {
             // Ensure every catalog service exists as a durable local row (SQLite
             // in app container — survives app updates; never ships secrets).
             _ = try await ensureCatalogProviders(reloadAfter: false)
+            // App Store screenshot capture only (`-ScreenshotDemo` launch arg).
+            // Never block first paint if demo seed fails.
+            if LocalScreenshotDemoSeeder.isEnabled {
+                do {
+                    try await LocalScreenshotDemoSeeder.seedIfNeeded(store: store)
+                } catch {
+                    lastError = "Screenshot demo seed: \(error.localizedDescription)"
+                }
+            }
             lastMaterializedCharges = try await SubscriptionMaterializer.materialize(store: store)
             try await reload()
             isReady = true

@@ -39,6 +39,9 @@ describe("middleware matcher — /api/budget-status exclusion (regression for th
       "/api/openrouter-credits",
       "/api/cron",
       "/api/auth/login",
+      // App Store Connect privacy/support URLs (public legal pages)
+      "/privacy",
+      "/support",
     ]) {
       expect(isSessionGated(p)).toBe(false);
     }

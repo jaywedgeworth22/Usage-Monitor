@@ -10,7 +10,7 @@ import AppCore
 public struct LocalRootView: View {
     @Bindable var settings: AppSettings
     @State private var model = LocalAppModel()
-    @State private var tab: Tab = .overview
+    @State private var tab: Tab = LocalRootView.initialTab()
     @State private var showAddProvider = false
     @State private var pendingDeleteProvider: LocalProvider?
     @State private var showWipeConfirmation = false
@@ -21,6 +21,18 @@ public struct LocalRootView: View {
     /// as a nonisolated default argument expression.
     public init(settings: AppSettings) {
         self.settings = settings
+        if LocalScreenshotDemoSeeder.isEnabled {
+            // Screenshots must not block on Face ID.
+            settings.appLockEnabled = false
+        }
+    }
+
+    private static func initialTab() -> Tab {
+        guard let raw = LocalScreenshotDemoSeeder.preferredTabRawValue,
+              let tab = Tab(rawValue: raw) else {
+            return .overview
+        }
+        return tab
     }
 
     public enum Tab: String, CaseIterable, Identifiable {
