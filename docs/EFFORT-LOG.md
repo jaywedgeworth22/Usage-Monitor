@@ -377,6 +377,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 - **Resolve Agent Sync Relay noise and Anthropic must-keep-funded alerts (AG)** — MERGED PR #113 / DEPLOYED. Updated `ensureAgentSyncProviderSeeded` to automatically disable the Agent Sync Relay provider on startup/poll, silencing the spurious missing_snapshot PagerDuty alerts. Also added a migration step in the same boot sequence to unflag `mustKeepFunded` for Anthropic since Anthropic does not expose a wallet balance. Tests green.
 
 ## Completed
+- **[GROK] ASC store listing + screenshots + App Store prep (Client + Local) — COMPLETED 2026-08-10 2:10pm CT.** PR #1073 merged. ASC en-US copy/categories/age/review/builds + 20 screenshots COMPLETE. Public /privacy+/support shipped. Submit for Review still owner gate.
 - **2026-08-05 — GROK — COMPLETED — Board hygiene (cross-app Issues alignment).** CT/ST/UM effort boards reconciled; open Issues = real WIP only.
 - **2026-08-05 — GROK — Board hygiene final:** closed 1 stale Active rows (merged/abandoned/superseded).
 - **[API-usage-monitor][GROK] Receipt inbox addresses chosen 2026-07-27.** Fallback: `receipts@jays.services` (apex → existing iCloud MX; do not change MX). Intake: high-entropy `rcpt-…@receipts.jays.services` stored in `~/.secrets/usage-monitor-receipt-inbox-addresses` (chmod 600). Next: Email Routing destination verify for fallback, onboard receipts subdomain, Worker secrets+deploy.
