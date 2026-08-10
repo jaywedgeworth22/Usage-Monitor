@@ -31,6 +31,10 @@ export const isPublicPath = (pathname: string) => {
     "/api/budget-status",
     "/api/health",
     "/api/ready",
+    // Public OpenRouter money probe for a dedicated UptimeRobot keyword monitor
+    // (account credits + per-key limits via management key). See
+    // src/app/api/openrouter-credits/route.ts.
+    "/api/openrouter-credits",
   ];
   if (publicPaths.includes(pathname)) return true;
   if (publicPaths.some((p) => pathname.startsWith(p + "/"))) return true;
