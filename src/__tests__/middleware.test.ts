@@ -36,6 +36,7 @@ describe("middleware matcher — /api/budget-status exclusion (regression for th
       "/api/otlp/v1/metrics",
       "/api/health",
       "/api/ready",
+      "/api/openrouter-credits",
       "/api/cron",
       "/api/auth/login",
     ]) {
