@@ -17,6 +17,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **[Usage-Monitor][GROK] Coolify B2 replica heartbeat (fix env_active_unverified) — IN PROGRESS 2026-08-10.** Live B2 was fine; `/api/ready` backup red for missing side-channel. Installed Hetzner host probe + Infisical `LITESTREAM_REPLICA_STATUS_PATH`; live `checks.backup.replicaOk=true`. Code: in-container heartbeat + Coolify probe scripts. Branch `grok/coolify-replica-heartbeat`.
 - **[Usage-Monitor][GROK] OpenRouter credit probe endpoint + dedicated UptimeRobot — IN PROGRESS 2026-08-09 11:45pm CT.** `GET /api/openrouter-credits` uses management key for account /credits + per-key limit_remaining; new UptimeRobot keyword monitor (ST health monitor unchanged). Rollout: `docs/rollouts/2026-08-10-openrouter-credit-probe-uptimerobot.md`.
 - **[GROK] Mobile nav brand label always visible ("Usage Monitor") — IN PR #1063 2026-08-09.** Nav currently hides title below sm; show icon+text on mobile. Website: Usage Monitor; iOS apps keep CFBundleDisplayName (Usage Client/Local Monitor).
 - **[GROK] Hetzner deploy observer + Coolify SOURCE_COMMIT revision (2026-08-07) — IN PR.** Pin PRODUCTION_ORIGIN_IPV4=167.233.254.55; drop backup.ok gate on observer; identity reads SOURCE_COMMIT. PR queue #1041/#1035/#1021 already merged.

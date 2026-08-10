@@ -87,11 +87,12 @@ Local pre-migration snapshots on `/data` still exist.
   rollback layer; Litestream remains the off-disk PITR layer.
 - `scripts/litestream-restore.sh` — manual disaster-recovery restore to a
   scratch path, run inside the production app container (see below).
-- `deploy/oracle/replica-status-probe.sh` — 10-minute host timer that proves
-  the replica is actually advancing and writes the heartbeat consumed by
-  `/api/ready`'s backup check (see "Replica heartbeat" in
-  `deploy/oracle/README.md`). Without it, a required backup reports
-  `env_active_unverified` and strict readiness fails.
+- `scripts/replica-status-heartbeat.sh` + `run-app-with-replica-heartbeat.sh` —
+  in-container LTX tip probe under Infisical-injected env (Coolify-safe).
+- `deploy/coolify/replica-status-probe.sh` — **production Hetzner** host timer
+  (Coolify UUID container + host-PID environ for S3 creds).
+- `deploy/oracle/replica-status-probe.sh` — **legacy Oracle** timer. Without a
+  live heartbeat, backup reports `env_active_unverified`.
 
 ## Production setup (host → Backblaze B2)
 
@@ -151,10 +152,28 @@ sudo docker exec usage-monitor-app-1 /app/bin/litestream databases -config /app/
 # which lists thousands of compacted objects and can time out):
 sudo docker exec usage-monitor-app-1 /app/bin/litestream ltx -config /app/litestream.yml /data/prod.db
 
-# The readiness heartbeat is fresh:
-cat /data/.litestream-replica-status.json
-curl -fsS https://usage.jays.services/api/ready?strict=1 | jq .checks.backup
+# The readiness heartbeat is fresh (Coolify volume or inside container):
+# host:
+cat /var/lib/docker/volumes/yagelvqux9e8l1kztif7bf2o-usage-data/_data/.litestream-replica-status.json
+# or inside the app container:
+#   cat /data/.litestream-replica-status.json
+curl -fsS https://usage.jays.services/api/ready | jq .checks.backup
+# Expect: active=true, envOnly=false, replicaOk=true, reason=null
 ```
+
+### Coolify/Hetzner host timer install
+
+```bash
+sudo install -o root -g root -m 0755 deploy/coolify/replica-status-probe.sh \
+  /usr/local/sbin/usage-monitor-replica-status
+# units: same shape as deploy/oracle/usage-monitor-replica-status.{service,timer}
+sudo systemctl enable --now usage-monitor-replica-status.timer
+sudo /usr/local/sbin/usage-monitor-replica-status
+```
+
+Infisical `usage-monitor` / `prod` must include
+`LITESTREAM_REPLICA_STATUS_PATH=/data/.litestream-replica-status.json` (also
+exported by `start-with-litestream.sh` after the next deploy).
 
 In `sudo docker logs usage-monitor-app-1`, look for the
 `[start-with-litestream] replication ENABLED` line and a

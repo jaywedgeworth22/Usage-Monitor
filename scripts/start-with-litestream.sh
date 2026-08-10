@@ -121,7 +121,12 @@ fi
 
 if [[ "${litestream_enabled}" == "true" ]]; then
   export LITESTREAM_ACTIVE=true
+  # Side-channel path consumed by getBackupRuntimeStatus. Coolify/Infisical
+  # may also set this; default so /api/ready never stays env_active_unverified
+  # when replication is actually on.
+  export LITESTREAM_REPLICA_STATUS_PATH="${LITESTREAM_REPLICA_STATUS_PATH:-/data/.litestream-replica-status.json}"
   log "replication ENABLED (LITESTREAM_S3_* set, bin/litestream present, r2=${litestream_endpoint_is_r2}, b2=${litestream_endpoint_is_b2})."
+  log "replica status path: ${LITESTREAM_REPLICA_STATUS_PATH}"
 
   if [[ ! -f "${DB_PATH}" ]]; then
     log "no local DB at ${DB_PATH} — attempting restore from replica (no-op if none exists yet)."
@@ -134,6 +139,34 @@ else
   log "replication DISABLED (set LITESTREAM_S3_BUCKET, LITESTREAM_S3_ENDPOINT,"
   log "LITESTREAM_S3_ACCESS_KEY_ID, LITESTREAM_S3_SECRET_ACCESS_KEY to enable — see docs/litestream.md)."
 fi
+
+# Background LTX tip probe → status file for /api/ready. Must run under the
+# same Infisical-injected env as litestream (Coolify). Host timers are optional.
+start_replica_heartbeat() {
+  local heartbeat="${REPO_ROOT}/scripts/replica-status-heartbeat.sh"
+  if [[ ! -x "${heartbeat}" ]]; then
+    if [[ -f "${heartbeat}" ]]; then
+      chmod +x "${heartbeat}" 2>/dev/null || true
+    fi
+  fi
+  if [[ ! -f "${heartbeat}" ]]; then
+    log "WARNING: replica-status-heartbeat.sh missing — /api/ready backup stays env_active_unverified."
+    return 0
+  fi
+  # One immediate write so readiness is green before the first 10m tick.
+  bash "${heartbeat}" --once || log "WARNING: initial replica heartbeat failed (will retry in loop)."
+  bash "${heartbeat}" &
+  REPLICA_HEARTBEAT_PID=$!
+  log "replica heartbeat started pid=${REPLICA_HEARTBEAT_PID}"
+}
+
+stop_replica_heartbeat() {
+  if [[ -n "${REPLICA_HEARTBEAT_PID:-}" ]] && kill -0 "${REPLICA_HEARTBEAT_PID}" 2>/dev/null; then
+    kill "${REPLICA_HEARTBEAT_PID}" 2>/dev/null || true
+    wait "${REPLICA_HEARTBEAT_PID}" 2>/dev/null || true
+  fi
+  REPLICA_HEARTBEAT_PID=""
+}
 
 log "Disk space on /data before backup:"
 df -h /data || true
@@ -184,6 +217,7 @@ if [[ "${litestream_enabled}" == "true" && "${litestream_endpoint_is_r2}" == "tr
       || "${R2_WRITES_DISABLED:-false}" == "true" \
       || -f "/data/r2-disabled-70pct.flag" ]]
   }
+  start_replica_heartbeat
   start_r2_litestream
   (
     was_killed=false
@@ -214,9 +248,10 @@ if [[ "${litestream_enabled}" == "true" && "${litestream_endpoint_is_r2}" == "tr
   ) &
   R2_WATCH_PID=$!
   cleanup_r2_litestream() {
-    log "shutting down R2 litestream sibling and watcher."
+    log "shutting down R2 litestream sibling, watcher, and replica heartbeat."
     kill "${R2_WATCH_PID}" 2>/dev/null || true
     stop_r2_litestream
+    stop_replica_heartbeat
     rm -f "${LITESTREAM_PID_FILE}" 2>/dev/null || true
   }
   trap cleanup_r2_litestream SIGTERM SIGINT EXIT
@@ -229,10 +264,12 @@ if [[ "${litestream_enabled}" == "true" && "${litestream_endpoint_is_r2}" == "tr
 fi
 
 if [[ "${litestream_enabled}" == "true" ]]; then
-  # Non-R2 (Garage etc.): keep litestream as PID 1 with -exec so the replica
-  # process owns signal routing. Free-tier kill never applies here.
-  log "starting litestream replicate (non-R2) wrapping npm start as supervised child."
-  exec "${LITESTREAM_BIN}" replicate -config "${LITESTREAM_CONFIG}" -exec "npm start"
+  # Non-R2 (B2 primary): litestream as PID 1 with -exec. Heartbeat runs beside
+  # npm under scripts/run-app-with-replica-heartbeat.sh so Infisical env is
+  # inherited and /api/ready gets a live LTX side-channel.
+  log "starting litestream replicate (non-R2/B2) wrapping app+heartbeat as supervised child."
+  exec "${LITESTREAM_BIN}" replicate -config "${LITESTREAM_CONFIG}" \
+    -exec "bash ${REPO_ROOT}/scripts/run-app-with-replica-heartbeat.sh"
 fi
 
 exec npm start
