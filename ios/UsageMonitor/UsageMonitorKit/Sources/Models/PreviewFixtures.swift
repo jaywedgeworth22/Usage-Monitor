@@ -244,11 +244,63 @@ public extension ServerReadiness {
         ok: true,
         status: "ready",
         checkedAt: "2026-07-19T09:15:00.000Z",
-        checks: Checks(
-            database: Check(ok: true, latencyMs: 3.2),
-            scheduler: Check(ok: true),
-            backup: Check(ok: true),
-            startup: Check(ok: true)
+        checks: ServerReadiness.Checks(
+            database: ServerReadiness.Check(ok: true, latencyMs: 3.2),
+            scheduler: ServerReadiness.Check(ok: true),
+            backup: ServerReadiness.Check(ok: true),
+            startup: ServerReadiness.Check(ok: true),
+            disk: ServerReadiness.DiskCheck(
+                ok: true,
+                freeBytes: 30_000_000_000,
+                totalBytes: 160_000_000_000
+            ),
+            backupLayers: ServerReadiness.BackupLayers(
+                local: .init(ok: true, present: true, count: 1, latestAgeSeconds: 3_600),
+                primary: .init(
+                    ok: true,
+                    target: "b2",
+                    label: "b2",
+                    active: true,
+                    replicaOk: true,
+                    replicaAgeSeconds: 120
+                ),
+                r2Historic: .init(ok: true, configured: true, role: "historic")
+            )
         )
+    )
+}
+
+public extension ServerMetrics {
+    static let sample = ServerMetrics(
+        degraded: false,
+        stale: false,
+        cacheAgeSeconds: 5,
+        host: .init(
+            name: "ubuntu-16gb-nbg1-cx43",
+            status: "running",
+            serverType: "cx43",
+            cpus: 8,
+            memoryTotalBytes: 16 * 1024 * 1024 * 1024,
+            location: "nbg1",
+            ip: "167.233.254.55",
+            backupWindow: "14-18"
+        ),
+        hostUsage: .init(
+            cpuPct: 18.5,
+            networkRxBytesPerSec: 120_000,
+            networkTxBytesPerSec: 45_000,
+            diskReadBytesPerSec: 2_000_000,
+            diskWriteBytesPerSec: 400_000
+        ),
+        resources: [
+            .init(uuid: "um", name: "usage-monitor", type: "application", status: "running:healthy", selfApp: true),
+            .init(uuid: "st", name: "socratic-app", type: "application", status: "running:healthy", selfApp: false),
+            .init(uuid: "ct", name: "congress-trade", type: "application", status: "running:unknown", selfApp: false),
+        ],
+        selfResources: [
+            .init(uuid: "um", name: "usage-monitor", type: "application", status: "running:healthy", selfApp: true),
+        ],
+        appDisk: .init(freeBytes: 30_000_000_000, totalBytes: 160_000_000_000, usedPct: 81, ok: true),
+        asOf: "2026-08-10T18:00:00.000Z"
     )
 }

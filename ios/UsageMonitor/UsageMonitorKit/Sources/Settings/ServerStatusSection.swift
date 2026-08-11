@@ -7,7 +7,7 @@ import Networking
 /// A live panel for the public `health`/`ready` probes. Renders even before a
 /// token is entered, so a user can tell "my token is wrong" apart from "the
 /// server is down". Skeleton on first load, typed error with retry on failure,
-/// dependency-check rows on success.
+/// dependency-check rows on success — including layered backup status.
 struct ServerStatusSection: View {
     let store: ServerStatusStore
     let onReload: @Sendable () async -> Void
@@ -17,7 +17,7 @@ struct ServerStatusSection: View {
             content
         } header: {
             HStack {
-                Text("Server status")
+                Text("Server Status")
                 Spacer()
                 if case let .loaded(snapshot) = store.state {
                     StatusBadge(
@@ -105,6 +105,26 @@ struct ServerStatusSection: View {
         }
 
         ForEach(snapshot.dependencyChecks) { check in
+            checkRow(check)
+        }
+
+        if !snapshot.backupLayerChecks.isEmpty {
+            // Visual break before backup layers inside the same section.
+            Text("Backups")
+                .font(Theme.Typography.captionEmphasis)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 4, trailing: 20))
+                .accessibilityAddTraits(.isHeader)
+
+            ForEach(snapshot.backupLayerChecks) { check in
+                checkRow(check)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func checkRow(_ check: ServerStatusSnapshot.DependencyCheck) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
             LabeledContent(check.name) {
                 StatusBadge(
                     dependencyLabel(check),
@@ -112,9 +132,17 @@ struct ServerStatusSection: View {
                     systemImage: check.ok ? "checkmark" : (check.gatesService ? "xmark" : "exclamationmark")
                 )
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(check.name): \(dependencyLabel(check))")
+            if let detail = check.detail, !detail.isEmpty {
+                Text(detail)
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            check.detail.map { "\(check.name): \(dependencyLabel(check)). \($0)" }
+                ?? "\(check.name): \(dependencyLabel(check))"
+        )
     }
 
     /// Service-gating checks fail hard ("Down"); observability-only checks

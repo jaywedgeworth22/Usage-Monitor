@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
 import {
+  getBackupLayersStatus,
   getBackupRuntimeStatus,
   getDatabaseFileStatus,
   getDiskRuntimeStatus,
@@ -252,6 +253,7 @@ export async function GET(request: Request) {
     databaseFile,
     scheduler,
     backup,
+    backupLayers,
     startup,
     disk,
     budgetControls,
@@ -260,6 +262,7 @@ export async function GET(request: Request) {
     Promise.resolve(getDatabaseFileStatus()),
     Promise.resolve(getSchedulerRuntimeStatus()),
     Promise.resolve(getBackupRuntimeStatus()),
+    Promise.resolve(getBackupLayersStatus()),
     Promise.resolve(getStartupRuntimeStatus()),
     Promise.resolve(getDiskRuntimeStatus()),
     budgetControlsReadiness(),
@@ -353,6 +356,10 @@ export async function GET(request: Request) {
         gatesOverallOk: false,
         ...backup,
       },
+      // Layered backup picture for Settings/ops UIs: local pre-migration
+      // snapshots, primary Litestream off-site (B2 in production), and
+      // historic R2 freeze. Never gates overall ok.
+      backupLayers,
       startup: {
         ok: startupReady,
         ...startup,

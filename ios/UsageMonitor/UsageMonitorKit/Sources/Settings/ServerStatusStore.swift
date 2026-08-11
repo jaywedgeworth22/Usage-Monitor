@@ -30,16 +30,19 @@ struct ServerStatusSnapshot: Equatable, Sendable {
     ///
     /// `gatesService` is false for observability-only checks (off-site backup):
     /// those may be red/amber without meaning the app itself is down, and they
-    /// never flip the header badge to Offline.
+    /// never flip the header badge to offline.
     struct DependencyCheck: Equatable, Sendable, Identifiable {
         var id: String { name }
         var name: String
         var ok: Bool
         /// When false, a failing check is labeled "Lagging" / warning, not "Down" / danger.
         var gatesService: Bool
+        /// Optional detail shown under the row (age, free disk, etc.).
+        var detail: String?
     }
 
-    /// The named dependency checks that were reported, in display order.
+    /// Core service-gating checks (database, scheduler, startup) plus disk.
+    /// Backup layers are rendered separately so Local / B2 / R2 stay distinct.
     var dependencyChecks: [DependencyCheck] {
         guard let checks = readiness?.checks else { return [] }
         var rows: [DependencyCheck] = []
@@ -49,15 +52,118 @@ struct ServerStatusSnapshot: Equatable, Sendable {
         if let c = checks.scheduler {
             rows.append(.init(name: "Scheduler", ok: c.ok, gatesService: true))
         }
-        // Off-site backup is observability-only (does not gate /api/ready ok).
-        // Still show it so free-tier lag is visible — but as a non-catastrophic row.
-        if let c = checks.backup {
-            rows.append(.init(name: "Backup (off-site)", ok: c.ok, gatesService: false))
-        }
         if let c = checks.startup {
             rows.append(.init(name: "Startup", ok: c.ok, gatesService: true))
         }
+        if let d = checks.disk {
+            rows.append(.init(
+                name: "Disk",
+                ok: d.ok,
+                gatesService: false,
+                detail: DiskFormat.summary(free: d.freeBytes, total: d.totalBytes)
+            ))
+        }
         return rows
+    }
+
+    /// Explicit backup layers when the server reports them; otherwise a single
+    /// legacy "Backup (off-site)" row from `checks.backup`.
+    var backupLayerChecks: [DependencyCheck] {
+        guard let checks = readiness?.checks else { return [] }
+        if let layers = checks.backupLayers {
+            var rows: [DependencyCheck] = []
+            if let local = layers.local {
+                rows.append(.init(
+                    name: "Local Backup",
+                    ok: local.ok,
+                    gatesService: false,
+                    detail: localDetail(local)
+                ))
+            }
+            if let primary = layers.primary {
+                rows.append(.init(
+                    name: primaryBackupName(primary),
+                    ok: primary.ok,
+                    gatesService: false,
+                    detail: primaryDetail(primary)
+                ))
+            }
+            if let r2 = layers.r2Historic {
+                rows.append(.init(
+                    name: "R2 Historic",
+                    ok: r2.ok,
+                    gatesService: false,
+                    detail: r2Detail(r2)
+                ))
+            }
+            if !rows.isEmpty { return rows }
+        }
+        // Pre-layers servers: single off-site row.
+        if let c = checks.backup {
+            return [.init(name: "Backup (Off-Site)", ok: c.ok, gatesService: false)]
+        }
+        return []
+    }
+
+    private func primaryBackupName(_ primary: ServerReadiness.BackupLayers.PrimaryLayer) -> String {
+        switch (primary.label ?? primary.target)?.lowercased() {
+        case "b2": return "B2 Backup"
+        case "r2": return "R2 Backup"
+        default: return "Off-Site Backup"
+        }
+    }
+
+    private func localDetail(_ local: ServerReadiness.BackupLayers.LocalLayer) -> String? {
+        var parts: [String] = []
+        if let count = local.count {
+            parts.append(count == 1 ? "1 snapshot" : "\(count) snapshots")
+        }
+        if let age = local.latestAgeSeconds {
+            parts.append("latest \(UptimeFormat.string(fromSeconds: Int(age))) ago")
+        }
+        if let reason = local.reason, !local.ok {
+            parts.append(humanReason(reason))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func primaryDetail(_ primary: ServerReadiness.BackupLayers.PrimaryLayer) -> String? {
+        var parts: [String] = []
+        if primary.active == false {
+            parts.append("inactive")
+        } else if let age = primary.replicaAgeSeconds {
+            parts.append("replica \(UptimeFormat.string(fromSeconds: Int(age))) ago")
+        } else if primary.envOnly == true {
+            parts.append("env only")
+        }
+        if let reason = primary.reason, !primary.ok {
+            parts.append(humanReason(reason))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func r2Detail(_ r2: ServerReadiness.BackupLayers.R2HistoricLayer) -> String? {
+        var parts: [String] = []
+        switch r2.role?.lowercased() {
+        case "historic": parts.append("weekly freeze")
+        case "active": parts.append("still primary")
+        case "unconfigured": parts.append("not monitored")
+        default: break
+        }
+        if r2.autoDisabled == true {
+            parts.append("writes paused")
+        }
+        if let reason = r2.reason, !r2.ok {
+            parts.append(humanReason(reason))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func humanReason(_ reason: String) -> String {
+        reason
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "r2 ", with: "R2 ")
+            .replacingOccurrences(of: "b2 ", with: "B2 ")
     }
 }
 
@@ -111,5 +217,32 @@ final class ServerStatusStore {
         let health = try await client.health()
         let readiness = try? await client.readiness()
         return ServerStatusSnapshot(health: health, readiness: readiness, fetchedAt: Date())
+    }
+}
+
+/// Compact free/total disk for dependency detail lines.
+enum DiskFormat {
+    static func summary(free: Int64?, total: Int64?) -> String? {
+        guard let free, let total, total > 0 else { return nil }
+        return "\(byteString(free)) free of \(byteString(total))"
+    }
+
+    static func byteString(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useGB, .useMB, .useTB]
+        formatter.countStyle = .file
+        formatter.includesUnit = true
+        formatter.isAdaptive = true
+        return formatter.string(fromByteCount: bytes)
+    }
+
+    static func rateString(_ bytesPerSec: Double?) -> String? {
+        guard let bytesPerSec, bytesPerSec >= 0, bytesPerSec.isFinite else { return nil }
+        return "\(byteString(Int64(bytesPerSec)))/s"
+    }
+
+    static func cpuString(_ pct: Double?) -> String? {
+        guard let pct, pct.isFinite else { return nil }
+        return String(format: "%.0f%%", min(100, max(0, pct)))
     }
 }

@@ -29,8 +29,7 @@ public struct ServerHealth: Codable, Hashable, Sendable {
     }
 }
 
-/// `GET /api/ready` — public readiness probe with dependency detail. Only the
-/// `ok`/`status` roll-up and each check's `ok` are decoded.
+/// `GET /api/ready` — public readiness probe with dependency detail.
 public struct ServerReadiness: Codable, Hashable, Sendable {
     public struct Check: Codable, Hashable, Sendable {
         public var ok: Bool
@@ -42,22 +41,151 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
         }
     }
 
+    public struct DiskCheck: Codable, Hashable, Sendable {
+        public var ok: Bool
+        public var freeBytes: Int64?
+        public var totalBytes: Int64?
+        public var thresholdBytes: Int64?
+        public var reason: String?
+
+        public init(
+            ok: Bool,
+            freeBytes: Int64? = nil,
+            totalBytes: Int64? = nil,
+            thresholdBytes: Int64? = nil,
+            reason: String? = nil
+        ) {
+            self.ok = ok
+            self.freeBytes = freeBytes
+            self.totalBytes = totalBytes
+            self.thresholdBytes = thresholdBytes
+            self.reason = reason
+        }
+    }
+
+    /// Layered backup observability (local · B2 primary · R2 historic).
+    public struct BackupLayers: Codable, Hashable, Sendable {
+        public var local: LocalLayer?
+        public var primary: PrimaryLayer?
+        public var r2Historic: R2HistoricLayer?
+
+        public init(
+            local: LocalLayer? = nil,
+            primary: PrimaryLayer? = nil,
+            r2Historic: R2HistoricLayer? = nil
+        ) {
+            self.local = local
+            self.primary = primary
+            self.r2Historic = r2Historic
+        }
+
+        public struct LocalLayer: Codable, Hashable, Sendable {
+            public var ok: Bool
+            public var present: Bool?
+            public var count: Int?
+            public var latestAgeSeconds: Double?
+            public var latestSizeBytes: Int64?
+            public var reason: String?
+
+            public init(
+                ok: Bool,
+                present: Bool? = nil,
+                count: Int? = nil,
+                latestAgeSeconds: Double? = nil,
+                latestSizeBytes: Int64? = nil,
+                reason: String? = nil
+            ) {
+                self.ok = ok
+                self.present = present
+                self.count = count
+                self.latestAgeSeconds = latestAgeSeconds
+                self.latestSizeBytes = latestSizeBytes
+                self.reason = reason
+            }
+        }
+
+        public struct PrimaryLayer: Codable, Hashable, Sendable {
+            public var ok: Bool
+            public var target: String?
+            public var label: String?
+            public var required: Bool?
+            public var active: Bool?
+            public var envOnly: Bool?
+            public var replicaOk: Bool?
+            public var replicaAgeSeconds: Double?
+            public var reason: String?
+
+            public init(
+                ok: Bool,
+                target: String? = nil,
+                label: String? = nil,
+                required: Bool? = nil,
+                active: Bool? = nil,
+                envOnly: Bool? = nil,
+                replicaOk: Bool? = nil,
+                replicaAgeSeconds: Double? = nil,
+                reason: String? = nil
+            ) {
+                self.ok = ok
+                self.target = target
+                self.label = label
+                self.required = required
+                self.active = active
+                self.envOnly = envOnly
+                self.replicaOk = replicaOk
+                self.replicaAgeSeconds = replicaAgeSeconds
+                self.reason = reason
+            }
+        }
+
+        public struct R2HistoricLayer: Codable, Hashable, Sendable {
+            public var ok: Bool
+            public var configured: Bool?
+            public var litestreamUsesR2: Bool?
+            public var autoDisabled: Bool?
+            public var role: String?
+            public var reason: String?
+
+            public init(
+                ok: Bool,
+                configured: Bool? = nil,
+                litestreamUsesR2: Bool? = nil,
+                autoDisabled: Bool? = nil,
+                role: String? = nil,
+                reason: String? = nil
+            ) {
+                self.ok = ok
+                self.configured = configured
+                self.litestreamUsesR2 = litestreamUsesR2
+                self.autoDisabled = autoDisabled
+                self.role = role
+                self.reason = reason
+            }
+        }
+    }
+
     public struct Checks: Codable, Hashable, Sendable {
         public var database: Check?
         public var scheduler: Check?
         public var backup: Check?
         public var startup: Check?
+        public var disk: DiskCheck?
+        public var backupLayers: BackupLayers?
 
         public init(
             database: Check? = nil,
             scheduler: Check? = nil,
             backup: Check? = nil,
-            startup: Check? = nil
+            startup: Check? = nil,
+            disk: DiskCheck? = nil,
+            backupLayers: BackupLayers? = nil
         ) {
             self.database = database
             self.scheduler = scheduler
             self.backup = backup
             self.startup = startup
+            self.disk = disk
+            self.backupLayers = backupLayers
         }
     }
 
@@ -71,5 +199,141 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
         self.status = status
         self.checkedAt = checkedAt
         self.checks = checks
+    }
+}
+
+/// `GET /api/server-metrics` — Hetzner host + Coolify app inventory (read-auth).
+public struct ServerMetrics: Codable, Hashable, Sendable {
+    public var degraded: Bool
+    public var stale: Bool
+    public var cacheAgeSeconds: Int?
+    public var host: HostInfo?
+    public var hostUsage: HostUsage?
+    public var resources: [Resource]
+    public var selfResources: [Resource]
+    public var appDisk: AppDisk?
+    public var asOf: String?
+    public var error: String?
+    public var warnings: [String]?
+
+    public init(
+        degraded: Bool = false,
+        stale: Bool = false,
+        cacheAgeSeconds: Int? = nil,
+        host: HostInfo? = nil,
+        hostUsage: HostUsage? = nil,
+        resources: [Resource] = [],
+        selfResources: [Resource] = [],
+        appDisk: AppDisk? = nil,
+        asOf: String? = nil,
+        error: String? = nil,
+        warnings: [String]? = nil
+    ) {
+        self.degraded = degraded
+        self.stale = stale
+        self.cacheAgeSeconds = cacheAgeSeconds
+        self.host = host
+        self.hostUsage = hostUsage
+        self.resources = resources
+        self.selfResources = selfResources
+        self.appDisk = appDisk
+        self.asOf = asOf
+        self.error = error
+        self.warnings = warnings
+    }
+
+    public struct HostInfo: Codable, Hashable, Sendable {
+        public var name: String?
+        public var status: String?
+        public var serverType: String?
+        public var cpus: Int?
+        public var memoryTotalBytes: Int64?
+        public var location: String?
+        public var ip: String?
+        public var backupWindow: String?
+
+        public init(
+            name: String? = nil,
+            status: String? = nil,
+            serverType: String? = nil,
+            cpus: Int? = nil,
+            memoryTotalBytes: Int64? = nil,
+            location: String? = nil,
+            ip: String? = nil,
+            backupWindow: String? = nil
+        ) {
+            self.name = name
+            self.status = status
+            self.serverType = serverType
+            self.cpus = cpus
+            self.memoryTotalBytes = memoryTotalBytes
+            self.location = location
+            self.ip = ip
+            self.backupWindow = backupWindow
+        }
+    }
+
+    public struct HostUsage: Codable, Hashable, Sendable {
+        public var cpuPct: Double?
+        public var networkRxBytesPerSec: Double?
+        public var networkTxBytesPerSec: Double?
+        public var diskReadBytesPerSec: Double?
+        public var diskWriteBytesPerSec: Double?
+
+        public init(
+            cpuPct: Double? = nil,
+            networkRxBytesPerSec: Double? = nil,
+            networkTxBytesPerSec: Double? = nil,
+            diskReadBytesPerSec: Double? = nil,
+            diskWriteBytesPerSec: Double? = nil
+        ) {
+            self.cpuPct = cpuPct
+            self.networkRxBytesPerSec = networkRxBytesPerSec
+            self.networkTxBytesPerSec = networkTxBytesPerSec
+            self.diskReadBytesPerSec = diskReadBytesPerSec
+            self.diskWriteBytesPerSec = diskWriteBytesPerSec
+        }
+    }
+
+    public struct Resource: Codable, Hashable, Sendable, Identifiable {
+        public var uuid: String
+        public var name: String
+        public var type: String
+        public var status: String
+        public var selfApp: Bool
+
+        public var id: String { uuid }
+
+        enum CodingKeys: String, CodingKey {
+            case uuid, name, type, status
+            case selfApp = "self"
+        }
+
+        public init(uuid: String, name: String, type: String, status: String, selfApp: Bool) {
+            self.uuid = uuid
+            self.name = name
+            self.type = type
+            self.status = status
+            self.selfApp = selfApp
+        }
+    }
+
+    public struct AppDisk: Codable, Hashable, Sendable {
+        public var freeBytes: Int64?
+        public var totalBytes: Int64?
+        public var usedPct: Int?
+        public var ok: Bool?
+
+        public init(
+            freeBytes: Int64? = nil,
+            totalBytes: Int64? = nil,
+            usedPct: Int? = nil,
+            ok: Bool? = nil
+        ) {
+            self.freeBytes = freeBytes
+            self.totalBytes = totalBytes
+            self.usedPct = usedPct
+            self.ok = ok
+        }
     }
 }

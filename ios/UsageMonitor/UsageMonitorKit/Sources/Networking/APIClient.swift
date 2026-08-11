@@ -85,6 +85,12 @@ public actor APIClient {
         try await get("/api/ready", authorization: .none)
     }
 
+    /// `GET /api/server-metrics` — Hetzner host + Coolify app inventory.
+    /// Bearer read token or dashboard session.
+    public func serverMetrics() async throws -> ServerMetrics {
+        try await get("/api/server-metrics", authorization: .read)
+    }
+
     /// Validate the currently stored bearer token without accepting a dashboard
     /// cookie as a substitute. Settings uses a disposable client for candidate
     /// tokens, so a stale cookie cannot make an invalid replacement look valid.

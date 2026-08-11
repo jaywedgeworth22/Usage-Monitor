@@ -3,11 +3,12 @@ import {
   existsSync,
   fstatSync,
   openSync,
+  readdirSync,
   readFileSync,
   statfsSync,
   statSync,
 } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import packageJson from "../../package.json";
 import type { CloudflareLegacyHandoffStatus } from "@/lib/external-billing-subscription-adoption";
 
@@ -328,29 +329,54 @@ export interface BackupRuntimeStatus {
  * the probe/status file is older than the budget. Default is 3h so a 1h
  * Litestream `sync-interval` (R2 free-tier calm) does not flap backup health.
  */
-function litestreamEndpointIsR2(): boolean {
+/** Off-site Litestream destination class (public readiness labeling only). */
+export type LitestreamReplicaTarget = "b2" | "r2" | "unknown";
+
+function litestreamEndpointHostname(): string | null {
   const endpoint = (
     process.env.LITESTREAM_S3_ENDPOINT ||
     process.env.AWS_S3_ENDPOINT ||
     ""
   ).trim();
-  if (!endpoint) return false;
+  if (!endpoint) return null;
   try {
     // Hostname-only check via URL parser (not a substring match) so path /
-    // userinfo cannot spoof R2 vs Garage (CodeQL js/incomplete-url-substring-sanitization).
+    // userinfo cannot spoof R2 vs B2 (CodeQL js/incomplete-url-substring-sanitization).
     const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(endpoint)
       ? endpoint
       : `https://${endpoint}`;
-    const host = new URL(withScheme).hostname.toLowerCase();
-    return (
-      host === "r2.cloudflarestorage.com" ||
-      host.endsWith(".r2.cloudflarestorage.com") ||
-      host === "r2.cloudflare.com" ||
-      host.endsWith(".r2.cloudflare.com")
-    );
+    return new URL(withScheme).hostname.toLowerCase();
   } catch {
-    return false;
+    return null;
   }
+}
+
+function litestreamEndpointIsR2(): boolean {
+  const host = litestreamEndpointHostname();
+  if (!host) return false;
+  return (
+    host === "r2.cloudflarestorage.com" ||
+    host.endsWith(".r2.cloudflarestorage.com") ||
+    host === "r2.cloudflare.com" ||
+    host.endsWith(".r2.cloudflare.com")
+  );
+}
+
+function litestreamEndpointIsB2(): boolean {
+  const host = litestreamEndpointHostname();
+  if (!host) return false;
+  return (
+    host === "backblazeb2.com" ||
+    host.endsWith(".backblazeb2.com") ||
+    // Native B2 S3-compatible endpoints: s3.<region>.backblazeb2.com
+    /^s3\.[a-z0-9-]+\.backblazeb2\.com$/.test(host)
+  );
+}
+
+export function getLitestreamReplicaTarget(): LitestreamReplicaTarget {
+  if (litestreamEndpointIsB2()) return "b2";
+  if (litestreamEndpointIsR2()) return "r2";
+  return "unknown";
 }
 
 function r2FreeTierKillEngaged(): boolean {
@@ -809,6 +835,223 @@ export function getDiskRuntimeStatus(): {
       reason: "disk_stat_failed",
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Layered backup observability (local pre-migration · B2 primary · R2 historic)
+// ---------------------------------------------------------------------------
+
+const PRE_MIGRATION_BACKUP_DIRECTORY = ".pre-migration-backups";
+// After a successful deploy, a verified pre-migration snapshot should exist.
+// Allow a multi-day window so infrequent deploys do not false-alarm; missing
+// dir/files still reports honestly for a never-deployed host.
+const LOCAL_BACKUP_MAX_AGE_SECONDS = 14 * 24 * 60 * 60;
+
+export interface LocalBackupRuntimeStatus {
+  ok: boolean;
+  present: boolean;
+  count: number;
+  latestAgeSeconds: number | null;
+  latestSizeBytes: number | null;
+  reason:
+    | "directory_missing"
+    | "no_verified_backups"
+    | "latest_stale"
+    | "stat_failed"
+    | null;
+}
+
+/**
+ * Same-disk SQLite pre-migration snapshots written by
+ * `scripts/backup-sqlite-before-migrate.mjs` under
+ * `<db-dir>/.pre-migration-backups`. Public-safe: never reports absolute paths.
+ */
+export function getLocalBackupRuntimeStatus(
+  now = new Date()
+): LocalBackupRuntimeStatus {
+  const dir = join(databaseDirectory(), PRE_MIGRATION_BACKUP_DIRECTORY);
+  try {
+    if (!existsSync(dir)) {
+      return {
+        ok: false,
+        present: false,
+        count: 0,
+        latestAgeSeconds: null,
+        latestSizeBytes: null,
+        reason: "directory_missing",
+      };
+    }
+    const entries = readdirSync(dir, { withFileTypes: true });
+    let count = 0;
+    let latestMtimeMs: number | null = null;
+    let latestSizeBytes: number | null = null;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      // Verified promotions end in .backup.db; ignore .partial / temp.
+      if (!entry.name.endsWith(".backup.db") && !entry.name.endsWith(".db")) {
+        continue;
+      }
+      if (entry.name.endsWith(".partial") || entry.name.includes(".partial.")) {
+        continue;
+      }
+      try {
+        const st = statSync(join(dir, entry.name));
+        count += 1;
+        if (latestMtimeMs == null || st.mtimeMs > latestMtimeMs) {
+          latestMtimeMs = st.mtimeMs;
+          latestSizeBytes = st.size;
+        }
+      } catch {
+        // skip unreadable entry
+      }
+    }
+    if (count === 0 || latestMtimeMs == null) {
+      return {
+        ok: false,
+        present: true,
+        count: 0,
+        latestAgeSeconds: null,
+        latestSizeBytes: null,
+        reason: "no_verified_backups",
+      };
+    }
+    const latestAgeSeconds = Math.max(
+      0,
+      (now.getTime() - latestMtimeMs) / 1000
+    );
+    const stale = latestAgeSeconds > LOCAL_BACKUP_MAX_AGE_SECONDS;
+    return {
+      ok: !stale,
+      present: true,
+      count,
+      latestAgeSeconds,
+      latestSizeBytes,
+      reason: stale ? "latest_stale" : null,
+    };
+  } catch {
+    return {
+      ok: false,
+      present: false,
+      count: 0,
+      latestAgeSeconds: null,
+      latestSizeBytes: null,
+      reason: "stat_failed",
+    };
+  }
+}
+
+export interface R2HistoricBackupStatus {
+  /** Credentials present for free-tier monitoring of historic R2. */
+  configured: boolean;
+  /**
+   * Live Litestream destination is R2 (should be false in production after
+   * the B2 cutover — R2 is historic freeze only).
+   */
+  litestreamUsesR2: boolean;
+  /** Host kill-switch paused R2 writes (only meaningful when litestreamUsesR2). */
+  autoDisabled: boolean;
+  /**
+   * Operator-facing role: `historic` when B2 is primary and R2 is retained
+   * as a freeze; `active` only when Litestream still points at R2.
+   */
+  role: "historic" | "active" | "unconfigured";
+  ok: boolean;
+  reason: string | null;
+}
+
+/**
+ * Historic Cloudflare R2 status. Does not call Cloudflare (ready path stays
+ * cheap/public); uses env + kill flag only. Full free-tier numbers remain on
+ * the session-gated operations card.
+ */
+export function getR2HistoricBackupStatus(): R2HistoricBackupStatus {
+  const account =
+    process.env.R2_USAGE_ACCOUNT_ID?.trim() ||
+    process.env.CLOUDFLARE_JAY_ACCOUNT_ID?.trim() ||
+    process.env.CLOUDFLARE_ACCOUNT_ID?.trim() ||
+    "";
+  const token =
+    process.env.R2_USAGE_API_TOKEN?.trim() ||
+    process.env.CLOUDFLARE_JAY_API_TOKEN?.trim() ||
+    process.env.CLOUDFLARE_API_TOKEN?.trim() ||
+    "";
+  const configured = Boolean(account && token);
+  const litestreamUsesR2 = litestreamEndpointIsR2();
+  const autoDisabled = r2FreeTierKillEngaged();
+
+  if (litestreamUsesR2) {
+    // Still writing (or intending to write) to R2 — not the desired steady state
+    // after B2 cutover, but report honestly.
+    const ok = !autoDisabled;
+    return {
+      configured,
+      litestreamUsesR2: true,
+      autoDisabled,
+      role: "active",
+      ok,
+      reason: autoDisabled
+        ? "r2_free_tier_disabled"
+        : configured
+          ? null
+          : "r2_monitor_unconfigured",
+    };
+  }
+
+  if (!configured) {
+    return {
+      configured: false,
+      litestreamUsesR2: false,
+      autoDisabled,
+      role: "unconfigured",
+      ok: true, // historic freeze without monitor credentials is not an outage
+      reason: "r2_monitor_unconfigured",
+    };
+  }
+
+  return {
+    configured: true,
+    litestreamUsesR2: false,
+    autoDisabled,
+    role: "historic",
+    ok: true,
+    reason: null,
+  };
+}
+
+export interface BackupLayersStatus {
+  local: LocalBackupRuntimeStatus;
+  /** Primary off-site Litestream replica (Backblaze B2 in production). */
+  primary: BackupRuntimeStatus & {
+    ok: boolean;
+    target: LitestreamReplicaTarget;
+    label: "b2" | "r2" | "offsite";
+  };
+  /** Historic Cloudflare R2 freeze / free-tier monitor. */
+  r2Historic: R2HistoricBackupStatus;
+}
+
+/**
+ * Three-layer backup picture for Settings / operations UIs.
+ * Does not gate readiness `ok` — same contract as `checks.backup`.
+ */
+export function getBackupLayersStatus(now = new Date()): BackupLayersStatus {
+  const primary = getBackupRuntimeStatus(now);
+  const target = getLitestreamReplicaTarget();
+  const primaryHealthy =
+    !primary.required ||
+    (primary.active &&
+      primary.replicaOk !== false &&
+      !(primary.envOnly && primary.verificationRequired));
+  return {
+    local: getLocalBackupRuntimeStatus(now),
+    primary: {
+      ok: primaryHealthy,
+      target,
+      label: target === "b2" ? "b2" : target === "r2" ? "r2" : "offsite",
+      ...primary,
+    },
+    r2Historic: getR2HistoricBackupStatus(),
+  };
 }
 
 export function resetRuntimeHealthForTests(): void {
