@@ -202,7 +202,7 @@ describe("platform-status messaging probes", () => {
       vi.stubEnv("SENDGRID_API_KEY", "SG.sendgrid-secret-key");
       routeByUrl([
         [
-          /api\.sendgrid\.com/,
+          /^https:\/\/api\.sendgrid\.com\//,
           response(200, { remain: 400, total: 100_000, overage: 0, next_reset: "2026-09-01" }),
         ],
       ]);
@@ -216,7 +216,7 @@ describe("platform-status messaging probes", () => {
 
     it("maps a 403 to unavailable", async () => {
       vi.stubEnv("SENDGRID_API_KEY", "SG.sendgrid-secret-key");
-      routeByUrl([[/api\.sendgrid\.com/, response(403, { errors: [{ message: "access forbidden" }] })]]);
+      routeByUrl([[/^https:\/\/api\.sendgrid\.com\//, response(403, { errors: [{ message: "access forbidden" }] })]]);
 
       const result = await probeFor("sendgrid").probe();
 
@@ -227,7 +227,7 @@ describe("platform-status messaging probes", () => {
 
     it("maps a 429 to degraded and rate_limited", async () => {
       vi.stubEnv("SENDGRID_API_KEY", "SG.sendgrid-secret-key");
-      routeByUrl([[/api\.sendgrid\.com/, response(429, { errors: [] })]]);
+      routeByUrl([[/^https:\/\/api\.sendgrid\.com\//, response(429, { errors: [] })]]);
 
       const result = await probeFor("sendgrid").probe();
 
