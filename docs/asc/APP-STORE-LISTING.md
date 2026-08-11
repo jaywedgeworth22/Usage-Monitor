@@ -25,6 +25,7 @@ Contact (review): Jay Wedgeworth · mail@jays.services · +1 956-420-0244
 | Primary category | Developer Tools |
 | Secondary (optional) | Productivity or Finance |
 | Price | Free |
+| Invalid Binary note | See `docs/rollouts/2026-08-11-local-invalid-binary.md` — TF VALID ≠ App Store review; beta macOS host is likely remaining blocker |
 | Content rights | Does not contain, show, or access third-party content that requires special licensing beyond user-configured APIs |
 | App Groups (Local) | `group.services.jays.usage.local.monitor` — must appear on **App Store** provisioning profile (not empty `[]`) |
 | App Groups (Client) | `group.services.jays.usage.client.monitor` on app + widget App Store profiles |
