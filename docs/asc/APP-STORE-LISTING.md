@@ -44,14 +44,14 @@ Contact (review): Jay Wedgeworth · mail@jays.services · +1 956-420-0244
 | **en-US localization id** | `806f8051-efc5-4edf-8527-3ccbdcdb79a3` |
 | **App info localization** | `d9a5a612-f7e9-459b-9fe9-3a89afb19a98` |
 | **Subtitle** (≤30) | Live budgets for API spend |
-| **Promotional text** (≤170, editable without new binary) | Connect your self-hosted Usage Monitor server. See month-to-date spend, provider budgets, project allocation, and alerts — with Face ID lock and offline widgets. |
+| **Promotional text** (≤170, editable without new binary) | Connect your self-hosted Usage Monitor server.  See month-to-date spend, provider budgets, project allocation, and alerts — with Face ID lock and offline widgets. |
 
 ### Description
 
 ```
 Usage Client Monitor is the iOS companion for a Usage Monitor server you host.
 
-See month-to-date API spend, budgets, and alerts without living in a browser tab. Point the app at your server URL, store a read token in the Keychain, and keep budgets on your Lock Screen and Home Screen widgets.
+See month-to-date API spend, budgets, and alerts without living in a browser tab.  Point the app at your server URL, store a read token in the Keychain, and keep budgets on your Lock Screen and Home Screen widgets.
 
 WHAT IT DOES
 • Live Overview — spent this month, budget pace, and projected end-of-month
@@ -62,13 +62,13 @@ WHAT IT DOES
 • Offline cache + widgets after the first successful sync
 
 WHO IT IS FOR
-Operators who already run (or will run) Usage Monitor on their own infrastructure — including the open/self-host path documented with the project. This app is a client. It does not replace hosting the server.
+Operators who already run (or will run) Usage Monitor on their own infrastructure — including the open/self-host path documented with the project.  This app is a client.  It does not replace hosting the server.
 
 WHAT YOU NEED
 • A reachable Usage Monitor base URL (HTTPS)
 • A read or full-access token issued by that server
 
-Privacy-minded: the developer does not receive your traffic unless you choose a server they operate. Your token stays in the device Keychain.
+Privacy-minded: the developer does not receive your traffic unless you choose a server they operate.  Your token stays in the device Keychain.
 
 Not a brokerage, bank, or tax product — developer tooling for API cost visibility.
 ```
@@ -96,7 +96,7 @@ To exercise live data (optional):
 1. Set Base URL to the reviewer’s own Usage Monitor instance, OR
 2. Contact mail@jays.services for a short-lived read-only review host if needed.
 
-Face ID is optional (Settings → App Lock). Disable App Lock for review if preferred.
+Face ID is optional (Settings → App Lock).  Disable App Lock for review if preferred.
 
 Encryption: standard HTTPS + Keychain only; ITSAppUsesNonExemptEncryption is false.
 ```
@@ -128,7 +128,7 @@ Declare data types only if the app *by design* sends them off-device: budget JSO
 | **en-US localization id** | `09c8eb6b-8f6d-4629-b14b-6e30a5d73da6` |
 | **App info localization** | `2d225776-d637-483e-aa1a-690f4b40e3fb` |
 | **Subtitle** (≤30) | On-device API budget tracker |
-| **Promotional text** | Track OpenRouter, OpenAI, Anthropic, and more on your phone — keys in Keychain, budgets in on-device SQLite. No Usage Monitor server required. |
+| **Promotional text** | Track OpenRouter, OpenAI, Anthropic, and more on your phone — keys in Keychain, budgets in on-device SQLite.  No Usage Monitor server required. |
 
 ### Description
 
@@ -155,7 +155,7 @@ WHAT IT IS NOT
 • Not a bank, brokerage, or tax product
 • Does not invent spend for providers that only offer console billing — those stay as subscription or manual rows
 
-Privacy-minded: processing is on-device. Keys leave the device only over HTTPS to providers you choose.
+Privacy-minded: processing is on-device.  Keys leave the device only over HTTPS to providers you choose.
 ```
 
 ### Keywords
@@ -173,9 +173,9 @@ Initial App Store release of Usage Local Monitor — on-device budgets, provider
 ### App Review notes
 
 ```
-On-device developer tools app. No login and no developer-operated backend.
+On-device developer tools app.  No login and no developer-operated backend.
 
-First launch seeds an empty/local catalog. To see non-zero month-to-date cost:
+First launch seeds an empty/local catalog.  To see non-zero month-to-date cost:
 1. Add Provider → choose OpenRouter (or similar)
 2. Paste a management/provisioning key if the provider requires it for cost APIs
 3. Pull to refresh
@@ -184,7 +184,7 @@ Inference-only keys may show connected without MTD cost — expected.
 
 Optional: use Settings wipe to clear demo data.
 
-Face ID is optional. Encryption is standard HTTPS + Keychain only.
+Face ID is optional.  Encryption is standard HTTPS + Keychain only.
 
 Screenshot builds may use -ScreenshotDemo fixture data; production App Store binaries do not require that flag.
 ```
