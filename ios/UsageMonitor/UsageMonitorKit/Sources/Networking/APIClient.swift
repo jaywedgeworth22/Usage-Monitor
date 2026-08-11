@@ -91,6 +91,20 @@ public actor APIClient {
         try await get("/api/server-metrics", authorization: .read)
     }
 
+    /// `GET /api/platform-status` — one status card per external platform the
+    /// fleet runs on.  Bearer read token or dashboard session, same dual-auth
+    /// preamble as `/api/server-metrics`.
+    public func platformStatus() async throws -> PlatformStatusPayload {
+        try await get("/api/platform-status", authorization: .read)
+    }
+
+    /// `GET /api/operations` — fleet operations aggregator (receipt inbox,
+    /// peer app health, Coolify fleet, R2 free tier, backup layers).  Bearer
+    /// read token or dashboard session.
+    public func operations() async throws -> OperationsHealth {
+        try await get("/api/operations", authorization: .read)
+    }
+
     /// Validate the currently stored bearer token without accepting a dashboard
     /// cookie as a substitute. Settings uses a disposable client for candidate
     /// tokens, so a stale cookie cannot make an invalid replacement look valid.

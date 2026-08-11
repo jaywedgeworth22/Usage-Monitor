@@ -88,8 +88,8 @@ final class LocalForecastTests: XCTestCase {
             fetchedAt: now,
             totalCost: 50,
             fixedCostIncludedUsd: 0,
-            costScope: "calendar_month_to_date",
-            costWindowStart: monthStart
+            costWindowStart: monthStart,
+            costScope: "calendar_month_to_date"
         )
         let sub = LocalSubscription(
             providerId: "p1",

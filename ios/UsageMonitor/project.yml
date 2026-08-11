@@ -94,6 +94,8 @@ targets:
       - package: UsageMonitorKit
         product: ProjectBudgets
       - package: UsageMonitorKit
+        product: Platforms
+      - package: UsageMonitorKit
         product: Settings
       - package: UsageMonitorKit
         product: AppLock

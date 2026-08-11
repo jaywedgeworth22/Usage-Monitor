@@ -187,10 +187,14 @@ environment; they **do not** construct these.
 - **`LoadState<Value>`** — `.idle/.loading/.loaded/.failed(APIError)` with
   `.value`, `.error`, `.isLoading`, `.isInitialLoading`. Use it for every
   feature-local store too.
-- **`AppTab`** (enum) — the five tabs and the deep-link vocabulary:
-  `.dashboard/.providers/.alerts/.projects/.settings`, each with `.title`
-  (Overview / Providers / Alerts / Projects / Settings) and `.systemImage`.
-- **`AppFeatures`** — the seam: five `() -> AnyView` closures the **app target**
+- **`AppTab`** (enum) — the six tabs and the deep-link vocabulary:
+  `.dashboard/.providers/.alerts/.platforms/.projects/.settings`, each with
+  `.title` (Overview / Providers / Alerts / Platforms / Projects / Settings)
+  and `.systemImage`.  Note iPhone shows only the first four plus a **More**
+  list, so `.projects` and `.settings` live under More; every dead-end state
+  that needs Settings must therefore call `env.selectTab?(.settings)` rather
+  than telling the user to "tap Settings".
+- **`AppFeatures`** — the seam: six `() -> AnyView` closures the **app target**
   supplies (one per tab). `RootView(environment:features:initialTab:)` is the
   `TabView` shell; it owns tab selection + app-wide chrome and injects
   `AppEnvironment`, `BudgetStore`, `AppSettings`, and the color scheme. Each

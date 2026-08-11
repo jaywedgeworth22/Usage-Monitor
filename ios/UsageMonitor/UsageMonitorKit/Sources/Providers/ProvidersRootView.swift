@@ -33,7 +33,14 @@ public struct ProvidersRootView: View {
                 .navigationDestination(for: ProviderRoute.self) { route in
                     ProviderDetailView(route: route)
                 }
+                .navigationDestination(for: ProvidersExtraRoute.self) { route in
+                    switch route {
+                    case .money: MoneyScreen()
+                    case .keysAndApps: KeysAndAppsScreen()
+                    }
+                }
                 .toolbar { sortMenu }
+                .toolbar { moreMenu }
                 .task { await store.loadIfNeeded() }
                 // Re-run when a cross-tab deep link lands a new pending id.
                 .task(id: env?.pendingProviderID) {
@@ -289,6 +296,31 @@ public struct ProvidersRootView: View {
         .accessibilityLabel("Refresh failed. Showing last loaded data. \(error.message)")
     }
 
+    /// The two web surfaces that have no tab of their own.  The tab bar is
+    /// already at its iPhone limit, so Money and Keys & Apps live here — one
+    /// tap from Providers, which is the lane both of them are about.
+    private var moreMenu: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Menu {
+                Button {
+                    Haptics.tap()
+                    path.append(ProvidersExtraRoute.money)
+                } label: {
+                    Label("Money", systemImage: "creditcard.fill")
+                }
+                Button {
+                    Haptics.tap()
+                    path.append(ProvidersExtraRoute.keysAndApps)
+                } label: {
+                    Label("Keys & Apps", systemImage: "key.horizontal.fill")
+                }
+            } label: {
+                Label("More", systemImage: "ellipsis.circle")
+            }
+            .accessibilityLabel("More provider views")
+        }
+    }
+
     private var sortMenu: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
@@ -336,3 +368,10 @@ private struct ProvidersListPreviewHost: View {
     }
 }
 #endif
+
+/// Routes for the two web surfaces that have no tab of their own.
+/// Kept separate from `ProviderRoute` so provider deep links stay unambiguous.
+enum ProvidersExtraRoute: Hashable {
+    case money
+    case keysAndApps
+}

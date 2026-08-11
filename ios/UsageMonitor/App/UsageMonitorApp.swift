@@ -3,6 +3,7 @@ import AppCore
 import Dashboard
 import Providers
 import Alerts
+import Platforms
 import ProjectBudgets
 import Settings
 import AppLock
@@ -136,6 +137,7 @@ private extension AppFeatures {
         dashboard: { AnyView(DashboardRootView()) },
         providers: { AnyView(ProvidersRootView()) },
         alerts: { AnyView(AlertsRootView()) },
+        platforms: { AnyView(PlatformsRootView()) },
         projects: { AnyView(ProjectBudgetsRootView()) },
         settings: { AnyView(SettingsRootView()) }
     )

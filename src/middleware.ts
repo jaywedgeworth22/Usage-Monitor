@@ -41,6 +41,16 @@ export const isPublicPath = (pathname: string) => {
     // Self-authenticates (session OR USAGE_READ_TOKEN) for iOS Client Monitor
     // host usage + Coolify app inventory. See src/app/api/server-metrics/route.ts.
     "/api/server-metrics",
+    // Same dual-auth pattern: per-platform status cards (hosting, edge,
+    // storage, observability, developer, messaging, payments, secrets) for the
+    // web Platforms page and the iOS Platforms tab.
+    // See src/app/api/platform-status/route.ts.
+    "/api/platform-status",
+    // Fleet operations aggregator (receipt inbox, peer app health, Coolify
+    // fleet, R2 free tier, backup layers). Read-only infrastructure status in
+    // the same class as server-metrics, exposed to the iOS client via the same
+    // dual-auth preamble. See src/app/api/operations/route.ts.
+    "/api/operations",
   ];
   if (publicPaths.includes(pathname)) return true;
   if (publicPaths.some((p) => pathname.startsWith(p + "/"))) return true;
