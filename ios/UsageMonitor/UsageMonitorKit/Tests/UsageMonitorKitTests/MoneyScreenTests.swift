@@ -26,24 +26,66 @@ final class MoneyScreenTests: XCTestCase {
 
     // MARK: - Wire contract
 
+    /// The screen reads two sources with two DIFFERENT auth modes, and that
+    /// split is the load-bearing part: `/api/subscriptions` is bearer-reachable
+    /// so recurring costs render with only a read token, while `/api/providers`
+    /// is session-only and may legitimately 401.  Recording every request
+    /// rather than just the last one is deliberate — a single-slot capture
+    /// silently asserted whichever call happened to finish last.
     @MainActor
-    func testStoreReadsSubscriptionsWithBearerAuthorization() async {
+    func testStoreReadsBothSourcesWithTheCorrectAuthorizationPerRoute() async {
         let client = Self.makeClient(token: "  read-token  ")
-        var observedPath: String?
-        var observedAuthorization: String?
+        let observed = RequestLog()
         MoneyURLProtocol.handler = { request in
-            observedPath = request.url?.path
-            observedAuthorization = request.value(forHTTPHeaderField: "Authorization")
+            let path = request.url?.path ?? ""
+            observed.record(path: path, authorization: request.value(forHTTPHeaderField: "Authorization"))
+            if path == "/api/providers" { return .json([Any]()) }
             return .json([Self.subscriptionJSON(id: "sub-1", name: "Claude Max", monthlyEquivalentUsd: 200, costUsd: 200)])
         }
 
         let store = MoneyStore()
         await store.load(using: client)
 
-        XCTAssertEqual(observedPath, "/api/subscriptions")
-        XCTAssertEqual(observedAuthorization, "Bearer read-token")
+        XCTAssertTrue(observed.paths.contains("/api/subscriptions"))
+        XCTAssertEqual(
+            observed.authorization(for: "/api/subscriptions"),
+            "Bearer read-token",
+            "the bearer read token must reach the subscriptions read"
+        )
+        if observed.paths.contains("/api/providers") {
+            XCTAssertNil(
+                observed.authorization(for: "/api/providers") ?? nil,
+                "session-only routes must not carry the bearer token"
+            )
+        }
         XCTAssertEqual(store.state.value?.count, 1)
         XCTAssertEqual(store.viewData(now: Self.now)?.monthlyTotalLine, "$200.00")
+    }
+
+    /// Thread-safe request recorder — the two loads run concurrently.
+    private final class RequestLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entries: [(path: String, authorization: String?)] = []
+
+        func record(path: String, authorization: String?) {
+            lock.lock()
+            defer { lock.unlock() }
+            entries.append((path, authorization))
+        }
+
+        var paths: [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return entries.map(\.path)
+        }
+
+        /// Nested optional on purpose: outer nil means "never requested",
+        /// inner nil means "requested with no Authorization header".
+        func authorization(for path: String) -> String?? {
+            lock.lock()
+            defer { lock.unlock() }
+            return entries.first { $0.path == path }?.authorization
+        }
     }
 
     @MainActor
