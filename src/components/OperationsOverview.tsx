@@ -11,6 +11,8 @@ import type {
   SocraticInfrastructureSummary,
 } from "@/lib/operations-health";
 import type { R2FleetAccountSnapshot, R2FleetSummary } from "@/lib/r2-usage";
+import type { ServerMetricsPayload } from "@/lib/server-metrics";
+import type { HostPreventionPanel } from "@/lib/server-metrics-indicators";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -573,6 +575,260 @@ export function FleetBackupsCard({ data }: { data: FleetBackupStatusPayload | nu
   );
 }
 
+function preventionState(overall: string | undefined | null): OperationalState {
+  if (overall === "critical") return "degraded";
+  if (overall === "warning") return "degraded";
+  if (overall === "ok") return "healthy";
+  return "unavailable";
+}
+
+function MiniSparkline({ values, label }: { values: number[]; label: string }) {
+  if (values.length < 2) return null;
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const span = Math.max(max - min, 1);
+  const w = 120;
+  const h = 28;
+  const pts = values
+    .map((v, i) => {
+      const x = (i / (values.length - 1)) * w;
+      const y = h - ((v - min) / span) * (h - 2) - 1;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <svg
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      role="img"
+      aria-label={label}
+      className="text-sky-600 dark:text-sky-300"
+    >
+      <polyline
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        points={pts}
+      />
+    </svg>
+  );
+}
+
+export function HostStatsCard({ data }: { data: ServerMetricsPayload | null }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!data) {
+    return (
+      <section
+        aria-labelledby="host-stats-heading"
+        className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800"
+      >
+        <div className="px-5 py-4">
+          <h3
+            id="host-stats-heading"
+            className="text-sm font-semibold text-gray-900 dark:text-gray-100"
+          >
+            Host Stats
+          </h3>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Sign in to load Hetzner CPU, disk, app, and backup risk indicators.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  const prevention: HostPreventionPanel | null = data.prevention;
+  const state = preventionState(prevention?.overall);
+  const cpuTrail =
+    prevention?.history
+      .map((h) => h.cpuPct)
+      .filter((v): v is number => typeof v === "number") ?? [];
+  const summary = prevention?.summary;
+  const headline = prevention
+    ? prevention.overall === "ok"
+      ? `CPU ${summary?.cpuLatestPct != null ? `${Math.round(summary.cpuLatestPct)}%` : "—"} · disk ${summary?.diskUsedPct != null ? `${summary.diskUsedPct}%` : "—"} · ${summary?.appsDown ?? 0} apps down`
+      : `${prevention.indicators.length} active indicator${prevention.indicators.length === 1 ? "" : "s"}`
+    : "Prevention panel unavailable";
+
+  return (
+    <section
+      aria-labelledby="host-stats-heading"
+      className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 lg:col-span-2"
+    >
+      <div className="flex items-start justify-between gap-4 px-5 py-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            className="rounded-lg bg-emerald-50 p-2 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300"
+            aria-hidden="true"
+          >
+            <Server className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h3
+              id="host-stats-heading"
+              className="text-sm font-semibold text-gray-900 dark:text-gray-100"
+            >
+              Host Stats
+            </h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {data.host.name ?? "Hetzner host"}
+              {data.host.serverType ? ` · ${data.host.serverType}` : ""}
+              {data.host.cpus != null ? ` · ${data.host.cpus} vCPU` : ""}
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {headline}
+            </p>
+            {cpuTrail.length >= 2 ? (
+              <div className="mt-2">
+                <MiniSparkline values={cpuTrail} label="CPU history sparkline" />
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <StatePill state={state} />
+          <DisclosureButton
+            expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+            controls="host-stats-detail"
+          >
+            Details
+          </DisclosureButton>
+        </div>
+      </div>
+      {expanded && prevention ? (
+        <div
+          id="host-stats-detail"
+          className="space-y-4 border-t border-gray-100 px-5 py-4 text-xs dark:border-gray-700"
+        >
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <p className="font-medium text-gray-800 dark:text-gray-200">CPU (1h)</p>
+              <p className="mt-1 text-gray-500 dark:text-gray-400">
+                Peak{" "}
+                {summary?.cpuPeakPct != null
+                  ? `${Math.round(summary.cpuPeakPct)}%`
+                  : "—"}{" "}
+                · avg{" "}
+                {summary?.cpuAvgPct != null
+                  ? `${Math.round(summary.cpuAvgPct)}%`
+                  : "—"}{" "}
+                · now{" "}
+                {summary?.cpuLatestPct != null
+                  ? `${Math.round(summary.cpuLatestPct)}%`
+                  : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="font-medium text-gray-800 dark:text-gray-200">Disk</p>
+              <p className="mt-1 text-gray-500 dark:text-gray-400">
+                {summary?.diskUsedPct != null
+                  ? `${summary.diskUsedPct}% used`
+                  : "—"}
+                {summary?.diskFreeBytes != null
+                  ? ` · free ${formatBytes(summary.diskFreeBytes)}`
+                  : ""}
+              </p>
+            </div>
+            <div>
+              <p className="font-medium text-gray-800 dark:text-gray-200">Apps &amp; backups</p>
+              <p className="mt-1 text-gray-500 dark:text-gray-400">
+                {summary?.appsHealthy ?? 0}/{summary?.appsTotal ?? 0} healthy
+                {summary?.appsDown
+                  ? ` · ${summary.appsDown} down`
+                  : ""}
+                {summary?.backupAppsOk != null && summary.backupAppsTotal != null
+                  ? ` · backups ${summary.backupAppsOk}/${summary.backupAppsTotal}`
+                  : ""}
+              </p>
+            </div>
+          </div>
+
+          {prevention.indicators.length > 0 ? (
+            <div>
+              <p className="font-medium text-gray-800 dark:text-gray-200">
+                Active Indicators
+              </p>
+              <ul className="mt-2 space-y-2">
+                {prevention.indicators.map((ind) => (
+                  <li key={ind.id} className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-900/40">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="font-medium text-gray-800 dark:text-gray-200">
+                        {ind.label}
+                        {ind.subject ? (
+                          <span className="ml-1 font-normal text-gray-400">
+                            · {ind.subject}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span
+                        className={
+                          ind.severity === "critical"
+                            ? "text-red-600 dark:text-red-300"
+                            : ind.severity === "warning"
+                              ? "text-amber-700 dark:text-amber-300"
+                              : "text-gray-500"
+                        }
+                      >
+                        {ind.severity}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-gray-500 dark:text-gray-400">
+                      {ind.detail}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-gray-500 dark:text-gray-400">
+              No active risk indicators.{"\u00a0"} Host CPU, disk, apps, and backups look within thresholds.
+            </p>
+          )}
+
+          {prevention.history.length > 0 ? (
+            <div>
+              <p className="font-medium text-gray-800 dark:text-gray-200">
+                Recent Poll History
+              </p>
+              <p className="mt-1 text-gray-500 dark:text-gray-400">
+                {prevention.historyNote}
+              </p>
+              <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+                {[...prevention.history].reverse().slice(0, 16).map((sample) => (
+                  <li
+                    key={sample.at}
+                    className="flex flex-wrap items-baseline justify-between gap-2 font-mono text-[11px] text-gray-500 dark:text-gray-400"
+                  >
+                    <span>{sample.at}</span>
+                    <span>
+                      cpu{" "}
+                      {sample.cpuPct != null
+                        ? `${Math.round(sample.cpuPct)}%`
+                        : "—"}
+                      {sample.diskUsedPct != null
+                        ? ` · disk ${sample.diskUsedPct}%`
+                        : ""}
+                      {sample.appsDown > 0
+                        ? ` · ${sample.appsDown} down`
+                        : ""}
+                      {sample.indicatorIds.length > 0
+                        ? ` · ${sample.indicatorIds.length} flags`
+                        : ""}
+                      {` · ${sample.overall}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function CoolifyFleetCard({ data }: { data: CoolifyFleetSummary }) {
   const [expanded, setExpanded] = useState(false);
   const summary =
@@ -637,19 +893,35 @@ export function CoolifyFleetCard({ data }: { data: CoolifyFleetSummary }) {
 
 export default function OperationsOverview() {
   const [data, setData] = useState<OperationsHealthSummary | null>(null);
+  const [hostMetrics, setHostMetrics] = useState<ServerMetricsPayload | null>(
+    null
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
 
   const refresh = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
     try {
-      const response = await fetch("/api/operations", { cache: "no-store" });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      setData((await response.json()) as OperationsHealthSummary);
+      const [opsResponse, metricsResponse] = await Promise.all([
+        fetch("/api/operations", { cache: "no-store" }),
+        fetch("/api/server-metrics", { cache: "no-store" }),
+      ]);
+      if (!opsResponse.ok) throw new Error(`HTTP ${opsResponse.status}`);
+      setData((await opsResponse.json()) as OperationsHealthSummary);
+      if (metricsResponse.ok) {
+        setHostMetrics(
+          (await metricsResponse.json()) as ServerMetricsPayload
+        );
+      } else {
+        // 401 without session is fine; keep last metrics if any.
+        if (metricsResponse.status !== 401) {
+          setHostMetrics(null);
+        }
+      }
       setRequestError(null);
     } catch {
       setRequestError("Operations status could not be refreshed.");
-      setData((previous) => previous ? markOperationsStale(previous) : null);
+      setData((previous) => (previous ? markOperationsStale(previous) : null));
     } finally {
       if (manual) setRefreshing(false);
     }
@@ -657,8 +929,12 @@ export default function OperationsOverview() {
 
   useEffect(() => {
     void refresh();
-    const onVisibility = () => { if (document.visibilityState === "visible") void refresh(); };
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, REFRESH_INTERVAL_MS);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, REFRESH_INTERVAL_MS);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.clearInterval(timer);
@@ -670,18 +946,43 @@ export default function OperationsOverview() {
     <section aria-labelledby="operations-heading" className="space-y-3">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 id="operations-heading" className="text-sm font-semibold text-gray-800 dark:text-gray-200">Operations</h2>
-          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Receipt intake and service health, kept separate from provider costs.</p>
+          <h2
+            id="operations-heading"
+            className="text-sm font-semibold text-gray-800 dark:text-gray-200"
+          >
+            Operations
+          </h2>
+          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+            Receipt intake, host risk indicators, and service health — kept
+            separate from provider costs.
+          </p>
         </div>
-        <button type="button" onClick={() => void refresh(true)} disabled={refreshing}
-          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} aria-hidden="true" /> Refresh
+        <button
+          type="button"
+          onClick={() => void refresh(true)}
+          disabled={refreshing}
+          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+        >
+          <RefreshCw
+            className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+            aria-hidden="true"
+          />{" "}
+          Refresh
         </button>
       </div>
-      <div aria-live="polite" className="sr-only">{requestError ?? (data ? "Operations status refreshed." : "Loading operations status.")}</div>
-      {requestError && <p className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">{requestError}{data ? " Last confirmed data is marked stale." : ""}</p>}
+      <div aria-live="polite" className="sr-only">
+        {requestError ??
+          (data ? "Operations status refreshed." : "Loading operations status.")}
+      </div>
+      {requestError && (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          {requestError}
+          {data ? " Last confirmed data is marked stale." : ""}
+        </p>
+      )}
       {data ? (
         <div className="grid gap-3 lg:grid-cols-2">
+          <HostStatsCard data={hostMetrics} />
           <R2FleetCard data={data.r2Fleet} />
           <FleetBackupsCard data={data.fleetBackups} />
           <ReceiptInboxCard data={data.receiptInbox} />

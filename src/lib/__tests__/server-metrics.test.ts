@@ -78,6 +78,9 @@ describe("fetchServerMetrics", () => {
     expect(payload.resources).toHaveLength(2);
     expect(payload.fleetBackups).not.toBeNull();
     expect(payload.fleetBackups?.apps.length).toBeGreaterThanOrEqual(1);
+    expect(payload.prevention).not.toBeNull();
+    expect(payload.prevention?.summary.appsTotal).toBeGreaterThanOrEqual(1);
+    expect(Array.isArray(payload.prevention?.history)).toBe(true);
     expect(payload.selfResources).toMatchObject([
       {
         uuid: "um-self-uuid",
