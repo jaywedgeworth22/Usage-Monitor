@@ -125,19 +125,30 @@ async function probeTwilio(): Promise<PlatformProbeResult> {
   const base = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}`;
 
   try {
-    const [account, balance] = await Promise.all([
+    // Settled rather than all: a transport failure on the balance call alone
+    // must not decide the whole card.  The account call still decides
+    // reachability, so a rejection there keeps the existing unreachable path.
+    const [accountSettled, balanceSettled] = await Promise.allSettled([
       requestJson(`${base}.json`, { headers }),
       requestJson(`${base}/Balance.json`, { headers }),
     ]);
+    if (accountSettled.status === "rejected") throw accountSettled.reason;
+    const account = accountSettled.value;
 
     if (!account.ok) {
       return upstreamFailure(account.status, "Twilio rejected the account lookup.");
     }
 
+    // A failed balance request is not the same fact as "this account has no
+    // balance".  Keeping the two apart is what stops depleted prepaid credit
+    // from rendering green.
+    const balance = balanceSettled.status === "fulfilled" ? balanceSettled.value : null;
+    const balanceReadable = balance?.ok === true;
+
     const accountRecord = asRecord(account.data);
     const status = text(accountRecord?.status);
     const accountType = text(accountRecord?.type);
-    const balanceRecord = balance.ok ? asRecord(balance.data) : undefined;
+    const balanceRecord = balance?.ok ? asRecord(balance.data) : undefined;
     const balanceAmount = numberFrom(balanceRecord?.balance);
     const currency = text(balanceRecord?.currency);
 
@@ -147,7 +158,7 @@ async function probeTwilio(): Promise<PlatformProbeResult> {
       metric(
         "Balance",
         balanceAmount === null ? "Unavailable" : money(balanceAmount, currency),
-        balance.ok ? undefined : "balance lookup failed"
+        balanceReadable ? undefined : "balance lookup failed"
       ),
     ];
 
@@ -160,6 +171,21 @@ async function probeTwilio(): Promise<PlatformProbeResult> {
         ),
         metrics,
         error: "account_not_active",
+      };
+    }
+
+    // Reported after the account check so a suspended account keeps the more
+    // urgent headline, and before the healthy return so a card can never claim
+    // "no balance reported" on the strength of a request that never answered.
+    if (!balanceReadable) {
+      return {
+        state: "degraded",
+        headline: sentences(
+          "Twilio is active.",
+          "The balance could not be read, so a low prepaid balance would go unnoticed."
+        ),
+        metrics,
+        error: "balance_unavailable",
       };
     }
 

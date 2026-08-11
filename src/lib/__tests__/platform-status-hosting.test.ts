@@ -419,6 +419,14 @@ describe("HOSTING_PROBES", () => {
   // -------------------------------------------------------------------------
 
   describe("netlify", () => {
+    /** Published + Failed Builds + Not Published must always equal Sites. */
+    function assertNetlifyBucketsTotal(metrics: Array<{ label: string; value: string }>): void {
+      const read = (label: string) => Number(metricValue(metrics, label));
+      expect(read("Published") + read("Failed Builds") + read("Not Published")).toBe(
+        read("Sites")
+      );
+    }
+
     it("counts published sites and names failed builds", async () => {
       vi.stubEnv("NETLIFY_API_TOKEN", "netlify-token");
       fetchJsonMock.mockResolvedValue(
@@ -434,8 +442,95 @@ describe("HOSTING_PROBES", () => {
       expect(metricValue(result.metrics, "Sites")).toBe("2");
       expect(metricValue(result.metrics, "Published")).toBe("1");
       expect(metricValue(result.metrics, "Failed Builds")).toBe("1");
+      expect(metricValue(result.metrics, "Not Published")).toBe("0");
+      assertNetlifyBucketsTotal(result.metrics);
       expect(result.headline).toContain("blog failed to build.");
       assertSentenceGaps(result.headline);
+    });
+
+    it("never calls a site with no published deploy healthy", async () => {
+      vi.stubEnv("NETLIFY_API_TOKEN", "netlify-token");
+      fetchJsonMock.mockResolvedValue(
+        jsonResponse([
+          { id: "s1", name: "brochure", published_deploy: { state: "ready" } },
+          { id: "s2", name: "blog", published_deploy: null },
+        ])
+      );
+
+      const result = await probeById("netlify").probe();
+
+      expect(result.state).toBe("degraded");
+      expect(metricValue(result.metrics, "Published")).toBe("1");
+      expect(metricValue(result.metrics, "Not Published")).toBe("1");
+      assertNetlifyBucketsTotal(result.metrics);
+      expect(result.headline).toBe(
+        "1 of 2 Netlify sites have a published deploy.  blog has no published deploy."
+      );
+      assertSentenceGaps(result.headline);
+    });
+
+    it("counts an in-flight or cancelled deploy state as not published", async () => {
+      vi.stubEnv("NETLIFY_API_TOKEN", "netlify-token");
+      fetchJsonMock.mockResolvedValue(
+        jsonResponse([
+          { id: "s1", name: "brochure", published_deploy: { state: "building" } },
+          { id: "s2", name: "blog", published_deploy: { state: "canceled" } },
+          { id: "s3", name: "docs" },
+        ])
+      );
+
+      const result = await probeById("netlify").probe();
+
+      expect(result.state).toBe("degraded");
+      expect(metricValue(result.metrics, "Sites")).toBe("3");
+      expect(metricValue(result.metrics, "Published")).toBe("0");
+      expect(metricValue(result.metrics, "Failed Builds")).toBe("0");
+      expect(metricValue(result.metrics, "Not Published")).toBe("3");
+      assertNetlifyBucketsTotal(result.metrics);
+      // The old bug: "Published: 0" beside a headline claiming every site published.
+      expect(result.headline).toBe(
+        "0 of 3 Netlify sites have a published deploy.  brochure and 2 more have no published deploy."
+      );
+      assertSentenceGaps(result.headline);
+    });
+
+    it("still leads with the failed build when sites are also unpublished", async () => {
+      vi.stubEnv("NETLIFY_API_TOKEN", "netlify-token");
+      fetchJsonMock.mockResolvedValue(
+        jsonResponse([
+          { id: "s1", name: "brochure", published_deploy: { state: "ready" } },
+          { id: "s2", name: "blog", published_deploy: { state: "failed" } },
+          { id: "s3", name: "docs", published_deploy: { state: "enqueued" } },
+        ])
+      );
+
+      const result = await probeById("netlify").probe();
+
+      expect(result.state).toBe("degraded");
+      expect(metricValue(result.metrics, "Failed Builds")).toBe("1");
+      expect(metricValue(result.metrics, "Not Published")).toBe("1");
+      assertNetlifyBucketsTotal(result.metrics);
+      expect(result.headline).toBe(
+        "1 of 3 Netlify sites have a published deploy.  blog failed to build."
+      );
+    });
+
+    it("is healthy only when every site has a ready published deploy", async () => {
+      vi.stubEnv("NETLIFY_API_TOKEN", "netlify-token");
+      fetchJsonMock.mockResolvedValue(
+        jsonResponse([
+          { id: "s1", name: "brochure", published_deploy: { state: "ready" } },
+          { id: "s2", name: "blog", published_deploy: { state: "ready" } },
+        ])
+      );
+
+      const result = await probeById("netlify").probe();
+
+      expect(result.state).toBe("healthy");
+      expect(metricValue(result.metrics, "Published")).toBe("2");
+      expect(metricValue(result.metrics, "Not Published")).toBe("0");
+      assertNetlifyBucketsTotal(result.metrics);
+      expect(result.headline).toBe("All 2 Netlify sites have a published deploy.");
     });
 
     it("maps a missing resource to degraded / not_found", async () => {
@@ -537,8 +632,41 @@ describe("HOSTING_PROBES", () => {
       expect(result.state).toBe("healthy");
       expect(metricValue(result.metrics, "Projects")).toBe("2");
       expect(metricValue(result.metrics, "Services")).toBe("2");
-      expect(result.headline).toBe("Railway reports 2 projects running 2 services.");
+      expect(result.headline).toBe(
+        "Railway lists 2 projects with 2 services.  Deployment status is not checked."
+      );
+      assertSentenceGaps(result.headline);
       expect(fetchJsonMock.mock.calls[0][1]?.method).toBe("POST");
+    });
+
+    it("says plainly that deployment status is not part of the inventory", async () => {
+      vi.stubEnv("RAILWAY_API_TOKEN", "railway-token");
+      fetchJsonMock.mockResolvedValue(
+        jsonResponse({
+          data: {
+            me: {
+              projects: {
+                edges: [
+                  {
+                    node: { id: "p1", name: "fleet", services: { edges: [{ node: { id: "s1" } }] } },
+                  },
+                ],
+              },
+            },
+          },
+        })
+      );
+
+      const result = await probeById("railway").probe();
+
+      // The query cannot see a stopped, crashed or failed deployment, so the
+      // card must not imply the discovered services are running.
+      expect(result.headline).not.toMatch(/running|live|up\b/i);
+      expect(metricValue(result.metrics, "Deployment Status")).toBe("Not checked");
+      // Singular copy, because "1 projects" is not something a human writes.
+      expect(result.headline).toBe(
+        "Railway lists 1 project with 1 service.  Deployment status is not checked."
+      );
     });
 
     it("degrades on a GraphQL error returned with HTTP 200", async () => {

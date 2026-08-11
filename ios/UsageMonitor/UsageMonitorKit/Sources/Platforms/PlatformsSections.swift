@@ -110,9 +110,86 @@ struct FleetHostSection: View {
 // Fleet apps
 // ---------------------------------------------------------------------------
 
+/// How one Coolify application reads in the fleet list.
+///
+/// Coolify's status is a composite `"<state>"` or `"<state>:<health>"` string —
+/// "running", "running:healthy", "running:unhealthy", "running:unknown",
+/// "exited:unhealthy".  It must be parsed into its two parts rather than
+/// substring-matched: "unhealthy" literally *contains* "healthy", so a
+/// `contains("healthy")` test paints a down application green.  The parse
+/// mirrors `classifyCoolifyStatus` in `src/lib/platform-status/probes/hosting.ts`
+/// so iOS and the web Ops page agree about what is up.
+enum FleetAppStatus: Equatable, Sendable {
+    /// Running and the health check passes.
+    case healthy
+    /// The health check is failing, whatever the container state claims.
+    case unhealthy
+    /// Not serving: exited, stopped, dead.
+    case down
+    /// Running, but this monitor cannot say whether it serves traffic.
+    case unknown
+    /// Coolify has no status for this application — never deployed.
+    case notDeployed
+
+    /// Container states that mean the application is not serving traffic.
+    private static let downStates: Set<String> = [
+        "exited", "stopped", "dead", "removing", "killed",
+    ]
+
+    /// Container states that mean the application is up.
+    private static let upStates: Set<String> = ["running", "healthy"]
+
+    static func parse(_ raw: String) -> FleetAppStatus {
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return .notDeployed }
+
+        let parts = normalized.split(
+            separator: ":",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        let state = String(parts[0]).trimmingCharacters(in: .whitespaces)
+        let health =
+            parts.count > 1 ? String(parts[1]).trimmingCharacters(in: .whitespaces) : ""
+        guard !state.isEmpty || !health.isEmpty else { return .notDeployed }
+
+        // Most severe interpretation first.  A failing health check and a
+        // stopped container both outrank anything that merely looks healthy.
+        if downStates.contains(state) { return .down }
+        if health == "unhealthy" || state == "unhealthy" { return .unhealthy }
+        if upStates.contains(state) {
+            // Only an explicit pass — or a bare "running" with no health check
+            // configured at all — counts as healthy.  "running:unknown" does not.
+            return health.isEmpty || health == "healthy" ? .healthy : .unknown
+        }
+        // restarting, paused, created, or a state Coolify has not shipped yet.
+        return .unknown
+    }
+
+    var title: String {
+        switch self {
+        case .healthy: return "Healthy"
+        case .unhealthy: return "Unhealthy"
+        case .down: return "Down"
+        case .unknown: return "Unknown"
+        case .notDeployed: return "Not Deployed"
+        }
+    }
+
+    var semantic: Theme.SemanticStatus {
+        switch self {
+        case .healthy: return .ok
+        case .unhealthy, .down: return .danger
+        case .unknown: return .warning
+        case .notDeployed: return .neutral
+        }
+    }
+}
+
 /// Every Coolify application on the host, for all fleet apps — not just this
 /// one.  An app Coolify reports as running but cannot health-check shows as
-/// "Unknown" rather than being quietly counted as healthy.
+/// "Unknown" rather than being quietly counted as healthy, and one reporting
+/// "running:unhealthy" shows as down rather than green.
 struct FleetAppsSection: View {
     let metrics: ServerMetrics
 
@@ -121,6 +198,7 @@ struct FleetAppsSection: View {
             SectionHeader("Fleet Apps", subtitle: "\(metrics.resources.count) on this host")
 
             ForEach(metrics.resources) { resource in
+                let status = FleetAppStatus.parse(resource.status)
                 HStack(spacing: Theme.Spacing.sm) {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                         Text(resource.fleetLabel ?? resource.name)
@@ -131,29 +209,12 @@ struct FleetAppsSection: View {
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
                     Spacer(minLength: Theme.Spacing.sm)
-                    StatusBadge(statusTitle(resource.status), status: status(for: resource.status))
+                    StatusBadge(status.title, status: status.semantic)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dsCard()
-    }
-
-    private func status(for raw: String) -> Theme.SemanticStatus {
-        let value = raw.lowercased()
-        if value.contains("unknown") { return .warning }
-        if value.contains("healthy") || value.contains("running") { return .ok }
-        if value.contains("exited") || value.contains("stopped") { return .danger }
-        return .neutral
-    }
-
-    private func statusTitle(_ raw: String) -> String {
-        let value = raw.lowercased()
-        if value.contains("unknown") { return "Unknown" }
-        if value.contains("healthy") { return "Healthy" }
-        if value.contains("running") { return "Running" }
-        if value.contains("exited") || value.contains("stopped") { return "Down" }
-        return "Unknown"
     }
 }
 
@@ -224,6 +285,76 @@ struct FleetBackupsSection: View {
 // Operations rollup
 // ---------------------------------------------------------------------------
 
+/// How one R2 fleet account reads.
+///
+/// Availability is decided *before* usage.  `overallOnTrackToExceed70Pct`
+/// defaults to `false`, and a failed read ships `storage: emptyMetric()` with
+/// `mtdPct: 0` (see `fetchR2FleetSummary` in `src/lib/r2-usage.ts`) — so keying
+/// the badge off that flag alone paints a broken account green beside a
+/// meaningless 0%.  An account that is unconfigured, errored, or reporting a
+/// status this build does not recognise shows its unavailability instead, and
+/// its usage figure is suppressed.
+enum R2AccountHealth: Equatable, Sendable {
+    /// No credentials for this account — nothing to read.
+    case unconfigured
+    /// Configured, but the usage read failed; the numbers cannot be trusted.
+    case unavailable
+    /// Read succeeded and the account is on track to exceed the free tier.
+    case watch
+    /// Read succeeded and the account is inside the free tier.
+    case ok
+
+    static func evaluate(_ account: OperationsHealth.R2Fleet.Account) -> R2AccountHealth {
+        let status = (account.status ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let error = (account.error ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !account.configured || status == "unconfigured" { return .unconfigured }
+        if status == "error" || !error.isEmpty { return .unavailable }
+        // Fail closed on a status this build has never seen rather than
+        // assuming it means "fine".
+        if !status.isEmpty, status != "ok" { return .unavailable }
+        // A configured, error-free account with no usage figure still has
+        // nothing to report — do not fall back to 0%.
+        guard account.storage?.mtdPct != nil else { return .unavailable }
+
+        return account.overallOnTrackToExceed70Pct ? .watch : .ok
+    }
+
+    /// Usage percentages are only meaningful when the read actually succeeded.
+    var showsUsage: Bool {
+        switch self {
+        case .watch, .ok: return true
+        case .unconfigured, .unavailable: return false
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .unconfigured: return "Not Configured"
+        case .unavailable: return "Unavailable"
+        case .watch: return "Watch"
+        case .ok: return "OK"
+        }
+    }
+
+    var semantic: Theme.SemanticStatus {
+        switch self {
+        case .unconfigured: return .neutral
+        case .unavailable, .watch: return .warning
+        case .ok: return .ok
+        }
+    }
+
+    /// The reason line under the row, when there is one worth showing.
+    func detail(for account: OperationsHealth.R2Fleet.Account) -> String? {
+        guard self == .unavailable else { return nil }
+        let error = (account.error ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return error.isEmpty ? "Metrics unavailable" : error
+    }
+}
+
 /// The `/api/operations` half of the web Ops page: peer app health, R2 free
 /// tier, receipt inbox.  Previously unreachable from iOS at all.
 struct FleetOperationsSection: View {
@@ -251,24 +382,41 @@ struct FleetOperationsSection: View {
 
             if let r2 = operations.r2Fleet, r2.configured {
                 ForEach(r2.accounts) { account in
-                    HStack(spacing: Theme.Spacing.sm) {
-                        Text(account.label ?? account.id)
-                            .font(Theme.Typography.body)
-                            .foregroundStyle(Theme.Colors.primaryText)
-                        Spacer(minLength: Theme.Spacing.sm)
-                        Text(PlatformFormat.percent(account.storage?.mtdPct))
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                        StatusBadge(
-                            account.overallOnTrackToExceed70Pct ? "Watch" : "OK",
-                            status: account.overallOnTrackToExceed70Pct ? .warning : .ok
-                        )
-                    }
+                    r2Row(account)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dsCard()
+    }
+
+    @ViewBuilder
+    private func r2Row(_ account: OperationsHealth.R2Fleet.Account) -> some View {
+        let health = R2AccountHealth.evaluate(account)
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+            HStack(spacing: Theme.Spacing.sm) {
+                Text(account.label ?? account.id)
+                    .font(Theme.Typography.body)
+                    .foregroundStyle(
+                        health == .unconfigured
+                            ? Theme.Colors.secondaryText : Theme.Colors.primaryText
+                    )
+                Spacer(minLength: Theme.Spacing.sm)
+                if health.showsUsage {
+                    Text(PlatformFormat.percent(account.storage?.mtdPct))
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                StatusBadge(health.title, status: health.semantic)
+            }
+
+            if let detail = health.detail(for: account) {
+                Text(detail)
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     @ViewBuilder

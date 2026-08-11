@@ -12,6 +12,92 @@ import {
 
 const REFRESH_INTERVAL_MS = 60_000;
 
+/**
+ * The house sentence gap, written for HTML.
+ *
+ * House style is two spaces between sentences, but HTML collapses a literal
+ * double space down to one, so the gap is a non-breaking space followed by an
+ * ordinary space: the NBSP survives collapsing and the ordinary space keeps
+ * the pair breakable at the end of a line.  Same construction as the JSX
+ * `{"\u00a0"}` + space form used in OperationsOverview.tsx.
+ */
+const SENTENCE_GAP = "\u00a0 ";
+
+/**
+ * Restore the sentence gap in server-supplied prose.
+ *
+ * Probe headlines are written with two literal spaces between sentences (the
+ * same house rule, applied server-side).  Rendered into HTML as-is those two
+ * spaces collapse to one, so swap every run of plain spaces for the NBSP form
+ * before display.  A string with no double space comes back untouched, and the
+ * transform is idempotent because an NBSP is not a plain space.
+ */
+export function withSentenceGaps(text: string): string {
+  return text.replace(/ {2,}/g, SENTENCE_GAP);
+}
+
+/**
+ * Lead-in for the unconfigured-card hint.
+ *
+ * Deliberately neutral about how the listed variables relate to each other.
+ * `requiredEnv` is a flat list of names and the contract does not say whether a
+ * platform needs all of them (App Store Connect needs the issuer ID *and* the
+ * key ID *and* the private key) or any one of them, so the copy must not claim
+ * either.  It names the variables and stops there.
+ */
+export const REQUIRED_ENV_LEAD_IN = "Set the environment variables this card uses:";
+
+/** Separator between env var names.  A comma asserts nothing; "or"/"and" would. */
+export const REQUIRED_ENV_SEPARATOR = ", ";
+
+/**
+ * The slice of `document` the poll loop reads.  Narrow and injectable so the
+ * visibility gating can be unit-tested without a DOM.
+ */
+export interface VisibilityTarget {
+  readonly visibilityState: string;
+  addEventListener(type: "visibilitychange", listener: () => void): void;
+  removeEventListener(type: "visibilitychange", listener: () => void): void;
+}
+
+/**
+ * Poll `onTick` on an interval, but only while the page is actually visible.
+ *
+ * A background tab firing a full platform sweep every minute burns vendor API
+ * quota for a render nobody can see, so ticks are skipped outright while the
+ * document is hidden and a single catch-up tick fires the moment it becomes
+ * visible again — the page a viewer comes back to is fresh, not a minute stale.
+ *
+ * Returns the cleanup: it stops the timer and drops the listener, so an
+ * unmount leaves nothing behind.
+ */
+export function startVisiblePolling(
+  onTick: () => void,
+  intervalMs: number,
+  target: VisibilityTarget | null,
+): () => void {
+  const isHidden = () => target?.visibilityState === "hidden";
+  let wasHidden = isHidden();
+
+  const timer = setInterval(() => {
+    if (isHidden()) return;
+    onTick();
+  }, intervalMs);
+
+  const handleVisibilityChange = () => {
+    const hidden = isHidden();
+    if (wasHidden && !hidden) onTick();
+    wasHidden = hidden;
+  };
+
+  target?.addEventListener("visibilitychange", handleVisibilityChange);
+
+  return () => {
+    clearInterval(timer);
+    target?.removeEventListener("visibilitychange", handleVisibilityChange);
+  };
+}
+
 /** Section order on the page.  Mirrors the registry's probe order. */
 const CATEGORY_ORDER: PlatformCategory[] = [
   "hosting",
@@ -83,7 +169,9 @@ function PlatformCardView({ platform }: { platform: PlatformStatusCard }) {
       </div>
 
       {platform.headline ? (
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{platform.headline}</p>
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+          {withSentenceGaps(platform.headline)}
+        </p>
       ) : null}
 
       {platform.configured && platform.metrics.length > 0 ? (
@@ -106,16 +194,16 @@ function PlatformCardView({ platform }: { platform: PlatformStatusCard }) {
 
       {muted && platform.requiredEnv.length > 0 ? (
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-          Set{" "}
+          {REQUIRED_ENV_LEAD_IN}{" "}
           {platform.requiredEnv.map((name, index) => (
             <span key={name}>
-              {index > 0 ? " or " : ""}
+              {index > 0 ? REQUIRED_ENV_SEPARATOR : ""}
               <code className="rounded bg-gray-200 px-1 py-0.5 font-mono text-[11px] dark:bg-gray-700">
                 {name}
               </code>
             </span>
-          ))}{" "}
-          to enable this card.
+          ))}
+          .
         </p>
       ) : null}
 
@@ -168,10 +256,14 @@ export default function PlatformsPageClient() {
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
-    const timer = setInterval(() => void load(), REFRESH_INTERVAL_MS);
+    const stopPolling = startVisiblePolling(
+      () => void load(),
+      REFRESH_INTERVAL_MS,
+      typeof document === "undefined" ? null : document,
+    );
     return () => {
       controller.abort();
-      clearInterval(timer);
+      stopPolling();
     };
   }, [load]);
 
@@ -183,7 +275,8 @@ export default function PlatformsPageClient() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Platforms</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Live status for every platform the fleet runs on.  Not part of your spend totals.
+            Live status for every platform the fleet runs on.{"\u00a0"} Not part of your
+            spend totals.
           </p>
         </div>
         <button

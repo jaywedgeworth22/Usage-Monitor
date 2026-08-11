@@ -16,11 +16,15 @@ import SwiftUI
 // mutations across two lanes is how an owner ends up pausing the same plan
 // twice.  The footer card points at the one place that owns them.
 //
-// Auth: the single read is `GET /api/subscriptions`, which the server serves to
-// a bearer read token *or* a dashboard session.  Nothing here is session-only,
-// so there is no "Full Dashboard Access Required" gate — a 401 on this screen
-// means the stored credential itself was rejected, and the honest next step is
+// Auth: two reads with two different reaches, matching the web Money page.
+// `GET /api/subscriptions` is served to a bearer read token *or* a dashboard
+// session, and it alone decides whether this screen renders at all — a 401
+// there means the stored credential was rejected, and the honest next step is
 // the credentials `ErrorState` that lands the user in Settings.
+// `GET /api/providers` is dashboard-session-only and carries plan-level fixed
+// fees; without a session it degrades to the established "Full Dashboard Access
+// Required → Open Settings" card, and the total says out loud that plan-level
+// fees are missing rather than quietly understating the bill.
 //
 // Pushed from an existing screen, so it owns no `NavigationStack` of its own.
 // Public entry point — keep `MoneyScreen` + `public init()` stable.
@@ -56,7 +60,7 @@ public struct MoneyScreen: View {
             errorView(for: error)
         } else if let data = store.viewData() {
             if data.isEmpty {
-                emptyView
+                emptyView(data)
             } else {
                 loadedView(data)
             }
@@ -100,11 +104,17 @@ public struct MoneyScreen: View {
         .background(Theme.Colors.background)
     }
 
-    private var emptyView: some View {
+    /// "Nothing tracked" is only an honest headline when both recurring-cost
+    /// models were actually readable.  With the session-only provider half
+    /// refused, a plan-level fixed fee could exist and simply be invisible, so
+    /// the copy says that instead of asserting there is nothing.
+    private func emptyView(_ data: MoneyViewData) -> some View {
         EmptyState(
             systemImage: "creditcard.trianglebadge.exclamationmark",
             title: "No Paid Services Tracked",
-            message: "Recurring plans show up here once the monitor records them.  Track a plan in Settings to see its monthly cost and renewal date.",
+            message: data.needsDashboardSessionForPlanFees
+                ? "No tracked subscriptions were found.  Plan-level provider fees are not included without a dashboard session — sign in with the dashboard password in Settings to check for them."
+                : "Recurring plans show up here once the monitor records them.  Track a plan in Settings to see its monthly cost and renewal date.",
             actionTitle: "Open Settings",
             action: { env?.selectTab?(.settings) }
         )
@@ -120,6 +130,9 @@ public struct MoneyScreen: View {
             }
         ) {
             MoneyTotalCard(data: data)
+            if data.needsDashboardSessionForPlanFees {
+                MoneyPlanFeeAccessCard(openSettings: { env?.selectTab?(.settings) })
+            }
             MoneyHighlightTiles(data: data)
 
             ForEach(data.billingGroups) { group in
@@ -150,7 +163,7 @@ public struct MoneyScreen: View {
     private var manageFooter: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             SectionHeader("Managing Plans")
-            Text("Prices and renewal dates come from the monitor's own subscription records.  Pause, resume, and remove plans in Settings under Subscriptions.")
+            Text("Prices and renewal dates come from the monitor's own records — tracked subscriptions, plus fixed monthly fees recorded on a provider.  Pause, resume, and remove plans in Settings under Subscriptions; edit a provider's plan fee under Providers.")
                 .font(Theme.Typography.caption)
                 .foregroundStyle(Theme.Colors.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -196,11 +209,51 @@ struct MoneyTotalCard: View {
                     .foregroundStyle(Theme.Colors.tertiaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let caveat = data.planFeeCaveat {
+                // A total that silently omits plan-level fees is the failure
+                // this screen exists to prevent, so the admission travels with
+                // the figure itself rather than living further down the page.
+                Text(caveat)
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dsCard()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Monthly recurring \(data.monthlyTotalLine), \(data.summaryLine)")
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        let base = "Monthly recurring \(data.monthlyTotalLine), \(data.summaryLine)"
+        guard let caveat = data.planFeeCaveat else { return base }
+        return "\(base). \(caveat)"
+    }
+}
+
+/// The established session-gate affordance (`Providers/KeysAndAppsScreen`,
+/// `Dashboard/IntelligenceSection`), scoped to the one thing that is actually
+/// missing here.  The subscription half already rendered above it, so this is a
+/// capability gap inline on a working screen — never an error state.
+struct MoneyPlanFeeAccessCard: View {
+    let openSettings: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text("Full Dashboard Access Required")
+                .font(Theme.Typography.callout.weight(.semibold))
+                .foregroundStyle(Theme.Colors.primaryText)
+            Text("Some recurring fees are recorded on a provider as a fixed monthly cost instead of as a subscription.  Reading them needs a dashboard session, so sign in with the dashboard password in Settings to fold them into the total above.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Open Settings", action: openSettings)
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.Colors.accent)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dsCard()
     }
 }
 
@@ -355,6 +408,16 @@ struct MoneyServiceRowView: View {
 
             if let source = row.billingSource {
                 Text("Billing source: \(source)")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.tertiaryText)
+                    .lineLimit(1)
+            }
+
+            if let note = row.originNote {
+                // A plan fee and a subscription are edited in different places,
+                // so the row says which one it is rather than leaving the owner
+                // hunting through Subscriptions for a plan-level charge.
+                Text(note)
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.tertiaryText)
                     .lineLimit(1)

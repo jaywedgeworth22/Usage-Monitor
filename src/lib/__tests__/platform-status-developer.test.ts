@@ -393,9 +393,64 @@ describe("developer platform probes", () => {
       ]);
       expect(result.metrics.length).toBeLessThanOrEqual(6);
       expect(fetchJson.mock.calls[0]?.[0]).toBe(
-        "https://api.appstoreconnect.apple.com/v1/builds?limit=5"
+        "https://api.appstoreconnect.apple.com/v1/builds?sort=-uploadedDate&limit=5"
       );
       expect(JSON.stringify(result)).not.toContain("PRIVATE KEY");
+    });
+
+    it("asks Apple to sort by newest upload before the page is limited", async () => {
+      configureAppStoreConnect();
+      fetchJson.mockResolvedValue(jsonResponse(buildsBody()));
+
+      await probeById("app-store-connect").probe();
+
+      // `limit` without `sort` returns an arbitrary partial page once the
+      // account has more than five builds, so the newest build can be absent
+      // from the response and no in-memory comparison can recover it.
+      const requested = new URL(fetchJson.mock.calls[0]?.[0] as string);
+      expect(requested.searchParams.get("sort")).toBe("-uploadedDate");
+      expect(requested.searchParams.get("limit")).toBe("5");
+    });
+
+    it("surfaces a failed newest build on an account with more builds than the page", async () => {
+      configureAppStoreConnect();
+      // What Apple returns for `sort=-uploadedDate&limit=5` on a busy account:
+      // the five newest uploads, newest first, with older ones cut off.  The
+      // failure an operator must see is the one at the top.
+      fetchJson.mockResolvedValue(
+        jsonResponse({
+          data: [
+            { version: "150", uploaded: "2026-08-11T09:00:00.000Z", state: "FAILED" },
+            { version: "149", uploaded: "2026-08-10T09:00:00.000Z", state: "VALID" },
+            { version: "148", uploaded: "2026-08-09T09:00:00.000Z", state: "VALID" },
+            { version: "147", uploaded: "2026-08-08T09:00:00.000Z", state: "VALID" },
+            { version: "146", uploaded: "2026-08-07T09:00:00.000Z", state: "VALID" },
+          ].map((build, index) => ({
+            type: "builds",
+            id: `5b1a8f2c-0000-4000-8000-1c0de00001${index}`,
+            attributes: {
+              version: build.version,
+              uploadedDate: build.uploaded,
+              expired: false,
+              processingState: build.state,
+            },
+          })),
+          meta: { paging: { total: 37, limit: 5 } },
+        })
+      );
+
+      const result = await probeById("app-store-connect").probe();
+
+      expect(result.state).toBe("degraded");
+      expect(result.error).toBe("build_processing_failed");
+      expect(result.headline).toBe(
+        "Latest build 150 failed processing in App Store Connect."
+      );
+      expect(result.metrics).toContainEqual({
+        label: "Latest Build",
+        value: "150",
+        hint: "uploaded 3h ago",
+      });
     });
 
     it("goes degraded when Apple failed to process the newest build", async () => {

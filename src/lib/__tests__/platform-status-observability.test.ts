@@ -49,6 +49,26 @@ function requestHeaders(index = 0): Record<string, string> {
   return (fetchJsonMock.mock.calls[index]?.[1]?.headers ?? {}) as Record<string, string>;
 }
 
+/**
+ * Serve one response per request, in order.  A request past the end throws, so
+ * a probe that paginates without a working stop condition fails loudly instead
+ * of quietly re-reading the last page forever.
+ */
+function servePages(...responses: ReturnType<typeof jsonResponse>[]) {
+  let call = 0;
+  fetchJsonMock.mockImplementation(async () => {
+    const response = responses[call];
+    call += 1;
+    if (!response) throw new Error(`unexpected page request #${call}`);
+    return response;
+  });
+}
+
+/** Form-encoded body of the nth request, for asserting pagination offsets. */
+function requestBody(index: number): URLSearchParams {
+  return new URLSearchParams(String(fetchJsonMock.mock.calls[index]?.[1]?.body ?? ""));
+}
+
 function sentryProject(
   overrides: Partial<SentryProjectHealth> & Pick<SentryProjectHealth, "projectSlug" | "displayName">
 ): SentryProjectHealth {
@@ -336,6 +356,139 @@ describe("uptimerobot probe", () => {
     expect(result.state).toBe("unreachable");
     expect(result.error).toBe("timeout");
   });
+
+  /**
+   * Regression: only the first page of 50 monitors used to be inspected, so a
+   * monitor down on page two was invisible and the card claimed "healthy".
+   */
+  describe("pagination", () => {
+    /** `count` monitors, all up, numbered from `start`. */
+    function upMonitors(start: number, count: number) {
+      return Array.from({ length: count }, (_, index) => ({
+        id: 800_100_000 + start + index,
+        friendly_name: `Monitor ${start + index}`,
+        status: 2,
+        custom_uptime_ratio: "100.000",
+      }));
+    }
+
+    function page(offset: number, total: number, monitors: unknown[]) {
+      return jsonResponse(200, {
+        stat: "ok",
+        pagination: { offset, limit: 50, total },
+        monitors,
+      });
+    }
+
+    const downMonitor = {
+      id: 800_100_999,
+      friendly_name: "OpenRouter credits probe",
+      status: 9,
+      custom_uptime_ratio: "97.500",
+    };
+
+    it("walks every page and reports the whole account once coverage is complete", async () => {
+      vi.stubEnv("UPTIMEROBOT_API_KEY", "u800100-testkey");
+      servePages(page(0, 60, upMonitors(0, 50)), page(50, 60, upMonitors(50, 10)));
+
+      const result = await probeFor("uptimerobot").probe();
+      expect(result.state).toBe("healthy");
+      expect(result.headline).toBe("All 60 monitors are up.");
+      expect(result.error).toBeUndefined();
+
+      const byLabel = new Map(result.metrics.map((entry) => [entry.label, entry]));
+      expect(byLabel.get("Monitors")?.value).toBe("60 monitors");
+      // Coverage is complete, so nothing is hedged with a "+".
+      expect(byLabel.get("Up")?.value).toBe("60");
+
+      expect(fetchJsonMock).toHaveBeenCalledTimes(2);
+      expect(requestBody(0).get("offset")).toBe("0");
+      expect(requestBody(1).get("offset")).toBe("50");
+      expect(requestBody(1).get("limit")).toBe("50");
+    });
+
+    it("finds a monitor that is down on a later page instead of reporting healthy", async () => {
+      vi.stubEnv("UPTIMEROBOT_API_KEY", "u800100-testkey");
+      servePages(
+        page(0, 60, upMonitors(0, 50)),
+        page(50, 60, [...upMonitors(50, 9), downMonitor])
+      );
+
+      const result = await probeFor("uptimerobot").probe();
+      expect(result.state).toBe("degraded");
+      expect(result.state).not.toBe("healthy");
+      expect(result.headline).toBe("1 of 60 monitors is down.");
+
+      const down = result.metrics.find((entry) => entry.label === "Down");
+      expect(down?.value).toBe("1");
+      expect(down?.hint).toBe("OpenRouter credits probe");
+    });
+
+    it("reports stale rather than healthy when the page cap leaves monitors unchecked", async () => {
+      vi.stubEnv("UPTIMEROBOT_API_KEY", "u800100-testkey");
+      // Six full pages of up monitors against an account claiming 1000.
+      servePages(
+        ...Array.from({ length: 6 }, (_, index) =>
+          page(index * 50, 1000, upMonitors(index * 50, 50))
+        )
+      );
+
+      const result = await probeFor("uptimerobot").probe();
+      // A zero down count drawn from 300 of 1000 monitors is not evidence
+      // that nothing is down.
+      expect(result.state).toBe("stale");
+      expect(result.state).not.toBe("healthy");
+      expect(result.error).toBe("partial_read");
+      expect(result.headline).toBe(
+        "300 of 300 checked monitors are up.  700 more were not checked."
+      );
+
+      const byLabel = new Map(result.metrics.map((entry) => [entry.label, entry]));
+      expect(byLabel.get("Monitors")?.value).toBe("1,000 monitors");
+      expect(byLabel.get("Monitors")?.hint).toBe("300 of 1,000 checked");
+      // Every tally is a floor while coverage is partial.
+      expect(byLabel.get("Up")?.value).toBe("300+");
+
+      // The cap is what stopped the sweep, not the mock running out of pages.
+      expect(fetchJsonMock).toHaveBeenCalledTimes(6);
+    });
+
+    it("keeps the monitors it did read when a later page fails, and admits the gap", async () => {
+      vi.stubEnv("UPTIMEROBOT_API_KEY", "u800100-testkey");
+      servePages(page(0, 60, upMonitors(0, 50)), jsonResponse(500, null));
+
+      const result = await probeFor("uptimerobot").probe();
+      expect(result.state).toBe("stale");
+      expect(result.error).toBe("partial_read");
+      expect(result.headline).toBe(
+        "50 of 50 checked monitors are up.  10 more were not checked."
+      );
+      expect(result.metrics.find((entry) => entry.label === "Up")?.value).toBe("50+");
+      expect(fetchJsonMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("stops paginating when the time budget is spent and does not claim healthy", async () => {
+      // Frozen clock, advanced explicitly by the mock, so the budget is
+      // exercised deterministically rather than against wall-clock timing.
+      vi.useFakeTimers();
+      const start = new Date("2026-08-11T12:00:00.000Z");
+      vi.setSystemTime(start);
+      vi.stubEnv("UPTIMEROBOT_API_KEY", "u800100-testkey");
+
+      const slowFirstPage = page(0, 1000, upMonitors(0, 50));
+      fetchJsonMock.mockImplementation(async () => {
+        // Burn nearly the whole 12s budget on page one.
+        vi.setSystemTime(new Date(start.getTime() + 11_500));
+        return slowFirstPage;
+      });
+
+      const result = await probeFor("uptimerobot").probe();
+      expect(result.state).toBe("stale");
+      expect(result.error).toBe("partial_read");
+      // One page only: too little budget remained to be worth another request.
+      expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 describe("pagerduty probe", () => {
@@ -440,5 +593,137 @@ describe("pagerduty probe", () => {
     const result = await probeFor("pagerduty").probe();
     expect(result.state).toBe("unreachable");
     expect(result.error).toBe("unreachable");
+  });
+
+  /**
+   * Regression: with `more: true`, a first page of purely acknowledged
+   * incidents used to render "healthy, zero triggered" even though a triggered
+   * incident could be sitting on the very next page.
+   */
+  describe("pagination", () => {
+    /** `count` acknowledged incidents, numbered from `start`. */
+    function acknowledgedIncidents(start: number, count: number) {
+      return Array.from({ length: count }, (_, index) => ({
+        id: `PACK${start + index}`,
+        status: "acknowledged",
+        urgency: "low",
+        created_at: "2026-08-11T08:00:00Z",
+        title: "Being worked",
+      }));
+    }
+
+    function page(offset: number, incidents: unknown[], more: boolean, total: number) {
+      return jsonResponse(200, { incidents, limit: 100, offset, more, total });
+    }
+
+    const triggeredIncident = {
+      id: "PT4KHLK",
+      status: "triggered",
+      urgency: "high",
+      created_at: "2026-08-11T09:30:00Z",
+      title: "Usage Monitor 5xx spike",
+    };
+
+    it("finds a triggered incident on a later page instead of reporting healthy", async () => {
+      // "Oldest Triggered" renders a relative age, so the clock is frozen.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-11T12:00:00.000Z"));
+      vi.stubEnv("PAGERDUTY_API_KEY", "pagerduty-fixture-token");
+      servePages(
+        page(0, acknowledgedIncidents(0, 100), true, 150),
+        page(100, [...acknowledgedIncidents(100, 49), triggeredIncident], false, 150)
+      );
+
+      const result = await probeFor("pagerduty").probe();
+      expect(result.state).toBe("degraded");
+      expect(result.state).not.toBe("healthy");
+      expect(result.headline).toBe("1 incident is triggered.  149 more are acknowledged.");
+      // Coverage completed, so the counts are exact and carry no "+".
+      expect(result.error).toBeUndefined();
+
+      const byLabel = new Map(result.metrics.map((entry) => [entry.label, entry]));
+      expect(byLabel.get("Triggered")?.value).toBe("1 incident");
+      expect(byLabel.get("Acknowledged")?.value).toBe("149 incidents");
+      expect(byLabel.get("Oldest Triggered")?.value).toBe("2h ago");
+      expect(JSON.stringify(result)).not.toContain("5xx spike");
+
+      expect(fetchJsonMock).toHaveBeenCalledTimes(2);
+      expect(String(fetchJsonMock.mock.calls[0][0])).toContain("offset=0");
+      expect(String(fetchJsonMock.mock.calls[1][0])).toContain("offset=100");
+      expect(String(fetchJsonMock.mock.calls[1][0])).toContain("limit=100");
+    });
+
+    it("reports exact counts once every page has been read", async () => {
+      vi.stubEnv("PAGERDUTY_API_KEY", "pagerduty-fixture-token");
+      servePages(
+        page(0, acknowledgedIncidents(0, 100), true, 120),
+        page(100, acknowledgedIncidents(100, 20), false, 120)
+      );
+
+      const result = await probeFor("pagerduty").probe();
+      expect(result.state).toBe("healthy");
+      expect(result.headline).toBe("No triggered incidents.  120 acknowledged and being worked.");
+      expect(result.error).toBeUndefined();
+      expect(result.metrics.find((entry) => entry.label === "Acknowledged")?.value).toBe(
+        "120 incidents"
+      );
+      // Nothing is hedged, and no coverage row is added, once coverage is whole.
+      expect(result.metrics.some((entry) => entry.label === "Coverage")).toBe(false);
+    });
+
+    it("reports stale rather than healthy when the page cap leaves incidents unread", async () => {
+      vi.stubEnv("PAGERDUTY_API_KEY", "pagerduty-fixture-token");
+      servePages(
+        ...Array.from({ length: 5 }, (_, index) =>
+          page(index * 100, acknowledgedIncidents(index * 100, 100), true, 5000)
+        )
+      );
+
+      const result = await probeFor("pagerduty").probe();
+      // Zero triggered across 500 of 5000 open incidents proves nothing.
+      expect(result.state).toBe("stale");
+      expect(result.state).not.toBe("healthy");
+      expect(result.error).toBe("partial_read");
+      expect(result.headline).toBe(
+        "No triggered incidents among the 500 checked.  4,500 more were not checked."
+      );
+
+      const byLabel = new Map(result.metrics.map((entry) => [entry.label, entry]));
+      expect(byLabel.get("Triggered")?.value).toBe("0 incidents");
+      expect(byLabel.get("Acknowledged")?.value).toBe("500 incidents+");
+      expect(byLabel.get("Coverage")?.value).toBe("500 read");
+      expect(byLabel.get("Coverage")?.hint).toBe("of 5,000 open");
+
+      // The cap stopped the sweep, not the mock running out of pages.
+      expect(fetchJsonMock).toHaveBeenCalledTimes(5);
+    });
+
+    it("keeps the incidents it did read when a later page fails, and admits the gap", async () => {
+      vi.stubEnv("PAGERDUTY_API_KEY", "pagerduty-fixture-token");
+      servePages(
+        page(0, acknowledgedIncidents(0, 100), true, 150),
+        jsonResponse(500, null)
+      );
+
+      const result = await probeFor("pagerduty").probe();
+      expect(result.state).toBe("stale");
+      expect(result.error).toBe("partial_read");
+      expect(result.headline).toBe(
+        "No triggered incidents among the 100 checked.  50 more were not checked."
+      );
+      expect(fetchJsonMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("surfaces a first-page rejection rather than an empty partial card", async () => {
+      vi.stubEnv("PAGERDUTY_API_KEY", "y_badkey");
+      servePages(jsonResponse(403, { error: { code: 2006 } }));
+
+      const result = await probeFor("pagerduty").probe();
+      expect(result.state).toBe("unavailable");
+      expect(result.error).toBe("unauthorized");
+      expect(result.metrics).toEqual([]);
+      // No point paginating past a rejected key.
+      expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+    });
   });
 });

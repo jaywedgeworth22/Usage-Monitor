@@ -271,7 +271,15 @@ const ASC_ISSUER_ENV = "ASC_ISSUER_ID";
 const ASC_KEY_ID_ENV = "ASC_KEY_ID";
 const ASC_PRIVATE_KEY_ENV = "ASC_PRIVATE_KEY";
 
-const ASC_BUILDS_URL = "https://api.appstoreconnect.apple.com/v1/builds?limit=5";
+/**
+ * `limit` alone would hand back an arbitrary partial page on an account with
+ * more than five builds, so a newest build that failed processing — the exact
+ * thing this card exists to surface — could fall outside the window entirely.
+ * `sort=-uploadedDate` makes the server pick the newest five; the spelling
+ * matches this repo's other App Store Connect caller, `scripts/asc-push-listing.rb`.
+ */
+const ASC_BUILDS_URL =
+  "https://api.appstoreconnect.apple.com/v1/builds?sort=-uploadedDate&limit=5";
 const ASC_AUDIENCE = "appstoreconnect-v1";
 /** Apple rejects anything over 20 minutes; a probe needs far less. */
 const ASC_TOKEN_LIFETIME_SECONDS = 600;
@@ -413,7 +421,11 @@ function ascBuilds(data: unknown): AscBuild[] {
     }));
 }
 
-/** Apple does not guarantee ordering, so pick the newest upload explicitly. */
+/**
+ * The request already asks Apple for newest-first, so this is the belt to that
+ * suspenders: a page that came back in another order still yields the newest
+ * upload rather than whichever row happened to land first.
+ */
 function newestBuild(builds: AscBuild[]): AscBuild | null {
   let newest: AscBuild | null = null;
   let newestMs = Number.NEGATIVE_INFINITY;

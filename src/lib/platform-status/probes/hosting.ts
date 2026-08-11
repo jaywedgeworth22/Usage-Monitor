@@ -19,6 +19,7 @@ import {
   envValue,
   failureResult,
   finiteNumber,
+  formatCount,
   hasEnv,
   metric,
   requestJson,
@@ -441,6 +442,23 @@ async function probeVercel(): Promise<PlatformProbeResult> {
 // Netlify
 // ---------------------------------------------------------------------------
 
+type NetlifyBucket = "published" | "failed" | "unpublished";
+
+/**
+ * Netlify exposes the deploy currently serving a site as `published_deploy`.
+ * Only a "ready" one is actually live: a site with no such record has never
+ * published, and any other state ("building", "enqueued", "canceled", …) means
+ * the site is not serving that deploy.  Both land in `unpublished` rather than
+ * in no bucket at all, so the three counts always add up to the site total and
+ * a site this monitor cannot vouch for keeps the card off "healthy".
+ */
+function classifyNetlifySite(site: Record<string, unknown>): NetlifyBucket {
+  const state = (readText(asRecord(site.published_deploy)?.state, 24) ?? "").toLowerCase();
+  if (state === "ready") return "published";
+  if (state === "error" || state === "failed") return "failed";
+  return "unpublished";
+}
+
 async function probeNetlify(): Promise<PlatformProbeResult> {
   const token = envValue("NETLIFY_API_TOKEN");
   if (!token) return missingCredentials("Netlify");
@@ -454,30 +472,44 @@ async function probeNetlify(): Promise<PlatformProbeResult> {
     }
     if (!Array.isArray(response.data)) return malformed("Netlify");
 
-    const failed: string[] = [];
-    let total = 0;
-    let published = 0;
+    const names: Record<NetlifyBucket, string[]> = {
+      published: [],
+      failed: [],
+      unpublished: [],
+    };
     for (const row of asArray(response.data).slice(0, MAX_ROWS)) {
       const site = asRecord(row);
       if (!site) continue;
-      total += 1;
-      const state = (readText(asRecord(site.published_deploy)?.state, 24) ?? "").toLowerCase();
-      if (state === "ready") published += 1;
-      else if (state === "error" || state === "failed") {
-        failed.push(displayName(site.name, "a site"));
-      }
+      names[classifyNetlifySite(site)].push(displayName(site.name, "a site"));
     }
 
+    const published = names.published.length;
+    const total = published + names.failed.length + names.unpublished.length;
     const metrics: PlatformMetric[] = [
       metric("Sites", count(total)),
       metric("Published", count(published)),
-      metric("Failed Builds", count(failed.length)),
+      metric("Failed Builds", count(names.failed.length)),
+      metric("Not Published", count(names.unpublished.length)),
     ];
 
-    if (failed.length > 0) {
+    // Worst state wins the second sentence, so the headline names the site the
+    // owner should look at first.
+    let problem: string | null = null;
+    if (names.failed.length > 0) {
+      problem = problemSentence(names.failed, "failed to build", "failed to build", "A site");
+    } else if (names.unpublished.length > 0) {
+      problem = problemSentence(
+        names.unpublished,
+        "has no published deploy",
+        "have no published deploy",
+        "A site"
+      );
+    }
+
+    if (problem) {
       return {
         state: "degraded",
-        headline: `${count(published)} of ${count(total)} Netlify sites have a published deploy.  ${problemSentence(failed, "failed to build", "failed to build", "A site")}`,
+        headline: `${count(published)} of ${count(total)} Netlify sites have a published deploy.  ${problem}`,
         metrics,
       };
     }
@@ -559,6 +591,18 @@ async function probeFly(): Promise<PlatformProbeResult> {
 // Railway
 // ---------------------------------------------------------------------------
 
+/**
+ * Inventory only, on purpose.
+ *
+ * A Railway service does not have one runtime state: it has one deployment per
+ * environment (production, staging, every PR environment), so "is this service
+ * running" has no single answer that one bounded query can return — and a
+ * nested per-service deployment connection across every project is exactly the
+ * kind of query Railway rejects for cost on a larger account.  Rather than
+ * guess, this probe reports what it can actually see — how many projects and
+ * services exist — and says plainly that deployment status is not part of it.
+ * A stopped or crashed service must never be summarized as running here.
+ */
 const RAILWAY_QUERY =
   "query { me { projects { edges { node { id name services { edges { node { id } } } } } } } }";
 
@@ -608,6 +652,7 @@ async function probeRailway(): Promise<PlatformProbeResult> {
     const metrics: PlatformMetric[] = [
       metric("Projects", count(projects)),
       metric("Services", count(services)),
+      metric("Deployment Status", "Not checked", "inventory only"),
     ];
 
     return {
@@ -615,7 +660,7 @@ async function probeRailway(): Promise<PlatformProbeResult> {
       headline:
         projects === 0
           ? "Railway has no projects on this account."
-          : `Railway reports ${count(projects)} projects running ${count(services)} services.`,
+          : `Railway lists ${formatCount(projects, "project")} with ${formatCount(services, "service")}.  Deployment status is not checked.`,
       metrics,
     };
   } catch (error) {

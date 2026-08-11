@@ -141,6 +141,80 @@ describe("platform-status messaging probes", () => {
       expect(result.headline).toContain("suspended.  Messages will not send");
     });
 
+    it("degrades when the balance lookup fails on an otherwise healthy account", async () => {
+      vi.stubEnv("TWILIO_ACCOUNT_SID", "ACfake-not-a-real-sid");
+      vi.stubEnv("TWILIO_AUTH_TOKEN", "twilio-auth-token-value");
+      routeByUrl([
+        [/\/Balance\.json$/, response(500, { message: "Service unavailable" })],
+        [/\/Accounts\/AC[\w-]+\.json$/, response(200, { status: "active", type: "Full" })],
+      ]);
+
+      const result = await probeFor("twilio").probe();
+
+      // A failed request is not evidence of a healthy account: reporting this
+      // as healthy would show depleted prepaid credit as green.
+      expect(result.state).toBe("degraded");
+      expect(result.error).toBe("balance_unavailable");
+      expect(result.headline).toBe(
+        "Twilio is active.  The balance could not be read, so a low prepaid balance would go unnoticed."
+      );
+      expect(result.metrics).toContainEqual({
+        label: "Balance",
+        value: "Unavailable",
+        hint: "balance lookup failed",
+      });
+    });
+
+    it("degrades when only the balance request fails in transport", async () => {
+      vi.stubEnv("TWILIO_ACCOUNT_SID", "ACfake-not-a-real-sid");
+      vi.stubEnv("TWILIO_AUTH_TOKEN", "twilio-auth-token-value");
+      fetchJsonMock.mockImplementation(async (url: string) => {
+        if (/\/Balance\.json$/.test(url)) throw new Error("socket hang up");
+        return response(200, { status: "active", type: "Full" });
+      });
+
+      const result = await probeFor("twilio").probe();
+
+      // The account answered, so the card degrades rather than declaring the
+      // whole platform unreachable.
+      expect(result.state).toBe("degraded");
+      expect(result.error).toBe("balance_unavailable");
+    });
+
+    it("keeps the suspended-account verdict when the balance also fails", async () => {
+      vi.stubEnv("TWILIO_ACCOUNT_SID", "ACfake-not-a-real-sid");
+      vi.stubEnv("TWILIO_AUTH_TOKEN", "twilio-auth-token-value");
+      routeByUrl([
+        [/\/Balance\.json$/, response(503, {})],
+        [/\/Accounts\/AC[\w-]+\.json$/, response(200, { status: "suspended", type: "Full" })],
+      ]);
+
+      const result = await probeFor("twilio").probe();
+
+      expect(result.state).toBe("degraded");
+      expect(result.error).toBe("account_not_active");
+    });
+
+    it("stays healthy when Twilio answers with no balance for the account", async () => {
+      vi.stubEnv("TWILIO_ACCOUNT_SID", "ACfake-not-a-real-sid");
+      vi.stubEnv("TWILIO_AUTH_TOKEN", "twilio-auth-token-value");
+      routeByUrl([
+        // A 200 with no balance field is the genuine "not reported" case, and
+        // it must stay distinguishable from a request that never answered.
+        [/\/Balance\.json$/, response(200, { account_sid: "ACfake-not-a-real-sid" })],
+        [/\/Accounts\/AC[\w-]+\.json$/, response(200, { status: "active", type: "Trial" })],
+      ]);
+
+      const result = await probeFor("twilio").probe();
+
+      expect(result.state).toBe("healthy");
+      expect(result.error).toBeUndefined();
+      expect(result.headline).toBe(
+        "Twilio is active.  Balance is not reported for this account."
+      );
+      expect(result.metrics).toContainEqual({ label: "Balance", value: "Unavailable" });
+    });
+
     it("maps a rejected account lookup to unavailable", async () => {
       vi.stubEnv("TWILIO_ACCOUNT_SID", "ACfake-not-a-real-sid");
       vi.stubEnv("TWILIO_AUTH_TOKEN", "twilio-auth-token-value");

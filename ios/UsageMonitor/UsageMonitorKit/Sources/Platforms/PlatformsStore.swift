@@ -70,15 +70,48 @@ public final class PlatformsStore {
 
     /// Every configured platform plus fleet app currently needing attention.
     /// This is what the tab badge and the top summary line count.
+    ///
+    /// A fleet app counts when it is anything other than cleanly running —
+    /// down ("exited", "stopped", "restarting"), degraded ("running:unhealthy")
+    /// or un-verifiable ("running:unknown").  Counting only "unknown" let the
+    /// header announce "All Systems Normal" while the Fleet Apps section
+    /// directly below it listed a stopped application.
     public var attentionCount: Int {
         let platformIssues = platformState.value?.attentionPlatforms.count ?? 0
         let hostIssues = hostState.value.map { metrics -> Int in
             var count = 0
             if metrics.prevention?.overall == "critical" { count += 1 }
-            count += metrics.resources.filter { $0.status.lowercased().contains("unknown") }.count
+            count += metrics.resources.filter {
+                PlatformsStore.resourceNeedsAttention($0.status)
+            }.count
             return count
         } ?? 0
         return platformIssues + hostIssues
+    }
+
+    /// Whether one Coolify resource status is anything other than cleanly running.
+    ///
+    /// Coolify reports `"<state>"` or `"<state>:<health>"` — "running:healthy",
+    /// "running:unknown", "exited", "restarting:starting".  This splits on the
+    /// colon instead of substring-matching, because "running:unhealthy"
+    /// *contains* "healthy": substring checks silently score a degraded app as
+    /// fine.  A bare "running" (what Coolify databases report, having no
+    /// container healthcheck) is accepted; every other shape, including an
+    /// unrecognised one, is something a human should look at.
+    ///
+    /// Mirrors `classifyCoolifyStatus` in
+    /// `src/lib/platform-status/probes/hosting.ts` so the tab badge and the web
+    /// hosting card agree on what "down" means.
+    nonisolated static func resourceNeedsAttention(_ rawStatus: String) -> Bool {
+        let parts = rawStatus.lowercased().split(
+            separator: ":",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        let state = parts.first?.trimmingCharacters(in: .whitespaces) ?? ""
+        let health = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : ""
+        guard state == "running" else { return true }
+        return !(health.isEmpty || health == "healthy")
     }
 
     private func fetchAll(using client: APIClient) async {

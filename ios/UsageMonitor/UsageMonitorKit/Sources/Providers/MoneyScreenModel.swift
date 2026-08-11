@@ -10,39 +10,81 @@ import Observation
 // the money math (what counts toward the recurring total, what reads as "not
 // budgeted", how a renewal date is worded) is unit-testable without SwiftUI.
 //
-// Source of truth is `GET /api/subscriptions` — one bearer-readable list that
-// already carries the provider reference, the monthly-equivalent cost, and the
-// next renewal timestamp per row.  There is deliberately NO `/api/providers`
-// call here: that route is dashboard-session-only, and everything this screen
-// needs is already on the subscription payload.  Adding it would gate a
-// bearer-reachable money view behind a password for no new information.
+// TWO sources, because the monitor has two equally valid ways to model a
+// recurring fee and a total that reads only one of them is wrong:
+//
+//   1. `GET /api/subscriptions` — bearer-readable.  Tracked plans, each already
+//      carrying its provider reference, monthly-equivalent cost, and next
+//      renewal timestamp.
+//   2. `GET /api/providers?view=dashboard` — dashboard-session-only.  Carries
+//      `ProviderPlan.fixedMonthlyCostUsd`, a recurring fee recorded straight on
+//      the provider instead of as a Subscription.  The web Money page reads
+//      both for exactly this reason (`src/components/MoneyPageClient.tsx`).
+//
+// The two loads are INDEPENDENT.  A read-token-only user still gets the whole
+// subscription half; the session-only half degrades to the established "Full
+// Dashboard Access Required → Open Settings" affordance, and the screen says
+// out loud that plan-level fees are missing rather than quietly understating
+// the total.
+//
+// Double-counting is prevented the same way `src/lib/billing-inventory.ts`
+// does it: a provider's plan-level fee is a FALLBACK, dropped entirely once
+// that provider has an active tracked subscription.
 // ---------------------------------------------------------------------------
 
-/// Owns the Money screen's single read (`GET /api/subscriptions`, bearer- or
-/// dashboard-session-authorized).
+/// Owns the Money screen's two reads and keeps their failure modes separate.
 ///
-/// Follows `Settings/HostUsageStore` exactly: the probe is injectable so tests
-/// and previews never touch the network, the client is passed per call (a host
-/// switch just passes the rebuilt client), and a failed *refresh* keeps the
-/// previously loaded rows rather than replacing good money data with an error.
+/// Follows `Settings/HostUsageStore` for the bearer half (injectable probe, the
+/// client passed per call, a failed *refresh* keeping the previously loaded
+/// rows) and `Dashboard/IntelligenceStore` for the session-only half (a 401 is
+/// a capability gap that sets ``providersRequireSession``, never an error
+/// screen).
 @MainActor
 @Observable
 final class MoneyStore {
+    /// The bearer-reachable half.  Its failure is the only one allowed to take
+    /// over the whole screen.
     private(set) var state: LoadState<[SubscriptionSummary]> = .idle
 
+    /// The session-only half.  Its failure only ever costs plan-level fees.
+    private(set) var providerState: LoadState<[ProviderManagementItem]> = .idle
+
+    /// Set when `/api/providers` was refused for want of a dashboard session.
+    private(set) var providersRequireSession = false
+
     private let probe: @Sendable (APIClient) async throws -> [SubscriptionSummary]
+    private let providerProbe: @Sendable (APIClient) async throws -> [ProviderManagementItem]
 
     init(
         probe: @escaping @Sendable (APIClient) async throws -> [SubscriptionSummary] =
-            MoneyStore.liveProbe
+            MoneyStore.liveProbe,
+        providerProbe: @escaping @Sendable (APIClient) async throws -> [ProviderManagementItem] =
+            MoneyStore.liveProviderProbe
     ) {
         self.probe = probe
+        self.providerProbe = providerProbe
+    }
+
+    /// How much of the plan-level fee story made it into the total.
+    var planFeeCoverage: MoneyViewData.PlanFeeCoverage {
+        if providersRequireSession { return .requiresSession }
+        if let error = providerState.error { return .unavailable(error) }
+        if providerState.value == nil { return .pending }
+        return .included
     }
 
     /// The rendered view data, recomputed from the loaded rows. `nil` until the
-    /// first successful load, which is what drives skeleton vs. content.
+    /// first successful *subscription* load, which is what drives skeleton vs.
+    /// content — the provider half never gates the money view.
     func viewData(now: Date = Date()) -> MoneyViewData? {
-        state.value.map { MoneyViewData(subscriptions: $0, now: now) }
+        state.value.map {
+            MoneyViewData(
+                subscriptions: $0,
+                providers: providerState.value ?? [],
+                planFeeCoverage: planFeeCoverage,
+                now: now
+            )
+        }
     }
 
     func loadIfNeeded(using client: APIClient) async {
@@ -51,6 +93,7 @@ final class MoneyStore {
 
     func load(using client: APIClient) async {
         if state.value == nil { state = .loading }
+        if providerState.value == nil, !providersRequireSession { providerState = .loading }
         await fetch(using: client)
     }
 
@@ -60,15 +103,37 @@ final class MoneyStore {
 
     func reset() {
         state = .idle
+        providerState = .idle
+        providersRequireSession = false
     }
 
+    /// Both reads run concurrently and neither can fail the other: a 401 on the
+    /// session-only provider route must not touch the subscription rows a read
+    /// token legitimately fetched.
     private func fetch(using client: APIClient) async {
+        async let subscriptionTask: Void = fetchSubscriptions(using: client)
+        async let providerTask: Void = fetchProviders(using: client)
+        _ = await (subscriptionTask, providerTask)
+    }
+
+    private func fetchSubscriptions(using client: APIClient) async {
         do {
             state = .loaded(try await probe(client))
         } catch let error as APIError {
             handle(error)
         } catch {
             handle(.transport(error.localizedDescription))
+        }
+    }
+
+    private func fetchProviders(using client: APIClient) async {
+        do {
+            providerState = .loaded(try await providerProbe(client))
+            providersRequireSession = false
+        } catch let error as APIError {
+            handleProvider(error)
+        } catch {
+            handleProvider(.transport(error.localizedDescription))
         }
     }
 
@@ -80,10 +145,28 @@ final class MoneyStore {
         }
     }
 
+    /// No dashboard session is a missing capability with an obvious next step,
+    /// not a failure: keep the state neutral so the screen offers Settings.
+    private func handleProvider(_ error: APIError) {
+        if case .unauthorized = error {
+            providersRequireSession = true
+            providerState = .idle
+            return
+        }
+        if providerState.value == nil {
+            providerState = .failed(error)
+        }
+    }
+
     nonisolated static let liveProbe: @Sendable (APIClient) async throws -> [SubscriptionSummary] = {
         client in
         try await client.subscriptions()
     }
+
+    nonisolated static let liveProviderProbe:
+        @Sendable (APIClient) async throws -> [ProviderManagementItem] = { client in
+            try await client.providerInventory()
+        }
 }
 
 // ---------------------------------------------------------------------------
@@ -91,17 +174,44 @@ final class MoneyStore {
 // ---------------------------------------------------------------------------
 
 /// Everything the Money screen renders, derived once from the subscription
-/// list plus a caller-supplied `now` (injected rather than read from the clock
-/// so renewal wording is deterministic in tests).
+/// list, the provider inventory, and a caller-supplied `now` (injected rather
+/// than read from the clock so renewal wording is deterministic in tests).
 struct MoneyViewData: Equatable {
+    /// How much of the plan-level fee story reached the headline total.
+    ///
+    /// Anything other than ``included`` means the figure on screen may be low,
+    /// and the screen is required to say so — a silently understated recurring
+    /// total is the one failure this screen exists to prevent.
+    enum PlanFeeCoverage: Equatable {
+        /// The provider inventory loaded; plan-level fees are in the total.
+        case included
+        /// `/api/providers` is still in flight.
+        case pending
+        /// No dashboard session, so the session-only provider read was refused.
+        case requiresSession
+        /// The provider read failed for a non-auth reason.
+        case unavailable(APIError)
+    }
+
     /// One paid service.
     struct Row: Identifiable, Equatable {
+        /// Which of the monitor's two recurring-cost models produced this row.
+        /// Both are legitimate; only one of them can ever be counted per
+        /// provider (see ``MoneyViewData/init(subscriptions:providers:planFeeCoverage:now:calendar:)``).
+        enum Origin: Equatable {
+            /// A tracked `Subscription` row.
+            case subscription
+            /// `ProviderPlan.fixedMonthlyCostUsd` recorded on the provider.
+            case providerPlan
+        }
+
         let id: String
         let name: String
         let providerID: String
         let providerTitle: String
         let projectName: String?
         let cadence: String
+        let origin: Origin
         /// `true` only when the monitor actually has a recurring price on file.
         /// A row with nothing recorded must never render as "$0" — see
         /// ``monthlyLine``.
@@ -136,7 +246,14 @@ struct MoneyViewData: Equatable {
         }
 
         var accessibilityLabel: String {
-            "\(name), \(providerTitle), \(monthlyLine) \(monthlySecondary), \(renewalLine)"
+            let base = "\(name), \(providerTitle), \(monthlyLine) \(monthlySecondary), \(renewalLine)"
+            return origin == .providerPlan ? "\(base), provider plan fee" : base
+        }
+
+        /// Shown under a plan-fee row so it can never be mistaken for a tracked
+        /// subscription — they are edited in different places.
+        var originNote: String? {
+            origin == .providerPlan ? "From the provider's plan settings" : nil
         }
     }
 
@@ -182,6 +299,8 @@ struct MoneyViewData: Equatable {
     let hasBudgetedActive: Bool
     /// The soonest upcoming renewal among active rows.
     let nextRenewal: Row?
+    /// Whether plan-level provider fees made it into the numbers above.
+    let planFeeCoverage: PlanFeeCoverage
 
     var isEmpty: Bool {
         billingGroups.isEmpty && considering.isEmpty && inactive.isEmpty
@@ -206,13 +325,65 @@ struct MoneyViewData: Equatable {
         return parts.joined(separator: " · ")
     }
 
-    init(subscriptions: [SubscriptionSummary], now: Date = Date(), calendar: Calendar = .current) {
-        let rows = subscriptions.map { Row(subscription: $0, now: now, calendar: calendar) }
+    /// The plain statement that the headline figure is incomplete, `nil` when
+    /// it is not.  Never softened: an understated recurring total that does not
+    /// admit it is worse than no total at all.
+    var planFeeCaveat: String? {
+        switch planFeeCoverage {
+        case .included:
+            return nil
+        case .pending:
+            return "Checking provider plans for fixed monthly fees…"
+        case .requiresSession:
+            return "Plan-level provider fees are not included without a dashboard session, so this total may be low."
+        case .unavailable:
+            return "Provider plans could not be loaded, so any plan-level fee is missing from this total."
+        }
+    }
+
+    /// Whether the screen should offer the dashboard sign-in affordance.
+    var needsDashboardSessionForPlanFees: Bool {
+        planFeeCoverage == .requiresSession
+    }
+
+    /// - Parameters:
+    ///   - subscriptions: `GET /api/subscriptions` (bearer-reachable).
+    ///   - providers: `GET /api/providers?view=dashboard` (session-only), empty
+    ///     when that read was refused or has not landed yet.
+    ///   - planFeeCoverage: what happened to the provider read, so the total can
+    ///     admit when it is incomplete.
+    init(
+        subscriptions: [SubscriptionSummary],
+        providers: [ProviderManagementItem] = [],
+        planFeeCoverage: PlanFeeCoverage = .included,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) {
+        self.planFeeCoverage = planFeeCoverage
+        let subscriptionRows = subscriptions.map { Row(subscription: $0, now: now, calendar: calendar) }
+
+        // Double-count guard, mirroring `buildBillingInventory` in
+        // `src/lib/billing-inventory.ts` (and `planFixedInCashUsd` in
+        // `src/lib/budget-status.ts`): a provider's plan-level fee is a
+        // FALLBACK.  Once that provider bills through an active tracked
+        // subscription, the plan fee is the same money modelled twice and is
+        // dropped outright — not halved, not listed separately.  Non-active
+        // subscriptions (considering / paused / canceled / expired) are not
+        // billing, so they do not suppress it.
+        let providersBilledBySubscription = Set(
+            subscriptionRows.filter { $0.effectiveStatus == "active" }.map(\.providerID)
+        )
+        let planRows = providers.compactMap { provider -> Row? in
+            guard !providersBilledBySubscription.contains(provider.id) else { return nil }
+            return Row(providerPlan: provider, now: now, calendar: calendar)
+        }
+
+        let rows = subscriptionRows + planRows
         let byBucket = Dictionary(grouping: rows) { MoneyViewData.bucket(for: $0) }
         let activeRows = byBucket[.active] ?? []
 
-        // Group active services by the provider carried on the payload — no
-        // session-only provider lookup needed.
+        // Group active services by provider, so a plan-level fee lands in the
+        // same card as that provider's other services.
         var grouped: [String: [Row]] = [:]
         for row in activeRows { grouped[row.providerID, default: []].append(row) }
 
@@ -299,6 +470,7 @@ extension MoneyViewData.Row {
         providerTitle = subscription.provider.title
         projectName = subscription.project?.name
         cadence = subscription.cadenceLabel
+        origin = .subscription
         isBudgeted = budgeted
         countsTowardTotal = active && isUsd
         monthlyEquivalentUsd = isUsd ? subscription.monthlyEquivalentUsd : 0
@@ -327,6 +499,64 @@ extension MoneyViewData.Row {
         status = MoneyFormat.status(subscription.effectiveStatus)
         effectiveStatus = subscription.effectiveStatus
         billingSource = subscription.externalBillingSource.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// A recurring fee recorded as `ProviderPlan.fixedMonthlyCostUsd` instead of
+    /// as a Subscription.  The field is a *monthly* figure by definition, so it
+    /// needs no cadence conversion — the web fallback item sets exactly the same
+    /// `monthlyEquivalentUsd` (`src/lib/billing-inventory.ts`).
+    ///
+    /// Returns `nil` when the provider records neither a fee nor a renewal date:
+    /// there is no money story to tell, and listing every connected provider
+    /// would bury the ones that actually charge.
+    init?(providerPlan provider: ProviderManagementItem, now: Date, calendar: Calendar) {
+        let fee = provider.plan?.fixedMonthlyCostUsd
+        let renewal = provider.plan?.renewalDate.flatMap(MoneyFormat.planRenewalDate)
+        guard fee != nil || renewal != nil else { return nil }
+
+        // Same honesty rule as a subscription: a plan carrying a renewal date
+        // but no recorded price is unbudgeted, never "$0".
+        let budgeted = (fee ?? 0) > 0.005
+        // An inactive provider is not billing, so it buckets out of the total
+        // exactly as the web fallback item's "inactive" status does.
+        let planStatus = provider.isActive ? "active" : "inactive"
+
+        id = "provider-plan:\(provider.id)"
+        name = MoneyFormat.planRowName(for: provider)
+        providerID = provider.id
+        providerTitle = provider.title
+        projectName = nil
+        cadence = budgeted ? "monthly" : "plan renewal"
+        origin = .providerPlan
+        isBudgeted = budgeted
+        // `fixedMonthlyCostUsd` is USD by definition, so the USD-only test the
+        // subscription rows apply is already satisfied.
+        countsTowardTotal = provider.isActive
+        monthlyEquivalentUsd = budgeted ? (fee ?? 0) : 0
+        currency = "USD"
+
+        if budgeted {
+            monthlyLine = CurrencyFormat.usd(fee ?? 0)
+            monthlySecondary = "per month"
+            priceLine = "\(CurrencyFormat.usd(fee ?? 0)) · monthly plan fee"
+        } else {
+            monthlyLine = "Not budgeted"
+            monthlySecondary = "no plan fee recorded"
+            priceLine = "No plan fee on file"
+        }
+
+        renewalDate = renewal
+        renewalLine = MoneyFormat.renewalLine(
+            date: renewal,
+            autoRenew: renewal != nil,
+            effectiveStatus: planStatus,
+            now: now,
+            calendar: calendar
+        )
+        statusLabel = MoneyFormat.statusLabel(planStatus)
+        status = MoneyFormat.status(planStatus)
+        effectiveStatus = planStatus
+        billingSource = nil
     }
 }
 
@@ -369,6 +599,9 @@ enum MoneyFormat {
         switch effectiveStatus {
         case "active": lead = autoRenew ? "Renews \(day)" : "Term ends \(day)"
         case "considering": lead = "Would renew \(day)"
+        // Only a deactivated provider's plan row reaches this: the date is on
+        // file but the monitor is not billing it, so it claims no charge.
+        case "inactive": lead = "Plan renewal \(day)"
         default: lead = "Paid through \(day)"
         }
         return "\(lead) · \(relative)"
@@ -390,6 +623,32 @@ enum MoneyFormat {
         default: return "\(abs(days)) days ago"
         }
     }
+
+    /// A provider plan's row name.  The account label wins when the owner set
+    /// one (two Anthropic connections must not both read "Anthropic plan"),
+    /// mirroring the web fallback item's `provider.label || "<display> plan"`.
+    static func planRowName(for provider: ProviderManagementItem) -> String {
+        let label = provider.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return label.isEmpty ? "\(provider.title) plan" : label
+    }
+
+    /// Provider plan renewal dates arrive either as a full ISO timestamp or as
+    /// a bare `yyyy-MM-dd` calendar day — the native plan editor submits the
+    /// latter (`Settings/ProviderManagementInventory.swift`).
+    static func planRenewalDate(_ raw: String) -> Date? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return ISO8601DateParser.date(from: trimmed) ?? planDayFormatter.date(from: trimmed)
+    }
+
+    private static let planDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 
     /// Chip text → Title Case.
     static func statusLabel(_ effectiveStatus: String) -> String {
