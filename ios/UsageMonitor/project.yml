@@ -55,6 +55,8 @@ targets:
     platform: iOS
     sources:
       - path: App
+      - path: App/Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     settings:
       base:
         PRODUCT_NAME: UsageMonitor
@@ -109,6 +111,8 @@ targets:
     platform: iOS
     sources:
       - path: LocalApp
+      - path: LocalApp/Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     settings:
       base:
         # Distinct product name + bundle ID so Xcode never overwrites the remote client.
@@ -151,6 +155,8 @@ targets:
     platform: iOS
     sources:
       - path: UsageMonitorWidget
+      - path: UsageMonitorWidget/PrivacyInfo.xcprivacy
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: services.jays.usage.client.monitor.widget
