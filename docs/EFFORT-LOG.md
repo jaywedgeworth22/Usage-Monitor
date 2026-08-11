@@ -17,6 +17,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **[Usage-Monitor][GROK] Local Invalid Binary fix (App Groups profiles + PrivacyInfo + re-ship) — PR #1090 2026-08-11.** Portal profiles regenerated (groups fixed); PrivacyInfo shipped; TF VALID. **App Store review still Invalid Binary** — host is macOS 27 beta (`BuildMachineOSBuild=26A5353q`); owner must rebuild on stable macOS/Xcode Cloud. Rollout note in repo.
 - **[2026-08-10][GROK] Fleet backup locations (B2 dumps + Litestream per UM/ST/CT) on server-metrics + Operations + iOS Host Usage — IN PR.**
 - **[Usage-Monitor][GROK] Default light theme — IN PROGRESS 2026-08-10 (branch `grok/default-light-theme`).** Web+iOS light default.
 - **[Usage-Monitor][GROK] ST OOM + Coolify/ST ops visibility — IN PROGRESS 2026-08-10 (branch `grok/st-ops-fleet-visibility`).** Full ST health + Coolify fleet Operations card; host OOM/backup ops. Rollout: `docs/rollouts/2026-08-10-st-oom-and-fleet-ops-visibility.md`.
