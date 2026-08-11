@@ -15,6 +15,11 @@ struct LocalUsageMonitorApp: App {
                 LocalRootView(settings: settings)
             }
             .preferredColorScheme(settings.theme.colorScheme)
+            // Designed-for-iPhone Mac: force a usable desktop window; some TF
+            // installs opened with a zero-sized or unresponsive chrome when
+            // the scene had no preferred size.
+            .frame(minWidth: 420, minHeight: 640)
         }
+        .defaultSize(width: 480, height: 860)
     }
 }

@@ -100,10 +100,24 @@ export async function resolveOpenRouterProbeKey(): Promise<string | null> {
 }
 
 type KeyLike = {
+  name?: string | null;
+  label?: string | null;
   disabled?: boolean;
   limitUsd?: number | null;
   limitRemainingUsd?: number | null;
 };
+
+function isIgnoredKeyLabel(labelOrName?: string | null): boolean {
+  if (!labelOrName) return false;
+  const lower = labelOrName.toLowerCase();
+  return (
+    lower.includes("onboarding") ||
+    lower.includes("test") ||
+    lower.includes("demo") ||
+    lower.includes("temp") ||
+    lower.includes("sample")
+  );
+}
 
 function evaluateKeys(
   keys: KeyLike[],
@@ -121,7 +135,8 @@ function evaluateKeys(
 
   for (const k of keys) {
     if (k.disabled) continue;
-    if (k.limitUsd == null && k.limitRemainingUsd == null) continue;
+    if (isIgnoredKeyLabel(k.label) || isIgnoredKeyLabel(k.name)) continue;
+    if (k.limitUsd == null || k.limitUsd <= 0) continue;
     if (k.limitRemainingUsd == null) continue;
     keysWithLimit += 1;
     const rem = k.limitRemainingUsd;

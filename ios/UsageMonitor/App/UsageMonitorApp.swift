@@ -100,13 +100,15 @@ struct UsageMonitorApp: App {
             .onChange(of: environment.settings.baseHost) { _, _ in
                 Task { await activateCurrentAccountScope() }
             }
+            .frame(minWidth: 420, minHeight: 640)
         }
+        .defaultSize(width: 480, height: 860)
         .onChange(of: scenePhase) { _, phase in
             Task {
                 await activateCurrentAccountScope()
             }
             // Queue the next background budget refresh when leaving foreground.
-            if phase == .background {
+            if phase == .background, PlatformRuntime.supportsBackgroundAppRefresh {
                 BackgroundRefreshManager.shared.schedule()
             }
         }
@@ -155,20 +157,25 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // the Lock Screen: every refresh diffs the alert set and posts a local
         // notification for newly-crossed thresholds (gated on the user's
         // "Budget alerts" toggle + minimum severity, deduped across runs).
-        BackgroundRefreshManager.shared.configure(
-            // Honour Settings host override (same UserDefaults key as AppSettings).
-            makeClient: {
-                let host = UserDefaults.standard.string(forKey: "settings.baseHost") ?? ""
-                let configuration =
-                    APIConfiguration.fromUserInput(host) ?? .production
-                return APIClient(
-                    configuration: configuration,
-                    tokenStore: KeychainTokenStore()
-                )
-            },
-            alertNotifier: { items in await AlertNotifier.deliver(for: items) }
-        )
-        BackgroundRefreshManager.shared.register()
+        // iOS-on-Mac: skip BGTask registration. Designed-for-iPhone Mac installs
+        // do not get reliable BGAppRefresh and registration has been observed to
+        // fail launch (open error -10671 / immediate exit) with minOS 26 + beta hosts.
+        if PlatformRuntime.supportsBackgroundAppRefresh {
+            BackgroundRefreshManager.shared.configure(
+                // Honour Settings host override (same UserDefaults key as AppSettings).
+                makeClient: {
+                    let host = UserDefaults.standard.string(forKey: "settings.baseHost") ?? ""
+                    let configuration =
+                        APIConfiguration.fromUserInput(host) ?? .production
+                    return APIClient(
+                        configuration: configuration,
+                        tokenStore: KeychainTokenStore()
+                    )
+                },
+                alertNotifier: { items in await AlertNotifier.deliver(for: items) }
+            )
+            BackgroundRefreshManager.shared.register()
+        }
 
         // Notification tap routing: install the UN delegate and the alert
         // category before any launch-time tap is delivered.
