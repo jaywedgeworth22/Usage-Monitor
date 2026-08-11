@@ -1,3 +1,4 @@
+import type { FleetBackupStatusPayload } from "@/lib/fleet-backup-status";
 import type { R2FleetSummary } from "@/lib/r2-usage";
 
 const SOCRATIC_HEALTH_URL = "https://socratictrade.com/api/health";
@@ -105,6 +106,8 @@ export interface OperationsHealthSummary {
   socraticInfrastructure: SocraticInfrastructureSummary;
   coolifyFleet: CoolifyFleetSummary;
   r2Fleet: R2FleetSummary | null;
+  /** Per-app / per-location off-site backup status (B2 dumps, Litestream, local). */
+  fleetBackups: FleetBackupStatusPayload | null;
   fetchedAt: string;
 }
 
@@ -639,20 +642,27 @@ export async function fetchOperationsHealth(): Promise<OperationsHealthSummary> 
   if (operationsInFlight) return operationsInFlight;
   operationsInFlight = (async () => {
     const { fetchR2FleetSummary } = await import("@/lib/r2-usage");
-    const [receiptInbox, socraticInfrastructure, coolifyFleet, r2Fleet] = await Promise.all([
-      fetchReceiptInboxSummary(),
-      fetchSocraticInfrastructureSummary(),
-      fetchCoolifyFleetSummary(),
-      fetchR2FleetSummary().catch((error) => {
-        console.error("[operations] R2 fleet summary failed:", error);
-        return null;
-      }),
-    ]);
-    const value = {
+    const { fetchFleetBackupStatus } = await import("@/lib/fleet-backup-status");
+    const [receiptInbox, socraticInfrastructure, coolifyFleet, r2Fleet, fleetBackups] =
+      await Promise.all([
+        fetchReceiptInboxSummary(),
+        fetchSocraticInfrastructureSummary(),
+        fetchCoolifyFleetSummary(),
+        fetchR2FleetSummary().catch((error) => {
+          console.error("[operations] R2 fleet summary failed:", error);
+          return null;
+        }),
+        fetchFleetBackupStatus().catch((error) => {
+          console.error("[operations] fleet backup status failed:", error);
+          return null;
+        }),
+      ]);
+    const value: OperationsHealthSummary = {
       receiptInbox,
       socraticInfrastructure,
       coolifyFleet,
       r2Fleet,
+      fleetBackups,
       fetchedAt: new Date().toISOString(),
     };
     operationsCache = { expiresAt: Date.now() + OPERATIONS_CACHE_TTL_MS, value };

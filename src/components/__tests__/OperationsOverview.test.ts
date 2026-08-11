@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   CoolifyFleetCard,
+  FleetBackupsCard,
   markOperationsStale,
   ReceiptInboxCard,
   R2FleetCard,
@@ -222,12 +223,40 @@ describe("OperationsOverview cards", () => {
         fetchedAt: "2026-07-18T10:00:00.000Z",
         localBackup: { autoDisabled: false, litestreamUsesR2: true },
       },
+      fleetBackups: {
+        configured: true,
+        ok: true,
+        asOf: "2026-07-18T10:00:00.000Z",
+        cacheAgeSeconds: 0,
+        apps: [
+          {
+            id: "usage-monitor",
+            label: "Usage Monitor",
+            self: true,
+            ok: true,
+            locations: [
+              {
+                id: "b2-full-dump",
+                label: "B2 Full Dump",
+                ok: true,
+                present: true,
+                latestAgeSeconds: 120,
+                bytes: 1_000_000,
+                fileCount: 2,
+                reason: null,
+              },
+            ],
+          },
+        ],
+        warnings: [],
+      },
     });
     expect(stale.receiptInbox.state).toBe("stale");
     expect(stale.socraticInfrastructure.state).toBe("stale");
     expect(stale.coolifyFleet.state).toBe("stale");
     expect(stale.receiptInbox.error).toBe("dashboard_refresh_failed");
     expect(stale.r2Fleet?.configured).toBe(false);
+    expect(stale.fleetBackups?.ok).toBe(false);
   });
 
   it("renders the fleet R2 card for three apps", () => {

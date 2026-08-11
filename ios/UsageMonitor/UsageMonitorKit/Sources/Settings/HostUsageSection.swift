@@ -144,7 +144,7 @@ struct HostUsageSection: View {
             .accessibilityAddTraits(.isHeader)
 
         if let selfApp = metrics.selfResources.first {
-            LabeledContent(selfApp.name) {
+            LabeledContent(selfApp.fleetLabel ?? selfApp.name) {
                 StatusBadge(
                     resourceLabel(selfApp.status),
                     status: resourceStatus(selfApp.status),
@@ -171,7 +171,38 @@ struct HostUsageSection: View {
             }
         }
 
-        // All apps on the host
+        // Fleet backups (summary + open detail for ST / CT / UM locations)
+        if let fleet = metrics.fleetBackups, !fleet.apps.isEmpty {
+            Text("Fleet Backups")
+                .font(Theme.Typography.captionEmphasis)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 2, trailing: 20))
+                .accessibilityAddTraits(.isHeader)
+
+            ForEach(fleet.apps) { app in
+                LabeledContent(app.label) {
+                    StatusBadge(
+                        app.ok == false ? "Lagging" : "OK",
+                        status: app.ok == false ? .warning : .ok,
+                        systemImage: app.ok == false ? "exclamationmark" : "checkmark"
+                    )
+                }
+                if let summary = appBackupSummary(app) {
+                    Text(summary)
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+
+            NavigationLink {
+                FleetBackupDetailView(fleet: fleet)
+            } label: {
+                Label("Open Backup Locations", systemImage: "externaldrive.badge.timemachine")
+                    .font(Theme.Typography.caption.weight(.semibold))
+            }
+        }
+
+        // All apps on the host (runtime status + linked backup flag when known)
         let others = metrics.resources.filter { !$0.selfApp }
         if !others.isEmpty {
             Text("All Apps On Host")
@@ -181,17 +212,32 @@ struct HostUsageSection: View {
                 .accessibilityAddTraits(.isHeader)
 
             ForEach(others) { resource in
-                LabeledContent(resource.name) {
-                    StatusBadge(
-                        resourceLabel(resource.status),
-                        status: resourceStatus(resource.status),
-                        systemImage: resourceStatus(resource.status) == .ok
-                            ? "checkmark"
-                            : "exclamationmark"
-                    )
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                    LabeledContent(resource.fleetLabel ?? resource.name) {
+                        StatusBadge(
+                            resourceLabel(resource.status),
+                            status: resourceStatus(resource.status),
+                            systemImage: resourceStatus(resource.status) == .ok
+                                ? "checkmark"
+                                : "exclamationmark"
+                        )
+                    }
+                    if let backupLine = linkedBackupLine(
+                        fleetAppId: resource.fleetAppId,
+                        fleet: metrics.fleetBackups
+                    ) {
+                        Text(backupLine)
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    Text(resource.type.capitalized)
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(resource.name): \(resourceLabel(resource.status))")
+                .accessibilityLabel(
+                    "\(resource.fleetLabel ?? resource.name): \(resourceLabel(resource.status))"
+                )
             }
         }
 
@@ -200,6 +246,35 @@ struct HostUsageSection: View {
                 .font(Theme.Typography.caption)
                 .foregroundStyle(Theme.Colors.warning)
         }
+    }
+
+    private func appBackupSummary(_ app: ServerMetrics.FleetBackups.App) -> String? {
+        let present = app.locations.filter { $0.present == true || $0.ok == true }
+        guard !present.isEmpty else {
+            return app.locations.first?.reason.map { humanReason($0) }
+        }
+        let parts = present.prefix(3).map { loc -> String in
+            if let age = loc.latestAgeSeconds {
+                return "\(loc.label) \(UptimeFormat.string(fromSeconds: Int(age))) ago"
+            }
+            return loc.label
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func linkedBackupLine(
+        fleetAppId: String?,
+        fleet: ServerMetrics.FleetBackups?
+    ) -> String? {
+        guard let fleetAppId, let fleet else { return nil }
+        guard let app = fleet.apps.first(where: { $0.id == fleetAppId }) else { return nil }
+        return appBackupSummary(app).map { "Backups: \($0)" }
+    }
+
+    private func humanReason(_ reason: String) -> String {
+        reason
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "b2 ", with: "B2 ")
     }
 
     private func resourceLabel(_ status: String) -> String {
