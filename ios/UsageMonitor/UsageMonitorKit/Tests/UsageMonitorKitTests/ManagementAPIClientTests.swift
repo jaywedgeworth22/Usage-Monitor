@@ -790,7 +790,7 @@ private final class ManagementURLProtocol: URLProtocol {
             guard let handler = Self.handler else {
                 throw URLError(.badServerResponse)
             }
-            let stub = try handler(request)
+            let stub = try handler(Self.materializingBody(of: request))
             let response = HTTPURLResponse(
                 url: request.url!,
                 statusCode: stub.status,
@@ -806,6 +806,35 @@ private final class ManagementURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+
+    /// `URLSession` converts a request's `httpBody` into an `httpBodyStream`
+    /// before handing it to a custom `URLProtocol`, so `httpBody` reads back as
+    /// nil inside the stub and every payload assertion silently passes over an
+    /// empty dictionary. Drain the stream once here and give the handler a
+    /// request whose `httpBody` is populated, so body assertions are real and
+    /// can be made repeatedly without re-reading a consumed stream.
+    private static func materializingBody(of request: URLRequest) -> URLRequest {
+        guard request.httpBody == nil, let stream = request.httpBodyStream else {
+            return request
+        }
+
+        var body = Data()
+        let bufferSize = 4_096
+        var buffer = [UInt8](repeating: 0, count: bufferSize)
+        stream.open()
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: bufferSize)
+            guard read > 0 else { break }
+            body.append(buffer, count: read)
+        }
+        stream.close()
+
+        guard !body.isEmpty else { return request }
+        var materialized = request
+        materialized.httpBodyStream = nil
+        materialized.httpBody = body
+        return materialized
+    }
 }
 
 private struct ManagementStubResponse {

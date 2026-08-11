@@ -252,14 +252,16 @@ final class DashboardViewDataTests: XCTestCase {
         XCTAssertEqual(data.apiEquivalentSavings, 512.30 - 461.55, accuracy: 0.001)
         XCTAssertTrue(data.hasApiEquivalentSavings)
 
-        // Never negative.
-        var summary = BudgetSummary.sample
-        summary.estimatedApiEquivalentUsd = 10
-        summary.totalSpentUsd = 400
-        let response = BudgetStatusResponse(
-            ok: true, generatedAt: "2026-07-19T09:15:00.000Z", month: "2026-07",
-            providers: [], projects: nil, summary: summary
+        // Never negative. Spend is provider-derived (see `totalSpent`), and the
+        // server's `summary.estimatedApiEquivalentUsd` is the sum over the same
+        // providers, so the clamp is exercised with provider spend well above
+        // the API-equivalent value.
+        var response = makeResponse(
+            budget: 500,
+            providers: [provider(spent: 400, projected: 400, budget: 500, status: .ok)]
         )
+        response.summary.estimatedApiEquivalentUsd = 10
+        XCTAssertEqual(DashboardViewData(response).totalSpent, 400)
         XCTAssertEqual(DashboardViewData(response).apiEquivalentSavings, 0)
         XCTAssertFalse(DashboardViewData(response).hasApiEquivalentSavings)
     }
