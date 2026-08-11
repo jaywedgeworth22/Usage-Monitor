@@ -20,6 +20,7 @@
     "pricing:update": "node scripts/update-model-pricing.mjs",
     "repair:anthropic-funding": "node scripts/repair-anthropic-funding.mjs",
     "add:cursor-subscription": "node scripts/add-cursor-subscription.mjs",
+    "antigravity:collect": "node scripts/antigravity-usage-collector.mjs",
     "import:receipt-screenshots": "node scripts/add-user-billing-receipts.mjs",
     "import:billing-receipts": "node scripts/import-private-billing-receipts.mjs",
     "receipt-inbox:verify-lifecycle": "node scripts/verify-receipt-inbox-lifecycle.mjs",
