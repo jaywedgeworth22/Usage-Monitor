@@ -424,6 +424,10 @@ bash scripts/ios-ship-testflight.sh
 
 Fleet: `/Users/jay/apps/ios-fleet/README.md`. Bundles `services.jays.usage.client.monitor` (Usage Client Monitor) + `services.jays.usage.local.monitor` (Usage Local Monitor), team `CC8UTF7ATG`.
 
+## Theme default = light (owner 2026-08-10)
+
+Default product theme is **light** for all fleet apps. Do not ship dark-first or system defaults that land on dark. See `/Users/jay/apps/FLEET-UI-COPY.md` and `/Users/jay/apps/AGENT-SYNC.md`.
+
 ## Fleet UI copy
 
 Owner copy rules (Title Case headings/buttons; sentence-case values; lowercase compact money; always-inline iOS nav titles; ticker logos): `docs/FLEET-UI-COPY.md` (canonical live board: `/Users/jay/apps/FLEET-UI-COPY.md`).

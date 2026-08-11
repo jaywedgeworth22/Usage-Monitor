@@ -48,7 +48,9 @@ export default async function RootLayout({
       <body className="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 antialiased min-h-screen pb-[env(safe-area-inset-bottom)]">
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
+          // Owner 2026-08-10: light is the default. System/dark remain
+          // selectable in the nav; do not boot into dark from OS preference.
+          defaultTheme="light"
           enableSystem
           nonce={nonce}
         >
