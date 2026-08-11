@@ -11,6 +11,11 @@
  * absolute paths / credentials.
  */
 
+import {
+  fetchFleetBackupStatus,
+  FLEET_COOLIFY_APP_UUIDS,
+  type FleetBackupStatusPayload,
+} from "@/lib/fleet-backup-status";
 import { getDiskRuntimeStatus } from "@/lib/runtime-health";
 
 export const SERVER_METRICS_CACHE_TTL_MS = 120_000;
@@ -55,6 +60,13 @@ export interface ServerMetricsResource {
   status: string;
   /** True when this resource is the Usage Monitor app itself. */
   self: boolean;
+  /**
+   * When this Coolify resource is a known fleet app (ST / CT / UM), the stable
+   * fleet id used to join backup location rows.
+   */
+  fleetAppId?: "usage-monitor" | "socratic-trade" | "congress-trade" | null;
+  /** Title Case product label when fleetAppId is known. */
+  fleetLabel?: string | null;
 }
 
 export interface ServerMetricsPayload {
@@ -93,6 +105,11 @@ export interface ServerMetricsPayload {
     usedPct: number | null;
     ok: boolean;
   };
+  /**
+   * Off-site + local backup status for every fleet app on this host
+   * (Usage Monitor, Socratic.Trade, Congress.Trade), per location.
+   */
+  fleetBackups: FleetBackupStatusPayload | null;
   asOf: string;
   error?: string;
   warnings?: string[];
@@ -456,12 +473,23 @@ function normalizeCoolifyResources(
       warnings.push(`Coolify resource at index ${i} was malformed and omitted.`);
       continue;
     }
+    const fleetAppId = FLEET_COOLIFY_APP_UUIDS[uuid] ?? null;
+    const fleetLabel =
+      fleetAppId === "usage-monitor"
+        ? "Usage Monitor"
+        : fleetAppId === "socratic-trade"
+          ? "Socratic.Trade"
+          : fleetAppId === "congress-trade"
+            ? "Congress.Trade"
+            : null;
     resources.push({
       uuid,
       name,
       type,
       status,
       self: uuid === selfUuid,
+      fleetAppId,
+      fleetLabel,
     });
   }
   if (payload.length > max) {
@@ -619,6 +647,34 @@ async function loadRemoteMetrics(
 
   const resources = normalizedResources.resources;
   const selfResources = resources.filter((r) => r.self);
+
+  // Fleet backup inventory (B2 + peer litestream). Independent of Hetzner/Coolify.
+  let fleetBackups: FleetBackupStatusPayload | null = null;
+  try {
+    fleetBackups = await fetchFleetBackupStatus(new Date(refreshedAt));
+    if (fleetBackups.warnings.length > 0) {
+      warnings.push(...fleetBackups.warnings);
+    }
+  } catch {
+    warnings.push("Fleet backup status could not be loaded.");
+  }
+
+  // Join Coolify CT uuid by name when not in the static map (volume name varies).
+  for (const r of resources) {
+    if (r.fleetAppId) continue;
+    const lower = r.name.toLowerCase();
+    if (lower.includes("congress")) {
+      r.fleetAppId = "congress-trade";
+      r.fleetLabel = "Congress.Trade";
+    } else if (lower.includes("socratic") || lower.includes("d83b1")) {
+      r.fleetAppId = "socratic-trade";
+      r.fleetLabel = "Socratic.Trade";
+    } else if (lower.includes("usage") || lower.includes("yagel")) {
+      r.fleetAppId = "usage-monitor";
+      r.fleetLabel = "Usage Monitor";
+    }
+  }
+
   const finalWarnings = uniqueStrings(warnings);
   const providerErrors = [
     coolifyResourcesFetch.error,
@@ -647,6 +703,7 @@ async function loadRemoteMetrics(
       resources,
       selfResources,
       appDisk: appDiskFromRuntime(),
+      fleetBackups,
       asOf: new Date(refreshedAt).toISOString(),
       ...(providerErrors.length > 0
         ? {

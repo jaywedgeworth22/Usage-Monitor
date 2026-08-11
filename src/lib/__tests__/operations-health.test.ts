@@ -196,8 +196,17 @@ describe("operations health", () => {
     expect(result.coolifyFleet.configured).toBe(false);
     expect(result.r2Fleet?.configured).toBe(false);
     expect(result.r2Fleet?.accounts).toHaveLength(3);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toBe("https://socratictrade.com/api/health");
+    expect(result.fleetBackups).not.toBeNull();
+    expect(result.fleetBackups?.apps.map((a) => a.id)).toEqual([
+      "usage-monitor",
+      "socratic-trade",
+      "congress-trade",
+    ]);
+    // ST peer health + Socratic infrastructure share one public health URL in this fixture.
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(
+      fetchMock.mock.calls.some((c) => String(c[0]).includes("socratictrade.com/api/health"))
+    ).toBe(true);
   });
 
   it("single-flights and briefly caches dashboard refreshes across tabs", async () => {

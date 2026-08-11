@@ -2,6 +2,7 @@
 
 import { ChevronDown, Cloud, Inbox, RefreshCw, Server } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import type { FleetBackupStatusPayload } from "@/lib/fleet-backup-status";
 import type {
   CoolifyFleetSummary,
   OperationsHealthSummary,
@@ -31,8 +32,11 @@ export function markOperationsStale(previous: OperationsHealthSummary): Operatio
       state: previous.coolifyFleet.configured ? "stale" : previous.coolifyFleet.state,
       error: "dashboard_refresh_failed",
     },
-    // Keep last R2 numbers; null out only if we never had them.
+    // Keep last R2 / fleet backup numbers; null out only if we never had them.
     r2Fleet: previous.r2Fleet,
+    fleetBackups: previous.fleetBackups
+      ? { ...previous.fleetBackups, ok: false }
+      : previous.fleetBackups,
   };
 }
 
@@ -466,6 +470,109 @@ export function SocraticInfrastructureCard({ data }: { data: SocraticInfrastruct
   );
 }
 
+function fleetBackupAgeLabel(ageSeconds: number | null | undefined): string {
+  if (ageSeconds == null || !Number.isFinite(ageSeconds)) return "age unknown";
+  if (ageSeconds < 60) return `${Math.round(ageSeconds)}s ago`;
+  if (ageSeconds < 3600) return `${Math.floor(ageSeconds / 60)}m ago`;
+  if (ageSeconds < 86_400) return `${Math.floor(ageSeconds / 3600)}h ago`;
+  return `${Math.floor(ageSeconds / 86_400)}d ago`;
+}
+
+export function FleetBackupsCard({ data }: { data: FleetBackupStatusPayload | null }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!data) {
+    return (
+      <section aria-labelledby="fleet-backups-heading" className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+        <div className="px-5 py-4">
+          <h3 id="fleet-backups-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">Fleet Backups</h3>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Backup status could not be loaded.</p>
+        </div>
+      </section>
+    );
+  }
+  const state: OperationalState = !data.configured
+    ? "unconfigured"
+    : data.ok
+      ? "healthy"
+      : "degraded";
+  const okApps = data.apps.filter((a) => a.ok).length;
+  return (
+    <section aria-labelledby="fleet-backups-heading" className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+      <div className="flex items-start justify-between gap-4 px-5 py-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="rounded-lg bg-sky-50 p-2 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300" aria-hidden="true">
+            <Cloud className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h3 id="fleet-backups-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">Fleet Backups</h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {data.configured
+                ? `${okApps} of ${data.apps.length} apps OK · B2 dumps + Litestream per location`
+                : "Backblaze monitor key not configured"}
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Checked <time suppressHydrationWarning dateTime={data.asOf}>{relativeTime(data.asOf)}</time>
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <StatePill state={state} />
+          <DisclosureButton expanded={expanded} onClick={() => setExpanded((v) => !v)} controls="fleet-backups-detail">
+            Details
+          </DisclosureButton>
+        </div>
+      </div>
+      {expanded && (
+        <div id="fleet-backups-detail" className="space-y-4 border-t border-gray-100 px-5 py-4 text-xs dark:border-gray-700">
+          {data.apps.map((app) => (
+            <div key={app.id}>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p className="font-medium text-gray-800 dark:text-gray-200">
+                  {app.label}
+                  {app.self ? (
+                    <span className="ml-1 font-normal text-gray-400">· this app</span>
+                  ) : null}
+                </p>
+                <StatePill state={app.ok ? "healthy" : "degraded"} />
+              </div>
+              <ul className="mt-2 space-y-1.5">
+                {app.locations.map((loc) => (
+                  <li key={`${app.id}-${loc.id}`} className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-gray-700 dark:text-gray-300">{loc.label}</span>
+                    <span className="text-gray-500 dark:text-gray-400">
+                      {loc.ok === true
+                        ? "OK"
+                        : loc.ok === false
+                          ? loc.present
+                            ? "Lagging"
+                            : "Missing"
+                          : loc.reason === "not_configured" || loc.reason === "b2_unconfigured"
+                            ? "N/A"
+                            : "Unknown"}
+                      {loc.latestAgeSeconds != null
+                        ? ` · ${fleetBackupAgeLabel(loc.latestAgeSeconds)}`
+                        : ""}
+                      {loc.fileCount != null && loc.fileCount > 0
+                        ? ` · ${loc.fileCount} object${loc.fileCount === 1 ? "" : "s"}`
+                        : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          {data.warnings.length > 0 ? (
+            <p className="text-amber-700 dark:text-amber-300">{data.warnings.join(" · ")}</p>
+          ) : null}
+          <p className="text-gray-500 dark:text-gray-400">
+            Locations are independent.{"\u00a0"} A fresh B2 full dump keeps disaster recovery alive even when continuous Litestream is lagging.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function CoolifyFleetCard({ data }: { data: CoolifyFleetSummary }) {
   const [expanded, setExpanded] = useState(false);
   const summary =
@@ -576,6 +683,7 @@ export default function OperationsOverview() {
       {data ? (
         <div className="grid gap-3 lg:grid-cols-2">
           <R2FleetCard data={data.r2Fleet} />
+          <FleetBackupsCard data={data.fleetBackups} />
           <ReceiptInboxCard data={data.receiptInbox} />
           <SocraticInfrastructureCard data={data.socraticInfrastructure} />
           <CoolifyFleetCard data={data.coolifyFleet} />

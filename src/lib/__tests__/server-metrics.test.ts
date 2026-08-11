@@ -76,18 +76,22 @@ describe("fetchServerMetrics", () => {
     const payload = await fetchServerMetrics();
     expect(payload.configuration.coolify).toBe("configured");
     expect(payload.resources).toHaveLength(2);
-    expect(payload.selfResources).toEqual([
+    expect(payload.fleetBackups).not.toBeNull();
+    expect(payload.fleetBackups?.apps.length).toBeGreaterThanOrEqual(1);
+    expect(payload.selfResources).toMatchObject([
       {
         uuid: "um-self-uuid",
         name: "usage-monitor",
         type: "application",
         status: "running:healthy",
         self: true,
+        fleetAppId: "usage-monitor",
+        fleetLabel: "Usage Monitor",
       },
     ]);
-    expect(payload.resources.find((r) => r.name === "socratic-app")?.self).toBe(
-      false
-    );
+    const st = payload.resources.find((r) => r.name === "socratic-app");
+    expect(st?.self).toBe(false);
+    expect(st?.fleetAppId).toBe("socratic-trade");
   });
 
   it("parses Hetzner CPU into host-percent and latest hostUsage", async () => {

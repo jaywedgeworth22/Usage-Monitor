@@ -10,7 +10,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * `GET /api/server-metrics` — Hetzner host utilization + Coolify app inventory.
+ * `GET /api/server-metrics` — Hetzner host utilization + Coolify app inventory
+ * + fleet backup locations (B2 dumps / Litestream / local) for UM · ST · CT.
  *
  * Dual-auth (same as budget-status): dashboard session cookie OR
  * `USAGE_READ_TOKEN` bearer. Middleware excludes this path so the route can

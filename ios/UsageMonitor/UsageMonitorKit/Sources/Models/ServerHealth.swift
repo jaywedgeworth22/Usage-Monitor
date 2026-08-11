@@ -212,6 +212,7 @@ public struct ServerMetrics: Codable, Hashable, Sendable {
     public var resources: [Resource]
     public var selfResources: [Resource]
     public var appDisk: AppDisk?
+    public var fleetBackups: FleetBackups?
     public var asOf: String?
     public var error: String?
     public var warnings: [String]?
@@ -225,6 +226,7 @@ public struct ServerMetrics: Codable, Hashable, Sendable {
         resources: [Resource] = [],
         selfResources: [Resource] = [],
         appDisk: AppDisk? = nil,
+        fleetBackups: FleetBackups? = nil,
         asOf: String? = nil,
         error: String? = nil,
         warnings: [String]? = nil
@@ -237,6 +239,7 @@ public struct ServerMetrics: Codable, Hashable, Sendable {
         self.resources = resources
         self.selfResources = selfResources
         self.appDisk = appDisk
+        self.fleetBackups = fleetBackups
         self.asOf = asOf
         self.error = error
         self.warnings = warnings
@@ -301,20 +304,33 @@ public struct ServerMetrics: Codable, Hashable, Sendable {
         public var type: String
         public var status: String
         public var selfApp: Bool
+        public var fleetAppId: String?
+        public var fleetLabel: String?
 
         public var id: String { uuid }
 
         enum CodingKeys: String, CodingKey {
             case uuid, name, type, status
             case selfApp = "self"
+            case fleetAppId, fleetLabel
         }
 
-        public init(uuid: String, name: String, type: String, status: String, selfApp: Bool) {
+        public init(
+            uuid: String,
+            name: String,
+            type: String,
+            status: String,
+            selfApp: Bool,
+            fleetAppId: String? = nil,
+            fleetLabel: String? = nil
+        ) {
             self.uuid = uuid
             self.name = name
             self.type = type
             self.status = status
             self.selfApp = selfApp
+            self.fleetAppId = fleetAppId
+            self.fleetLabel = fleetLabel
         }
     }
 
@@ -334,6 +350,90 @@ public struct ServerMetrics: Codable, Hashable, Sendable {
             self.totalBytes = totalBytes
             self.usedPct = usedPct
             self.ok = ok
+        }
+    }
+
+    /// Off-site + local backup status for fleet apps on the shared host.
+    public struct FleetBackups: Codable, Hashable, Sendable {
+        public var configured: Bool?
+        public var ok: Bool?
+        public var asOf: String?
+        public var cacheAgeSeconds: Int?
+        public var apps: [App]
+        public var warnings: [String]?
+
+        public init(
+            configured: Bool? = nil,
+            ok: Bool? = nil,
+            asOf: String? = nil,
+            cacheAgeSeconds: Int? = nil,
+            apps: [App] = [],
+            warnings: [String]? = nil
+        ) {
+            self.configured = configured
+            self.ok = ok
+            self.asOf = asOf
+            self.cacheAgeSeconds = cacheAgeSeconds
+            self.apps = apps
+            self.warnings = warnings
+        }
+
+        public struct App: Codable, Hashable, Sendable, Identifiable {
+            public var id: String
+            public var label: String
+            public var selfApp: Bool?
+            public var ok: Bool?
+            public var locations: [Location]
+
+            enum CodingKeys: String, CodingKey {
+                case id, label, ok, locations
+                case selfApp = "self"
+            }
+
+            public init(
+                id: String,
+                label: String,
+                selfApp: Bool? = nil,
+                ok: Bool? = nil,
+                locations: [Location] = []
+            ) {
+                self.id = id
+                self.label = label
+                self.selfApp = selfApp
+                self.ok = ok
+                self.locations = locations
+            }
+        }
+
+        public struct Location: Codable, Hashable, Sendable, Identifiable {
+            public var id: String
+            public var label: String
+            public var ok: Bool?
+            public var present: Bool?
+            public var latestAgeSeconds: Double?
+            public var bytes: Int64?
+            public var fileCount: Int?
+            public var reason: String?
+
+            public init(
+                id: String,
+                label: String,
+                ok: Bool? = nil,
+                present: Bool? = nil,
+                latestAgeSeconds: Double? = nil,
+                bytes: Int64? = nil,
+                fileCount: Int? = nil,
+                reason: String? = nil
+            ) {
+                self.id = id
+                self.label = label
+                self.ok = ok
+                self.present = present
+                self.latestAgeSeconds = latestAgeSeconds
+                self.bytes = bytes
+                self.fileCount = fileCount
+                self.reason = reason
+            }
         }
     }
 }
