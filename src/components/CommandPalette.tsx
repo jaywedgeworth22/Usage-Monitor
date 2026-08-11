@@ -17,6 +17,7 @@ const STATIC_COMMANDS: CommandItem[] = [
   { id: "money", label: "Money", hint: "Paid services", href: "/money", keywords: "subscriptions billing recurring" },
   { id: "projects", label: "Projects", hint: "Budgets", href: "/projects", keywords: "budgets attribution" },
   { id: "alerts", label: "Alerts", hint: "Attention", href: "/alerts", keywords: "alerts critical attention" },
+  { id: "platforms", label: "Platforms", hint: "Platform status", href: "/platforms", keywords: "hetzner coolify cloudflare backblaze sentry uptimerobot github stripe twilio slack render vercel infrastructure hosting status" },
   { id: "ops", label: "Ops", hint: "Operations", href: "/ops", keywords: "health sentry receipt infrastructure" },
   { id: "settings", label: "Settings", href: "/settings", keywords: "config" },
   { id: "attribution", label: "Keys & apps", hint: "Attribution", href: "/attribution", keywords: "keys attribution project" },

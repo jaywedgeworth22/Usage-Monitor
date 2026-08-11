@@ -7,6 +7,7 @@ public enum AppTab: String, CaseIterable, Hashable, Sendable, Identifiable {
     case dashboard
     case providers
     case alerts
+    case platforms
     case projects
     case settings
 
@@ -17,6 +18,7 @@ public enum AppTab: String, CaseIterable, Hashable, Sendable, Identifiable {
         case .dashboard: return "Overview"
         case .providers: return "Providers"
         case .alerts: return "Alerts"
+        case .platforms: return "Platforms"
         case .projects: return "Projects"
         case .settings: return "Settings"
         }
@@ -27,6 +29,7 @@ public enum AppTab: String, CaseIterable, Hashable, Sendable, Identifiable {
         case .dashboard: return "chart.pie.fill"
         case .providers: return "square.stack.3d.up.fill"
         case .alerts: return "bell.fill"
+        case .platforms: return "server.rack"
         case .projects: return "folder.fill"
         case .settings: return "gearshape.fill"
         }
@@ -45,6 +48,7 @@ public struct AppFeatures {
     public var dashboard: () -> AnyView
     public var providers: () -> AnyView
     public var alerts: () -> AnyView
+    public var platforms: () -> AnyView
     public var projects: () -> AnyView
     public var settings: () -> AnyView
 
@@ -52,12 +56,14 @@ public struct AppFeatures {
         dashboard: @escaping () -> AnyView,
         providers: @escaping () -> AnyView,
         alerts: @escaping () -> AnyView,
+        platforms: @escaping () -> AnyView,
         projects: @escaping () -> AnyView,
         settings: @escaping () -> AnyView
     ) {
         self.dashboard = dashboard
         self.providers = providers
         self.alerts = alerts
+        self.platforms = platforms
         self.projects = projects
         self.settings = settings
     }
@@ -114,6 +120,7 @@ public struct RootView: View {
             tab(.dashboard) { features.dashboard() }
             tab(.providers) { features.providers() }
             tab(.alerts, badge: activeAlertCount) { features.alerts() }
+            tab(.platforms) { features.platforms() }
             tab(.projects) { features.projects() }
             tab(.settings) { features.settings() }
         }

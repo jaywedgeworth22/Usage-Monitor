@@ -23,6 +23,7 @@ const PRIMARY_LINKS: NavLink[] = [
   { href: "/money", label: "Money" },
   { href: "/projects", label: "Projects" },
   { href: "/alerts", label: "Alerts" },
+  { href: "/platforms", label: "Platforms" },
   { href: "/ops", label: "Ops" },
   { href: "/settings", label: "Settings" },
 ];

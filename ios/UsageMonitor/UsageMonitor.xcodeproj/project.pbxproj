@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		015574DB5733115F9AD66A42 /* LocalAdapters in Frameworks */ = {isa = PBXBuildFile; productRef = 6E9A2E2D92F2F0E964E1CD4E /* LocalAdapters */; };
-		0DAE1542F635F3A7312AFC3F /* PushScaffold in Frameworks */ = {isa = PBXBuildFile; productRef = 590BA6623B548785E8D8773F /* PushScaffold */; };
+		0DAE1542F635F3A7312AFC3F /* OfflineCache in Frameworks */ = {isa = PBXBuildFile; productRef = DCDD9B886592E046087C8AB8 /* OfflineCache */; };
 		1BC7DDFCC842993EF462F71D /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 56712F7BC822DA0DB33B2F89 /* DesignSystem */; };
 		276F317A99A928209250BE5E /* UsageMonitorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B30FDC3F50A61E4D10BC24B /* UsageMonitorApp.swift */; };
 		29A5ED6DA3DD8518200726E2 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 792B1B2FC84FE1924C7CD1A6 /* WidgetPresentation.swift */; };
@@ -27,19 +27,20 @@
 		653C8DD8CA2750953F698C58 /* WidgetShared in Frameworks */ = {isa = PBXBuildFile; productRef = 574A28A99BCD3C462CA17A0D /* WidgetShared */; };
 		6B2191AA76ABBB7C0B9E4EC9 /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = C022422D070736B642E57F94 /* LocalStore */; };
 		6CB37F405426D5B08943A367 /* Alerts in Frameworks */ = {isa = PBXBuildFile; productRef = BCBC6C1579802E15115FA523 /* Alerts */; };
-		8F40DA5814B26236048AE760 /* Settings in Frameworks */ = {isa = PBXBuildFile; productRef = EEF104AFE3B635560BB73E94 /* Settings */; };
+		84C98816E8C661773E58A4FE /* PushScaffold in Frameworks */ = {isa = PBXBuildFile; productRef = 590BA6623B548785E8D8773F /* PushScaffold */; };
+		8F40DA5814B26236048AE760 /* Platforms in Frameworks */ = {isa = PBXBuildFile; productRef = 0772155CEF61EADBA51DAC23 /* Platforms */; };
 		98CCE4B03A6799D8B4584385 /* ScreenshotDemoSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E62F2FB6F8366000FC474EBD /* ScreenshotDemoSupport.swift */; };
 		9FC1AA41DEEF222CA0DD91F6 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 37C47BD409744EC363A5D9C3 /* DesignSystem */; };
 		A25988FF08C31D2498209FB2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DA93AC5DCCD01FBB2A560D25 /* Assets.xcassets */; };
 		A33EA13C79DE4913AEC1B6D2 /* BudgetWidgetIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 345CB985D932922EA66F6D73 /* BudgetWidgetIntent.swift */; };
 		A976B24560232E9756646779 /* LocalSecrets in Frameworks */ = {isa = PBXBuildFile; productRef = 0368BE726DC57AFA46C92F87 /* LocalSecrets */; };
-		B0D9919838E639EB7D80FEEA /* OfflineCache in Frameworks */ = {isa = PBXBuildFile; productRef = DCDD9B886592E046087C8AB8 /* OfflineCache */; };
+		B0D9919838E639EB7D80FEEA /* AppLock in Frameworks */ = {isa = PBXBuildFile; productRef = 4A50A30B1EBA9441B1967DC6 /* AppLock */; };
 		B82FFD609432C0928F46DA8F /* AccountChangeNotifyingTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB1864248318F2267ECF38E2 /* AccountChangeNotifyingTokenStore.swift */; };
 		C155B87B338BD9E084925657 /* AppLock in Frameworks */ = {isa = PBXBuildFile; productRef = BAF14D074525FC55D08ED25C /* AppLock */; };
 		C3186C23E4A15ACE7390C70A /* UsageMonitorWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F1AEB8CDA324975C39D57883 /* UsageMonitorWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C36A8008C72FC6F54DC9D91F /* AppCore in Frameworks */ = {isa = PBXBuildFile; productRef = BC8AFCFC7A57AE9488201CE1 /* AppCore */; };
 		C66672426BD66072764EF255 /* Models in Frameworks */ = {isa = PBXBuildFile; productRef = FB1941171577206B0A52D658 /* Models */; };
-		D59524D4370F4A67319835B6 /* AppLock in Frameworks */ = {isa = PBXBuildFile; productRef = 4A50A30B1EBA9441B1967DC6 /* AppLock */; };
+		D59524D4370F4A67319835B6 /* Settings in Frameworks */ = {isa = PBXBuildFile; productRef = EEF104AFE3B635560BB73E94 /* Settings */; };
 		D7A3794CC04F7C2FC1E5BC8A /* WidgetShared in Frameworks */ = {isa = PBXBuildFile; productRef = F5DE3993265E786D85889937 /* WidgetShared */; };
 		DAED714153D252B9557AD1B3 /* WidgetPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FEDFB3CAEE756FB7630C7E0 /* WidgetPresentationTests.swift */; };
 		E59095873363A193B4D35574 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D3FA9AE664C5C606A9368339 /* PrivacyInfo.xcprivacy */; };
@@ -142,10 +143,11 @@
 				F3DA80422F5F65435C87288A /* Providers in Frameworks */,
 				6CB37F405426D5B08943A367 /* Alerts in Frameworks */,
 				2F405C0C02E1C475403A48C0 /* ProjectBudgets in Frameworks */,
-				8F40DA5814B26236048AE760 /* Settings in Frameworks */,
-				D59524D4370F4A67319835B6 /* AppLock in Frameworks */,
-				B0D9919838E639EB7D80FEEA /* OfflineCache in Frameworks */,
-				0DAE1542F635F3A7312AFC3F /* PushScaffold in Frameworks */,
+				8F40DA5814B26236048AE760 /* Platforms in Frameworks */,
+				D59524D4370F4A67319835B6 /* Settings in Frameworks */,
+				B0D9919838E639EB7D80FEEA /* AppLock in Frameworks */,
+				0DAE1542F635F3A7312AFC3F /* OfflineCache in Frameworks */,
+				84C98816E8C661773E58A4FE /* PushScaffold in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -344,6 +346,7 @@
 				AF921547F127906DB1C7629D /* Providers */,
 				BCBC6C1579802E15115FA523 /* Alerts */,
 				AC0DB39F15745ACE550BB82F /* ProjectBudgets */,
+				0772155CEF61EADBA51DAC23 /* Platforms */,
 				EEF104AFE3B635560BB73E94 /* Settings */,
 				4A50A30B1EBA9441B1967DC6 /* AppLock */,
 				DCDD9B886592E046087C8AB8 /* OfflineCache */,
@@ -948,6 +951,10 @@
 		0368BE726DC57AFA46C92F87 /* LocalSecrets */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalSecrets;
+		};
+		0772155CEF61EADBA51DAC23 /* Platforms */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Platforms;
 		};
 		37C47BD409744EC363A5D9C3 /* DesignSystem */ = {
 			isa = XCSwiftPackageProductDependency;
