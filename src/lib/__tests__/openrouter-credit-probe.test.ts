@@ -107,6 +107,28 @@ describe("openrouter-credit-probe", () => {
     expect(r.reasons).toContain("key_limit_reached");
   });
 
+  it("ignores keys labeled onboarding or test when checking limits", async () => {
+    process.env.OPENROUTER_MANAGEMENT_KEY = "sk-or-mgmt";
+    fetchUsageMock.mockResolvedValue({
+      balance: 80,
+      credits: 100,
+      totalCost: null,
+      totalRequests: null,
+      rawData: {
+        capabilities: { managementKeyConfirmed: true },
+        keys: [
+          { label: "onboarding-key", disabled: false, limitUsd: 5, limitRemainingUsd: 0 },
+          { label: "test-run", disabled: false, limitUsd: 10, limitRemainingUsd: 0 },
+          { label: "st-production", disabled: false, limitUsd: 100, limitRemainingUsd: 50 },
+        ],
+      },
+    });
+    const r = await probeOpenRouterCredits(1000);
+    expect(r.ok).toBe(true);
+    expect(r.keysLimitReached).toBe(0);
+    expect(r.reasons).toEqual([]);
+  });
+
   it("ok=false when any enabled key is low on its limit", async () => {
     process.env.OPENROUTER_ADMIN_KEY = "sk-or-mgmt";
     process.env.OPENROUTER_KEY_LIMIT_LOW_USD = "5";

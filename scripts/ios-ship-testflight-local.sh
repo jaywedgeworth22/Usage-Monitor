@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+
+# Force stable Xcode.app (not Xcode-beta) for ASC/TestFlight.
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 # Ship **Usage Local Monitor** (on-device / free App Store candidate) to TestFlight.
 # Bundle ID: services.jays.usage.local.monitor (Usage Local Monitor)
 # Does NOT ship Usage Client Monitor (services.jays.usage.client.monitor).
