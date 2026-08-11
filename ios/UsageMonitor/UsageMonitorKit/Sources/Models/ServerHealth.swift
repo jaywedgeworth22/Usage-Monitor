@@ -213,6 +213,7 @@ public struct ServerMetrics: Codable, Hashable, Sendable {
     public var selfResources: [Resource]
     public var appDisk: AppDisk?
     public var fleetBackups: FleetBackups?
+    public var prevention: Prevention?
     public var asOf: String?
     public var error: String?
     public var warnings: [String]?
@@ -227,6 +228,7 @@ public struct ServerMetrics: Codable, Hashable, Sendable {
         selfResources: [Resource] = [],
         appDisk: AppDisk? = nil,
         fleetBackups: FleetBackups? = nil,
+        prevention: Prevention? = nil,
         asOf: String? = nil,
         error: String? = nil,
         warnings: [String]? = nil
@@ -240,9 +242,137 @@ public struct ServerMetrics: Codable, Hashable, Sendable {
         self.selfResources = selfResources
         self.appDisk = appDisk
         self.fleetBackups = fleetBackups
+        self.prevention = prevention
         self.asOf = asOf
         self.error = error
         self.warnings = warnings
+    }
+
+    /// Prevention indicators + short poll history (OOM / disk / backup lag).
+    public struct Prevention: Codable, Hashable, Sendable {
+        public var overall: String?
+        public var summary: Summary?
+        public var indicators: [Indicator]
+        public var history: [HistorySample]
+        public var historyNote: String?
+
+        public init(
+            overall: String? = nil,
+            summary: Summary? = nil,
+            indicators: [Indicator] = [],
+            history: [HistorySample] = [],
+            historyNote: String? = nil
+        ) {
+            self.overall = overall
+            self.summary = summary
+            self.indicators = indicators
+            self.history = history
+            self.historyNote = historyNote
+        }
+
+        public struct Summary: Codable, Hashable, Sendable {
+            public var cpuPeakPct: Double?
+            public var cpuAvgPct: Double?
+            public var cpuLatestPct: Double?
+            public var cpuSampleCount: Int?
+            public var diskUsedPct: Int?
+            public var diskFreeBytes: Int64?
+            public var diskTotalBytes: Int64?
+            public var appsHealthy: Int?
+            public var appsDown: Int?
+            public var appsDegraded: Int?
+            public var appsUnknown: Int?
+            public var appsTotal: Int?
+            public var backupAppsOk: Int?
+            public var backupAppsTotal: Int?
+            public var backupConfigured: Bool?
+
+            public init(
+                cpuPeakPct: Double? = nil,
+                cpuAvgPct: Double? = nil,
+                cpuLatestPct: Double? = nil,
+                cpuSampleCount: Int? = nil,
+                diskUsedPct: Int? = nil,
+                diskFreeBytes: Int64? = nil,
+                diskTotalBytes: Int64? = nil,
+                appsHealthy: Int? = nil,
+                appsDown: Int? = nil,
+                appsDegraded: Int? = nil,
+                appsUnknown: Int? = nil,
+                appsTotal: Int? = nil,
+                backupAppsOk: Int? = nil,
+                backupAppsTotal: Int? = nil,
+                backupConfigured: Bool? = nil
+            ) {
+                self.cpuPeakPct = cpuPeakPct
+                self.cpuAvgPct = cpuAvgPct
+                self.cpuLatestPct = cpuLatestPct
+                self.cpuSampleCount = cpuSampleCount
+                self.diskUsedPct = diskUsedPct
+                self.diskFreeBytes = diskFreeBytes
+                self.diskTotalBytes = diskTotalBytes
+                self.appsHealthy = appsHealthy
+                self.appsDown = appsDown
+                self.appsDegraded = appsDegraded
+                self.appsUnknown = appsUnknown
+                self.appsTotal = appsTotal
+                self.backupAppsOk = backupAppsOk
+                self.backupAppsTotal = backupAppsTotal
+                self.backupConfigured = backupConfigured
+            }
+        }
+
+        public struct Indicator: Codable, Hashable, Sendable, Identifiable {
+            public var id: String
+            public var severity: String
+            public var label: String
+            public var detail: String
+            public var subject: String?
+
+            public init(
+                id: String,
+                severity: String,
+                label: String,
+                detail: String,
+                subject: String? = nil
+            ) {
+                self.id = id
+                self.severity = severity
+                self.label = label
+                self.detail = detail
+                self.subject = subject
+            }
+        }
+
+        public struct HistorySample: Codable, Hashable, Sendable, Identifiable {
+            public var at: String
+            public var cpuPct: Double?
+            public var diskUsedPct: Int?
+            public var appsDown: Int?
+            public var appsDegraded: Int?
+            public var indicatorIds: [String]?
+            public var overall: String?
+
+            public var id: String { at }
+
+            public init(
+                at: String,
+                cpuPct: Double? = nil,
+                diskUsedPct: Int? = nil,
+                appsDown: Int? = nil,
+                appsDegraded: Int? = nil,
+                indicatorIds: [String]? = nil,
+                overall: String? = nil
+            ) {
+                self.at = at
+                self.cpuPct = cpuPct
+                self.diskUsedPct = diskUsedPct
+                self.appsDown = appsDown
+                self.appsDegraded = appsDegraded
+                self.indicatorIds = indicatorIds
+                self.overall = overall
+            }
+        }
     }
 
     public struct HostInfo: Codable, Hashable, Sendable {

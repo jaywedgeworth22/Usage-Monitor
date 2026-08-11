@@ -136,6 +136,68 @@ struct HostUsageSection: View {
             }
         }
 
+        // Prevention indicators + history (OOM / disk / app / backup lag)
+        if let prevention = metrics.prevention {
+            Text("Risk Indicators")
+                .font(Theme.Typography.captionEmphasis)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 2, trailing: 20))
+                .accessibilityAddTraits(.isHeader)
+
+            LabeledContent("Overall") {
+                StatusBadge(
+                    preventionOverallLabel(prevention.overall),
+                    status: preventionOverallStatus(prevention.overall),
+                    systemImage: prevention.overall == "ok"
+                        ? "checkmark.shield.fill"
+                        : "exclamationmark.shield.fill"
+                )
+            }
+
+            if let summary = prevention.summary {
+                if let peak = summary.cpuPeakPct {
+                    LabeledContent("CPU Peak (1h)", value: String(format: "%.0f%%", peak))
+                }
+                if let avg = summary.cpuAvgPct {
+                    LabeledContent("CPU Avg (1h)", value: String(format: "%.0f%%", avg))
+                }
+                if let down = summary.appsDown, let total = summary.appsTotal {
+                    LabeledContent("Apps", value: "\(total - down)/\(total) up")
+                }
+                if let ok = summary.backupAppsOk, let total = summary.backupAppsTotal {
+                    LabeledContent("Backups", value: "\(ok)/\(total) OK")
+                }
+            }
+
+            let topIndicators = Array(prevention.indicators.prefix(4))
+            ForEach(topIndicators) { indicator in
+                VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                    LabeledContent(indicator.label) {
+                        StatusBadge(
+                            indicator.severity.capitalized,
+                            status: indicatorSeverityStatus(indicator.severity),
+                            systemImage: indicator.severity == "critical"
+                                ? "xmark.octagon.fill"
+                                : "exclamationmark.triangle.fill"
+                        )
+                    }
+                    Text(indicator.detail)
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                .accessibilityElement(children: .combine)
+            }
+
+            if !prevention.history.isEmpty {
+                NavigationLink {
+                    HostPreventionDetailView(prevention: prevention)
+                } label: {
+                    Label("Open Stats & History", systemImage: "chart.line.uptrend.xyaxis")
+                        .font(Theme.Typography.caption.weight(.semibold))
+                }
+            }
+        }
+
         // This app
         Text("This App")
             .font(Theme.Typography.captionEmphasis)
@@ -275,6 +337,30 @@ struct HostUsageSection: View {
         reason
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "b2 ", with: "B2 ")
+    }
+
+    private func preventionOverallLabel(_ overall: String?) -> String {
+        switch overall {
+        case "critical": return "Critical"
+        case "warning": return "Watch"
+        default: return "OK"
+        }
+    }
+
+    private func preventionOverallStatus(_ overall: String?) -> Theme.SemanticStatus {
+        switch overall {
+        case "critical": return .danger
+        case "warning": return .warning
+        default: return .ok
+        }
+    }
+
+    private func indicatorSeverityStatus(_ severity: String) -> Theme.SemanticStatus {
+        switch severity {
+        case "critical": return .danger
+        case "warning": return .warning
+        default: return .ok
+        }
     }
 
     private func resourceLabel(_ status: String) -> String {
