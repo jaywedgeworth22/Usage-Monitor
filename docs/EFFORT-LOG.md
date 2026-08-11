@@ -17,6 +17,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **[Usage-Monitor][GROK] ST OOM + Coolify/ST ops visibility — IN PROGRESS 2026-08-10 (branch `grok/st-ops-fleet-visibility`).** Full ST health + Coolify fleet Operations card; host OOM/backup ops. Rollout: `docs/rollouts/2026-08-10-st-oom-and-fleet-ops-visibility.md`.
 - **[GROK] ASC store listing + screenshots + App Store prep (Client + Local) — IN PROGRESS 2026-08-10 2:06pm CT.** Public /privacy+/support; ASC en-US copy/categories/review/build attach; age rating set; 20 screenshots uploaded (iPhone 6.7 + iPad 12.9) COMPLETE; listing pack docs/asc/. Branch `grok/asc-store-listing-screenshots`. Privacy pages need prod deploy before Submit for Review.
 - **[Usage-Monitor][GROK] Coolify B2 replica heartbeat (fix env_active_unverified) — MERGED PR #1072 2026-08-10.** Live B2 was fine; `/api/ready` backup red for missing side-channel. Host probe + Infisical path installed live (`replicaOk=true`). Code: in-container heartbeat + Coolify probe.
 - **[Usage-Monitor][GROK] OpenRouter credit probe endpoint + dedicated UptimeRobot — IN PROGRESS 2026-08-09 11:45pm CT.** `GET /api/openrouter-credits` uses management key for account /credits + per-key limit_remaining; new UptimeRobot keyword monitor (ST health monitor unchanged). Rollout: `docs/rollouts/2026-08-10-openrouter-credit-probe-uptimerobot.md`.

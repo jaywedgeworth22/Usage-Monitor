@@ -1,3 +1,9 @@
+## Current (2026-08-10 GROK — ST OOM + fleet ops visibility)
+
+Branch `grok/st-ops-fleet-visibility`: Operations full ST health + Coolify fleet; host ST 6g + backup keep-3. Rollout: `docs/rollouts/2026-08-10-st-oom-and-fleet-ops-visibility.md`.
+
+## Prior
+
 ## Current (2026-08-04 GROK)
 
 - iOS TestFlight agent ship: `bash scripts/ios-ship-testflight.sh` (fleet `/Users/jay/apps/ios-fleet/README.md`).

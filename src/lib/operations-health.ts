@@ -46,31 +46,73 @@ export interface SocraticInfrastructureSummary {
   state: OperationalState;
   fetchedAt: string;
   releaseSha: string | null;
+  processStartedAt: string | null;
+  processUptimeSeconds: number | null;
+  recentRestart: boolean;
   database: "ok" | "degraded" | "unknown";
   schedulerAgeSeconds: number | null;
+  schedulerStale: boolean;
   activeTradingAccounts: number | null;
   degradedTradingAccounts: number | null;
+  tradingLivenessDegraded: boolean;
+  marketOpen: boolean | null;
+  dataProvidersDegraded: boolean;
+  dependencyCount: number | null;
   failedDependencies: string[];
+  pineconeConfigured: boolean | null;
+  ragEmbedProvider: string | null;
+  openrouterCreditsOk: boolean | null;
+  openrouterCreditsThresholdUsd: number | null;
   dbSizeBytes: number | null;
   walSizeBytes: number | null;
   freeBytes: number | null;
   totalBytes: number | null;
   litestreamState: string | null;
   litestreamAgeSeconds: number | null;
+  storageDegraded: boolean;
   adminUrl: string;
+  error?: string;
+}
+
+export interface CoolifyFleetResource {
+  name: string | null;
+  type: string | null;
+  status: string | null;
+  state: string | null;
+  health: string | null;
+  up: boolean | null;
+  degraded: boolean;
+  fqdn: string | null;
+}
+
+/** Coolify fleet snapshot for Operations (COOLIFY_SERVER_STATS + COOLIFY_HOST only). */
+export interface CoolifyFleetSummary {
+  configured: boolean;
+  state: OperationalState;
+  host: string | null;
+  applications: CoolifyFleetResource[];
+  resources: CoolifyFleetResource[];
+  appsUp: number;
+  appsDown: number;
+  appsDegraded: number;
+  appsUnknown: number;
+  fetchedAt: string;
   error?: string;
 }
 
 export interface OperationsHealthSummary {
   receiptInbox: ReceiptInboxSummary;
   socraticInfrastructure: SocraticInfrastructureSummary;
-  /** Cloudflare R2 free-tier snapshot for UM / ST / CT (null if fetch failed). */
+  coolifyFleet: CoolifyFleetSummary;
   r2Fleet: R2FleetSummary | null;
   fetchedAt: string;
 }
 
+const RECENT_RESTART_SECONDS = 600;
+
 let lastReceiptSuccess: ReceiptInboxSummary | undefined;
 let lastSocraticSuccess: SocraticInfrastructureSummary | undefined;
+let lastCoolifySuccess: CoolifyFleetSummary | undefined;
 let operationsCache: { expiresAt: number; value: OperationsHealthSummary } | undefined;
 let operationsInFlight: Promise<OperationsHealthSummary> | undefined;
 
@@ -249,6 +291,46 @@ function dependencyFailures(value: unknown): string[] {
     .slice(0, 20);
 }
 
+function dependencyCount(value: unknown): number | null {
+  const dependencies = asRecord(value);
+  if (!dependencies) return null;
+  return Object.keys(dependencies).length;
+}
+
+function unreachableSocratic(fetchedAt: string, error?: string): SocraticInfrastructureSummary {
+  return {
+    state: "unreachable",
+    fetchedAt,
+    releaseSha: null,
+    processStartedAt: null,
+    processUptimeSeconds: null,
+    recentRestart: false,
+    database: "unknown",
+    schedulerAgeSeconds: null,
+    schedulerStale: false,
+    activeTradingAccounts: null,
+    degradedTradingAccounts: null,
+    tradingLivenessDegraded: false,
+    marketOpen: null,
+    dataProvidersDegraded: false,
+    dependencyCount: null,
+    failedDependencies: [],
+    pineconeConfigured: null,
+    ragEmbedProvider: null,
+    openrouterCreditsOk: null,
+    openrouterCreditsThresholdUsd: null,
+    dbSizeBytes: null,
+    walSizeBytes: null,
+    freeBytes: null,
+    totalBytes: null,
+    litestreamState: null,
+    litestreamAgeSeconds: null,
+    storageDegraded: false,
+    adminUrl: "https://admin.socratictrade.com/admin/server",
+    ...(error ? { error } : {}),
+  };
+}
+
 export async function fetchSocraticInfrastructureSummary(): Promise<SocraticInfrastructureSummary> {
   const fetchedAt = new Date().toISOString();
   try {
@@ -265,6 +347,7 @@ export async function fetchSocraticInfrastructureSummary(): Promise<SocraticInfr
     const release = asRecord(checks.release);
     const trading = asRecord(checks.tradingLiveness);
     const storage = asRecord(checks.storage);
+    const openrouter = asRecord(checks.openrouterCredits);
     const failedDependencies = dependencyFailures(checks.dependencies);
     const database = checks.db === "ok" ? "ok" : checks.db ? "degraded" : "unknown";
     const litestreamState =
@@ -273,11 +356,29 @@ export async function fetchSocraticInfrastructureSummary(): Promise<SocraticInfr
         : typeof storage?.litestreamState === "string"
           ? storage.litestreamState
           : null;
-    const degraded =
+    const processUptimeSeconds = finiteNonNegative(release?.processUptimeSeconds);
+    const processStartedAt = canonicalTimestamp(release?.processStartedAt);
+    const recentRestart =
+      processUptimeSeconds !== null && processUptimeSeconds < RECENT_RESTART_SECONDS;
+    const tradingLivenessDegraded = checks.tradingLivenessDegraded === true;
+    const dataProvidersDegraded = checks.dataProvidersDegraded === true;
+    const storageDegraded = checks.storageDegraded === true;
+    const schedulerStale = checks.schedulerStale === true;
+    const openrouterCreditsOk =
+      openrouter == null ? null : openrouter.ok === true ? true : openrouter.ok === false ? false : null;
+    const hardDegraded =
       body.ok !== true ||
       database !== "ok" ||
       failedDependencies.length > 0 ||
-      (litestreamState !== null && litestreamState !== "replicating" && litestreamState !== "known");
+      storageDegraded ||
+      schedulerStale ||
+      openrouterCreditsOk === false ||
+      (litestreamState !== null &&
+        litestreamState !== "replicating" &&
+        litestreamState !== "known") ||
+      recentRestart;
+    const softDegraded = tradingLivenessDegraded || dataProvidersDegraded;
+    const degraded = hardDegraded || softDegraded;
     const result: SocraticInfrastructureSummary = {
       state: degraded ? "degraded" : "healthy",
       fetchedAt,
@@ -285,17 +386,35 @@ export async function fetchSocraticInfrastructureSummary(): Promise<SocraticInfr
         typeof release?.sha === "string" && /^[0-9a-f]{7,64}$/i.test(release.sha)
           ? release.sha.toLowerCase()
           : null,
+      processStartedAt,
+      processUptimeSeconds,
+      recentRestart,
       database,
       schedulerAgeSeconds: finiteNonNegative(checks.schedulerAgeSeconds),
+      schedulerStale,
       activeTradingAccounts: boundedInteger(trading?.activeAccounts, 10_000),
       degradedTradingAccounts: boundedInteger(trading?.degraded, 10_000),
+      tradingLivenessDegraded,
+      marketOpen: typeof trading?.marketOpen === "boolean" ? trading.marketOpen : null,
+      dataProvidersDegraded,
+      dependencyCount: dependencyCount(checks.dependencies),
       failedDependencies,
+      pineconeConfigured:
+        typeof checks.pineconeConfigured === "boolean" ? checks.pineconeConfigured : null,
+      ragEmbedProvider:
+        typeof checks.ragEmbedProvider === "string" &&
+        /^[a-z0-9._:-]{1,40}$/i.test(checks.ragEmbedProvider)
+          ? checks.ragEmbedProvider
+          : null,
+      openrouterCreditsOk,
+      openrouterCreditsThresholdUsd: finiteNonNegative(openrouter?.thresholdUsd),
       dbSizeBytes: finiteNonNegative(storage?.dbSizeBytes),
       walSizeBytes: finiteNonNegative(storage?.walSizeBytes),
       freeBytes: finiteNonNegative(storage?.freeBytes),
       totalBytes: finiteNonNegative(storage?.totalBytes),
       litestreamState,
       litestreamAgeSeconds: finiteNonNegative(storage?.litestreamAgeSeconds),
+      storageDegraded,
       adminUrl: "https://admin.socratictrade.com/admin/server",
     };
     lastSocraticSuccess = result;
@@ -305,22 +424,210 @@ export async function fetchSocraticInfrastructureSummary(): Promise<SocraticInfr
     if (lastSocraticSuccess) {
       return { ...lastSocraticSuccess, state: "stale", error: message };
     }
+    return unreachableSocratic(fetchedAt, message);
+  }
+}
+
+function coolifyConfiguration(): { host: string; token: string } | undefined {
+  const token =
+    process.env.COOLIFY_SERVER_STATS?.trim() || process.env.COOLIFY_API_TOKEN?.trim() || "";
+  // Never fall through to COOLIFY_AGENTS — full admin must stay out of app code paths.
+  if (!token || token.length < 16) return undefined;
+  const host = (process.env.COOLIFY_HOST?.trim() || "https://host.jays.services").replace(
+    /\/+$/,
+    ""
+  );
+  try {
+    const parsed = new URL(host);
+    if (parsed.protocol !== "https:") return undefined;
+  } catch {
+    return undefined;
+  }
+  return { host, token };
+}
+
+function parseCoolifyStatus(status: unknown): {
+  state: string | null;
+  health: string | null;
+  up: boolean | null;
+  degraded: boolean;
+} {
+  if (typeof status !== "string" || !status.trim()) {
+    return { state: null, health: null, up: null, degraded: false };
+  }
+  const [statePart, healthPart] = status.split(":");
+  const state = statePart.trim().toLowerCase() || "unknown";
+  const health = healthPart?.trim().toLowerCase() || null;
+  const up = state === "running";
+  // "running:unknown" is common for compose apps without a healthcheck — not degraded.
+  const degraded = up && health === "unhealthy";
+  return { state, health, up, degraded };
+}
+
+function mapCoolifyResource(
+  row: UnknownRecord,
+  typeFallback: string | null
+): CoolifyFleetResource | null {
+  const name =
+    typeof row.name === "string" && row.name.trim() && row.name.length <= 120
+      ? row.name.trim()
+      : null;
+  const typeRaw =
+    typeof row.type === "string" && row.type.trim()
+      ? row.type.trim().toLowerCase()
+      : typeFallback;
+  const type =
+    typeRaw && /^[a-z0-9._:-]{1,40}$/i.test(typeRaw) ? typeRaw : typeFallback;
+  const status =
+    typeof row.status === "string" && row.status.trim() && row.status.length <= 80
+      ? row.status.trim()
+      : null;
+  const parsed = parseCoolifyStatus(status);
+  const fqdnRaw = typeof row.fqdn === "string" ? row.fqdn.trim() : null;
+  let fqdn: string | null = null;
+  if (fqdnRaw && fqdnRaw.length <= 300 && !/[<>\s]/.test(fqdnRaw)) {
+    fqdn = fqdnRaw
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .slice(0, 4)
+      .join(", ");
+  }
+  if (!name && !status && !fqdn) return null;
+  return {
+    name,
+    type,
+    status,
+    state: parsed.state,
+    health: parsed.health,
+    up: parsed.up,
+    degraded: parsed.degraded,
+    fqdn,
+  };
+}
+
+export async function fetchCoolifyFleetSummary(): Promise<CoolifyFleetSummary> {
+  const fetchedAt = new Date().toISOString();
+  const config = coolifyConfiguration();
+  if (!config) {
     return {
-      state: "unreachable",
+      configured: false,
+      state: "unconfigured",
+      host: null,
+      applications: [],
+      resources: [],
+      appsUp: 0,
+      appsDown: 0,
+      appsDegraded: 0,
+      appsUnknown: 0,
       fetchedAt,
-      releaseSha: null,
-      database: "unknown",
-      schedulerAgeSeconds: null,
-      activeTradingAccounts: null,
-      degradedTradingAccounts: null,
-      failedDependencies: [],
-      dbSizeBytes: null,
-      walSizeBytes: null,
-      freeBytes: null,
-      totalBytes: null,
-      litestreamState: null,
-      litestreamAgeSeconds: null,
-      adminUrl: "https://admin.socratictrade.com/admin/server",
+    };
+  }
+  try {
+    const headers = {
+      Accept: "application/json",
+      Authorization: `Bearer ${config.token}`,
+    };
+    const appsRes = await fetch(`${config.host}/api/v1/applications`, {
+      headers,
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!appsRes.ok) throw new Error(`applications HTTP ${appsRes.status}`);
+    const appsBody = await readBoundedJson(appsRes, MAX_HEALTH_RESPONSE_BYTES);
+    if (!Array.isArray(appsBody)) throw new Error("invalid_applications");
+    const applications: CoolifyFleetResource[] = [];
+    for (const row of appsBody.slice(0, 40)) {
+      const rec = asRecord(row);
+      if (!rec) continue;
+      const mapped = mapCoolifyResource(rec, "application");
+      if (mapped) applications.push(mapped);
+    }
+
+    let resources: CoolifyFleetResource[] = [];
+    try {
+      const serversRes = await fetch(`${config.host}/api/v1/servers`, {
+        headers,
+        cache: "no-store",
+        redirect: "error",
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (serversRes.ok) {
+        const serversBody = await readBoundedJson(serversRes, MAX_HEALTH_RESPONSE_BYTES);
+        const servers = Array.isArray(serversBody) ? serversBody : [];
+        for (const server of servers.slice(0, 5)) {
+          const uuid =
+            typeof asRecord(server)?.uuid === "string"
+              ? (asRecord(server)!.uuid as string)
+              : null;
+          if (!uuid || !/^[a-z0-9]{8,64}$/i.test(uuid)) continue;
+          const resRes = await fetch(
+            `${config.host}/api/v1/servers/${encodeURIComponent(uuid)}/resources`,
+            {
+              headers,
+              cache: "no-store",
+              redirect: "error",
+              signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+            }
+          );
+          if (!resRes.ok) continue;
+          const resBody = await readBoundedJson(resRes, MAX_HEALTH_RESPONSE_BYTES);
+          if (!Array.isArray(resBody)) continue;
+          for (const row of resBody.slice(0, 40)) {
+            const rec = asRecord(row);
+            if (!rec) continue;
+            const mapped = mapCoolifyResource(rec, null);
+            if (mapped) resources.push(mapped);
+          }
+        }
+      }
+    } catch {
+      // resources are supplementary
+    }
+
+    const appsUp = applications.filter((a) => a.up === true).length;
+    const appsDown = applications.filter((a) => a.up === false).length;
+    const appsDegraded = applications.filter((a) => a.degraded).length;
+    const appsUnknown = applications.filter((a) => a.up == null).length;
+    const state: OperationalState =
+      appsDown > 0
+        ? "degraded"
+        : appsDegraded > 0
+          ? "degraded"
+          : applications.length === 0
+            ? "unavailable"
+            : "healthy";
+    const result: CoolifyFleetSummary = {
+      configured: true,
+      state,
+      host: config.host,
+      applications,
+      resources,
+      appsUp,
+      appsDown,
+      appsDegraded,
+      appsUnknown,
+      fetchedAt,
+    };
+    lastCoolifySuccess = result;
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unavailable";
+    if (lastCoolifySuccess) {
+      return { ...lastCoolifySuccess, state: "stale", error: message };
+    }
+    return {
+      configured: true,
+      state: "unavailable",
+      host: config.host,
+      applications: [],
+      resources: [],
+      appsUp: 0,
+      appsDown: 0,
+      appsDegraded: 0,
+      appsUnknown: 0,
+      fetchedAt,
       error: message,
     };
   }
@@ -332,9 +639,10 @@ export async function fetchOperationsHealth(): Promise<OperationsHealthSummary> 
   if (operationsInFlight) return operationsInFlight;
   operationsInFlight = (async () => {
     const { fetchR2FleetSummary } = await import("@/lib/r2-usage");
-    const [receiptInbox, socraticInfrastructure, r2Fleet] = await Promise.all([
+    const [receiptInbox, socraticInfrastructure, coolifyFleet, r2Fleet] = await Promise.all([
       fetchReceiptInboxSummary(),
       fetchSocraticInfrastructureSummary(),
+      fetchCoolifyFleetSummary(),
       fetchR2FleetSummary().catch((error) => {
         console.error("[operations] R2 fleet summary failed:", error);
         return null;
@@ -343,6 +651,7 @@ export async function fetchOperationsHealth(): Promise<OperationsHealthSummary> 
     const value = {
       receiptInbox,
       socraticInfrastructure,
+      coolifyFleet,
       r2Fleet,
       fetchedAt: new Date().toISOString(),
     };
@@ -359,6 +668,7 @@ export async function fetchOperationsHealth(): Promise<OperationsHealthSummary> 
 export function resetOperationsHealthCacheForTests(): void {
   lastReceiptSuccess = undefined;
   lastSocraticSuccess = undefined;
+  lastCoolifySuccess = undefined;
   operationsCache = undefined;
   operationsInFlight = undefined;
 }
