@@ -64,7 +64,8 @@ public final class AppSettings {
     public init(defaults: UserDefaults = .standard, sharedDefaults: UserDefaults? = nil) {
         self.defaults = defaults
         self.sharedDefaults = sharedDefaults
-        self.theme = AppTheme(rawValue: defaults.string(forKey: Key.theme) ?? "") ?? .system
+        // Owner 2026-08-10: light is the product default (not system/OS dark).
+        self.theme = AppTheme(rawValue: defaults.string(forKey: Key.theme) ?? "") ?? .light
         self.baseHost = defaults.string(forKey: Key.host) ?? ""
         self.appLockEnabled = defaults.bool(forKey: Key.appLockEnabled)
         // didSet does not fire during init assignment — mirror explicitly.

@@ -1,3 +1,9 @@
+## Current (2026-08-10 GROK — default light theme)
+
+Light is product default (web ThemeProvider + iOS AppSettings). Rollout: `docs/rollouts/2026-08-10-default-light-theme.md`.
+
+## Prior
+
 ## Current (2026-08-10 GROK — ST OOM + fleet ops visibility)
 
 Branch `grok/st-ops-fleet-visibility`: Operations full ST health + Coolify fleet; host ST 6g + backup keep-3. Rollout: `docs/rollouts/2026-08-10-st-oom-and-fleet-ops-visibility.md`.
