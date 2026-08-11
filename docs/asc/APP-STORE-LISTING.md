@@ -26,6 +26,9 @@ Contact (review): Jay Wedgeworth · mail@jays.services · +1 956-420-0244
 | Secondary (optional) | Productivity or Finance |
 | Price | Free |
 | Content rights | Does not contain, show, or access third-party content that requires special licensing beyond user-configured APIs |
+| App Groups (Local) | `group.services.jays.usage.local.monitor` — must appear on **App Store** provisioning profile (not empty `[]`) |
+| App Groups (Client) | `group.services.jays.usage.client.monitor` on app + widget App Store profiles |
+| PrivacyInfo | Bundle `PrivacyInfo.xcprivacy` in app (+ widget). Required-reason: file timestamp `C617.1`, disk space `E174.1` |
 | Export compliance | Uses only exempt encryption (HTTPS / Keychain / CryptoKit standard). `ITSAppUsesNonExemptEncryption = false` |
 | Age rating | 4+ — all questionnaire items None / No (no UGC, no unrestricted web browser, no gambling, etc.) |
 | App Privacy (nutrition) | See per-app sections. No tracking. |
