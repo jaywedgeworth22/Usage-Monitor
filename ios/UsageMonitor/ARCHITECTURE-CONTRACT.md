@@ -27,7 +27,7 @@ See `ios/README.md` and
 `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`.
 
 Toolchain on the build host: **Swift 6.4** (`swift --version`), **Xcode 27.0**
-(`xcodebuild -version`). Package targets iOS 26+ for the owner's single-user device fleet.
+(`xcodebuild -version`). Package targets iOS 17+ (App Store floor; matches Congress.Trade). Host fleet may still build with Xcode 26+.
 
 ---
 
