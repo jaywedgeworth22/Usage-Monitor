@@ -16,6 +16,13 @@ RUN npm run build && bash scripts/fetch-litestream.sh
 
 FROM node:24.14.1-bookworm-slim AS runtime
 
+# Coolify / CI pass the git SHA as SOURCE_COMMIT (or COOLIFY_CONTAINER_NAME alone).
+# Bake it into the image so /api/health revision is correct even when a stale
+# runtime GIT_COMMIT_SHA is absent or Coolify omits the runtime inject.
+ARG SOURCE_COMMIT=""
+ARG GIT_COMMIT_SHA=""
+ENV SOURCE_COMMIT=${SOURCE_COMMIT}     GIT_COMMIT_SHA=${GIT_COMMIT_SHA}
+
 ARG INFISICAL_CLI_VERSION=0.43.114
 
 RUN apt-get update \
