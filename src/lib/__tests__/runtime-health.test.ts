@@ -130,6 +130,16 @@ describe("runtime health state", () => {
     });
   });
 
+  
+  it("prefers Coolify SOURCE_COMMIT over stale GIT_COMMIT_SHA", () => {
+    vi.stubEnv("RENDER_GIT_COMMIT", "");
+    vi.stubEnv("GIT_COMMIT_SHA", "stale-oracle-sha");
+    vi.stubEnv("SOURCE_COMMIT", "coolify-live-sha");
+    expect(getRuntimeIdentity()).toMatchObject({
+      revision: "coolify-live-sha",
+    });
+  });
+
   it("reads Coolify SOURCE_COMMIT when Render/GitHub commit env is unset", () => {
     vi.stubEnv("RENDER_GIT_COMMIT", "");
     vi.stubEnv("GIT_COMMIT_SHA", "");

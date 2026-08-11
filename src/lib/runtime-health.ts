@@ -284,10 +284,12 @@ export function getRuntimeIdentity(): {
     service: process.env.RENDER_SERVICE_NAME || "usage-monitor",
     version: packageJson.version,
     revision:
+      // Coolify injects SOURCE_COMMIT per deploy. Prefer it over a stale
+      // manual GIT_COMMIT_SHA (Oracle-era host env leftover) so /api/health
+      // and uptime "stale vs main" match the running image tag.
+      process.env.SOURCE_COMMIT ||
       process.env.RENDER_GIT_COMMIT ||
       process.env.GIT_COMMIT_SHA ||
-      // Coolify injects SOURCE_COMMIT for each deployment.
-      process.env.SOURCE_COMMIT ||
       null,
     environment: process.env.NODE_ENV || "development",
   };
