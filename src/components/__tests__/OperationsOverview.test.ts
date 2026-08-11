@@ -1,7 +1,13 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { markOperationsStale, ReceiptInboxCard, R2FleetCard, SocraticInfrastructureCard } from "@/components/OperationsOverview";
+import {
+  CoolifyFleetCard,
+  markOperationsStale,
+  ReceiptInboxCard,
+  R2FleetCard,
+  SocraticInfrastructureCard,
+} from "@/components/OperationsOverview";
 
 describe("OperationsOverview cards", () => {
   it("keeps receipt evidence separate from money and labels unconfigured state", () => {
@@ -30,25 +36,127 @@ describe("OperationsOverview cards", () => {
         state: "unreachable",
         fetchedAt: "2026-07-18T10:00:00.000Z",
         releaseSha: null,
+        processStartedAt: null,
+        processUptimeSeconds: null,
+        recentRestart: false,
         database: "unknown",
         schedulerAgeSeconds: null,
+        schedulerStale: false,
         activeTradingAccounts: null,
         degradedTradingAccounts: null,
+        tradingLivenessDegraded: false,
+        marketOpen: null,
+        dataProvidersDegraded: false,
+        dependencyCount: null,
         failedDependencies: [],
+        pineconeConfigured: null,
+        ragEmbedProvider: null,
+        openrouterCreditsOk: null,
+        openrouterCreditsThresholdUsd: null,
         dbSizeBytes: null,
         walSizeBytes: null,
         freeBytes: null,
         totalBytes: null,
         litestreamState: null,
         litestreamAgeSeconds: null,
+        storageDegraded: false,
         adminUrl: "https://admin.socratictrade.com/admin/server",
       },
     }));
     expect(html).toContain("Socratic Trade infrastructure");
     expect(html).toContain("Unreachable");
     expect(html).toContain("scheduler unavailable");
+    expect(html).toContain("uptime unknown");
     expect(html).not.toContain("0 GB");
     expect(html).not.toContain("0%");
+  });
+
+  it("surfaces recent restart and Coolify fleet app rows", () => {
+    const stHtml = renderToStaticMarkup(createElement(SocraticInfrastructureCard, {
+      data: {
+        state: "degraded",
+        fetchedAt: "2026-08-10T23:50:00.000Z",
+        releaseSha: "06d50e9950c27a9b918a322176f21f3dacb7e0e6",
+        processStartedAt: "2026-08-10T23:47:25.801Z",
+        processUptimeSeconds: 120,
+        recentRestart: true,
+        database: "ok",
+        schedulerAgeSeconds: 12,
+        schedulerStale: false,
+        activeTradingAccounts: 3,
+        degradedTradingAccounts: 3,
+        tradingLivenessDegraded: true,
+        marketOpen: false,
+        dataProvidersDegraded: true,
+        dependencyCount: 21,
+        failedDependencies: [],
+        pineconeConfigured: true,
+        ragEmbedProvider: "openrouter",
+        openrouterCreditsOk: true,
+        openrouterCreditsThresholdUsd: 3,
+        dbSizeBytes: null,
+        walSizeBytes: null,
+        freeBytes: null,
+        totalBytes: null,
+        litestreamState: "replicating",
+        litestreamAgeSeconds: 40,
+        storageDegraded: false,
+        adminUrl: "https://admin.socratictrade.com/admin/server",
+      },
+    }));
+    expect(stHtml).toContain("recent restart");
+    expect(stHtml).toContain("trading liveness degraded");
+    expect(stHtml).toContain("data providers degraded");
+
+    const fleetHtml = renderToStaticMarkup(createElement(CoolifyFleetCard, {
+      data: {
+        configured: true,
+        state: "healthy",
+        host: "https://host.jays.services",
+        applications: [
+          {
+            name: "socratic-app",
+            type: "application",
+            status: "running:healthy",
+            state: "running",
+            health: "healthy",
+            up: true,
+            degraded: false,
+            fqdn: "https://socratictrade.com",
+          },
+        ],
+        resources: [
+          {
+            name: "socratic-app",
+            type: "application",
+            status: "running:healthy",
+            state: "running",
+            health: "healthy",
+            up: true,
+            degraded: false,
+            fqdn: null,
+          },
+          {
+            name: "usage-monitor",
+            type: "application",
+            status: "running:healthy",
+            state: "running",
+            health: "healthy",
+            up: true,
+            degraded: false,
+            fqdn: null,
+          },
+        ],
+        appsUp: 1,
+        appsDown: 0,
+        appsDegraded: 0,
+        appsUnknown: 0,
+        fetchedAt: "2026-08-10T23:50:00.000Z",
+      },
+    }));
+    expect(fleetHtml).toContain("Coolify fleet");
+    expect(fleetHtml).toContain("1 up");
+    expect(fleetHtml).toContain("host.jays.services");
   });
 
   it("marks both previously healthy cards stale when the dashboard refresh fails", () => {
@@ -67,18 +175,43 @@ describe("OperationsOverview cards", () => {
         state: "healthy",
         fetchedAt: "2026-07-18T10:00:00.000Z",
         releaseSha: null,
+        processStartedAt: null,
+        processUptimeSeconds: 3600,
+        recentRestart: false,
         database: "ok",
         schedulerAgeSeconds: 10,
+        schedulerStale: false,
         activeTradingAccounts: 1,
         degradedTradingAccounts: 0,
+        tradingLivenessDegraded: false,
+        marketOpen: true,
+        dataProvidersDegraded: false,
+        dependencyCount: 5,
         failedDependencies: [],
+        pineconeConfigured: true,
+        ragEmbedProvider: "openrouter",
+        openrouterCreditsOk: true,
+        openrouterCreditsThresholdUsd: 3,
         dbSizeBytes: null,
         walSizeBytes: null,
         freeBytes: null,
         totalBytes: null,
         litestreamState: "replicating",
         litestreamAgeSeconds: 10,
+        storageDegraded: false,
         adminUrl: "https://admin.socratictrade.com/admin/server",
+      },
+      coolifyFleet: {
+        configured: true,
+        state: "healthy",
+        host: "https://host.jays.services",
+        applications: [],
+        resources: [],
+        appsUp: 0,
+        appsDown: 0,
+        appsDegraded: 0,
+        appsUnknown: 0,
+        fetchedAt: "2026-07-18T10:00:00.000Z",
       },
       r2Fleet: {
         configured: false,
@@ -92,6 +225,7 @@ describe("OperationsOverview cards", () => {
     });
     expect(stale.receiptInbox.state).toBe("stale");
     expect(stale.socraticInfrastructure.state).toBe("stale");
+    expect(stale.coolifyFleet.state).toBe("stale");
     expect(stale.receiptInbox.error).toBe("dashboard_refresh_failed");
     expect(stale.r2Fleet?.configured).toBe(false);
   });

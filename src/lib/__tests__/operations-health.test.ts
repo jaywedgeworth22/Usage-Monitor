@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  fetchCoolifyFleetSummary,
   fetchOperationsHealth,
   fetchReceiptInboxSummary,
   fetchSocraticInfrastructureSummary,
@@ -12,11 +13,18 @@ function healthBody(overrides: Record<string, unknown> = {}) {
   return {
     ok: true,
     checks: {
-      release: { sha: "70a2a39df5df8202f3061245f24b7e41b3142728" },
+      release: {
+        sha: "70a2a39df5df8202f3061245f24b7e41b3142728",
+        processStartedAt: "2026-08-10T12:00:00.000Z",
+        processUptimeSeconds: 7200,
+      },
       db: "ok",
       schedulerAgeSeconds: 13,
-      tradingLiveness: { activeAccounts: 3, degraded: 0 },
+      tradingLiveness: { activeAccounts: 3, degraded: 0, marketOpen: true },
       dependencies: { fmp: { ok: true }, "alpha-vantage": { ok: false } },
+      pineconeConfigured: true,
+      ragEmbedProvider: "openrouter",
+      openrouterCredits: { ok: true, thresholdUsd: 3 },
       storage: {
         dbSizeBytes: 393469952,
         walSizeBytes: 105954072,
@@ -51,6 +59,10 @@ describe("operations health", () => {
       "LITESTREAM_S3_ACCESS_KEY_ID",
       "LITESTREAM_S3_SECRET_ACCESS_KEY",
       "LITESTREAM_S3_BUCKET",
+      "COOLIFY_SERVER_STATS",
+      "COOLIFY_API_TOKEN",
+      "COOLIFY_AGENTS",
+      "COOLIFY_HOST",
     ]) {
       delete process.env[key];
     }
@@ -76,7 +88,13 @@ describe("operations health", () => {
       activeTradingAccounts: 3,
       degradedTradingAccounts: 0,
       failedDependencies: ["alpha-vantage"],
+      dependencyCount: 2,
       litestreamState: "replicating",
+      processUptimeSeconds: 7200,
+      recentRestart: false,
+      pineconeConfigured: true,
+      ragEmbedProvider: "openrouter",
+      openrouterCreditsOk: true,
     });
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain("userId");
@@ -95,11 +113,87 @@ describe("operations health", () => {
     expect(stale.error).toBe("network down");
   });
 
-  it("keeps the receipt inbox visibly unconfigured and makes no receipt request", async () => {
+  it("flags recent process restarts as degraded even when ok is true", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      Response.json(
+        healthBody({
+          dependencies: {},
+          release: {
+            sha: "06d50e9950c27a9b918a322176f21f3dacb7e0e6",
+            processStartedAt: "2026-08-10T23:47:25.801Z",
+            processUptimeSeconds: 90,
+          },
+        })
+      )
+    );
+    const result = await fetchSocraticInfrastructureSummary();
+    expect(result.recentRestart).toBe(true);
+    expect(result.state).toBe("degraded");
+    expect(result.processUptimeSeconds).toBe(90);
+  });
+
+  it("lists Coolify applications and server resources when configured", async () => {
+    process.env.COOLIFY_SERVER_STATS = "stats-token-with-enough-length";
+    process.env.COOLIFY_HOST = "https://host.jays.services";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/applications")) {
+        return Response.json([
+          {
+            uuid: "d83b1aykr03uwr32yhgzaiay",
+            name: "socratic-app",
+            status: "running:healthy",
+            fqdn: "https://socratictrade.com",
+          },
+          {
+            uuid: "yagelvqux9e8l1kztif7bf2o",
+            name: "usage-monitor",
+            status: "running:healthy",
+            fqdn: "https://usage.jays.services",
+          },
+        ]);
+      }
+      if (url.endsWith("/api/v1/servers")) {
+        return Response.json([{ uuid: "jxzqcs3h6g1wiipnnblhismp", name: "fleet-hetzner" }]);
+      }
+      if (url.includes("/resources")) {
+        return Response.json([
+          { name: "socratic-app", type: "application", status: "running:healthy" },
+          { name: "usage-monitor", type: "application", status: "running:healthy" },
+          { name: "congress-trade", type: "application", status: "running:unknown" },
+        ]);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    const result = await fetchCoolifyFleetSummary();
+    expect(result.configured).toBe(true);
+    expect(result.state).toBe("healthy");
+    expect(result.applications).toHaveLength(2);
+    expect(result.resources).toHaveLength(3);
+    expect(result.appsUp).toBe(2);
+    expect(result.resources.some((r) => r.name === "congress-trade")).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("keeps Coolify fleet unconfigured without inventing services", async () => {
+    delete process.env.COOLIFY_SERVER_STATS;
+    delete process.env.COOLIFY_API_TOKEN;
+    const fetchMock = vi.spyOn(global, "fetch");
+    const result = await fetchCoolifyFleetSummary();
+    expect(result.configured).toBe(false);
+    expect(result.state).toBe("unconfigured");
+    expect(result.applications).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+    it("keeps the receipt inbox visibly unconfigured and makes no receipt request", async () => {
+    delete process.env.COOLIFY_SERVER_STATS;
+    delete process.env.COOLIFY_API_TOKEN;
     const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue(Response.json(healthBody()));
     const result = await fetchOperationsHealth();
     expect(result.receiptInbox.state).toBe("unconfigured");
     expect(result.receiptInbox.configured).toBe(false);
+    expect(result.coolifyFleet.configured).toBe(false);
     expect(result.r2Fleet?.configured).toBe(false);
     expect(result.r2Fleet?.accounts).toHaveLength(3);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -107,6 +201,8 @@ describe("operations health", () => {
   });
 
   it("single-flights and briefly caches dashboard refreshes across tabs", async () => {
+    delete process.env.COOLIFY_SERVER_STATS;
+    delete process.env.COOLIFY_API_TOKEN;
     const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue(Response.json(healthBody({ dependencies: {} })));
     const [first, second] = await Promise.all([fetchOperationsHealth(), fetchOperationsHealth()]);
     const third = await fetchOperationsHealth();

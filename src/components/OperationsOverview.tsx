@@ -3,6 +3,7 @@
 import { ChevronDown, Cloud, Inbox, RefreshCw, Server } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type {
+  CoolifyFleetSummary,
   OperationsHealthSummary,
   OperationalState,
   ReceiptInboxSummary,
@@ -25,9 +26,22 @@ export function markOperationsStale(previous: OperationsHealthSummary): Operatio
       state: "stale",
       error: "dashboard_refresh_failed",
     },
+    coolifyFleet: {
+      ...previous.coolifyFleet,
+      state: previous.coolifyFleet.configured ? "stale" : previous.coolifyFleet.state,
+      error: "dashboard_refresh_failed",
+    },
     // Keep last R2 numbers; null out only if we never had them.
     r2Fleet: previous.r2Fleet,
   };
+}
+
+function formatUptime(seconds: number | null): string {
+  if (seconds === null) return "uptime unknown";
+  if (seconds < 60) return `up ${Math.round(seconds)}s`;
+  if (seconds < 3600) return `up ${Math.floor(seconds / 60)}m`;
+  if (seconds < 86_400) return `up ${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  return `up ${Math.floor(seconds / 86_400)}d`;
 }
 
 function stateLabel(state: OperationalState): string {
@@ -384,6 +398,8 @@ export function R2FleetCard({ data }: { data: R2FleetSummary | null }) {
 export function SocraticInfrastructureCard({ data }: { data: SocraticInfrastructureSummary }) {
   const [expanded, setExpanded] = useState(false);
   const scheduler = data.schedulerAgeSeconds === null ? "scheduler unavailable" : `scheduler ${Math.round(data.schedulerAgeSeconds)}s ago`;
+  const uptime = formatUptime(data.processUptimeSeconds);
+  const depTotal = data.dependencyCount ?? data.failedDependencies.length;
   return (
     <section aria-labelledby="socratic-infrastructure-heading" className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
       <div className="flex items-start justify-between gap-4 px-5 py-4">
@@ -391,7 +407,16 @@ export function SocraticInfrastructureCard({ data }: { data: SocraticInfrastruct
           <span className="rounded-lg bg-violet-50 p-2 text-violet-600 dark:bg-violet-950/40 dark:text-violet-300" aria-hidden="true"><Server className="h-4 w-4" /></span>
           <div className="min-w-0">
             <h3 id="socratic-infrastructure-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">Socratic Trade infrastructure</h3>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Database {data.database} · {scheduler} · {data.failedDependencies.length} dependency issue{data.failedDependencies.length === 1 ? "" : "s"}</p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Database {data.database} · {scheduler} · {uptime}
+              {data.recentRestart ? " · recent restart" : ""}
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {data.failedDependencies.length} dependency issue{data.failedDependencies.length === 1 ? "" : "s"}
+              {depTotal != null ? ` of ${depTotal}` : ""}
+              {data.tradingLivenessDegraded ? " · trading liveness degraded" : ""}
+              {data.dataProvidersDegraded ? " · data providers degraded" : ""}
+            </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Last checked <time suppressHydrationWarning dateTime={data.fetchedAt} title={data.fetchedAt}>{relativeTime(data.fetchedAt)}</time>{data.releaseSha ? ` · ${data.releaseSha.slice(0, 8)}` : ""}
             </p>
@@ -407,14 +432,96 @@ export function SocraticInfrastructureCard({ data }: { data: SocraticInfrastruct
           <div>
             <p className="font-medium text-gray-800 dark:text-gray-200">Storage &amp; backup</p>
             <p className="mt-1 text-gray-500 dark:text-gray-400">DB {formatBytes(data.dbSizeBytes)} · WAL {formatBytes(data.walSizeBytes)}</p>
-            <p className="mt-1 text-gray-500 dark:text-gray-400">Free {formatBytes(data.freeBytes)} · Litestream {data.litestreamState ?? "Unavailable"}</p>
+            <p className="mt-1 text-gray-500 dark:text-gray-400">Free {formatBytes(data.freeBytes)} · Litestream {data.litestreamState ?? "Unavailable"}{data.storageDegraded ? " (degraded)" : ""}</p>
           </div>
           <div>
-            <p className="font-medium text-gray-800 dark:text-gray-200">Runtime &amp; dependencies</p>
-            <p className="mt-1 text-gray-500 dark:text-gray-400">{data.activeTradingAccounts ?? "Unavailable"} active account{data.activeTradingAccounts === 1 ? "" : "s"} · {data.degradedTradingAccounts ?? "Unavailable"} degraded</p>
-            <p className="mt-1 text-gray-500 dark:text-gray-400">{data.failedDependencies.length > 0 ? data.failedDependencies.join(", ") : "No dependency failures reported"}</p>
+            <p className="font-medium text-gray-800 dark:text-gray-200">Runtime &amp; services</p>
+            <p className="mt-1 text-gray-500 dark:text-gray-400">
+              {uptime}
+              {data.processStartedAt ? ` · started ${relativeTime(data.processStartedAt)}` : ""}
+              {data.recentRestart ? " · crash/restart window" : ""}
+            </p>
+            <p className="mt-1 text-gray-500 dark:text-gray-400">
+              {data.activeTradingAccounts ?? "Unavailable"} active account{data.activeTradingAccounts === 1 ? "" : "s"} · {data.degradedTradingAccounts ?? "Unavailable"} degraded
+              {data.marketOpen === true ? " · market open" : data.marketOpen === false ? " · market closed" : ""}
+            </p>
+            <p className="mt-1 text-gray-500 dark:text-gray-400">
+              Dependencies: {data.failedDependencies.length > 0 ? data.failedDependencies.join(", ") : "none failed"}
+              {data.dependencyCount != null ? ` (${data.dependencyCount} total)` : ""}
+            </p>
+            <p className="mt-1 text-gray-500 dark:text-gray-400">
+              Pinecone {data.pineconeConfigured === null ? "unknown" : data.pineconeConfigured ? "configured" : "off"}
+              {data.ragEmbedProvider ? ` · embed ${data.ragEmbedProvider}` : ""}
+              {data.openrouterCreditsOk === null
+                ? ""
+                : data.openrouterCreditsOk
+                  ? " · OpenRouter credits ok"
+                  : " · OpenRouter credits low"}
+            </p>
             <a href={data.adminUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex min-h-11 items-center font-medium text-blue-600 hover:underline dark:text-blue-300">Open full Socratic admin panel</a>
           </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function CoolifyFleetCard({ data }: { data: CoolifyFleetSummary }) {
+  const [expanded, setExpanded] = useState(false);
+  const summary =
+    !data.configured
+      ? "Coolify host token not configured"
+      : `${data.appsUp} up · ${data.appsDown} down · ${data.appsDegraded} degraded` +
+        (data.appsUnknown > 0 ? ` · ${data.appsUnknown} unknown` : "");
+  const rows = data.resources.length > 0 ? data.resources : data.applications;
+  return (
+    <section aria-labelledby="coolify-fleet-heading" className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+      <div className="flex items-start justify-between gap-4 px-5 py-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="rounded-lg bg-sky-50 p-2 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300" aria-hidden="true"><Cloud className="h-4 w-4" /></span>
+          <div className="min-w-0">
+            <h3 id="coolify-fleet-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">Coolify fleet</h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{summary}</p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Last checked <time suppressHydrationWarning dateTime={data.fetchedAt} title={data.fetchedAt}>{relativeTime(data.fetchedAt)}</time>
+              {data.host ? ` · ${data.host.replace(/^https?:\/\//, "")}` : ""}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <StatePill state={data.state} />
+          <DisclosureButton expanded={expanded} onClick={() => setExpanded((value) => !value)} controls="coolify-fleet-detail">Details</DisclosureButton>
+        </div>
+      </div>
+      {expanded && (
+        <div id="coolify-fleet-detail" className="border-t border-gray-100 px-5 py-4 text-xs dark:border-gray-700">
+          {rows.length === 0 ? (
+            <p className="text-gray-500 dark:text-gray-400">
+              {data.error ? `Could not load services: ${data.error}` : "No applications or resources reported."}
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {rows.map((row, index) => {
+                const label = row.name ?? row.fqdn ?? `resource-${index + 1}`;
+                const status = row.status ?? (row.up === true ? "running" : row.up === false ? "down" : "unknown");
+                return (
+                  <li key={`${label}-${index}`} className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="font-medium text-gray-800 dark:text-gray-200">
+                      {label}
+                      {row.type ? <span className="ml-1 font-normal text-gray-400">({row.type})</span> : null}
+                    </span>
+                    <span className="text-gray-500 dark:text-gray-400">
+                      {status}
+                      {row.degraded ? " · degraded" : ""}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p className="mt-3 text-gray-500 dark:text-gray-400">
+            Live CPU/memory still comes from Coolify Sentinel (not this API). Application status is from Coolify REST.
+          </p>
         </div>
       )}
     </section>
@@ -471,10 +578,12 @@ export default function OperationsOverview() {
           <R2FleetCard data={data.r2Fleet} />
           <ReceiptInboxCard data={data.receiptInbox} />
           <SocraticInfrastructureCard data={data.socraticInfrastructure} />
+          <CoolifyFleetCard data={data.coolifyFleet} />
         </div>
       ) : !requestError ? (
         <div className="grid gap-3 lg:grid-cols-2" aria-hidden="true">
           <div className="h-40 animate-pulse rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800 lg:col-span-2" />
+          <div className="h-28 animate-pulse rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800" />
           <div className="h-28 animate-pulse rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800" />
           <div className="h-28 animate-pulse rounded-xl border border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800" />
         </div>
