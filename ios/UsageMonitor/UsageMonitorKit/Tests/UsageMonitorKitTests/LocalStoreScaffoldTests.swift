@@ -258,7 +258,7 @@ final class LocalSeedTruthTests: XCTestCase {
         XCTAssertNil(LocalProviderCatalog.entry(name: "cloudflare")?.suggestedMonthlyUsd)
     }
 
-    func testCatalogNamingAndConnectionAbilities() {
+    func testCatalogNamingAndConnectionAbilities() throws {
         // OpenAI API vs ChatGPT subscription (parity with Claude split).
         XCTAssertEqual(LocalProviderCatalog.entry(name: "openai")?.displayName, "OpenAI (API)")
         XCTAssertEqual(LocalProviderCatalog.entry(name: "openai-chatgpt-sub")?.displayName, "ChatGPT (subscription)")
@@ -292,10 +292,15 @@ final class LocalSeedTruthTests: XCTestCase {
         let second = try await model.ensureCatalogProviders()
         XCTAssertGreaterThan(first, 10)
         XCTAssertEqual(second, 0, "Second ensure must not duplicate")
-        let names = Set(try await store.listProviders().map(\.name))
+        // Hoisted out of the XCTUnwrap below: its autoclosure is neither async
+        // nor actor-isolated, so `try await store.listProviders()` inline could
+        // not compile.  Reading once also stops the two assertions below from
+        // querying the actor twice for the same snapshot.
+        let providers = try await store.listProviders()
+        let names = Set(providers.map(\.name))
         XCTAssertTrue(names.contains("openai-chatgpt-sub"))
         XCTAssertTrue(names.contains("xai-supergrok-sub"))
-        let xai = try XCTUnwrap(try await store.listProviders().first { $0.name == "xai" })
+        let xai = try XCTUnwrap(providers.first { $0.name == "xai" })
         XCTAssertEqual(xai.displayName, "xAI")
         XCTAssertEqual(xai.adapterKind, "xai")
     }
