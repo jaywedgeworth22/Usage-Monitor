@@ -17,6 +17,10 @@ import {
   type FleetBackupStatusPayload,
 } from "@/lib/fleet-backup-status";
 import { getDiskRuntimeStatus } from "@/lib/runtime-health";
+import {
+  recordAndBuildPreventionPanel,
+  type HostPreventionPanel,
+} from "@/lib/server-metrics-indicators";
 
 export const SERVER_METRICS_CACHE_TTL_MS = 120_000;
 export const SERVER_METRICS_FAILURE_RETRY_MS = 30_000;
@@ -110,6 +114,11 @@ export interface ServerMetricsPayload {
    * (Usage Monitor, Socratic.Trade, Congress.Trade), per location.
    */
   fleetBackups: FleetBackupStatusPayload | null;
+  /**
+   * Prevention panel: risk indicators (CPU / disk / apps / backups) plus a
+   * short process-local poll history for post-incident trend spotting.
+   */
+  prevention: HostPreventionPanel | null;
   asOf: string;
   error?: string;
   warnings?: string[];
@@ -133,6 +142,17 @@ export function resetServerMetricsCacheForTests(): void {
   }
   runtime.cache = undefined;
   runtime.inFlight = undefined;
+}
+
+function withPrevention(
+  payload: Omit<ServerMetricsPayload, "prevention"> & {
+    prevention?: HostPreventionPanel | null;
+  }
+): ServerMetricsPayload {
+  return {
+    ...payload,
+    prevention: recordAndBuildPreventionPanel(payload),
+  };
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -682,37 +702,39 @@ async function loadRemoteMetrics(
     hetznerMetricsFetch.error,
   ].filter(Boolean) as string[];
 
+  const basePayload = {
+    degraded: finalWarnings.length > 0,
+    stale: false,
+    cacheAgeSeconds: 0,
+    configuration: configuration.states,
+    host,
+    hostUsage: {
+      cpuPct: latestOf(parsedMetrics.metrics.cpu),
+      networkRxBytesPerSec: latestOf(parsedMetrics.metrics.networkRx),
+      networkTxBytesPerSec: latestOf(parsedMetrics.metrics.networkTx),
+      diskReadBytesPerSec: latestOf(parsedMetrics.metrics.diskRead),
+      diskWriteBytesPerSec: latestOf(parsedMetrics.metrics.diskWrite),
+    },
+    metrics: parsedMetrics.metrics,
+    resources,
+    selfResources,
+    appDisk: appDiskFromRuntime(),
+    fleetBackups,
+    asOf: new Date(refreshedAt).toISOString(),
+    ...(providerErrors.length > 0
+      ? {
+          error:
+            "One or more infrastructure providers could not be queried.",
+        }
+      : {}),
+    ...(finalWarnings.length > 0 ? { warnings: finalWarnings } : {}),
+  };
+
   return {
     attempted,
     succeeded,
     hetznerMetricsFailed,
-    payload: {
-      degraded: finalWarnings.length > 0,
-      stale: false,
-      cacheAgeSeconds: 0,
-      configuration: configuration.states,
-      host,
-      hostUsage: {
-        cpuPct: latestOf(parsedMetrics.metrics.cpu),
-        networkRxBytesPerSec: latestOf(parsedMetrics.metrics.networkRx),
-        networkTxBytesPerSec: latestOf(parsedMetrics.metrics.networkTx),
-        diskReadBytesPerSec: latestOf(parsedMetrics.metrics.diskRead),
-        diskWriteBytesPerSec: latestOf(parsedMetrics.metrics.diskWrite),
-      },
-      metrics: parsedMetrics.metrics,
-      resources,
-      selfResources,
-      appDisk: appDiskFromRuntime(),
-      fleetBackups,
-      asOf: new Date(refreshedAt).toISOString(),
-      ...(providerErrors.length > 0
-        ? {
-            error:
-              "One or more infrastructure providers could not be queried.",
-          }
-        : {}),
-      ...(finalWarnings.length > 0 ? { warnings: finalWarnings } : {}),
-    },
+    payload: withPrevention(basePayload),
   };
 }
 
@@ -748,10 +770,11 @@ export async function fetchServerMetrics(): Promise<ServerMetricsPayload> {
         result.attempted > 0 &&
         result.succeeded === 0
       ) {
-        const payload: ServerMetricsPayload = {
+        const payload = withPrevention({
           ...previous.payload,
           degraded: true,
           stale: true,
+          asOf: new Date(refreshedAt).toISOString(),
           error:
             "Infrastructure providers are unavailable; showing the last successful snapshot.",
           warnings: uniqueStrings([
@@ -759,7 +782,7 @@ export async function fetchServerMetrics(): Promise<ServerMetricsPayload> {
             ...(result.payload.warnings ?? []),
             "The displayed infrastructure snapshot is stale.",
           ]),
-        };
+        });
         runtime.cache = {
           key: cacheKey,
           payload,
@@ -774,7 +797,7 @@ export async function fetchServerMetrics(): Promise<ServerMetricsPayload> {
         previous.discardAt > refreshedAt &&
         result.hetznerMetricsFailed
       ) {
-        const payload: ServerMetricsPayload = {
+        const payload = withPrevention({
           ...result.payload,
           metrics: previous.payload.metrics,
           hostUsage: previous.payload.hostUsage,
@@ -787,7 +810,7 @@ export async function fetchServerMetrics(): Promise<ServerMetricsPayload> {
             ...(result.payload.warnings ?? []),
             "The displayed infrastructure metrics are stale.",
           ]),
-        };
+        });
         runtime.cache = {
           key: cacheKey,
           payload,
