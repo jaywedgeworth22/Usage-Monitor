@@ -24,6 +24,44 @@ final class OfflineCacheTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    /// Asserts a cache file carries `completeUntilFirstUserAuthentication`
+    /// Data Protection.
+    ///
+    /// The Simulator does not implement Data Protection: `setAttributes`
+    /// accepts `.protectionKey` (the `.posixPermissions` written in the *same*
+    /// call, and the backup exclusion written right after it, both land), but
+    /// `attributesOfItem` always reads the protection back as `nil`. So the
+    /// real assertion can only run on a device — it is kept intact there, and
+    /// the Simulator branch pins the known no-op so this fails loudly if the
+    /// platform ever starts reporting protection instead of silently passing.
+    private func assertProtectedUntilFirstUnlock(
+        _ attributes: [FileAttributeKey: Any],
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        #if os(iOS)
+        let protection = attributes[.protectionKey] as? FileProtectionType
+        #if targetEnvironment(simulator)
+        XCTAssertNil(
+            protection,
+            """
+            The Simulator now reports Data Protection — delete this branch so \
+            the device assertion runs everywhere.
+            """,
+            file: file,
+            line: line
+        )
+        #else
+        XCTAssertEqual(
+            protection,
+            .completeUntilFirstUserAuthentication,
+            file: file,
+            line: line
+        )
+        #endif
+        #endif
+    }
+
     // MARK: - Disk cache round-trip
 
     func testSaveThenLoadRoundTripsResponse() {
@@ -163,12 +201,7 @@ final class OfflineCacheTests: XCTestCase {
         )
         XCTAssertEqual(values.isExcludedFromBackup, true)
 
-        #if os(iOS)
-        XCTAssertEqual(
-            attributes[.protectionKey] as? FileProtectionType,
-            .completeUntilFirstUserAuthentication
-        )
-        #endif
+        assertProtectedUntilFirstUnlock(attributes)
     }
 
     func testClearRemovesEveryScopeAndLegacyFile() throws {
@@ -288,12 +321,7 @@ final class OfflineCacheTests: XCTestCase {
         )
         XCTAssertEqual(values.isExcludedFromBackup, true)
 
-        #if os(iOS)
-        XCTAssertEqual(
-            attributes[.protectionKey] as? FileProtectionType,
-            .completeUntilFirstUserAuthentication
-        )
-        #endif
+        assertProtectedUntilFirstUnlock(attributes)
     }
 
     func testWidgetStoreFallbackRoundTripAndClear() {
