@@ -449,6 +449,21 @@ async function probeUptimeRobot(): Promise<PlatformProbeResult> {
       };
     }
 
+    // "Not down" is not the same fact as "up".  A monitor that is pending, or
+    // in a status we could not classify, has simply never reported — claiming
+    // "All 1 monitors are up" when up is zero and one is pending states
+    // something we do not know.  Hold the card indeterminate until it checks in.
+    if (pending > 0) {
+      return {
+        state: "stale",
+        headline:
+          `${up} of ${inspected} monitors are up.  ` +
+          `${pending} ${pending === 1 ? "has" : "have"} not reported yet.`,
+        metrics,
+        error: "pending_monitors",
+      };
+    }
+
     return {
       state: "healthy",
       headline:

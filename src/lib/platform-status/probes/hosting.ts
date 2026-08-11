@@ -363,7 +363,12 @@ async function probeRender(): Promise<PlatformProbeResult> {
 // Vercel
 // ---------------------------------------------------------------------------
 
-type VercelDeployState = "ready" | "failed" | "building" | "none";
+/**
+ * `unknown` is deliberately distinct from `building`.  Folding every
+ * unrecognised readyState into "building" reports a deploy in progress that
+ * may not exist, and a card should not invent a reason it does not have.
+ */
+type VercelDeployState = "ready" | "failed" | "building" | "unknown" | "none";
 
 function vercelProductionState(project: Record<string, unknown>): VercelDeployState {
   const production = asRecord(asRecord(project.targets)?.production);
@@ -373,7 +378,15 @@ function vercelProductionState(project: Record<string, unknown>): VercelDeploySt
   const state = raw.toUpperCase();
   if (state === "READY") return "ready";
   if (state === "ERROR" || state === "CANCELED" || state === "CANCELLED") return "failed";
-  return "building";
+  if (
+    state === "BUILDING" ||
+    state === "QUEUED" ||
+    state === "INITIALIZING" ||
+    state === "UPLOADING"
+  ) {
+    return "building";
+  }
+  return "unknown";
 }
 
 async function probeVercel(): Promise<PlatformProbeResult> {
@@ -423,14 +436,30 @@ async function probeVercel(): Promise<PlatformProbeResult> {
       };
     }
 
+    // A project with no ready production deployment is not healthy just
+    // because nothing reported an outright failure: it is either mid-build or
+    // in a state we could not classify, and both mean production is not
+    // confirmed live.  Returning healthy here produced a green card whose own
+    // headline read "0 of 1 projects have a ready production deployment".
+    if (total > 0 && ready < total) {
+      const unclassified = total - ready - building;
+      return {
+        state: "degraded",
+        headline:
+          building > 0 && unclassified === 0
+            ? `${count(ready)} of ${count(total)} Vercel projects have a ready production deployment.  ${count(building)} still building.`
+            : `${count(ready)} of ${count(total)} Vercel projects have a ready production deployment.`,
+        metrics,
+        error: building > 0 && unclassified === 0 ? "deploy_in_progress" : "not_ready",
+      };
+    }
+
     return {
       state: "healthy",
       headline:
         total === 0
           ? "Vercel has no projects in this scope."
-          : ready === total
-            ? `All ${count(total)} Vercel projects have a ready production deployment.`
-            : `${count(ready)} of ${count(total)} Vercel projects have a ready production deployment.`,
+          : `All ${count(total)} Vercel projects have a ready production deployment.`,
       metrics,
     };
   } catch (error) {

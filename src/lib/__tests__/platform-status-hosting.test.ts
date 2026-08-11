@@ -385,6 +385,42 @@ describe("HOSTING_PROBES", () => {
       assertSentenceGaps(result.headline);
     });
 
+    it("does not report healthy when a project has no ready production deployment", async () => {
+      // Regression: this returned `healthy` while its own headline read
+      // "0 of 1 ... have a ready production deployment".  Nothing failed
+      // outright, but nothing was confirmed live either.
+      vi.stubEnv("VERCEL_API_TOKEN", "vercel-token");
+      fetchJsonMock.mockResolvedValue(
+        jsonResponse({
+          projects: [{ id: "p1", name: "marketing", latestDeployments: [{ readyState: "BUILDING" }] }],
+          pagination: { count: 1 },
+        })
+      );
+
+      const result = await probeById("vercel").probe();
+
+      expect(result.state).toBe("degraded");
+      expect(result.error).toBe("deploy_in_progress");
+      expect(metricValue(result.metrics, "Production Ready")).toBe("0");
+      expect(result.headline).not.toContain("All ");
+      assertSentenceGaps(result.headline);
+    });
+
+    it("does not report healthy when a production state cannot be classified", async () => {
+      vi.stubEnv("VERCEL_API_TOKEN", "vercel-token");
+      fetchJsonMock.mockResolvedValue(
+        jsonResponse({
+          projects: [{ id: "p1", name: "marketing", targets: { production: { readyState: "WAT" } } }],
+          pagination: { count: 1 },
+        })
+      );
+
+      const result = await probeById("vercel").probe();
+
+      expect(result.state).toBe("degraded");
+      expect(result.error).toBe("not_ready");
+    });
+
     it("is healthy when every production deployment is ready", async () => {
       vi.stubEnv("VERCEL_API_TOKEN", "vercel-token");
       vi.stubEnv("VERCEL_TEAM_ID", "team_abc");

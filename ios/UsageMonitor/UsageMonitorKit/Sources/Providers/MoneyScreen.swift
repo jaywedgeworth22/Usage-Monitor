@@ -39,12 +39,12 @@ public struct MoneyScreen: View {
         content
             .navigationTitle("Money")
             .navigationBarTitleDisplayMode(.inline)
-            .task {
-                guard let env else { return }
-                await store.loadIfNeeded(using: env.apiClient)
-            }
-            // A host switch or credential change rebuilds the API client; drop
-            // the previous host's costs rather than showing them as this one's.
+            // ONE identity-keyed task, deliberately not two.  A separate
+            // unkeyed `.task` would keep running when the identity changed —
+            // SwiftUI only cancels and restarts the keyed one — so an
+            // in-flight request against the previous host could land last and
+            // overwrite the new host's recurring-cost rows.  Keying the only
+            // load means a host or credential switch cancels it outright.
             .task(id: env?.accessIdentityRevision) {
                 guard let env else { return }
                 store.reset()

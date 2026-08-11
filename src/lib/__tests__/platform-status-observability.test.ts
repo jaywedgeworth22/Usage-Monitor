@@ -259,6 +259,28 @@ describe("uptimerobot probe", () => {
     expect(probeFor("uptimerobot").isConfigured()).toBe(true);
   });
 
+  it("holds a pending monitor indeterminate instead of claiming it is up", async () => {
+    // Regression: with one pending monitor and zero up, the card returned
+    // `healthy` and said "All 1 monitors are up".  UptimeRobot status 0 is
+    // "paused", 1 is "not checked yet" — a monitor that has never reported
+    // is not evidence of health.
+    vi.stubEnv("UPTIMEROBOT_API_KEY", "u800100-testkey");
+    fetchJsonMock.mockResolvedValue(
+      jsonResponse(200, {
+        stat: "ok",
+        pagination: { offset: 0, limit: 50, total: 1 },
+        monitors: [{ id: 1, friendly_name: "brand new", status: 1, custom_uptime_ratio: "0" }],
+      })
+    );
+
+    const result = await probeFor("uptimerobot").probe();
+
+    expect(result.state).toBe("stale");
+    expect(result.error).toBe("pending_monitors");
+    expect(result.headline).not.toContain("All ");
+    expect(result.headline).toContain("not reported yet");
+  });
+
   it("parses a healthy monitor list and never echoes the API key", async () => {
     vi.stubEnv("UPTIMEROBOT_API_KEY", "u800100-testkey");
     fetchJsonMock.mockResolvedValue(jsonResponse(200, healthyPayload));
