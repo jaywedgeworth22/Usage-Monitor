@@ -20,11 +20,13 @@ public struct SettingsRootView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var model: SettingsViewModel
     @State private var status: ServerStatusStore
+    @State private var hostUsage: HostUsageStore
     @State private var access: ManagementAccessStore
 
     public init() {
         _model = State(initialValue: SettingsViewModel())
         _status = State(initialValue: ServerStatusStore())
+        _hostUsage = State(initialValue: HostUsageStore())
         _access = State(initialValue: ManagementAccessStore())
     }
 
@@ -32,7 +34,12 @@ public struct SettingsRootView: View {
     init(model: SettingsViewModel, status: ServerStatusStore) {
         _model = State(initialValue: model)
         _status = State(initialValue: status)
+        _hostUsage = State(initialValue: HostUsageStore())
         _access = State(initialValue: ManagementAccessStore())
+    }
+
+    private var hasHostCredential: Bool {
+        env.hasToken || access.capabilities.sessionManagement.isActive
     }
 
     public var body: some View {
@@ -44,6 +51,12 @@ public struct SettingsRootView: View {
                 TokenConnectionSection(model: model)
                 ServerStatusSection(store: status) {
                     await status.refresh(using: env.apiClient)
+                }
+                HostUsageSection(
+                    store: hostUsage,
+                    hasCredential: hasHostCredential
+                ) {
+                    await hostUsage.refresh(using: env.apiClient)
                 }
                 NotificationsSection()
                 AppearanceSection(settings: env.settings)
@@ -60,11 +73,23 @@ public struct SettingsRootView: View {
             }
             .task(id: env.accessIdentityRevision) {
                 access.resetForIdentityChange()
+                hostUsage.reset()
                 await access.loadIfNeeded(using: env.apiClient)
+                if hasHostCredential {
+                    await hostUsage.loadIfNeeded(using: env.apiClient)
+                }
+            }
+            .task(id: hasHostCredential) {
+                if hasHostCredential {
+                    await hostUsage.loadIfNeeded(using: env.apiClient)
+                }
             }
             .refreshable {
                 await status.refresh(using: env.apiClient)
                 await access.refresh(using: env.apiClient)
+                if hasHostCredential {
+                    await hostUsage.refresh(using: env.apiClient)
+                }
             }
         }
     }
@@ -190,15 +215,7 @@ private enum PreviewProbe {
                 version: "1.8.2",
                 commit: "fe6d9c6d1a"
             ),
-            readiness: .init(
-                ok: true,
-                status: "ready",
-                checks: .init(
-                    database: .init(ok: true),
-                    scheduler: .init(ok: true),
-                    backup: .init(ok: true)
-                )
-            ),
+            readiness: .sample,
             fetchedAt: Date()
         )
     }
@@ -209,7 +226,16 @@ private enum PreviewProbe {
             readiness: .init(
                 ok: false,
                 status: "degraded",
-                checks: .init(database: .init(ok: true), scheduler: .init(ok: false), backup: .init(ok: true))
+                checks: .init(
+                    database: .init(ok: true),
+                    scheduler: .init(ok: false),
+                    backup: .init(ok: true),
+                    backupLayers: .init(
+                        local: .init(ok: true, present: true, count: 1),
+                        primary: .init(ok: false, target: "b2", label: "b2", reason: "replica_status_stale"),
+                        r2Historic: .init(ok: true, configured: true, role: "historic")
+                    )
+                )
             ),
             fetchedAt: Date()
         )

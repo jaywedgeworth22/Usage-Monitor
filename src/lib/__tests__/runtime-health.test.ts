@@ -1,6 +1,7 @@
 import {
   closeSync,
   fstatSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   renameSync,
@@ -12,9 +13,13 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   captureDatabaseFileBaseline,
+  getBackupLayersStatus,
   getBackupRuntimeStatus,
   getDatabaseFileStatus,
   getDiskRuntimeStatus,
+  getLocalBackupRuntimeStatus,
+  getLitestreamReplicaTarget,
+  getR2HistoricBackupStatus,
   getRuntimeIdentity,
   getSchedulerReadiness,
   getSchedulerRuntimeStatus,
@@ -307,6 +312,77 @@ describe("runtime health state", () => {
       verificationRequired: false,
       reason: "env_active_unverified",
     });
+  });
+
+  it("classifies Litestream endpoints as b2 / r2 / unknown", () => {
+    vi.stubEnv(
+      "LITESTREAM_S3_ENDPOINT",
+      "https://s3.eu-central-003.backblazeb2.com"
+    );
+    expect(getLitestreamReplicaTarget()).toBe("b2");
+
+    vi.stubEnv(
+      "LITESTREAM_S3_ENDPOINT",
+      "https://abc.r2.cloudflarestorage.com"
+    );
+    expect(getLitestreamReplicaTarget()).toBe("r2");
+
+    vi.stubEnv("LITESTREAM_S3_ENDPOINT", "https://garage.example.invalid");
+    expect(getLitestreamReplicaTarget()).toBe("unknown");
+  });
+
+  it("reports local pre-migration backup inventory without leaking paths", () => {
+    const dir = mkdtempSync(join(tmpdir(), "usage-monitor-local-backup-"));
+    const dbPath = join(dir, "prod.db");
+    const backupDir = join(dir, ".pre-migration-backups");
+    try {
+      writeFileSync(dbPath, "sqlite-placeholder\n");
+      mkdirSync(backupDir, { recursive: true });
+      vi.stubEnv("DATABASE_URL", `file:${dbPath}`);
+
+      expect(getLocalBackupRuntimeStatus()).toMatchObject({
+        ok: false,
+        present: true,
+        count: 0,
+        reason: "no_verified_backups",
+      });
+
+      const backupPath = join(backupDir, "prod-2026-08-01.backup.db");
+      writeFileSync(backupPath, "backup-bytes\n");
+      const now = new Date("2026-08-02T00:00:00.000Z");
+      const status = getLocalBackupRuntimeStatus(now);
+      expect(status).toMatchObject({
+        ok: true,
+        present: true,
+        count: 1,
+        reason: null,
+      });
+      expect(status.latestAgeSeconds).not.toBeNull();
+      expect(status.latestSizeBytes).toBeGreaterThan(0);
+      expect(JSON.stringify(status)).not.toContain(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("labels R2 as historic when Litestream points at B2", () => {
+    vi.stubEnv(
+      "LITESTREAM_S3_ENDPOINT",
+      "https://s3.eu-central-003.backblazeb2.com"
+    );
+    vi.stubEnv("R2_USAGE_ACCOUNT_ID", "acct");
+    vi.stubEnv("R2_USAGE_API_TOKEN", "tok");
+    expect(getR2HistoricBackupStatus()).toMatchObject({
+      configured: true,
+      litestreamUsesR2: false,
+      role: "historic",
+      ok: true,
+    });
+
+    const layers = getBackupLayersStatus();
+    expect(layers.primary.label).toBe("b2");
+    expect(layers.r2Historic.role).toBe("historic");
+    expect(layers.local).toBeDefined();
   });
 
   describe("database file identity", () => {

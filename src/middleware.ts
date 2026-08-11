@@ -38,6 +38,9 @@ export const isPublicPath = (pathname: string) => {
     // (account credits + per-key limits via management key). See
     // src/app/api/openrouter-credits/route.ts.
     "/api/openrouter-credits",
+    // Self-authenticates (session OR USAGE_READ_TOKEN) for iOS Client Monitor
+    // host usage + Coolify app inventory. See src/app/api/server-metrics/route.ts.
+    "/api/server-metrics",
   ];
   if (publicPaths.includes(pathname)) return true;
   if (publicPaths.some((p) => pathname.startsWith(p + "/"))) return true;

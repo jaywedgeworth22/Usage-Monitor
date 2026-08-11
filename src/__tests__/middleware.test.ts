@@ -37,6 +37,7 @@ describe("middleware matcher — /api/budget-status exclusion (regression for th
       "/api/health",
       "/api/ready",
       "/api/openrouter-credits",
+      "/api/server-metrics",
       "/api/cron",
       "/api/auth/login",
       // App Store Connect privacy/support URLs (public legal pages)
