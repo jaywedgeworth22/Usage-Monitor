@@ -77,14 +77,35 @@ not a malformed one.
 
 **Owner action required:** Cloudflare dashboard → R2 → Manage API Tokens →
 create a token with **Object Read & Write** scoped to `usage-monitor-prod-v3`,
-then store:
+then paste it into the two empty fields below.
 
-```
-R2_ARCHIVE_ENDPOINT           https://3a9368057468d0909cafaa85df12d1b7.r2.cloudflarestorage.com
-R2_ARCHIVE_BUCKET             usage-monitor-prod-v3
-R2_ARCHIVE_ACCESS_KEY_ID      <new>
-R2_ARCHIVE_SECRET_ACCESS_KEY  <new>
-```
+Every `R2_ARCHIVE_*` key is **already provisioned in Infisical** (env `prod`,
+path `/`, seeded 2026-08-12) — the non-secret ones filled in, the two
+credential fields created **empty on purpose** so the job fails closed with
+`credentials_missing` rather than producing a confusing 401:
+
+| Key | Usage Monitor | Congress.Trade | Socratic.Trade |
+|---|---|---|---|
+| `R2_ARCHIVE_ENDPOINT` | `https://3a936805….r2.cloudflarestorage.com` | `https://0e9f5a0c….r2.cloudflarestorage.com` | `https://94ec35cf….r2.cloudflarestorage.com` |
+| `R2_ARCHIVE_BUCKET` | `usage-monitor-prod-v3` | `congress-trade-bucket` | `socratic-trade-bucket` |
+| `R2_ARCHIVE_REGION` | `auto` | `auto` | `auto` |
+| `R2_ARCHIVE_PREFIX` | `weekly/` | `weekly/` | `weekly/` |
+| `R2_ARCHIVE_KEEP_GENERATIONS` | `2` | `2` | `2` |
+| `R2_ARCHIVE_ACCESS_KEY_ID` | **empty — fill this** | **empty** | **empty** |
+| `R2_ARCHIVE_SECRET_ACCESS_KEY` | **empty — fill this** | **empty** | **empty** |
+
+Infisical project IDs: UM `86e35e51-91bc-4dfd-a045-4484726b9c40`, CT
+`f61a79de-8d77-4f0b-9361-4b7208598290`, ST
+`39d93bb7-76f9-498c-8b50-a7def52e072f`.
+
+Gotcha for future seeding: the Infisical **CLI cannot write an empty value**
+(`infisical secrets set KEY=` fails); the REST API accepts one fine. Use
+`POST /api/v3/secrets/raw/<KEY>` with `"secretValue": ""`.
+
+Congress.Trade and Socratic.Trade are seeded **forward only** — the archive
+script lives in this repo alone, so those keys are inert placeholders until the
+job is ported. Their endpoint/bucket values are inferred from each account
+having exactly one R2 bucket; confirm before first use.
 
 Deliberately **not** reused: `LITESTREAM_S3_*` now points at B2, and signing an
 R2 request with B2 keys produces a 401 that reads exactly like a revoked token.
