@@ -42,21 +42,44 @@ No server-side code changes were needed: `USAGE_INGEST_PRODUCER_TOKENS`
 (`src/lib/ingest-auth.ts`) already supports adding an arbitrary
 `producerId:token` pair without a deploy.
 
+## Output shape
+
+Confirmed via https://antigravity.google/docs/cli/headless: `agy -p "<any
+prompt>" --output-format json` always wraps the result in a generic envelope
+regardless of what was asked —
+
+```json
+{
+  "conversation_id": "...",
+  "status": "SUCCESS",
+  "response": "...",
+  "duration_seconds": 7.16,
+  "num_turns": 1,
+  "usage": { "input_tokens": ..., "output_tokens": ..., "total_tokens": ... }
+}
+```
+
+The envelope's `usage` block is the token cost of *running the CLI query
+itself* (e.g. what it cost to ask `/usage`) — it is unrelated to account
+quota and the collector never sends it as telemetry. Per the antigravity-cli
+changelog (v1.1.11), slash commands in print mode "emit one tab-separated
+record per line," so the real per-model quota data lives inside `response`
+as TSV text, which `parseUsageResponseText()` parses.
+
 ## KNOWN GAP — verify before scheduling
 
-Google has not published a JSON schema for
-`agy -p "/usage" --output-format json` (confirmed against antigravity.google
-docs and the antigravity-cli changelog — the flag exists as of CLI v1.1.8,
-non-interactive slash-command output as of v1.1.11, but no field reference).
-The collector's `extractQuotaRecords()` is a best-effort reading of plausible
-field names, and it fails loudly (dumps raw JSON, exits non-zero) rather than
-sending guessed values if nothing recognizable is found.
+Google has not published the **column layout** of those tab-separated
+records (only that a header + one row per model exists). The parser only
+trusts a self-describing header row — it maps column names in `response`'s
+first line via `COLUMN_ALIASES`, and with no recognizable header it dumps
+the raw lines and refuses to guess a positional order rather than risk
+mis-assigning fields.
 
 **Before installing the launchd job:** run
 `node scripts/antigravity-usage-collector.mjs --dry-run --debug` on the Mac
 where `agy` is authenticated, compare the "raw CLI output" against the
-"parsed events" it prints, and adjust the field-name aliases in
-`extractQuotaRecords()`/`toTelemetryEvent()` if they don't line up.
+"parsed events" it prints, and extend `COLUMN_ALIASES` in the script if the
+real header wording doesn't match.
 
 ## Setup (owner)
 
