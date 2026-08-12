@@ -6,6 +6,9 @@ node_modules
 *.log
 .DS_Store
 tsconfig.tsbuildinfo
+# Bytecode from scripts/test_sync_effort_issues.py (congress-trading-shared
+# already ignores this; this repo's copy of the suite did not).
+__pycache__/
 
 # Local SQLite dev database (Prisma's `prisma db push`/`prisma migrate dev`
 # create these next to prisma/schema.prisma; SQLite also creates -journal
