@@ -91,7 +91,12 @@ enum PreviewProbe {
                     backupLayers: .init(
                         local: .init(ok: true, present: true, count: 1),
                         primary: .init(ok: false, target: "b2", label: "b2", reason: "replica_status_stale"),
-                        r2Historic: .init(ok: true, configured: true, role: "historic")
+                        r2Historic: .init(
+                            ok: false,
+                            configured: true,
+                            role: "historic",
+                            reason: "archive_not_run"
+                        )
                     )
                 )
             ),

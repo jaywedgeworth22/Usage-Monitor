@@ -13,6 +13,21 @@ final class ServerStatusFeatureTests: XCTestCase {
 
     // MARK: Formatting
 
+    func testHealthDecodesRevisionAsCommitAndIgnoresNpmPlaceholderInUI() throws {
+        let json = Data("""
+        {
+          "ok": true,
+          "status": "live",
+          "version": "0.1.0",
+          "revision": "ef32f9afdeadbeef",
+          "service": "usage-monitor"
+        }
+        """.utf8)
+        let health = try JSONDecoder().decode(ServerHealth.self, from: json)
+        XCTAssertEqual(health.version, "0.1.0")
+        XCTAssertEqual(health.commit, "ef32f9afdeadbeef")
+    }
+
     func testUptimeFormatting() {
         XCTAssertEqual(UptimeFormat.string(fromSeconds: 273_600), "3d 4h")
         XCTAssertEqual(UptimeFormat.string(fromSeconds: 3_660), "1h 1m")
@@ -76,7 +91,12 @@ final class ServerStatusFeatureTests: XCTestCase {
                             active: true,
                             replicaAgeSeconds: 90
                         ),
-                        r2Historic: .init(ok: true, configured: true, role: "historic")
+                        r2Historic: .init(
+                            ok: true,
+                            configured: true,
+                            role: "historic",
+                            weeklyArchive: .init(ok: true, ageSeconds: 3_600)
+                        )
                     )
                 )
             ),
@@ -96,10 +116,9 @@ final class ServerStatusFeatureTests: XCTestCase {
             layered.backupLayerChecks.first { $0.name == "Local Backup" }?.detail?
                 .contains("2 snapshots") == true
         )
-        XCTAssertTrue(
-            layered.backupLayerChecks.first { $0.name == "R2 Historic" }?.detail?
-                .contains("weekly freeze") == true
-        )
+        let r2Detail = layered.backupLayerChecks.first { $0.name == "R2 Historic" }?.detail
+        XCTAssertTrue(r2Detail?.contains("weekly archive") == true)
+        XCTAssertFalse(r2Detail?.contains("weekly freeze") == true)
 
         let down = ServerStatusSnapshot(
             health: .init(ok: false, status: "fail"),
@@ -115,7 +134,7 @@ final class ServerStatusFeatureTests: XCTestCase {
     // The free-tier kill-switch flag is only meaningful while R2 is the live
     // litestream target (role "active"). A stale/engaged flag left over from
     // an unrelated incident must not make an already-frozen "historic" R2
-    // row claim "writes paused" next to its green OK badge.
+    // row claim "writes paused".
     func testR2HistoricDetailIgnoresStaleKillSwitchFlag() {
         let snapshot = ServerStatusSnapshot(
             health: .init(ok: true, status: "ok"),
@@ -125,19 +144,70 @@ final class ServerStatusFeatureTests: XCTestCase {
                 checks: .init(
                     backupLayers: .init(
                         r2Historic: .init(
-                            ok: true,
+                            ok: false,
                             configured: true,
                             autoDisabled: true,
-                            role: "historic"
+                            role: "historic",
+                            reason: "archive_not_run"
                         )
                     )
                 )
             ),
             fetchedAt: Date()
         )
-        let detail = snapshot.backupLayerChecks.first { $0.name == "R2 Historic" }?.detail
-        XCTAssertTrue(detail?.contains("weekly freeze") == true)
-        XCTAssertFalse(detail?.contains("writes paused") == true)
+        let row = snapshot.backupLayerChecks.first { $0.name == "R2 Historic" }
+        XCTAssertEqual(row?.ok, false)
+        XCTAssertTrue(row?.detail?.contains("weekly archive not run") == true)
+        XCTAssertFalse(row?.detail?.contains("writes paused") == true)
+        XCTAssertFalse(row?.detail?.contains("weekly freeze") == true)
+    }
+
+    func testR2HistoricWithoutWeeklyArchiveIsNotOkEvenIfServerSaysOk() {
+        let snapshot = ServerStatusSnapshot(
+            health: .init(ok: true, status: "ok"),
+            readiness: .init(
+                ok: true,
+                status: "ready",
+                checks: .init(
+                    backupLayers: .init(
+                        r2Historic: .init(ok: true, configured: true, role: "historic")
+                    )
+                )
+            ),
+            fetchedAt: Date()
+        )
+        let row = snapshot.backupLayerChecks.first { $0.name == "R2 Historic" }
+        XCTAssertEqual(row?.ok, false)
+        XCTAssertEqual(row?.detail, "weekly archive not run")
+    }
+
+    func testR2HistoricStaleArchiveShowsLaggingDetail() {
+        let snapshot = ServerStatusSnapshot(
+            health: .init(ok: true, status: "ok"),
+            readiness: .init(
+                ok: true,
+                status: "ready",
+                checks: .init(
+                    backupLayers: .init(
+                        r2Historic: .init(
+                            ok: false,
+                            configured: true,
+                            role: "historic",
+                            reason: "archive_stale",
+                            weeklyArchive: .init(
+                                ok: false,
+                                ageSeconds: 900_000,
+                                reason: "archive_stale"
+                            )
+                        )
+                    )
+                )
+            ),
+            fetchedAt: Date()
+        )
+        let row = snapshot.backupLayerChecks.first { $0.name == "R2 Historic" }
+        XCTAssertEqual(row?.ok, false)
+        XCTAssertTrue(row?.detail?.contains("archive stale") == true)
     }
 
     func testServerStatusStoreLoadsViaProbe() async {

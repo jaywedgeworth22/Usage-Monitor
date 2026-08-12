@@ -1095,17 +1095,24 @@ export function getR2HistoricBackupStatus(): R2HistoricBackupStatus {
     };
   }
 
-  // Once the weekly archive is running, its freshness — not the mere presence
-  // of a frozen bucket — is what makes R2 a trustworthy second copy. A failed
-  // or stale archive is observability-only (it never gates the service), so it
-  // surfaces as amber via `reason` rather than flipping readiness.
+  // Historic R2 is only a trustworthy second copy when the weekly verified
+  // archive is fresh.  A missing, failed, or stale archive is still
+  // observability-only (backup layers never gate `/api/ready` ok), but the
+  // layer's own `ok` must be false so Settings / iOS do not paint a green
+  // check next to a freeze that has never been refreshed.
+  const archiveReason =
+    weeklyArchive == null
+      ? "archive_not_run"
+      : weeklyArchive.ok
+        ? null
+        : weeklyArchive.reason;
   return {
     configured: true,
     litestreamUsesR2: false,
     autoDisabled,
     role: "historic",
-    ok: true,
-    reason: weeklyArchive && !weeklyArchive.ok ? weeklyArchive.reason : null,
+    ok: weeklyArchive?.ok === true,
+    reason: archiveReason,
     weeklyArchive,
   };
 }

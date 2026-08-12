@@ -558,6 +558,12 @@ async function loadRemoteMetrics(
   let succeeded = 0;
   let hetznerMetricsFailed = false;
 
+  // Overlap fleet-backup listing with Hetzner/Coolify.  Sequential used to
+  // push a cold `/api/server-metrics` past the iOS 20s request timeout.
+  const fleetBackupsPromise = fetchFleetBackupStatus(new Date(refreshedAt)).catch(
+    () => null
+  );
+
   if (configuration.states.hetzner === "partial") {
     warnings.push(
       "Hetzner configuration is incomplete; both API token and server ID are required."
@@ -670,13 +676,11 @@ async function loadRemoteMetrics(
 
   // Fleet backup inventory (B2 + peer litestream). Independent of Hetzner/Coolify.
   let fleetBackups: FleetBackupStatusPayload | null = null;
-  try {
-    fleetBackups = await fetchFleetBackupStatus(new Date(refreshedAt));
-    if (fleetBackups.warnings.length > 0) {
-      warnings.push(...fleetBackups.warnings);
-    }
-  } catch {
+  fleetBackups = await fleetBackupsPromise;
+  if (fleetBackups == null) {
     warnings.push("Fleet backup status could not be loaded.");
+  } else if (fleetBackups.warnings.length > 0) {
+    warnings.push(...fleetBackups.warnings);
   }
 
   // Join Coolify CT uuid by name when not in the static map (volume name varies).

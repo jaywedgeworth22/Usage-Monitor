@@ -92,9 +92,11 @@ struct ServerStatusSection: View {
     private func loaded(_ snapshot: ServerStatusSnapshot) -> some View {
         LabeledContent("Service", value: snapshot.health.service ?? "usage-monitor")
 
-        if let version = snapshot.health.version {
-            LabeledContent("Version") {
-                Text(versionText(version: version, commit: snapshot.health.commit))
+        LabeledContent("App", value: appVersionText)
+
+        if let revision = snapshot.health.commit, !revision.isEmpty {
+            LabeledContent("Server") {
+                Text(String(revision.prefix(7)))
                     .font(.system(.body, design: .monospaced))
                     .foregroundStyle(Theme.Colors.secondaryText)
             }
@@ -158,8 +160,13 @@ struct ServerStatusSection: View {
         return check.gatesService ? .danger : .warning
     }
 
-    private func versionText(version: String, commit: String?) -> String {
-        guard let commit, !commit.isEmpty else { return version }
-        return "\(version) · \(commit.prefix(7))"
+    /// This device's App Store marketing version + build, never the server's
+    /// leftover `package.json` `0.1.0`.
+    private var appVersionText: String {
+        let version =
+            Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        let build =
+            Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—"
+        return "\(version) (\(build))"
     }
 }

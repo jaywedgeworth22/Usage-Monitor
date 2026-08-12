@@ -91,7 +91,7 @@ struct ServerStatusSnapshot: Equatable, Sendable {
             if let r2 = layers.r2Historic {
                 rows.append(.init(
                     name: "R2 Historic",
-                    ok: r2.ok,
+                    ok: r2HistoricRowOk(r2),
                     gatesService: false,
                     detail: r2Detail(r2)
                 ))
@@ -142,10 +142,36 @@ struct ServerStatusSnapshot: Equatable, Sendable {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    /// Historic R2 is only OK when the weekly verified archive is fresh.
+    /// Older servers may still report `ok: true` with a missing archive —
+    /// treat that as lagging so the row never shows a green check for a
+    /// freeze that has never been refreshed.
+    private func r2HistoricRowOk(_ r2: ServerReadiness.BackupLayers.R2HistoricLayer) -> Bool {
+        guard r2.role?.lowercased() == "historic" else { return r2.ok }
+        if let archive = r2.weeklyArchive {
+            return r2.ok && archive.ok
+        }
+        return false
+    }
+
     private func r2Detail(_ r2: ServerReadiness.BackupLayers.R2HistoricLayer) -> String? {
         var parts: [String] = []
         switch r2.role?.lowercased() {
-        case "historic": parts.append("weekly freeze")
+        case "historic":
+            if let archive = r2.weeklyArchive {
+                if archive.ok {
+                    parts.append("weekly archive")
+                    if let age = archive.ageSeconds {
+                        parts.append("latest \(UptimeFormat.string(fromSeconds: Int(age))) ago")
+                    }
+                } else if let reason = archive.reason, !reason.isEmpty {
+                    parts.append(humanReason(reason))
+                } else {
+                    parts.append("weekly archive lagging")
+                }
+            } else {
+                parts.append("weekly archive not run")
+            }
         case "active": parts.append("still primary")
         case "unconfigured": parts.append("not monitored")
         default: break
@@ -156,12 +182,15 @@ struct ServerStatusSnapshot: Equatable, Sendable {
         // litestreamUsesR2"). In "historic" role R2 already isn't being
         // written to by design (docs/rollouts/2026-08-06-backup-steady-state-policy.md),
         // so the flag is inert there; showing "writes paused" anyway reads
-        // as an outage next to a green OK badge.
+        // as an outage next to a healthy badge.
         if r2.autoDisabled == true && r2.role?.lowercased() == "active" {
             parts.append("writes paused")
         }
-        if let reason = r2.reason, !r2.ok {
-            parts.append(humanReason(reason))
+        if let reason = r2.reason, !r2HistoricRowOk(r2) {
+            let human = humanReason(reason)
+            if !parts.contains(human) {
+                parts.append(human)
+            }
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
