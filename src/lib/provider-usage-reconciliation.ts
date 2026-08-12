@@ -17,7 +17,9 @@ import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
  * Two rules this module exists to enforce:
  *   1. A provider whose billing simply cannot be verified is labelled
  *      "unverifiable" EXPLICITLY — never skipped, so a structurally-blind
- *      provider can never read as silently reconciled/ok.
+ *      provider can never read as silently reconciled/ok. That includes a
+ *      provider with an authoritative cost but ZERO pushed telemetry: there is
+ *      no self-reported figure to disagree with, so no delta is computed.
  *   2. Rows are UPSERTED on the (providerId, periodStart, periodEnd, keyRef)
  *      unique key, so repeated passes update one row per provider-period
  *      instead of destroying and recreating history.
@@ -251,6 +253,26 @@ export async function reconcileProviderUsage(
       // been polled yet this period.
       status = "pending";
       pending += 1;
+    } else if (reportedEventCount === 0) {
+      // The provider's own bill is in hand, but NOTHING pushed usage telemetry
+      // for it this period, so there is no self-reported figure to compare it
+      // against. Computing a delta here subtracts from ZERO and reports the
+      // ENTIRE bill as a "discrepancy" — which is how a $0.71 Twilio month
+      // became a PagerDuty incident that no tolerance could ever absorb (only a
+      // 100% ratio tolerance would, and that disables the check for every
+      // provider). A provider with no telemetry source is not in disagreement
+      // with itself; it is simply unverified, and saying so is the honest
+      // answer. Ordered after the snapshot branch so "pending" keeps its
+      // narrower meaning: waiting on the poll, not missing the telemetry side.
+      //
+      // Nothing here alerts — provider-alerts raises
+      // usage_reconciliation_discrepancy only on status === "discrepancy" — and
+      // because the event count is recomputed from live data every pass, a
+      // provider that LATER starts pushing telemetry falls straight through to
+      // normal reconciliation on the next run. The row is upserted in place, so
+      // no manual reset or backfill is involved.
+      status = "unverifiable";
+      unverifiable += 1;
     } else {
       verifiedCostUsd = snapshotCost;
       deltaUsd = snapshotCost - reportedCostUsd;

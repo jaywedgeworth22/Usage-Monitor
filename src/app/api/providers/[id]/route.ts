@@ -8,6 +8,10 @@ import {
   isLlmProviderName,
 } from "@/lib/provider-definitions";
 import { buildProviderAlertState } from "@/lib/provider-alerts";
+import {
+  resolveProviderAlertsBeforeDeletion,
+  type ProviderDeletionAlertResolution,
+} from "@/lib/alert-delivery";
 import { computeBudgetStatus, bustBudgetStatusCache } from "@/lib/budget-status";
 import {
   PlanSubscriptionExclusivityError,
@@ -702,7 +706,61 @@ export async function DELETE(
     );
   }
 
+  // Deleting the Provider row cascades its ProviderAlertNotification rows away,
+  // taking the PagerDuty dedup keys with them — after which NOTHING can ever
+  // resolve an incident this provider opened. Close the PagerDuty side first.
+  // `force=true` is the deliberate operator override for the case where the
+  // resolve genuinely cannot complete (e.g. the original routing key is gone)
+  // and the operator will close the incident by hand.
+  const force = request.nextUrl.searchParams.get("force") === "true";
+  let alertResolution: ProviderDeletionAlertResolution;
+  try {
+    alertResolution = await resolveProviderAlertsBeforeDeletion({
+      providerId: id,
+    });
+  } catch (error) {
+    if (force) {
+      alertResolution = {
+        openIncidents: 0,
+        pagerDutyResolvesSent: 0,
+        unresolved: [
+          {
+            alertCode: "unknown",
+            reason: error instanceof Error ? error.message : "resolve failed",
+          },
+        ],
+      };
+    } else {
+      return NextResponse.json(
+        {
+          error:
+            "Could not close this provider's open PagerDuty incidents, so deleting it would strand them.  Retry, or delete with ?force=true to accept that and close them by hand.",
+          detail: error instanceof Error ? error.message : String(error),
+        },
+        { status: 409 }
+      );
+    }
+  }
+  if (alertResolution.unresolved.length > 0 && !force) {
+    return NextResponse.json(
+      {
+        error:
+          "Could not close this provider's open PagerDuty incidents, so deleting it would strand them.  Retry, or delete with ?force=true to accept that and close them by hand.",
+        unresolved: alertResolution.unresolved,
+      },
+      { status: 409 }
+    );
+  }
+
   await prisma.provider.delete({ where: { id } });
   bustBudgetStatusCache();
-  return NextResponse.json({ success: true });
+  return NextResponse.json({
+    success: true,
+    ...(alertResolution.pagerDutyResolvesSent > 0
+      ? { pagerDutyResolvesSent: alertResolution.pagerDutyResolvesSent }
+      : {}),
+    ...(alertResolution.unresolved.length > 0
+      ? { strandedPagerDutyIncidents: alertResolution.unresolved }
+      : {}),
+  });
 }

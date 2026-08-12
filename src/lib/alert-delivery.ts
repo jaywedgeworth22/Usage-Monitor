@@ -572,8 +572,7 @@ function alertEvidenceTimes(
     snapshots: Array<{ fetchedAt: Date }>;
   },
   alertCode: ProviderAlert["code"],
-  evaluatedAt: Date,
-  state: AlertEvidenceState
+  evaluatedAt: Date
 ): { sourceAt: Date; at: Date } {
   if (
     provider.isActive &&
@@ -591,9 +590,24 @@ function alertEvidenceTimes(
     }
     // A stale alert is a deterministic transition derived from S itself.
     // Source time is compared first, so any newer snapshot wins even when the
-    // older snapshot's stale deadline is later. For the same snapshot, the
-    // deadline follows fetchedAt and permits a fresh -> stale recurrence.
-    if (alertCode === "stale_snapshot" && state === "active") {
+    // older snapshot's stale deadline is later.
+    //
+    // BOTH states stamp the stale deadline, deliberately. The clear case used
+    // to report `fetchedAt`, which is STRICTLY EARLIER than the deadline the
+    // active transition had already persisted; on the same snapshot (equal
+    // sourceAt) compareEvidence then ranked the persisted active watermark
+    // ahead of the clear candidate and rejected the resolution as stale
+    // evidence, so the PagerDuty resolve was never sent and the incident could
+    // never close. Equal watermarks let the "clear" > "active" state rank break
+    // the tie in the resolution's favour — exactly the ordering
+    // EVIDENCE_STATE_RANK exists to express.
+    //
+    // Consequence to know before re-enabling stale_snapshot emission (it is
+    // deliberately NOT emitted today — see provider-alerts.ts): one snapshot
+    // now yields ONE stale incident, because a re-trigger from the identical
+    // (sourceAt, deadline) pair is correctly suppressed by the persisted clear.
+    // A new snapshot or an alert-config generation bump still re-opens.
+    if (alertCode === "stale_snapshot") {
       return {
         sourceAt: snapshot.fetchedAt,
         at: providerSnapshotStaleAt(
@@ -618,7 +632,9 @@ function alertEvidence(
   evaluatedAt: Date,
   state: AlertEvidenceState
 ): AlertEvidence {
-  const times = alertEvidenceTimes(provider, alertCode, evaluatedAt, state);
+  // The times are state-independent by construction: active and clear MUST
+  // stamp the same watermark or compareEvidence deadlocks the transition.
+  const times = alertEvidenceTimes(provider, alertCode, evaluatedAt);
   return {
     configGeneration: provider.alertConfigGeneration,
     ...times,
@@ -3362,5 +3378,296 @@ export async function deliverProviderAlerts(options: {
       errors: [...result.errors],
     });
   }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Provider deletion: close outstanding PagerDuty incidents BEFORE the row goes
+// ---------------------------------------------------------------------------
+
+export interface ProviderDeletionAlertResolution {
+  /** Open incidents this provider still carried when deletion was attempted. */
+  openIncidents: number;
+  /** PagerDuty resolve events accepted during this call. */
+  pagerDutyResolvesSent: number;
+  /**
+   * Incidents whose PagerDuty side could NOT be closed. A non-empty list means
+   * deleting the provider row right now WOULD strand a live PagerDuty incident.
+   */
+  unresolved: Array<{ alertCode: string; reason: string }>;
+}
+
+/**
+ * `ProviderAlertNotification.providerId` cascades on delete, so hard-deleting a
+ * Provider destroys every open incident row — including the dedup keys and
+ * incident generations the resolve path needs. PagerDuty is then left holding a
+ * triggered incident that NOTHING can ever resolve: the maintenance pass only
+ * looks at providers that still exist, so no amount of waiting closes it.
+ *
+ * This closes the PagerDuty side first, using each incident's OWN persisted
+ * dedup key so the resolve lands on the exact incident the trigger opened.
+ * Resolves are idempotent at PagerDuty, so re-running after a partial failure
+ * is safe.
+ *
+ * The caller decides what a non-empty `unresolved` means; the DELETE route
+ * refuses the deletion (with an explicit force override) rather than knowingly
+ * stranding an incident.
+ *
+ * Deliberately narrower than the maintenance resolve path: it does not take the
+ * durable operation claim, and instead REFUSES to act on any incident with a
+ * live claim, leaving that incident for the caller to report and the operator
+ * to retry a moment later.
+ */
+export async function resolveProviderAlertsBeforeDeletion(options: {
+  providerId: string;
+  config?: AlertDeliveryConfig;
+  fetchImpl?: typeof fetch;
+  sleepImpl?: (ms: number) => Promise<void>;
+  now?: Date;
+  db?: PrismaLike;
+}): Promise<ProviderDeletionAlertResolution> {
+  const rawDb = options.db ?? prisma;
+  const db = options.db ? rawDb : withAlertPersistenceAdmission(rawDb);
+  const config = options.config ?? readAlertDeliveryConfig();
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const sleepImpl = options.sleepImpl ?? sleep;
+  const now = options.now ?? new Date();
+  const settings = {
+    timeoutMs: boundedPositiveNumber(config.timeoutMs, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS),
+    maxAttempts: Math.max(
+      1,
+      Math.floor(boundedPositiveNumber(config.maxAttempts, DEFAULT_MAX_ATTEMPTS, MAX_ATTEMPTS))
+    ),
+    retryBaseMs: boundedNonNegativeNumber(
+      config.retryBaseMs,
+      DEFAULT_RETRY_BASE_MS,
+      MAX_RETRY_BASE_MS
+    ),
+  };
+  const pagerDutyChannels = [
+    ...new Map(
+      config.channels
+        .filter(
+          (channel): channel is Extract<AlertDeliveryChannel, { kind: "pagerduty" }> =>
+            channel.kind === "pagerduty"
+        )
+        .map((channel) => [channelKey(channel), channel] as const)
+    ).values(),
+  ];
+
+  const result: ProviderDeletionAlertResolution = {
+    openIncidents: 0,
+    pagerDutyResolvesSent: 0,
+    unresolved: [],
+  };
+
+  const provider = await db.provider.findUnique({
+    where: { id: options.providerId },
+    select: { id: true, name: true, displayName: true },
+  });
+  if (!provider) return result;
+
+  const notifications = await db.providerAlertNotification.findMany({
+    where: { providerId: provider.id, resolvedAt: null },
+    select: {
+      id: true,
+      stateKey: true,
+      alertCode: true,
+      severity: true,
+      message: true,
+      firstDetectedAt: true,
+      incidentGeneration: true,
+      pagerDutyAuditState: true,
+      operationClaimToken: true,
+      operationClaimExpiresAt: true,
+      channelDeliveries: {
+        where: { channelKind: "pagerduty" },
+        select: {
+          channelKey: true,
+          pagerDutyDedupKey: true,
+          lastSucceededAt: true,
+          lastSucceededIncidentGeneration: true,
+          lastResolvedAt: true,
+          lastResolvedIncidentGeneration: true,
+          triggerIncidentGeneration: true,
+          triggerClaimToken: true,
+          triggerClaimExpiresAt: true,
+          resolveClaimToken: true,
+          resolveClaimExpiresAt: true,
+          lastError: true,
+        },
+      },
+    },
+  });
+  result.openIncidents = notifications.length;
+
+  const configuredPagerDutyKeys = new Set(
+    pagerDutyChannels.map((channel) => channelKey(channel))
+  );
+
+  for (const notification of notifications) {
+    const legacyAuditPending =
+      notification.pagerDutyAuditState === "legacy_unknown";
+    const resolvedForIncident = (
+      state: (typeof notification.channelDeliveries)[number]
+    ) =>
+      generationMatches(
+        state.lastResolvedIncidentGeneration,
+        notification.incidentGeneration
+      ) &&
+      state.lastResolvedAt !== null &&
+      state.lastResolvedAt >= notification.firstDetectedAt;
+    // Same predicate the maintenance resolve path uses: a PagerDuty
+    // destination is only owed a resolve if THIS incident generation actually
+    // reached it (or a legacy row makes that unknowable).
+    const relevantTriggerStates = notification.channelDeliveries.filter(
+      (state) =>
+        !resolvedForIncident(state) &&
+        (legacyAuditPending ||
+          ((generationMatches(
+            state.triggerIncidentGeneration,
+            notification.incidentGeneration
+          ) ||
+            generationMatches(
+              state.lastSucceededIncidentGeneration,
+              notification.incidentGeneration
+            )) &&
+            ((state.lastSucceededAt !== null &&
+              state.lastSucceededAt >= notification.firstDetectedAt) ||
+              state.lastError === TRIGGER_OUTCOME_UNKNOWN_MARKER ||
+              state.triggerClaimToken !== null)))
+    );
+    if (relevantTriggerStates.length === 0 && !legacyAuditPending) {
+      // Nothing ever reached PagerDuty for this incident, so deleting the row
+      // cannot strand anything there.
+      continue;
+    }
+
+    const claimInFlight =
+      (notification.operationClaimToken !== null &&
+        notification.operationClaimExpiresAt !== null &&
+        notification.operationClaimExpiresAt > now) ||
+      relevantTriggerStates.some(
+        (state) =>
+          (state.triggerClaimToken !== null &&
+            state.triggerClaimExpiresAt !== null &&
+            state.triggerClaimExpiresAt > now) ||
+          (state.resolveClaimToken !== null &&
+            state.resolveClaimExpiresAt !== null &&
+            state.resolveClaimExpiresAt > now)
+      );
+    if (claimInFlight) {
+      // A maintenance worker is mid-delivery on this incident. Resolving under
+      // it could overtake a trigger that has not yet crossed the durable
+      // boundary; the lease is short, so the honest answer is "retry shortly".
+      result.unresolved.push({
+        alertCode: notification.alertCode,
+        reason:
+          "a maintenance worker is mid-delivery on this incident; retry in a moment",
+      });
+      continue;
+    }
+
+    if (
+      relevantTriggerStates.some(
+        (state) => !configuredPagerDutyKeys.has(state.channelKey)
+      ) ||
+      (legacyAuditPending && pagerDutyChannels.length === 0)
+    ) {
+      result.unresolved.push({
+        alertCode: notification.alertCode,
+        reason:
+          "the PagerDuty routing key this incident was raised on is not configured",
+      });
+      continue;
+    }
+
+    const scope = notificationAlertScope({
+      providerId: provider.id,
+      alertCode: notification.alertCode,
+      stateKey: notification.stateKey,
+    });
+    const resolvedAlert: ProviderAlert = {
+      code: notification.alertCode as ProviderAlert["code"],
+      severity: normalizeSeverity(notification.severity) ?? "warning",
+      message: notification.message,
+    };
+    const channelsToResolve = pagerDutyChannels.filter((channel) => {
+      if (legacyAuditPending) return true;
+      const key = channelKey(channel);
+      return relevantTriggerStates.some((state) => state.channelKey === key);
+    });
+
+    let allResolvesSent = true;
+    for (const channel of channelsToResolve) {
+      const key = channelKey(channel);
+      const state = notification.channelDeliveries.find(
+        (entry) => entry.channelKey === key
+      );
+      const exactDedupKey = legacyAuditPending
+        ? pagerDutyDedupKey(
+            provider.id,
+            notification.alertCode,
+            notification.incidentGeneration,
+            "legacy_unknown",
+            scope
+          )
+        : state?.pagerDutyDedupKey ??
+          pagerDutyDedupKey(
+            provider.id,
+            notification.alertCode,
+            notification.incidentGeneration,
+            notification.pagerDutyAuditState,
+            scope
+          );
+      try {
+        await sendToChannel(
+          channel,
+          provider,
+          resolvedAlert,
+          now,
+          fetchImpl,
+          settings,
+          sleepImpl,
+          "resolve",
+          exactDedupKey
+        );
+      } catch (error) {
+        allResolvesSent = false;
+        result.unresolved.push({
+          alertCode: notification.alertCode,
+          reason: failureDetails(error).message,
+        });
+        continue;
+      }
+      result.pagerDutyResolvesSent += 1;
+      try {
+        await db.providerAlertChannelDelivery.updateMany({
+          where: { notificationId: notification.id, channelKey: key },
+          data: {
+            lastResolveAttemptAt: now,
+            lastResolvedAt: now,
+            lastResolvedIncidentGeneration: notification.incidentGeneration,
+            resolveAttemptCount: { increment: 1 },
+            lastResolveError: null,
+          },
+        });
+      } catch (error) {
+        // The resolve already landed at PagerDuty, which is the outcome that
+        // matters here. Bookkeeping on a row that is about to be cascade-deleted
+        // is best-effort; a repeat resolve is idempotent.
+        if (!isPrismaModelTimeout(error, "ProviderAlertChannelDelivery")) throw error;
+      }
+    }
+
+    if (!allResolvesSent) continue;
+    // Close the local incident too, so an abandoned deletion leaves consistent
+    // state and a concurrent maintenance pass does not re-notify.
+    await db.providerAlertNotification.updateMany({
+      where: { id: notification.id, resolvedAt: null },
+      data: { resolvedAt: now },
+    });
+  }
+
   return result;
 }

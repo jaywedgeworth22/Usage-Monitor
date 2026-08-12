@@ -1,3 +1,9 @@
+## Current (2026-08-12 CLAUDE — PagerDuty alert correctness)
+
+Branch `claude/pd-alert-correctness`: zero pushed telemetry now records `unverifiable` instead of manufacturing a 100%-of-bill discrepancy (PD #64/#70 Twilio); `stale_snapshot` CLEAR stamps the same watermark as ACTIVE so resolves stop deadlocking; provider deletion resolves outstanding PagerDuty incidents first (409 + `?force=true` override). Rollout: `docs/rollouts/2026-08-12-pagerduty-alert-correctness.md`.
+
+## Prior
+
 ## Current (2026-08-10 GROK — default light theme)
 
 Light is product default (web ThemeProvider + iOS AppSettings). Rollout: `docs/rollouts/2026-08-10-default-light-theme.md`.

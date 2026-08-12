@@ -1,4 +1,13 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -73,6 +82,122 @@ describe("DELETE /api/providers/:id attribution history", () => {
     expect(response.status).toBe(409);
     expect(await prisma.provider.count({ where: { id: provider.id } })).toBe(1);
     expect(await prisma.providerKeyIdentity.count({ where: { providerId: provider.id } })).toBe(1);
+  });
+});
+
+describe("DELETE /api/providers/:id PagerDuty incident closure", () => {
+  const ROUTING_KEY = "delete-route-pd-key";
+
+  async function seedProviderWithOpenPagerDutyIncident(name: string) {
+    const provider = await prisma.provider.create({
+      data: { name, displayName: name, type: "builtin" },
+    });
+    const openedAt = new Date("2026-07-19T08:00:00.000Z");
+    const notification = await prisma.providerAlertNotification.create({
+      data: {
+        providerId: provider.id,
+        stateKey: `${provider.id}:balance_low`,
+        alertCode: "balance_low",
+        severity: "warning",
+        providerName: provider.name,
+        providerDisplayName: provider.displayName,
+        message: "Balance is low.",
+        firstDetectedAt: openedAt,
+        lastDetectedAt: openedAt,
+        incidentGeneration: 1,
+        pagerDutyAuditState: "generation_scoped",
+      },
+    });
+    const digest = createHash("sha256")
+      .update(`pagerduty\0${ROUTING_KEY}`)
+      .digest("hex");
+    await prisma.providerAlertChannelDelivery.create({
+      data: {
+        notificationId: notification.id,
+        channelKey: `pagerduty:${digest}`,
+        channelKind: "pagerduty",
+        lastAttemptAt: openedAt,
+        lastSucceededAt: openedAt,
+        lastSucceededIncidentGeneration: 1,
+        triggerIncidentGeneration: 1,
+        pagerDutyDedupKey: `api-usage-monitor:${provider.id}:balance_low:incident-1`,
+        attemptCount: 1,
+        successCount: 1,
+      },
+    });
+    return { provider, notification };
+  }
+
+  beforeEach(() => {
+    process.env.ALERT_PAGERDUTY_ROUTING_KEY = ROUTING_KEY;
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    delete process.env.ALERT_PAGERDUTY_ROUTING_KEY;
+    await prisma.providerAlertChannelDelivery.deleteMany();
+    await prisma.providerAlertNotification.deleteMany();
+  });
+
+  it("resolves the open PagerDuty incident before deleting the row", async () => {
+    const { provider } = await seedProviderWithOpenPagerDutyIncident(
+      "pd-delete-resolves"
+    );
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("ok", { status: 202 }));
+
+    const response = await DELETE(
+      new NextRequest(`https://usage.jays.services/api/providers/${provider.id}`, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ id: provider.id }) }
+    );
+
+    expect(response.status).toBe(200);
+    const resolves = fetchSpy.mock.calls
+      .filter((call) => String(call[0]).includes("events.pagerduty.com"))
+      .map((call) => JSON.parse(String(call[1]?.body ?? "{}")));
+    expect(resolves).toHaveLength(1);
+    expect(resolves[0]).toMatchObject({
+      event_action: "resolve",
+      dedup_key: `api-usage-monitor:${provider.id}:balance_low:incident-1`,
+    });
+    expect(await prisma.provider.count({ where: { id: provider.id } })).toBe(0);
+  });
+
+  it("refuses the delete when the incident cannot be closed, and honours ?force=true", async () => {
+    const { provider } = await seedProviderWithOpenPagerDutyIncident(
+      "pd-delete-blocked"
+    );
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("nope", { status: 500 })
+    );
+
+    const blocked = await DELETE(
+      new NextRequest(`https://usage.jays.services/api/providers/${provider.id}`, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ id: provider.id }) }
+    );
+    expect(blocked.status).toBe(409);
+    // Refusing is the point: the row must survive so the incident stays
+    // resolvable rather than being orphaned in PagerDuty forever.
+    expect(await prisma.provider.count({ where: { id: provider.id } })).toBe(1);
+
+    const forced = await DELETE(
+      new NextRequest(
+        `https://usage.jays.services/api/providers/${provider.id}?force=true`,
+        { method: "DELETE" }
+      ),
+      { params: Promise.resolve({ id: provider.id }) }
+    );
+    expect(forced.status).toBe(200);
+    expect(await forced.json()).toMatchObject({
+      success: true,
+      strandedPagerDutyIncidents: [{ alertCode: "balance_low" }],
+    });
+    expect(await prisma.provider.count({ where: { id: provider.id } })).toBe(0);
   });
 });
 

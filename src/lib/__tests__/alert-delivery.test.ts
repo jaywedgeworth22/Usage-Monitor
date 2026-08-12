@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { createHash } from "node:crypto";
 import { setupPrismaSqliteTestDb } from "./setup-test-db";
 import { tryAcquireIngestAdmission } from "../ingest-admission";
 
@@ -9,6 +10,7 @@ let dbPath: string;
 let prisma: typeof import("@/lib/prisma").prisma;
 let deliverProviderAlerts: typeof import("../alert-delivery").deliverProviderAlerts;
 let readAlertDeliveryConfig: typeof import("../alert-delivery").readAlertDeliveryConfig;
+let resolveProviderAlertsBeforeDeletion: typeof import("../alert-delivery").resolveProviderAlertsBeforeDeletion;
 let AlertNotificationSummaryPersistenceTimeout: typeof import("../alert-delivery").AlertNotificationSummaryPersistenceTimeout;
 let encrypt: typeof import("@/lib/crypto").encrypt;
 
@@ -22,9 +24,12 @@ beforeAll(async () => {
 
   ({ prisma } = await import("@/lib/prisma"));
   ({ encrypt } = await import("@/lib/crypto"));
-  ({ deliverProviderAlerts, readAlertDeliveryConfig, AlertNotificationSummaryPersistenceTimeout } = await import(
-    "../alert-delivery"
-  ));
+  ({
+    deliverProviderAlerts,
+    readAlertDeliveryConfig,
+    resolveProviderAlertsBeforeDeletion,
+    AlertNotificationSummaryPersistenceTimeout,
+  } = await import("../alert-delivery"));
 }, 60_000);
 
 afterAll(async () => {
@@ -3764,5 +3769,249 @@ describe("S14: subscription insight alerts flow through delivery", () => {
 
     const bodies = fetchMock.mock.calls.map((call) => String(call[1]?.body ?? ""));
     expect(bodies.some((body) => body.includes("Claude Pro"))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PagerDuty incidents that could previously NEVER auto-resolve
+// ---------------------------------------------------------------------------
+
+describe("PagerDuty incidents that used to strand", () => {
+  const ROUTING_KEY = "pd-strand-routing-key";
+
+  function pagerDutyChannelKey(routingKey: string): string {
+    const digest = createHash("sha256")
+      .update(`pagerduty\0${routingKey}`)
+      .digest("hex");
+    return `pagerduty:${digest}`;
+  }
+
+  function pagerDutyBodies(fetchMock: ReturnType<typeof vi.fn>) {
+    return fetchMock.mock.calls
+      .filter((call) => String(call[0]).includes("events.pagerduty.com"))
+      .map((call) => JSON.parse(String(call[1]?.body ?? "{}")));
+  }
+
+  /**
+   * Seeds the exact shape a legacy open `stale_snapshot` incident has in
+   * production: the alert is no longer emitted at all (deliberate product
+   * choice), so the ONLY correct next transition is a resolve.
+   */
+  async function seedOpenStaleSnapshotIncident(options: {
+    name: string;
+    fetchedAt: Date;
+    staleAt: Date;
+  }) {
+    const provider = await prisma.provider.create({
+      data: {
+        name: options.name,
+        displayName: options.name,
+        type: "builtin",
+        refreshIntervalMin: 60,
+        snapshots: { create: { fetchedAt: options.fetchedAt } },
+        // A plan keeps the info-severity `unconfigured_budget` alert out of the
+        // way so this test observes the stale_snapshot transition alone.
+        plan: { create: { billingMode: "actual" } },
+      },
+    });
+    const notification = await prisma.providerAlertNotification.create({
+      data: {
+        providerId: provider.id,
+        stateKey: `${provider.id}:stale_snapshot`,
+        alertCode: "stale_snapshot",
+        severity: "warning",
+        providerName: provider.name,
+        providerDisplayName: provider.displayName,
+        message: "Snapshot is stale.",
+        firstDetectedAt: options.staleAt,
+        lastDetectedAt: options.staleAt,
+        incidentGeneration: 1,
+        // The watermark the ACTIVE transition persisted: the stale deadline,
+        // which is strictly later than the snapshot's fetchedAt.
+        evidenceConfigGeneration: 0,
+        evidenceSourceAt: options.fetchedAt,
+        evidenceWatermarkAt: options.staleAt,
+        evidenceWatermarkState: "active",
+        pagerDutyAuditState: "generation_scoped",
+        lastSentAt: options.staleAt,
+        sendCount: 1,
+      },
+    });
+    await prisma.providerAlertChannelDelivery.create({
+      data: {
+        notificationId: notification.id,
+        channelKey: pagerDutyChannelKey(ROUTING_KEY),
+        channelKind: "pagerduty",
+        lastAttemptAt: options.staleAt,
+        lastSucceededAt: options.staleAt,
+        lastSucceededIncidentGeneration: 1,
+        triggerIncidentGeneration: 1,
+        pagerDutyDedupKey: `api-usage-monitor:${provider.id}:stale_snapshot:incident-1`,
+        attemptCount: 1,
+        successCount: 1,
+      },
+    });
+    return { provider, notification };
+  }
+
+  it("sends the resolve for a cleared stale_snapshot instead of deadlocking on its own watermark", async () => {
+    const fetchedAt = new Date("2026-07-18T08:00:00.000Z");
+    // providerSnapshotStaleAt = fetchedAt + max(interval*3min, 1 day) = +24h.
+    const staleAt = new Date("2026-07-19T08:00:00.000Z");
+    const { provider, notification } = await seedOpenStaleSnapshotIncident({
+      name: "stale-snapshot-strand",
+      fetchedAt,
+      staleAt,
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 202 }));
+    const result = await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config: {
+        channels: [{ kind: "pagerduty" as const, routingKey: ROUTING_KEY }],
+        minSeverity: "warning" as const,
+        reminderHours: 24,
+        maxAttempts: 1,
+      },
+      fetchImpl: fetchMock,
+    });
+
+    // The bug: the CLEAR evidence stamped `fetchedAt` while the persisted
+    // ACTIVE evidence held the later stale deadline, so compareEvidence ranked
+    // the resolution as stale and suppressed it forever.
+    expect(
+      result.errors.filter((error) => error.alertCode === "stale_snapshot")
+    ).toEqual([]);
+    expect(result.resolved).toBe(1);
+
+    const resolves = pagerDutyBodies(fetchMock).filter(
+      (body) => body.event_action === "resolve"
+    );
+    expect(resolves).toHaveLength(1);
+    expect(resolves[0].dedup_key).toBe(
+      `api-usage-monitor:${provider.id}:stale_snapshot:incident-1`
+    );
+
+    const closed = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { id: notification.id },
+    });
+    expect(closed.resolvedAt).not.toBeNull();
+    expect(closed.evidenceWatermarkState).toBe("clear");
+    // Both transitions must agree on the watermark; an earlier clear watermark
+    // is exactly what deadlocked compareEvidence.
+    expect(closed.evidenceWatermarkAt).toEqual(staleAt);
+  });
+
+  it("resolves a provider's open PagerDuty incidents before the row is deleted", async () => {
+    const fetchedAt = new Date("2026-07-18T08:00:00.000Z");
+    const staleAt = new Date("2026-07-19T08:00:00.000Z");
+    const { provider, notification } = await seedOpenStaleSnapshotIncident({
+      name: "deleted-provider-strand",
+      fetchedAt,
+      staleAt,
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 202 }));
+    const outcome = await resolveProviderAlertsBeforeDeletion({
+      providerId: provider.id,
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config: {
+        channels: [{ kind: "pagerduty" as const, routingKey: ROUTING_KEY }],
+        minSeverity: "warning" as const,
+        reminderHours: 24,
+        maxAttempts: 1,
+      },
+      fetchImpl: fetchMock,
+    });
+
+    expect(outcome).toMatchObject({
+      openIncidents: 1,
+      pagerDutyResolvesSent: 1,
+      unresolved: [],
+    });
+    const resolves = pagerDutyBodies(fetchMock).filter(
+      (body) => body.event_action === "resolve"
+    );
+    expect(resolves).toHaveLength(1);
+    expect(resolves[0].dedup_key).toBe(
+      `api-usage-monitor:${provider.id}:stale_snapshot:incident-1`
+    );
+    const closed = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { id: notification.id },
+    });
+    expect(closed.resolvedAt).not.toBeNull();
+
+    // Deleting now cascades the incident row away with nothing left stranded.
+    await prisma.provider.delete({ where: { id: provider.id } });
+    expect(
+      await prisma.providerAlertNotification.findUnique({
+        where: { id: notification.id },
+      })
+    ).toBeNull();
+  });
+
+  it("reports the incident as unresolved rather than pretending, when PagerDuty rejects the resolve", async () => {
+    const fetchedAt = new Date("2026-07-18T08:00:00.000Z");
+    const staleAt = new Date("2026-07-19T08:00:00.000Z");
+    const { provider, notification } = await seedOpenStaleSnapshotIncident({
+      name: "delete-resolve-rejected",
+      fetchedAt,
+      staleAt,
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response("nope", { status: 500 }));
+    const outcome = await resolveProviderAlertsBeforeDeletion({
+      providerId: provider.id,
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config: {
+        channels: [{ kind: "pagerduty" as const, routingKey: ROUTING_KEY }],
+        minSeverity: "warning" as const,
+        reminderHours: 24,
+        maxAttempts: 1,
+      },
+      fetchImpl: fetchMock,
+    });
+
+    expect(outcome.pagerDutyResolvesSent).toBe(0);
+    expect(outcome.unresolved).toHaveLength(1);
+    expect(outcome.unresolved[0].alertCode).toBe("stale_snapshot");
+    // The local incident stays OPEN: claiming it closed while PagerDuty still
+    // shows it triggered is the dishonest state this whole path exists to avoid.
+    const stillOpen = await prisma.providerAlertNotification.findUniqueOrThrow({
+      where: { id: notification.id },
+    });
+    expect(stillOpen.resolvedAt).toBeNull();
+  });
+
+  it("does nothing for a provider that never reached PagerDuty", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "delete-no-pagerduty",
+        displayName: "Delete No PagerDuty",
+        type: "builtin",
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 202 }));
+
+    const outcome = await resolveProviderAlertsBeforeDeletion({
+      providerId: provider.id,
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config: {
+        channels: [{ kind: "pagerduty" as const, routingKey: ROUTING_KEY }],
+        minSeverity: "warning" as const,
+        reminderHours: 24,
+        maxAttempts: 1,
+      },
+      fetchImpl: fetchMock,
+    });
+
+    expect(outcome).toEqual({
+      openIncidents: 0,
+      pagerDutyResolvesSent: 0,
+      unresolved: [],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
