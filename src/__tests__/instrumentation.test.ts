@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   computeBudgetStatus: vi.fn().mockResolvedValue({}),
   computeProjectBudgetStatus: vi.fn().mockResolvedValue({}),
   deactivateDecommissionedBuiltInProviders: vi.fn().mockResolvedValue(0),
+  clearLlmMustKeepFundedFlags: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock("@/lib/usage-recorder", () => ({
@@ -19,6 +20,10 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/provider-retirement", () => ({
   deactivateDecommissionedBuiltInProviders:
     mocks.deactivateDecommissionedBuiltInProviders,
+}));
+
+vi.mock("@/lib/provider-funding-policy", () => ({
+  clearLlmMustKeepFundedFlags: mocks.clearLlmMustKeepFundedFlags,
 }));
 
 vi.mock("@/lib/budget-status", () => ({
@@ -38,6 +43,8 @@ describe("usage scheduler instrumentation", () => {
     mocks.computeProjectBudgetStatus.mockResolvedValue({});
     mocks.deactivateDecommissionedBuiltInProviders.mockClear();
     mocks.deactivateDecommissionedBuiltInProviders.mockResolvedValue(0);
+    mocks.clearLlmMustKeepFundedFlags.mockClear();
+    mocks.clearLlmMustKeepFundedFlags.mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -61,6 +68,7 @@ describe("usage scheduler instrumentation", () => {
 
     expect(mocks.startUsagePollingScheduler).toHaveBeenCalledOnce();
     expect(mocks.deactivateDecommissionedBuiltInProviders).toHaveBeenCalledOnce();
+    expect(mocks.clearLlmMustKeepFundedFlags).toHaveBeenCalledOnce();
   });
 
   it("bounds native SQLite memory before deciding whether polling is enabled", async () => {
