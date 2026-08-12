@@ -16,6 +16,8 @@ import type { HostPreventionPanel } from "@/lib/server-metrics-indicators";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
+import { MacHealthCard } from "@/components/MacHealthCard";
+
 export function markOperationsStale(previous: OperationsHealthSummary): OperationsHealthSummary {
   return {
     ...previous,
@@ -982,6 +984,7 @@ export default function OperationsOverview() {
       )}
       {data ? (
         <div className="grid gap-3 lg:grid-cols-2">
+          <MacHealthCard />
           <HostStatsCard data={hostMetrics} />
           <R2FleetCard data={data.r2Fleet} />
           <FleetBackupsCard data={data.fleetBackups} />

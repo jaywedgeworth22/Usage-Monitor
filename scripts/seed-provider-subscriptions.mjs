@@ -85,6 +85,8 @@ const PROVIDER_DEFAULTS = {
   twelvedata: { displayName: "Twelve Data", category: "Market Data" },
   alphavantage: { displayName: "Alpha Vantage", category: "Market Data" },
   finnhub: { displayName: "Finnhub", category: "Market Data" },
+  anthropic: { displayName: "Anthropic", category: "LLM" },
+  kimi: { displayName: "Kimi / Moonshot AI", category: "LLM" },
 };
 
 // Subscriptions to seed. costUsd/interval are the CURRENT (monthly) sticker
@@ -105,6 +107,22 @@ const SUBSCRIPTIONS = [
     status: "active",
     costUsd: 22,
     notes: "billed annually $264/yr",
+    knobEnv: {},
+  },
+  {
+    providerName: "anthropic",
+    name: "Claude Pro / Max",
+    status: "active",
+    costUsd: 20,
+    notes: "Active Claude Pro subscription ($20/mo)",
+    knobEnv: {},
+  },
+  {
+    providerName: "kimi",
+    name: "Kimi VIP",
+    status: "active",
+    costUsd: 15,
+    notes: "Active Kimi / Moonshot AI VIP subscription ($15/mo)",
     knobEnv: {},
   },
   {
