@@ -19,6 +19,14 @@ on:
 
 permissions:
   contents: read
+  # Lets a superseded observer cancel its own run. Supersession is routine at
+  # this merge rate (Coolify deploys take longer than the gap between merges),
+  # so it must conclude as "cancelled", not "failure" — otherwise every fast
+  # merge fires a false Run-failed notification. A genuinely stuck deploy is
+  # still alarmed: the newest SHA's observer keeps running (its target cannot
+  # be superseded until the next merge) and uptime-monitor.yml independently
+  # flags sustained release drift past its grace window.
+  actions: write
 
 # A newer main revision supersedes an older observer. Host-side mutation is
 # independently serialized by flock and never uses cancellation semantics.
@@ -58,8 +66,11 @@ jobs:
           main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
           if [[ "$main_sha" != "$TARGET_SHA" ]]; then
             echo "Revision $TARGET_SHA was superseded by $main_sha before observation began."
-            # Do not treat supersession as success — that masks a stuck deploy
-            # when merges land faster than Coolify can catch up (Wave C / C3).
+            # Supersession is neither success (that masks a stuck deploy —
+            # Wave C / C3) nor failure (that pages on every fast merge). The
+            # superseded observer cancels itself; the newer SHA's observer
+            # carries the verification, and uptime-monitor.yml release-drift
+            # detection alarms sustained staleness independently.
             echo "superseded=true" >> "$GITHUB_ENV"
             echo "deploy_observer_outcome=superseded" >> "$GITHUB_ENV"
           else
@@ -67,11 +78,17 @@ jobs:
             echo "deploy_observer_outcome=pending" >> "$GITHUB_ENV"
           fi
 
-      - name: Fail when observation target was already superseded
+      - name: Cancel this observer when its target was already superseded
         if: env.superseded == 'true'
         shell: bash
         run: |
-          echo "::error::Deploy observer target was superseded by a newer main SHA before verification. This is not success — check Coolify deploy lag / blocked-sha."
+          set -euo pipefail
+          echo "::notice::Target superseded by a newer main SHA; the newer observer carries verification. Cancelling this run."
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"
+          # Cancellation lands asynchronously; hold here until it kills the
+          # job. If it never lands, fail loudly rather than report false-green.
+          sleep 120
+          echo "::error::Self-cancellation did not take effect within 120s."
           exit 1
 
       - name: Wait for exact production revision
@@ -86,8 +103,13 @@ jobs:
               if [[ "$main_sha" != "$TARGET_SHA" ]]; then
                 echo "Revision $TARGET_SHA was superseded by $main_sha while waiting."
                 echo "deploy_observer_outcome=superseded" >> "$GITHUB_ENV"
-                # Fail the wait step so the workflow is not false-green. A later
-                # main SHA will run its own observer; this one did not verify.
+                # Neither success (false-green masks a stuck deploy) nor
+                # failure (pages on every fast merge): cancel this run. The
+                # newer SHA's own observer picks up verification, and
+                # uptime-monitor.yml alarms sustained release drift.
+                gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/cancel"
+                sleep 120
+                echo "::error::Self-cancellation did not take effect within 120s."
                 exit 1
               fi
             fi
