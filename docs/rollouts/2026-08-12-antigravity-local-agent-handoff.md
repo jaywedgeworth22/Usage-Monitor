@@ -12,6 +12,32 @@ owner spotted while reviewing (already committed, just needs the checklist
 in Part 2 to close the loop on the underlying flag). Don't split them
 unless asked; just track them separately below.
 
+## STATUS — worked 2026-08-12 by a local Claude Code session
+
+**Part 1 (collector): done and live.** Steps 1-8 below are all complete.
+`agy` was authenticated; the dry-run did NOT parse cleanly and the fix was
+not the "add words to `COLUMN_ALIASES`" one this doc predicted — the real
+payload has no header row at all, and carries a fully structured
+`command.data.groups[].buckets[]` field the original parser never looked at.
+It also meters per model *group* × *window*, not per model, which made the
+old group-name-keyed `eventId` collide and would have silently dropped half
+of every reading. See the rewritten "Output shape" section of
+`2026-08-11-antigravity-usage-collector.md` and commit
+`fix(antigravity): parse the real /usage payload, not the guessed one`.
+A real batch was sent and verified: `persisted: 4, rejected: 0`, four rows
+in `ExternalUsageEvent` under `provider: "google-antigravity"`.
+
+**Part 2 (R2 kill-switch): checked — the picture is slightly different from
+what this doc assumed.** The persisted flag file `/data/r2-disabled-70pct.flag`
+is **absent**; the kill switch is engaged purely through Coolify env vars
+(`LITESTREAM_EMERGENCY_DISABLE=true` and `R2_WRITES_DISABLED=true`, set in
+both the production and preview scopes). That matters for the auto-resume
+question in item 3: `clearR2AutoDisable()` only mutates `process.env` in the
+running process, so it can never durably clear an env-var-sourced switch —
+every restart re-injects `true`. The flag is not "stuck because storage is
+still ≥70%"; it is stuck because it is pinned in deploy config. Backup health
+is unaffected (B2 primary healthy, replica age ~1 min, R2 role `historic`).
+
 ---
 
 ## Part 1 — Antigravity quota collector (the main task)
@@ -56,15 +82,22 @@ the cloud sandbox that wrote this.
 
 4. **Add the Infisical secret.** Project `usage-monitor`
    (`86e35e51-91bc-4dfd-a045-4484726b9c40`), env `prod`, key
-   `USAGE_INGEST_PRODUCER_TOKENS`. First check whether that key already has
-   other `producerId:token` pairs (comma-separated) — if so, append rather
-   than overwrite:
-   ```
-   antigravity-cli:2e817df198390f9d6ca8579b4b4000c6993c2b55b10e9f5582f941e6023c5a20
-   ```
-   (Generated in the cloud sandbox with `secrets.token_hex(32)` — fine to
-   use as-is, or regenerate your own; either way it just needs to match
-   what the collector sends.)
+   `USAGE_INGEST_PRODUCER_TOKENS`, value `antigravity-cli:<token>`. First
+   check whether that key already has other `producerId:token` pairs
+   (comma-separated) — if so, append rather than overwrite.
+
+   > **This step originally pasted a literal 64-hex token here in plaintext,
+   > in a doc that was committed and pushed.** Don't do that — a value that is
+   > about to become a live production ingest credential must never be written
+   > into the repo. Mint it where it is used and write it straight to the
+   > secret store. That particular token was never installed anywhere, so
+   > there is nothing to rotate; it is a dead string, and the live credential
+   > is a different one minted locally on 2026-08-12.
+
+   Note the collector also needs the token half on its own, as
+   `ANTIGRAVITY_INGEST_TOKEN` — the original checklist missed this, and
+   without it step 6's `infisical run` invocation injects nothing and the
+   script exits on its missing-token guard.
 
 5. **Restart the usage-monitor app** (Coolify restart is enough, no
    redeploy needed) so `scripts/start-with-infisical.sh` re-injects the
