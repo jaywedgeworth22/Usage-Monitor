@@ -130,7 +130,7 @@ Oracle polls GitHub once per minute and deploys only when all of these are true:
    service and environment settings live through Render's API on every deploy.
 
 This pull model intentionally stores no production SSH key or cloud credential
-in GitHub. `.github/workflows/oracle-production-deploy.yml` is an independent
+in GitHub. `.github/workflows/production-deploy-verify.yml` is an independent
 receipt: after exact-main CI succeeds, it uses `curl --resolve` with the pinned
 reserved Oracle IP while retaining `usage.jays.services` for SNI/certificate
 validation, waits for production to report that exact revision, and fails

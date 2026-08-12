@@ -1,9 +1,11 @@
-name: Oracle Production Deploy
+name: Production Deploy Verification
 
 on:
-  # Oracle performs the mutation from its root-owned timer. This workflow is
-  # the GitHub-visible receipt: it starts only after exact-main CI succeeds and
-  # fails unless production reaches that exact revision.
+  # Coolify on Hetzner (fleet-hetzner-nbg1) performs the deploy. This workflow
+  # never mutates production — it is the GitHub-visible receipt: it starts only
+  # after exact-main CI succeeds and fails unless production reaches that exact
+  # revision. Oracle was the previous host; deploy/oracle/README.md keeps that
+  # retired runbook for emergency reference only.
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -21,7 +23,7 @@ permissions:
 # A newer main revision supersedes an older observer. Host-side mutation is
 # independently serialized by flock and never uses cancellation semantics.
 concurrency:
-  group: oracle-production-deploy
+  group: production-deploy-verify
   cancel-in-progress: true
 
 jobs:
@@ -34,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 250
     environment:
-      name: oracle-production
+      name: hetzner-production
       url: https://usage.jays.services
     env:
       TARGET_SHA: ${{ github.event.workflow_run.head_sha || inputs.revision || github.sha }}
@@ -57,22 +59,22 @@ jobs:
           if [[ "$main_sha" != "$TARGET_SHA" ]]; then
             echo "Revision $TARGET_SHA was superseded by $main_sha before observation began."
             # Do not treat supersession as success — that masks a stuck deploy
-            # when merges land faster than Oracle can catch up (Wave C / C3).
+            # when merges land faster than Coolify can catch up (Wave C / C3).
             echo "superseded=true" >> "$GITHUB_ENV"
-            echo "oracle_observer_outcome=superseded" >> "$GITHUB_ENV"
+            echo "deploy_observer_outcome=superseded" >> "$GITHUB_ENV"
           else
             echo "superseded=false" >> "$GITHUB_ENV"
-            echo "oracle_observer_outcome=pending" >> "$GITHUB_ENV"
+            echo "deploy_observer_outcome=pending" >> "$GITHUB_ENV"
           fi
 
       - name: Fail when observation target was already superseded
         if: env.superseded == 'true'
         shell: bash
         run: |
-          echo "::error::Oracle deploy observer target was superseded by a newer main SHA before verification. This is not success — check host auto-deploy lag / blocked-sha."
+          echo "::error::Deploy observer target was superseded by a newer main SHA before verification. This is not success — check Coolify deploy lag / blocked-sha."
           exit 1
 
-      - name: Wait for exact Oracle production revision
+      - name: Wait for exact production revision
         if: env.superseded != 'true'
         shell: bash
         run: |
@@ -83,7 +85,7 @@ jobs:
               main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
               if [[ "$main_sha" != "$TARGET_SHA" ]]; then
                 echo "Revision $TARGET_SHA was superseded by $main_sha while waiting."
-                echo "oracle_observer_outcome=superseded" >> "$GITHUB_ENV"
+                echo "deploy_observer_outcome=superseded" >> "$GITHUB_ENV"
                 # Fail the wait step so the workflow is not false-green. A later
                 # main SHA will run its own observer; this one did not verify.
                 exit 1
@@ -122,5 +124,5 @@ jobs:
             fi
             sleep 10
           done
-          echo "::error::Oracle production did not reach exact revision $TARGET_SHA within 240 minutes."
+          echo "::error::Hetzner production did not reach exact revision $TARGET_SHA within 240 minutes."
           exit 1
