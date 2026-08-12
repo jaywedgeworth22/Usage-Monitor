@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // Local collector for Google Antigravity quota usage.
 //
-// WHY THIS IS A LOCAL SCRIPT, NOT A GITHUB ACTION: Antigravity's per-model
-// quota is only readable where the `agy` CLI is installed and authenticated
-// (it talks to the local Antigravity language server / the user's cached
-// Google Cloud Code OAuth session). A GitHub Actions runner has neither, so
-// it cannot observe real usage — it can only fabricate numbers. This script
-// is meant to run on the same machine as Antigravity (see the launchd
-// template alongside this file) and push real readings to the monitor's
-// existing generic ingest endpoint.
+// WHY THIS IS A LOCAL SCRIPT, NOT A GITHUB ACTION: Antigravity's quota is
+// only readable where the `agy` CLI is installed and authenticated (it talks
+// to the local Antigravity language server / the user's cached Google Cloud
+// Code OAuth session). A GitHub Actions runner has neither, so it cannot
+// observe real usage — it can only fabricate numbers. This script is meant to
+// run on the same machine as Antigravity (see the launchd template alongside
+// this file) and push real readings to the monitor's existing generic ingest
+// endpoint.
 //
 // Usage:
 //   node scripts/antigravity-usage-collector.mjs [--dry-run] [--debug]
@@ -26,30 +26,42 @@
 //                                producerId half of the USAGE_INGEST_PRODUCER_TOKENS pair
 //   ANTIGRAVITY_CLI_BIN       - default "agy"
 //
-// OUTPUT SHAPE (confirmed via https://antigravity.google/docs/cli/headless):
-// `-p "<anything>" --output-format json` always wraps the result in a
-// generic envelope:
-//   { conversation_id, status, response, duration_seconds, num_turns,
-//     usage: { input_tokens, output_tokens, thinking_tokens,
-//              cache_read_tokens, total_tokens }, error }
-// `usage` there is the token cost of running THIS CLI invocation (e.g. what
-// it cost to ask "/usage") — it has nothing to do with account quota and is
-// never sent as telemetry. The real quota data is inside `response`, and per
-// the antigravity-cli changelog (v1.1.11) slash commands in print mode
-// "emit one tab-separated record per line" — so `response` is parsed as TSV
-// below, not as nested JSON fields.
+// OUTPUT SHAPE — verified against a real authenticated `agy` on 2026-08-12
+// (agy is not installed in CI, so scripts/test-antigravity-collector.mjs
+// replays a captured envelope instead of shelling out):
 //
-// KNOWN GAP: Google has not published the column layout of those
-// tab-separated records. parseUsageResponseText() below only trusts a
-// self-describing header row (first line naming its columns); with no
-// header it dumps the raw lines and refuses to guess a column order. Run
-// with --debug once against your real Antigravity install and compare the
-// "raw CLI output" dump against the "parsed events" dump before wiring this
-// into a scheduled job.
+//   {
+//     conversation_id, status: "SUCCESS", duration_seconds, num_turns,
+//     usage: { input_tokens, output_tokens, ... },
+//     response: "Gemini Models\tWeekly Limit Remaining\t93%\t2026-08-19T02:08:16Z\n...",
+//     command: { name: "usage", data: { description, groups: [ {
+//       name: "Gemini Models",
+//       description: "Models within this group: Gemini Flash, Gemini Pro",
+//       buckets: [ { id: "gemini-weekly", name: "Weekly Limit Remaining",
+//                    description, window: "weekly",
+//                    remaining_fraction: 0.9276916, reset_time: "2026-08-19T02:08:16Z" } ],
+//     } ] } },
+//   }
+//
+// Three things about that shape drive the parsing below:
+//
+//  1. `command.data.groups[].buckets[]` is the authoritative reading and is
+//     what this script prefers. It carries full-precision fractions
+//     (0.9276916, vs. the `response` line's rounded "93%"), stable bucket ids,
+//     and an explicit window kind. `response` is only a rendered view of it,
+//     and is parsed solely as a fallback for CLI versions that omit `command`.
+//  2. Quota is NOT per model. Antigravity meters per model *group* ("Gemini
+//     Models", "Claude and GPT models"), and each group has two independent
+//     windows — weekly and 5h. So one reading is four series, and the series
+//     identity is (group, bucket), never the group alone.
+//  3. `usage` in the envelope is the token cost of running THIS CLI
+//     invocation (what it cost to ask "/usage"). It has nothing to do with
+//     account quota and is never sent as telemetry.
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { hostname } from "node:os";
+import { pathToFileURL } from "node:url";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const DEBUG = process.argv.includes("--debug");
@@ -59,7 +71,6 @@ const PRODUCER_ID = process.env.ANTIGRAVITY_PRODUCER_ID || "antigravity-cli";
 const INGEST_URL =
   process.env.USAGE_MONITOR_INGEST_URL ||
   "https://usage.jays.services/api/ingest/usage";
-const INGEST_TOKEN = process.env.ANTIGRAVITY_INGEST_TOKEN?.trim();
 
 function log(message) {
   console.log(`[antigravity-usage-collector] ${message}`);
@@ -68,13 +79,6 @@ function log(message) {
 function fail(message, code = 1) {
   console.error(`[antigravity-usage-collector] ${message}`);
   process.exit(code);
-}
-
-if (!INGEST_TOKEN && !DRY_RUN) {
-  fail(
-    "Missing ANTIGRAVITY_INGEST_TOKEN. Run this via `infisical run -- ...` " +
-      "(see the doc header) or pass --dry-run to inspect parsing without sending."
-  );
 }
 
 function runAntigravityCli() {
@@ -110,14 +114,67 @@ function firstFiniteNumber(...values) {
   return undefined;
 }
 
-// Column-name aliases the header-row detector accepts, lowercased. Extend
-// this if a real header uses different wording than what's guessed here.
+// 0.9276916... -> 92.77. Two decimals is well inside the precision the CLI
+// actually varies at between ticks, and keeps the stored numbers readable.
+function fractionToPercent(fraction) {
+  return Math.round(fraction * 10_000) / 100;
+}
+
+function parsePercentCell(cell) {
+  if (typeof cell !== "string") return undefined;
+  const match = cell.trim().match(/^(-?\d+(?:\.\d+)?)\s*%$/);
+  if (!match) return undefined;
+  const value = Number.parseFloat(match[1]);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+// PRIMARY PATH. `command.data.groups[].buckets[]` — see the OUTPUT SHAPE note
+// at the top of this file. Returns [] (not an error) when this CLI version
+// doesn't emit `command`, so the caller can fall back to `response`.
+function parseUsageCommandGroups(command) {
+  const groups = command?.data?.groups;
+  if (!Array.isArray(groups)) return [];
+
+  const records = [];
+  for (const group of groups) {
+    if (!group || typeof group !== "object") continue;
+    const groupName = firstString(group.name, group.id);
+    const buckets = Array.isArray(group.buckets) ? group.buckets : [];
+    for (const bucket of buckets) {
+      if (!bucket || typeof bucket !== "object") continue;
+      const fraction = firstFiniteNumber(bucket.remaining_fraction);
+      if (fraction == null) continue;
+
+      const bucketId = firstString(bucket.id);
+      const bucketName = firstString(bucket.name);
+      const window = firstString(bucket.window);
+      const seriesKey = bucketId ?? `${groupName ?? "?"}|${bucketName ?? window ?? "?"}`;
+
+      records.push({
+        seriesKey,
+        label: `${groupName ?? "Antigravity"} (${window ?? bucketName ?? "quota"})`,
+        group: groupName,
+        bucketId,
+        window: window ?? bucketName,
+        percentRemaining: fractionToPercent(fraction),
+        resetAt: firstString(bucket.reset_time, bucket.resetTime),
+      });
+    }
+  }
+  return records;
+}
+
+// Column-name aliases the header-row detector accepts, lowercased. Real `agy`
+// output as of 2026-08-12 has NO header row — see parseUsageResponseText's
+// headerless branch — but a future version might add one.
 const COLUMN_ALIASES = {
+  group: ["group", "modelgroup", "models", "family"],
+  bucket: ["bucket", "limit", "limitname", "quota", "quotaname"],
   model: ["model", "modelname", "name", "id"],
+  percentRemaining: ["remaining", "percentremaining", "remainingpercent", "left"],
   percentUsed: ["percentused", "percentageused", "usedpercent", "usagepercent", "used"],
-  remaining: ["remaining", "remainingquota", "quotaremaining", "left"],
-  limit: ["limit", "quotalimit", "total", "max"],
-  resetAt: ["resetat", "resetsat", "nextreset", "refreshat", "reset"],
+  limitAbsolute: ["quotalimit", "total", "max"],
+  resetAt: ["resetat", "resetsat", "nextreset", "refreshat", "reset", "resettime"],
   window: ["window", "quotawindow", "period", "cadence"],
   tier: ["tier", "plan", "plantier"],
 };
@@ -130,10 +187,14 @@ function matchColumn(headerCell) {
   return null;
 }
 
-// `response` is TSV per the antigravity-cli changelog. Only trusts a
-// self-describing header row; refuses to guess positional column order with
-// no header rather than risk silently mis-assigning fields — see the KNOWN
-// GAP note at the top of this file.
+// FALLBACK PATH. `response` is the rendered view of the same data, one
+// tab-separated record per line. Observed real layout (headerless, 4 cells):
+//
+//   Gemini Models<TAB>Weekly Limit Remaining<TAB>93%<TAB>2026-08-19T02:08:16Z
+//
+// Loses precision versus the structured path (93% vs 92.77) and is only used
+// when `command` is absent. A self-describing header row, if a future CLI
+// version grows one, takes priority over the positional read.
 function parseUsageResponseText(responseText) {
   const lines = responseText
     .split("\n")
@@ -143,50 +204,72 @@ function parseUsageResponseText(responseText) {
 
   const headerCells = lines[0].split("\t").map((cell) => cell.trim());
   const columnMap = headerCells.map(matchColumn);
-  const recognizedCount = columnMap.filter(Boolean).length;
-  // Require a model column plus at least one quota-shaped column before
-  // trusting this as a header row at all.
-  if (!columnMap.includes("model") || recognizedCount < 2) {
-    fail(
-      "`agy -p \"/usage\" --output-format json`'s `response` field did not " +
-        "start with a recognizable header row, so this script won't guess a " +
-        `column order. Raw lines:\n${lines.join("\n")}\n` +
-        "Add the real column names to COLUMN_ALIASES in this script and re-run with --debug."
-    );
-  }
+  const hasHeaderRow =
+    columnMap.filter(Boolean).length >= 2 &&
+    (columnMap.includes("model") || columnMap.includes("group")) &&
+    // A data line's percent cell ("93%") must not be mistaken for a header.
+    !headerCells.some((cell) => parsePercentCell(cell) != null);
 
   const records = [];
-  for (const line of lines.slice(1)) {
-    const cells = line.split("\t").map((cell) => cell.trim());
-    const byField = {};
-    columnMap.forEach((field, index) => {
-      if (field) byField[field] = cells[index];
-    });
-    const model = byField.model;
-    if (!model) continue;
+  const dataLines = hasHeaderRow ? lines.slice(1) : lines;
 
-    const percentUsed = firstFiniteNumber(parseFloat(byField.percentUsed));
-    const remaining = firstFiniteNumber(parseFloat(byField.remaining));
-    const limit = firstFiniteNumber(parseFloat(byField.limit));
-    if (percentUsed == null && remaining == null && limit == null) continue;
+  for (const line of dataLines) {
+    const cells = line.split("\t").map((cell) => cell.trim());
+
+    let byField;
+    if (hasHeaderRow) {
+      byField = {};
+      columnMap.forEach((field, index) => {
+        if (field) byField[field] = cells[index];
+      });
+    } else {
+      // Positional read of the observed layout: group, bucket, percent, reset.
+      // Anchored on the percent cell rather than a fixed index so an extra
+      // leading or trailing column doesn't silently shift every field.
+      const percentIndex = cells.findIndex((cell) => parsePercentCell(cell) != null);
+      if (percentIndex < 1) continue;
+      byField = {
+        group: cells[0],
+        bucket: cells.slice(1, percentIndex).join(" ") || undefined,
+        percentRemaining: cells[percentIndex],
+        resetAt: cells[percentIndex + 1],
+      };
+    }
+
+    const group = firstString(byField.group);
+    const bucket = firstString(byField.bucket);
+    const model = firstString(byField.model);
+    const window = firstString(byField.window, bucket);
+    const name = group ?? model;
+    if (!name) continue;
+
+    const percentRemaining =
+      parsePercentCell(byField.percentRemaining) ??
+      firstFiniteNumber(Number.parseFloat(byField.percentRemaining));
+    const percentUsed =
+      parsePercentCell(byField.percentUsed) ??
+      firstFiniteNumber(Number.parseFloat(byField.percentUsed));
+    const limitAbsolute = firstFiniteNumber(Number.parseFloat(byField.limitAbsolute));
+    if (percentRemaining == null && percentUsed == null && limitAbsolute == null) continue;
 
     records.push({
-      model,
+      seriesKey: window ? `${name}|${window}` : name,
+      label: window ? `${name} (${window})` : name,
+      group,
+      window,
+      percentRemaining,
       percentUsed,
-      remaining,
-      limit,
+      limit: limitAbsolute,
       resetAt: firstString(byField.resetAt),
-      window: firstString(byField.window),
       tier: firstString(byField.tier),
     });
   }
   return records;
 }
 
-// Secondary path for a structured (non-TSV) response — some future CLI
-// version, or a caller passing --output-format stream-json, might nest real
-// objects instead of a flat TSV string. Same field-alias matching as the
-// legacy object-shape guess this replaced.
+// LAST-RESORT PATH for a structured response that isn't the `command`
+// envelope — e.g. a future CLI version, or a caller passing
+// --output-format stream-json, nesting per-model objects at the top level.
 function parseUsageResponseObject(raw) {
   const root = Array.isArray(raw)
     ? raw
@@ -213,71 +296,99 @@ function parseUsageResponseObject(raw) {
     const limit = firstFiniteNumber(entry.limit, entry.quotaLimit, entry.total);
     if (percentUsed == null && remaining == null && limit == null) continue;
 
+    const window = firstString(entry.window, entry.quotaWindow, entry.period);
     records.push({
-      model,
+      seriesKey: window ? `${model}|${window}` : model,
+      label: window ? `${model} (${window})` : model,
+      window,
       percentUsed,
       remaining,
       limit,
       resetAt: firstString(entry.resetAt, entry.resetsAt, entry.nextReset, entry.refreshAt),
-      window: firstString(entry.window, entry.quotaWindow, entry.period),
       tier: firstString(entry.tier, entry.plan, entry.planTier),
     });
   }
   return records;
 }
 
-function extractQuotaRecords(envelope) {
+export function extractQuotaRecords(envelope, { debug = DEBUG } = {}) {
   if (typeof envelope?.status === "string" && envelope.status !== "SUCCESS") {
     fail(
       `agy reported a non-success status: ${envelope.status}` +
         (envelope.error ? ` (${envelope.error})` : "")
     );
   }
-  if (DEBUG && envelope?.usage) {
+  if (debug && envelope?.usage) {
     log(
       `this CLI invocation itself cost ${envelope.usage.total_tokens ?? "?"} tokens ` +
         "(not account quota, not sent as telemetry)"
     );
   }
 
-  if (typeof envelope?.response === "string") {
-    return parseUsageResponseText(envelope.response);
+  const fromCommand = parseUsageCommandGroups(envelope?.command);
+  if (fromCommand.length > 0) {
+    if (debug) log(`read ${fromCommand.length} bucket(s) from the structured command payload`);
+    return fromCommand;
   }
-  // No `response` string (or not an envelope at all) — fall back to treating
-  // the parsed JSON as already being the structured records.
+
+  if (typeof envelope?.response === "string") {
+    const fromText = parseUsageResponseText(envelope.response);
+    if (debug) {
+      log(
+        `no structured command payload; read ${fromText.length} record(s) from the ` +
+          "rendered `response` text (reduced precision)"
+      );
+    }
+    return fromText;
+  }
+
   return parseUsageResponseObject(envelope);
 }
 
-function eventIdFor(occurredAtIso, model) {
+function eventIdFor(occurredAtIso, seriesKey) {
   return createHash("sha256")
-    .update(`${PRODUCER_ID} ${model} ${occurredAtIso}`)
+    .update(`${PRODUCER_ID} ${seriesKey} ${occurredAtIso}`)
     .digest("hex");
 }
 
-function toTelemetryEvent(record, occurredAtIso) {
+export function toTelemetryEvent(record, occurredAtIso) {
   // Prefer real absolute counts when the CLI provides them; otherwise fall
   // back to a normalized 0-100 percentage scale (limit=100). Either way,
   // `limit`/`credits` stay on the SAME scale so downstream percentage math
-  // (credits / limit) is meaningful regardless of which branch fired.
+  // (credits / limit) is meaningful regardless of which branch fired. Real
+  // Antigravity only ever reports fractions, so the percentage branch is the
+  // live one; the absolute branch is there for a CLI that starts reporting
+  // raw credit counts.
   const hasAbsolute = record.limit != null && record.remaining != null;
   const limit = hasAbsolute ? record.limit : 100;
   const credits = hasAbsolute
     ? record.remaining
-    : record.percentUsed != null
-      ? Math.max(0, 100 - record.percentUsed)
-      : undefined;
+    : record.percentRemaining != null
+      ? record.percentRemaining
+      : record.percentUsed != null
+        ? Math.max(0, 100 - record.percentUsed)
+        : undefined;
 
-  const metadata = { model: record.model };
+  const metadata = {};
+  if (record.group) metadata.modelGroup = record.group;
+  if (record.bucketId) metadata.bucketId = record.bucketId;
   if (record.window) metadata.quotaWindow = record.window;
   if (record.resetAt) metadata.resetAt = record.resetAt;
-  if (record.percentUsed != null) metadata.rawPercentUsed = record.percentUsed;
-  if (!hasAbsolute) metadata.scale = "percent_0_100";
+  if (!hasAbsolute) {
+    metadata.scale = "percent_0_100";
+    const percentUsed =
+      record.percentUsed ??
+      (record.percentRemaining != null
+        ? Math.round((100 - record.percentRemaining) * 100) / 100
+        : undefined);
+    if (percentUsed != null) metadata.rawPercentUsed = percentUsed;
+  }
 
   return {
-    eventId: eventIdFor(occurredAtIso, record.model),
+    eventId: eventIdFor(occurredAtIso, record.seriesKey),
     provider: "google-antigravity",
     service: "antigravity-cli",
-    label: record.model,
+    label: record.label,
     ...(record.tier ? { tier: record.tier } : {}),
     metricType: "quota",
     billingMode: "actual",
@@ -289,7 +400,33 @@ function toTelemetryEvent(record, occurredAtIso) {
   };
 }
 
-async function postBatch(events) {
+// The ingest idempotency key for a v2 event is derived from
+// (producerId, eventId) alone, so two records in one batch that hash to the
+// same eventId would collide and one reading would be silently dropped. That
+// is exactly what a group-name-only key used to do here: "Gemini Models"
+// names two distinct series (weekly and 5h). Fail loudly instead.
+export function assertUniqueSeriesKeys(records) {
+  const seen = new Map();
+  for (const record of records) {
+    const previous = seen.get(record.seriesKey);
+    if (previous) {
+      throw new Error(
+        `Two quota records share the series key "${record.seriesKey}" ` +
+          `("${previous.label}" and "${record.label}"). They would collide on ` +
+          "eventId and one reading would be dropped by ingest idempotency."
+      );
+    }
+    seen.set(record.seriesKey, record);
+  }
+}
+
+export function buildEvents(envelope, occurredAtIso, options = {}) {
+  const records = extractQuotaRecords(envelope, options);
+  assertUniqueSeriesKeys(records);
+  return records.map((record) => toTelemetryEvent(record, occurredAtIso));
+}
+
+async function postBatch(events, ingestToken) {
   const body = JSON.stringify({
     schemaVersion: 2,
     producerId: PRODUCER_ID,
@@ -302,7 +439,7 @@ async function postBatch(events) {
     headers: {
       "content-type": "application/json",
       "x-usage-telemetry-version": "2",
-      authorization: `Bearer ${INGEST_TOKEN}`,
+      authorization: `Bearer ${ingestToken}`,
     },
     body,
   });
@@ -326,6 +463,14 @@ async function postBatch(events) {
 }
 
 async function main() {
+  const ingestToken = process.env.ANTIGRAVITY_INGEST_TOKEN?.trim();
+  if (!ingestToken && !DRY_RUN) {
+    fail(
+      "Missing ANTIGRAVITY_INGEST_TOKEN. Run this via `infisical run -- ...` " +
+        "(see the doc header) or pass --dry-run to inspect parsing without sending."
+    );
+  }
+
   const raw = runAntigravityCli();
   if (DEBUG) log(`raw CLI output:\n${raw}`);
 
@@ -340,22 +485,28 @@ async function main() {
     );
   }
 
-  const records = extractQuotaRecords(parsedJson);
-  if (records.length === 0) {
+  const occurredAtIso = new Date().toISOString();
+  let events;
+  try {
+    events = buildEvents(parsedJson, occurredAtIso);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+
+  if (events.length === 0) {
     fail(
-      "Parsed a valid envelope with a recognized header row but extracted " +
-        "zero usable records from it (every data line was missing model " +
-        "and/or every quota-shaped column). Run with --debug and inspect " +
-        "the raw `response` lines against COLUMN_ALIASES."
+      "Parsed a valid envelope but extracted zero quota records from it. Run " +
+        "with --debug and compare the raw output against the OUTPUT SHAPE note " +
+        "at the top of this script — the CLI's payload has probably changed."
     );
   }
 
-  const occurredAtIso = new Date().toISOString();
-  const events = records.map((record) => toTelemetryEvent(record, occurredAtIso));
-
-  log(`parsed ${events.length} model quota record(s):`);
+  log(`parsed ${events.length} quota record(s):`);
   for (const event of events) {
-    log(`  - ${event.label}: credits=${event.credits ?? "n/a"} limit=${event.limit}`);
+    log(
+      `  - ${event.label}: ${event.credits ?? "n/a"}/${event.limit} remaining` +
+        (event.metadata.resetAt ? ` (resets ${event.metadata.resetAt})` : "")
+    );
   }
 
   if (DRY_RUN) {
@@ -364,13 +515,18 @@ async function main() {
     return;
   }
 
-  const ack = await postBatch(events);
+  const ack = await postBatch(events, ingestToken);
   log(`ingest ack: ${JSON.stringify(ack)}`);
   if (ack.ok === false || (typeof ack.rejected === "number" && ack.rejected > 0)) {
     fail(`Ingest reported rejections: ${JSON.stringify(ack)}`, 1);
   }
 }
 
-main().catch((error) => {
-  fail(error instanceof Error ? error.stack || error.message : String(error));
-});
+const invokedDirectly =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (invokedDirectly) {
+  main().catch((error) => {
+    fail(error instanceof Error ? error.stack || error.message : String(error));
+  });
+}

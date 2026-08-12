@@ -27,7 +27,7 @@ plus a scheduled GitHub Action. Both are wrong for this repo:
 ## What ships here
 
 - `scripts/antigravity-usage-collector.mjs` — runs
-  `agy -p "/usage" --output-format json`, maps each per-model quota record to
+  `agy -p "/usage" --output-format json`, maps each quota bucket to
   a v2 usage-telemetry event (`provider: "google-antigravity"`,
   `metricType: "quota"`), and POSTs a batch to
   `https://usage.jays.services/api/ingest/usage` with
@@ -37,6 +37,11 @@ plus a scheduled GitHub Action. Both are wrong for this repo:
   launchd template to run it every 4h (inside Antigravity's ~5h Pro/Ultra
   quota refresh window) on the machine where Antigravity is actually used.
 - `npm run antigravity:collect` — convenience alias for the script.
+- `scripts/test-antigravity-collector.mjs` (`npm run test:antigravity-collector`,
+  wired into `npm run verify` and CI) — replays a real captured envelope
+  through the parser. `agy` doesn't exist on a CI runner, so this fixture is
+  the only place a payload-shape regression gets caught before the launchd
+  job starts failing unwatched.
 
 No server-side code changes were needed: `USAGE_INGEST_PRODUCER_TOKENS`
 (`src/lib/ingest-auth.ts`) already supports adding an arbitrary
@@ -44,42 +49,66 @@ No server-side code changes were needed: `USAGE_INGEST_PRODUCER_TOKENS`
 
 ## Output shape
 
-Confirmed via https://antigravity.google/docs/cli/headless: `agy -p "<any
-prompt>" --output-format json` always wraps the result in a generic envelope
-regardless of what was asked —
+**Verified against a real authenticated `agy` on 2026-08-12** (this section
+previously described a guess based on the published headless docs and the
+v1.1.11 changelog; the guess was wrong in two ways worth recording).
 
 ```json
 {
-  "conversation_id": "...",
+  "conversation_id": "",
   "status": "SUCCESS",
-  "response": "...",
-  "duration_seconds": 7.16,
-  "num_turns": 1,
-  "usage": { "input_tokens": ..., "output_tokens": ..., "total_tokens": ... }
+  "response": "Gemini Models\tWeekly Limit Remaining\t93%\t2026-08-19T02:08:16Z\n…",
+  "duration_seconds": 0,
+  "num_turns": 0,
+  "usage": { "input_tokens": 0, "output_tokens": 0, "total_tokens": 0 },
+  "command": {
+    "name": "usage",
+    "data": {
+      "description": "Within each group, models share a weekly limit and a 5-hour limit. …",
+      "groups": [
+        {
+          "name": "Gemini Models",
+          "description": "Models within this group: Gemini Flash, Gemini Pro",
+          "buckets": [
+            {
+              "id": "gemini-weekly",
+              "name": "Weekly Limit Remaining",
+              "description": "You have used some of your weekly limit, it will fully refresh in 6 days, 18 hours.",
+              "window": "weekly",
+              "remaining_fraction": 0.9267072081565857,
+              "reset_time": "2026-08-19T02:08:16Z"
+            }
+          ]
+        }
+      ]
+    }
+  }
 }
 ```
 
 The envelope's `usage` block is the token cost of *running the CLI query
 itself* (e.g. what it cost to ask `/usage`) — it is unrelated to account
-quota and the collector never sends it as telemetry. Per the antigravity-cli
-changelog (v1.1.11), slash commands in print mode "emit one tab-separated
-record per line," so the real per-model quota data lives inside `response`
-as TSV text, which `parseUsageResponseText()` parses.
+quota and the collector never sends it as telemetry.
 
-## KNOWN GAP — verify before scheduling
+Two corrections to the original design:
 
-Google has not published the **column layout** of those tab-separated
-records (only that a header + one row per model exists). The parser only
-trusts a self-describing header row — it maps column names in `response`'s
-first line via `COLUMN_ALIASES`, and with no recognizable header it dumps
-the raw lines and refuses to guess a positional order rather than risk
-mis-assigning fields.
-
-**Before installing the launchd job:** run
-`node scripts/antigravity-usage-collector.mjs --dry-run --debug` on the Mac
-where `agy` is authenticated, compare the "raw CLI output" against the
-"parsed events" it prints, and extend `COLUMN_ALIASES` in the script if the
-real header wording doesn't match.
+1. **There is a fully structured payload.** `command.data.groups[].buckets[]`
+   carries full-precision fractions, stable bucket ids, and an explicit
+   window kind. `response`'s TSV is only a rendered view of it (rounded to
+   "93%"), so the collector reads `command` first and falls back to parsing
+   `response` only if a CLI version omits it. The real `response` also has
+   **no header row**, so the original header-only parser would have refused
+   every real reading; the fallback now reads the observed positional layout
+   (group, bucket, percent, reset), anchored on the percent cell.
+2. **Quota is not per model.** Antigravity meters per model *group* ("Gemini
+   Models", "Claude and GPT models"), and each group has two independent
+   windows — weekly and 5h. One reading is therefore four series, and series
+   identity is `(group, bucket)`. Keying on the model/group name alone —
+   which the first draft did — made the two windows of a group hash to the
+   same `eventId`, and since the v2 idempotency key is derived from
+   `(producerId, eventId)`, ingest would have silently dropped one of the two
+   readings. `assertUniqueSeriesKeys()` now fails loudly on any such
+   collision.
 
 ## Setup (owner)
 
@@ -101,6 +130,11 @@ real header wording doesn't match.
 
 `provider: "google-antigravity"` events show up in the existing telemetry
 panels (`GET /api/usage-events`, `GET /api/llm-burn`) with no further code
-changes — provider names are free-form strings. A `Provider` row (for a
-monthly-budget card) is optional and out of scope here; mirror
+changes — provider names are free-form strings. Four series land per tick,
+labelled `Gemini Models (weekly)`, `Gemini Models (5h)`,
+`Claude and GPT models (weekly)`, and `Claude and GPT models (5h)`, each on a
+0-100 percent-remaining scale (`limit: 100`, `credits: <percent remaining>`,
+`metadata.scale: "percent_0_100"`). Antigravity only ever reports fractions,
+never absolute credit counts. A `Provider` row (for a monthly-budget card) is
+optional and out of scope here; mirror
 `scripts/add-cursor-subscription.mjs` if/when wanted.

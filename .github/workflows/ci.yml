@@ -108,6 +108,13 @@ jobs:
       - name: Verify Apple projects
         run: npm run test:apple-projects
 
+      # Replays a captured `agy -p "/usage"` envelope — the CLI itself is only
+      # installed on the Mac that runs Antigravity, so this is the only place
+      # a payload-shape regression in the collector can be caught before the
+      # launchd job starts silently failing.
+      - name: Test Antigravity collector parsing
+        run: npm run test:antigravity-collector
+
       - name: Audit high-severity dependencies
         run: npm audit --audit-level=high
 
