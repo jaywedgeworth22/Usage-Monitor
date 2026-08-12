@@ -17,6 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import { awsUriEncode, signS3Request } from "./lib/s3-sigv4.mjs";
 import {
   archiveKeyFor,
+  isManagedArchiveKey,
   resolveArchiveConfig,
   runArchive,
   selectPruneTargets,
@@ -167,6 +168,29 @@ await test("selectPruneTargets ignores unrelated objects in the bucket", () => {
   ];
   const targets = selectPruneTargets(objects, "weekly/prod-2026-08-12T00-00-00Z.db.gz", 1);
   assert.deepEqual(targets, [], "litestream history and non-archive keys are never pruned");
+});
+
+await test("only keys this job could have written are ever DELETE candidates", () => {
+  // The candidate list comes from a ListObjectsV2 response — i.e. from outside
+  // this process. Without an allowlist a malformed or hostile listing could
+  // steer DELETE at the frozen litestream history.
+  assert.equal(isManagedArchiveKey("weekly/prod-2026-08-12T00-00-00Z.db.gz", "weekly/"), true);
+  assert.equal(isManagedArchiveKey("weekly/prod-nope.db.gz", "weekly/"), false);
+  assert.equal(isManagedArchiveKey("weekly/../../etc/passwd", "weekly/"), false);
+  assert.equal(isManagedArchiveKey("other/prod-2026-08-12T00-00-00Z.db.gz", "weekly/"), false);
+  assert.equal(isManagedArchiveKey("api-usage-monitor/prod.db/0001/0000.ltx", "weekly/"), false);
+  assert.equal(isManagedArchiveKey(null, "weekly/"), false);
+
+  const hostile = [
+    { key: "weekly/prod-2026-08-12T00-00-00Z.db.gz" },
+    { key: "weekly/prod-2026-08-05T00-00-00Z.db.gz" },
+    { key: "api-usage-monitor/prod.db/0001/0000.ltx" },
+    { key: "weekly/../api-usage-monitor/prod.db/0001/0001.ltx" },
+  ];
+  assert.deepEqual(
+    selectPruneTargets(hostile, "weekly/prod-2026-08-12T00-00-00Z.db.gz", 1, "weekly/"),
+    ["weekly/prod-2026-08-05T00-00-00Z.db.gz"]
+  );
 });
 
 // --------------------------------------------------------------- config ----

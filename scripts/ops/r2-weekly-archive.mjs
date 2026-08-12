@@ -51,7 +51,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { createGunzip, createGzip } from "node:zlib";
+import { createGzip, gunzipSync } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import { backup, DatabaseSync } from "node:sqlite";
 
@@ -146,12 +146,24 @@ export function archiveKeyFor(prefix, now = new Date()) {
 }
 
 /**
+ * Keys are only ever deleted if they match the exact shape this job writes.
+ * The candidate list comes from a ListObjectsV2 response, i.e. from outside
+ * this process — without an allowlist, a malformed or hostile listing could
+ * steer DELETE at arbitrary objects (the frozen Litestream history included).
+ */
+export function isManagedArchiveKey(key, prefix) {
+  if (typeof key !== "string" || !key.startsWith(prefix)) return false;
+  const remainder = key.slice(prefix.length);
+  return /^prod-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.db\.gz$/.test(remainder);
+}
+
+/**
  * Which existing objects to delete, given the freshly uploaded key.
  * Pure so the retention rule is unit-testable without touching R2.
  */
-export function selectPruneTargets(objects, freshKey, keepGenerations) {
+export function selectPruneTargets(objects, freshKey, keepGenerations, prefix = DEFAULTS.prefix) {
   const archives = objects
-    .filter((o) => o.key.endsWith(".db.gz"))
+    .filter((o) => isManagedArchiveKey(o.key, prefix))
     .sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0)); // newest first
   const keep = new Set();
   keep.add(freshKey); // the just-verified upload is never a prune candidate
@@ -175,12 +187,6 @@ function assertIntegrity(path) {
   }
 }
 
-function sha256File(path) {
-  const hash = createHash("sha256");
-  hash.update(readFileSync(path));
-  return hash.digest("hex");
-}
-
 async function snapshotDatabase(dbPath, destination, ratePages) {
   const source = new DatabaseSync(dbPath, { readOnly: true, timeout: 30_000 });
   try {
@@ -193,10 +199,6 @@ async function snapshotDatabase(dbPath, destination, ratePages) {
 
 async function gzipFile(source, destination) {
   await pipeline(createReadStream(source), createGzip({ level: 9 }), createWriteStream(destination));
-}
-
-async function gunzipFile(source, destination) {
-  await pipeline(createReadStream(source), createGunzip(), createWriteStream(destination));
 }
 
 function writeStatus(statusPath, payload) {
@@ -235,7 +237,6 @@ export async function runArchive({ env = process.env, argv = [], fetchImpl } = {
   const workDir = mkdtempSync(join(tmpdir(), "r2-weekly-archive-"));
   const snapshotPath = join(workDir, "snapshot.db");
   const compressedPath = join(workDir, "snapshot.db.gz");
-  const roundTripPath = join(workDir, "verify.db.gz");
   const restoredPath = join(workDir, "verify.db");
 
   try {
@@ -246,8 +247,13 @@ export async function runArchive({ env = process.env, argv = [], fetchImpl } = {
     log(`snapshot verified (${snapshotBytes} bytes)`);
 
     await gzipFile(snapshotPath, compressedPath);
-    const compressedBytes = statSync(compressedPath).size;
-    const localHash = sha256File(compressedPath);
+    // Read once, then derive size, hash, and the upload body from those exact
+    // bytes. A stat-then-hash-then-read sequence is a genuine TOCTOU race: the
+    // file could change between steps and we would advertise a hash that does
+    // not describe what we actually uploaded.
+    const compressedBuffer = readFileSync(compressedPath);
+    const compressedBytes = compressedBuffer.length;
+    const localHash = createHash("sha256").update(compressedBuffer).digest("hex");
     log(`compressed to ${compressedBytes} bytes (sha256 ${localHash.slice(0, 12)}...)`);
 
     const key = archiveKeyFor(config.prefix, startedAt);
@@ -263,7 +269,7 @@ export async function runArchive({ env = process.env, argv = [], fetchImpl } = {
       creds: config.creds,
       bucket: config.bucket,
       key,
-      body: readFileSync(compressedPath),
+      body: compressedBuffer,
       headers: {
         "content-type": "application/gzip",
         // Survives independently of this script so a human can verify by hand.
@@ -284,22 +290,25 @@ export async function runArchive({ env = process.env, argv = [], fetchImpl } = {
       fetchImpl,
     });
     const downloaded = Buffer.from(await response.arrayBuffer());
-    writeFileSync(roundTripPath, downloaded);
 
+    // Verify BEFORE anything touches the filesystem. Once the hash matches,
+    // these bytes are provably the ones we just uploaded, so the raw response
+    // body never needs to be persisted at all — only the decompressed database
+    // is written, and only because SQLite needs a file to open.
     const remoteHash = createHash("sha256").update(downloaded).digest("hex");
     if (remoteHash !== localHash) {
       throw new Error(
         `uploaded object hash mismatch: local ${localHash} vs remote ${remoteHash} — keeping all existing archives`
       );
     }
-    await gunzipFile(roundTripPath, restoredPath);
-    assertIntegrity(restoredPath);
-    const restoredBytes = statSync(restoredPath).size;
-    if (restoredBytes !== snapshotBytes) {
+    const restored = gunzipSync(downloaded);
+    if (restored.length !== snapshotBytes) {
       throw new Error(
-        `restored size mismatch: ${restoredBytes} vs ${snapshotBytes} — keeping all existing archives`
+        `restored size mismatch: ${restored.length} vs ${snapshotBytes} — keeping all existing archives`
       );
     }
+    writeFileSync(restoredPath, restored, { mode: 0o600 });
+    assertIntegrity(restoredPath);
     log("verification passed — the archive restores to a byte-identical, integrity-checked database");
 
     // ---- Only now is deleting anything safe.
@@ -309,7 +318,7 @@ export async function runArchive({ env = process.env, argv = [], fetchImpl } = {
       prefix: config.prefix,
       fetchImpl,
     });
-    const pruneTargets = selectPruneTargets(existing, key, config.keepGenerations);
+    const pruneTargets = selectPruneTargets(existing, key, config.keepGenerations, config.prefix);
     for (const target of pruneTargets) {
       log(`pruning superseded archive ${target}`);
       await s3Request({
