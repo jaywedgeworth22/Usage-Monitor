@@ -122,12 +122,62 @@ describe("EDGE_PROBES — Cloudflare", () => {
     expect(probe.isConfigured()).toBe(true);
   });
 
+  it("accepts an account-owned token that the user endpoint rejects", async () => {
+    // Regression for the live incident that burned real operator trust: the
+    // fleet's ST/CT tokens are ACCOUNT-OWNED and 401 at /user/tokens/verify by
+    // design while being perfectly valid.  Verifying only the user endpoint
+    // reported them as expired for days.  A token is dead only when BOTH
+    // endpoints reject it.
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "acct-um-0001");
+    vi.stubEnv("CLOUDFLARE_API_TOKEN", UM_TOKEN);
+
+    fetchJsonMock.mockImplementation(async (url: string) => {
+      if (url.includes("/accounts/acct-um-0001/tokens/verify")) {
+        return probeResponse(200, verifyBody());
+      }
+      if (url.includes("/user/tokens/verify")) {
+        return probeResponse(401, { success: false, errors: [{ code: 9109 }] });
+      }
+      if (url.includes("/zones?")) return probeResponse(200, zonesBody(1));
+      throw new Error(`unexpected request to ${url}`);
+    });
+
+    const result = await probe.probe();
+
+    expect(result.state).toBe("healthy");
+    expect(result.error).toBeUndefined();
+    expect(result.headline).toBe("Usage Monitor API token is valid.");
+  });
+
+  it("accepts a user-owned token that the account endpoint rejects", async () => {
+    // The inverse kind: user-owned tokens 401 at /accounts/{id}/tokens/verify.
+    // The probe tries the account endpoint first, so the fallback must run.
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "acct-um-0001");
+    vi.stubEnv("CLOUDFLARE_API_TOKEN", UM_TOKEN);
+
+    fetchJsonMock.mockImplementation(async (url: string) => {
+      if (url.includes("/accounts/acct-um-0001/tokens/verify")) {
+        return probeResponse(401, { success: false, errors: [{ code: 9109 }] });
+      }
+      if (url.includes("/user/tokens/verify")) {
+        return probeResponse(200, verifyBody());
+      }
+      if (url.includes("/zones?")) return probeResponse(200, zonesBody(1));
+      throw new Error(`unexpected request to ${url}`);
+    });
+
+    const result = await probe.probe();
+
+    expect(result.state).toBe("healthy");
+    expect(result.error).toBeUndefined();
+  });
+
   it("reports a healthy single account with zones and token expiry", async () => {
     vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "acct-um-0001");
     vi.stubEnv("CLOUDFLARE_API_TOKEN", UM_TOKEN);
 
     fetchJsonMock.mockImplementation(async (url: string) => {
-      if (url.includes("/user/tokens/verify")) {
+      if (url.includes("/tokens/verify")) {
         return probeResponse(200, verifyBody("2026-12-31T23:59:59Z"));
       }
       if (url.includes("/zones?")) return probeResponse(200, zonesBody(7));
@@ -165,7 +215,7 @@ describe("EDGE_PROBES — Cloudflare", () => {
 
     fetchJsonMock.mockImplementation(async (url: string, init?: RequestInit) => {
       const token = bearerToken(init);
-      if (url.includes("/user/tokens/verify")) {
+      if (url.includes("/tokens/verify")) {
         // Only the CT token carries an expiry, so it must be the one reported.
         return probeResponse(
           200,
@@ -208,7 +258,7 @@ describe("EDGE_PROBES — Cloudflare", () => {
 
     fetchJsonMock.mockImplementation(async (url: string, init?: RequestInit) => {
       const token = bearerToken(init);
-      if (url.includes("/user/tokens/verify")) {
+      if (url.includes("/tokens/verify")) {
         if (token === ST_TOKEN) {
           return probeResponse(401, {
             success: false,
@@ -253,7 +303,7 @@ describe("EDGE_PROBES — Cloudflare", () => {
     vi.stubEnv("CLOUDFLARE_API_TOKEN", UM_TOKEN);
 
     fetchJsonMock.mockImplementation(async (url: string) => {
-      if (url.includes("/user/tokens/verify")) {
+      if (url.includes("/tokens/verify")) {
         return probeResponse(403, {
           success: false,
           errors: [{ code: 9109, message: "Unauthorized to access requested resource" }],
@@ -293,7 +343,7 @@ describe("EDGE_PROBES — Cloudflare", () => {
     vi.stubEnv("CLOUDFLARE_API_TOKEN", UM_TOKEN);
 
     fetchJsonMock.mockImplementation(async (url: string) => {
-      if (url.includes("/user/tokens/verify")) {
+      if (url.includes("/tokens/verify")) {
         return probeResponse(200, {
           result: { id: "ed17574386854bf78a67040be0a770b0", status: "expired" },
           success: true,
@@ -336,7 +386,7 @@ describe("EDGE_PROBES — Cloudflare", () => {
     vi.stubEnv("CLOUDFLARE_API_TOKEN", UM_TOKEN);
 
     fetchJsonMock.mockImplementation(async (url: string) => {
-      if (url.includes("/user/tokens/verify")) return probeResponse(200, verifyBody());
+      if (url.includes("/tokens/verify")) return probeResponse(200, verifyBody());
       if (url.includes("/zones?")) {
         return probeResponse(403, {
           success: false,
