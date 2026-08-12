@@ -282,7 +282,15 @@ function SettingsPageContent() {
     setActionLoading(id);
     try {
       const res = await fetch(`/api/providers/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete");
+      if (!res.ok) {
+        // The refusals here are actionable (attribution history, Infisical
+        // ownership, an open PagerDuty incident that could not be closed), so
+        // show what the server actually said instead of "Failed to delete".
+        const body = await res.json().catch(() => null);
+        throw new Error(
+          typeof body?.error === "string" ? body.error : "Failed to delete"
+        );
+      }
       await fetchProviders();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete");

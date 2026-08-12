@@ -329,8 +329,24 @@ describe("reconcileProviderUsage", () => {
     expect(ambiguous[1].deltaUsd).toBeNull();
   });
 
+  async function seedPushedUsage(provider: string, costUsd: number) {
+    return prisma.externalUsageEvent.create({
+      data: {
+        sourceApp: "socratic-trade",
+        provider,
+        metricType: "usage",
+        keyRef: `${provider.toUpperCase()}_API_KEY`,
+        costUsd,
+        occurredAt: new Date(),
+      },
+    });
+  }
+
   it("records a discrepancy when provider-reported cost exceeds pushed telemetry", async () => {
     const provider = await seedProvider("openai", { totalCost: 100 });
+    // Telemetry MUST exist for a discrepancy to mean anything: the comparison
+    // is "what the apps said" vs "what the provider billed".
+    await seedPushedUsage("openai", 10);
 
     await reconcileProviderUsage();
 
@@ -339,8 +355,69 @@ describe("reconcileProviderUsage", () => {
     });
     expect(row.status).toBe("discrepancy");
     expect(row.verifiedCostUsd).toBe(100);
-    expect(row.reportedCostUsd).toBe(0);
-    expect(row.deltaUsd).toBe(100);
+    expect(row.reportedCostUsd).toBe(10);
+    expect(row.deltaUsd).toBe(90);
     expect(row.verifiedSource).toBe("usage-snapshot");
+  });
+
+  it("still reconciles to ok when telemetry and the provider's own bill agree", async () => {
+    const provider = await seedProvider("openai", { totalCost: 10 });
+    await seedPushedUsage("openai", 10);
+
+    await reconcileProviderUsage();
+
+    const row = await prisma.providerUsageReconciliation.findFirstOrThrow({
+      where: { providerId: provider.id },
+    });
+    expect(row.status).toBe("ok");
+    expect(row.reportedEventCount).toBe(1);
+    expect(row.deltaUsd).toBe(0);
+  });
+
+  it("calls a provider with a real bill and ZERO telemetry unverifiable, not a discrepancy", async () => {
+    // The Twilio case that opened PagerDuty incidents #64 and #70: nothing
+    // pushes Twilio usage events, so the reconciler was subtracting the whole
+    // bill from zero and reporting it as disagreement. No tolerance short of
+    // 100% can absorb "reported = 0", so the threshold is the wrong lever.
+    const provider = await seedProvider("twilio", { totalCost: 0.71 });
+
+    await reconcileProviderUsage();
+
+    const row = await prisma.providerUsageReconciliation.findFirstOrThrow({
+      where: { providerId: provider.id },
+    });
+    expect(row.status).toBe("unverifiable");
+    expect(row.reportedEventCount).toBe(0);
+    // No delta at all — provider-alerts raises usage_reconciliation_discrepancy
+    // off `status === "discrepancy"` + deltaUsd, so both must stay clear.
+    expect(row.deltaUsd).toBeNull();
+    expect(row.deltaRatio).toBeNull();
+    expect(row.verifiedCostUsd).toBeNull();
+  });
+
+  it("resumes normal reconciliation as soon as that provider starts reporting", async () => {
+    const provider = await seedProvider("twilio", { totalCost: 0.71 });
+
+    await reconcileProviderUsage();
+    expect(
+      (
+        await prisma.providerUsageReconciliation.findFirstOrThrow({
+          where: { providerId: provider.id },
+        })
+      ).status
+    ).toBe("unverifiable");
+
+    // A telemetry source comes online. No manual reset, no row surgery: the
+    // upserted row must flip back to a real comparison on the very next pass.
+    await seedPushedUsage("twilio", 0.71);
+    await reconcileProviderUsage();
+
+    const rows = await prisma.providerUsageReconciliation.findMany({
+      where: { providerId: provider.id },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("ok");
+    expect(rows[0].reportedCostUsd).toBeCloseTo(0.71, 10);
+    expect(rows[0].verifiedCostUsd).toBe(0.71);
   });
 });
