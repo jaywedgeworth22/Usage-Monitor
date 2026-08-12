@@ -150,7 +150,14 @@ struct ServerStatusSnapshot: Equatable, Sendable {
         case "unconfigured": parts.append("not monitored")
         default: break
         }
-        if r2.autoDisabled == true {
+        // The free-tier kill-switch flag only pauses writes while R2 is the
+        // live litestream target (role "active" — see runtime-health.ts's
+        // R2HistoricBackupStatus.autoDisabled doc: "only meaningful when
+        // litestreamUsesR2"). In "historic" role R2 already isn't being
+        // written to by design (docs/rollouts/2026-08-06-backup-steady-state-policy.md),
+        // so the flag is inert there; showing "writes paused" anyway reads
+        // as an outage next to a green OK badge.
+        if r2.autoDisabled == true && r2.role?.lowercased() == "active" {
             parts.append("writes paused")
         }
         if let reason = r2.reason, !r2.ok {

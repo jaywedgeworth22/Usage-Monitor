@@ -210,6 +210,34 @@ final class SettingsFeatureTests: XCTestCase {
         XCTAssertTrue(down.backupLayerChecks.isEmpty)
     }
 
+    // The free-tier kill-switch flag is only meaningful while R2 is the live
+    // litestream target (role "active"). A stale/engaged flag left over from
+    // an unrelated incident must not make an already-frozen "historic" R2
+    // row claim "writes paused" next to its green OK badge.
+    func testR2HistoricDetailIgnoresStaleKillSwitchFlag() {
+        let snapshot = ServerStatusSnapshot(
+            health: .init(ok: true, status: "ok"),
+            readiness: .init(
+                ok: true,
+                status: "ready",
+                checks: .init(
+                    backupLayers: .init(
+                        r2Historic: .init(
+                            ok: true,
+                            configured: true,
+                            autoDisabled: true,
+                            role: "historic"
+                        )
+                    )
+                )
+            ),
+            fetchedAt: Date()
+        )
+        let detail = snapshot.backupLayerChecks.first { $0.name == "R2 Historic" }?.detail
+        XCTAssertTrue(detail?.contains("weekly freeze") == true)
+        XCTAssertFalse(detail?.contains("writes paused") == true)
+    }
+
     func testDiskAndRateFormatting() {
         XCTAssertNotNil(DiskFormat.summary(free: 5_000_000_000, total: 20_000_000_000))
         XCTAssertNil(DiskFormat.summary(free: nil, total: 1))
