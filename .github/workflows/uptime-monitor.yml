@@ -48,7 +48,7 @@ jobs:
       PAGERDUTY_DEDUP_KEY: "usage-monitor-oracle-origin-readiness"
       # Release-drift alerting: a process can be fully "ready" while pinned N
       # commits behind main (the host poller writes blocked-sha and exits 0,
-      # keeping its systemd timer green; Oracle Production Deploy only fails
+      # keeping its systemd timer green; Production Deploy Verification only fails
       # once per merge). Drift is flagged only when SUSTAINED: main HEAD must
       # be older than this many minutes before the live revision counts as
       # stale. 360 sits comfortably above the 240-minute deploy transaction
@@ -311,7 +311,7 @@ jobs:
       # HEAD, and flags drift only when main HEAD is older than
       # DRIFT_GRACE_MINUTES — i.e. every legitimate deploy window has already
       # elapsed. Also surfaces the only GitHub-visible blocked-deploy receipt:
-      # a failed "Oracle Production Deploy" run on main (the host poller's
+      # a failed "Production Deploy Verification" run on main (the host poller's
       # blocked-sha state itself is invisible to GitHub by design).
       # Job invariant applies: continue-on-error, defaults written first, and
       # every failure path degrades to drift=false (no alert) with exit 0, so
@@ -371,7 +371,7 @@ jobs:
 
           last_receipt=$(gh run list \
             --repo "$GITHUB_REPOSITORY" \
-            --workflow "Oracle Production Deploy" \
+            --workflow "Production Deploy Verification" \
             --branch main \
             --limit 5 \
             --json status,conclusion \
@@ -410,7 +410,7 @@ jobs:
             --label incident \
             --limit 100 \
             --json number,title | jq -r --arg title "$DRIFT_INCIDENT_TITLE" 'first(.[] | select(.title == $title) | .number) // empty')
-          message="Production is ready but stale: serving revision ${{ steps.drift.outputs.live_sha }} while main HEAD is ${{ steps.drift.outputs.main_sha }} (main HEAD is ${{ steps.drift.outputs.age_minutes }} minutes old; grace window ${DRIFT_GRACE_MINUTES}m). Last completed Oracle Production Deploy receipt failed: ${{ steps.drift.outputs.receipt_failed }}. Likely cause: the host poller blocked this revision after repeated failures (it exits 0, so its systemd timer stays green). Operator remedy: sudo /usr/local/sbin/usage-monitor-auto-deploy --retry-blocked (see deploy/oracle/README.md). Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          message="Production is ready but stale: serving revision ${{ steps.drift.outputs.live_sha }} while main HEAD is ${{ steps.drift.outputs.main_sha }} (main HEAD is ${{ steps.drift.outputs.age_minutes }} minutes old; grace window ${DRIFT_GRACE_MINUTES}m). Last completed Production Deploy Verification receipt failed: ${{ steps.drift.outputs.receipt_failed }}. Likely cause: the host poller blocked this revision after repeated failures (it exits 0, so its systemd timer stays green). Operator remedy: sudo /usr/local/sbin/usage-monitor-auto-deploy --retry-blocked (see deploy/oracle/README.md). Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           if [ -n "$issue_number" ]; then
             gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "$message"
           else
