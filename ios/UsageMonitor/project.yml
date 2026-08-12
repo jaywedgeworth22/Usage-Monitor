@@ -96,6 +96,8 @@ targets:
       - package: UsageMonitorKit
         product: Platforms
       - package: UsageMonitorKit
+        product: ServerStatus
+      - package: UsageMonitorKit
         product: Settings
       - package: UsageMonitorKit
         product: AppLock

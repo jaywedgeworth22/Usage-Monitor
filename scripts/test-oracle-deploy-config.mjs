@@ -16,7 +16,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const read = (relativePath) =>
   readFileSync(path.join(repoRoot, relativePath), "utf8");
 
-const workflow = read(".github/workflows/oracle-production-deploy.yml");
+const workflow = read(".github/workflows/production-deploy-verify.yml");
 const uptimeWorkflow = read(".github/workflows/uptime-monitor.yml");
 const compose = read("deploy/oracle/compose.production.yaml");
 const composeDev = read("deploy/oracle/compose.yaml");

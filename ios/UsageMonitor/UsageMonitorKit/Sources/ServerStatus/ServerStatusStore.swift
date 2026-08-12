@@ -227,29 +227,4 @@ final class ServerStatusStore {
     }
 }
 
-/// Compact free/total disk for dependency detail lines.
-enum DiskFormat {
-    static func summary(free: Int64?, total: Int64?) -> String? {
-        guard let free, let total, total > 0 else { return nil }
-        return "\(byteString(free)) free of \(byteString(total))"
-    }
-
-    static func byteString(_ bytes: Int64) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useGB, .useMB, .useTB]
-        formatter.countStyle = .file
-        formatter.includesUnit = true
-        formatter.isAdaptive = true
-        return formatter.string(fromByteCount: bytes)
-    }
-
-    static func rateString(_ bytesPerSec: Double?) -> String? {
-        guard let bytesPerSec, bytesPerSec >= 0, bytesPerSec.isFinite else { return nil }
-        return "\(byteString(Int64(bytesPerSec)))/s"
-    }
-
-    static func cpuString(_ pct: Double?) -> String? {
-        guard let pct, pct.isFinite else { return nil }
-        return String(format: "%.0f%%", min(100, max(0, pct)))
-    }
-}
+// DiskFormat / UptimeFormat live in DesignSystem (shared with Settings).

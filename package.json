@@ -45,7 +45,7 @@
     "verify": "npm run lint && npm run typecheck && npm test && npm run test:receipt-inbox-worker && npm run test:migrate-safe && npm run test:sqlite-backup && npm run test:startup-config && npm run test:oracle-deploy && npm run test:apple-projects && npm run test:antigravity-collector && npm run build"
   },
   "dependencies": {
-    "@jaywedgeworth22/congress-trading-shared": "git+https://github.com/jaywedgeworth22/congress-trading-shared.git#v2.5.1",
+    "@jaywedgeworth22/congress-trading-shared": "github:jaywedgeworth22/congress-trading-shared#v2.5.2",
     "@prisma/client": "^6.0.0",
     "@sentry/nextjs": "^10.69.0",
     "lucide-react": "^1.30.0",

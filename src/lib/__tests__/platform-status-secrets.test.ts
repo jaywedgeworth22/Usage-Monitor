@@ -185,6 +185,46 @@ describe("platform-status secrets probes", () => {
     ]);
   });
 
+  it("degrades and names the scope when ONE identity is rejected among working ones", async () => {
+    // Regression for the live production incident: the stored Socratic Trade
+    // client secret was stale while CT, Shared and Automation all worked, and
+    // this card claimed Infisical had "rejected the machine identity
+    // credentials" wholesale.  One dead identity must not erase three live
+    // ones — the operator needs to know exactly which secret to rotate.
+    vi.stubEnv("INFISICAL_UM_CLIENT_ID", "um-client-id");
+    vi.stubEnv("INFISICAL_UM_CLIENT_SECRET", CLIENT_SECRET);
+    vi.stubEnv("INFISICAL_ST_CLIENT_ID", "st-client-id");
+    vi.stubEnv("INFISICAL_ST_CLIENT_SECRET", "st-stale-secret");
+    vi.stubEnv("INFISICAL_ST_PROJECT_ID", "39d93bb7-76f9-498c-8b50-a7def52e072f");
+
+    fetchJsonMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("/api/v1/auth/universal-auth/login")) {
+        const body = String(init?.body ?? "");
+        return body.includes("st-client-id")
+          ? response(401, { statusCode: 401, message: "Unauthorized" })
+          : response(200, { accessToken: ACCESS_TOKEN });
+      }
+      return response(200, secretList(12));
+    });
+
+    const result = await infisical.probe();
+
+    expect(result.state).toBe("degraded");
+    expect(result.error).toBe("identity_rejected");
+    expect(result.headline).toBe(
+      "1 of 2 machine identities authenticated.  The stored client secret for SocraticTrade.com was rejected, so that scope's credential sync is stalled."
+    );
+    expect(result.headline).toContain(".  ");
+    expect(result.metrics).toEqual([
+      { label: "Usage-Monitor", value: "12 secrets" },
+      { label: "SocraticTrade.com", value: "Rejected", hint: "HTTP 401" },
+    ]);
+
+    const rendered = JSON.stringify(result);
+    expect(rendered).not.toContain("st-stale-secret");
+    expect(rendered).not.toContain(CLIENT_SECRET);
+  });
+
   it("renders unavailable when the machine identity is rejected", async () => {
     vi.stubEnv("INFISICAL_UM_CLIENT_ID", "um-client-id");
     vi.stubEnv("INFISICAL_UM_CLIENT_SECRET", CLIENT_SECRET);
