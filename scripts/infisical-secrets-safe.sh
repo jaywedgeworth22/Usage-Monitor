@@ -140,15 +140,23 @@ MAP=(
   "SLACK_MCP_XOXB_TOKEN:SLACK_BOT_TOKEN"
   "PUSHOVER_USAGE_API_TOKEN:PUSHOVER_USAGE_API_TOKEN"
   "PUSHOVER_USER_KEY:PUSHOVER_USER_KEY"
+  # GITHUB_TOKEN in the local file is dead (GitHub 401s it directly), but
+  # GITHUB_MCP_TOKEN is live — verified 2026-08-12 against /rate_limit.
+  "GITHUB_MCP_TOKEN:GITHUB_TOKEN"
+  # The project's stored copy went stale while the local one still logs in —
+  # verified 2026-08-12 via universal-auth against app.infisical.com.  This
+  # was the single dead identity behind the prod Infisical card incident.
+  "INFISICAL_ST_CLIENT_SECRET:INFISICAL_ST_CLIENT_SECRET"
 )
 
 # Deliberately NOT synced automatically — see the notes printed below.
 HELD_BACK=(
-  "SENTRY_AUTH_TOKEN -> SENTRY_READ_TOKEN   rejected by Sentry when last tested; rotate first"
-  "GITHUB_TOKEN      -> GITHUB_TOKEN        rejected by GitHub when last tested; rotate first"
-  "STRIPE_SECRET_KEY -> STRIPE_SECRET_KEY   rejected by Stripe when last tested; rotate first"
+  "SENTRY_READ_TOKEN                        already present and WORKING in prod; never overwrite with SENTRY_AUTH_TOKEN (wrong token type)"
+  "STRIPE_SECRET_KEY                        Stripe itself says api_key_expired for the stored key; issue a fresh restricted read key first"
+  "GITHUB_TOKEN (local file copy)           GitHub 401s it; the sync uses GITHUB_MCP_TOKEN instead — fix the file at leisure"
   "TWILIO_MCP_CREDS  -> TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN   one blob, needs splitting by hand"
   "ASC_KEY_PATH      -> ASC_PRIVATE_KEY     source is a FILE PATH; prod needs the .p8 PEM CONTENTS"
+  "VERCEL_API_TOKEN                         intentionally absent; Vercel is not used by this fleet directly"
 )
 
 cmd_sync_platforms() {
