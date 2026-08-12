@@ -414,7 +414,7 @@ describe("runtime health state", () => {
         ok: true,
         key: "weekly/prod-2026-08-12T00-00-00Z.db.gz",
         completedAt: new Date(Date.now() - 3_600_000).toISOString(),
-        pruned: ["weekly/prod-2026-08-05T00-00-00Z.db.gz"],
+        prunedCount: 1,
       });
       vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
 

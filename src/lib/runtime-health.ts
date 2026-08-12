@@ -996,7 +996,7 @@ export function getR2WeeklyArchiveStatus(): R2WeeklyArchiveStatus | null {
       key?: unknown;
       checkedAt?: unknown;
       completedAt?: unknown;
-      pruned?: unknown;
+      prunedCount?: unknown;
       error?: unknown;
     };
 
@@ -1028,7 +1028,7 @@ export function getR2WeeklyArchiveStatus(): R2WeeklyArchiveStatus | null {
       ok: !stale,
       ageSeconds,
       key,
-      prunedCount: Array.isArray(parsed.pruned) ? parsed.pruned.length : null,
+      prunedCount: typeof parsed.prunedCount === "number" ? parsed.prunedCount : null,
       reason: stale ? "archive_stale" : null,
     };
   } catch {

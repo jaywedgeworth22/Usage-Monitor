@@ -342,7 +342,17 @@ export async function runArchive({ env = process.env, argv = [], fetchImpl } = {
       startedAt: startedAt.toISOString(),
       completedAt: new Date().toISOString(),
     };
-    writeStatus(config.statusPath, { ...result, checkedAt: result.completedAt });
+    // The status file records a COUNT, never the pruned key strings. Those
+    // originate from a ListObjectsV2 response, and while `isManagedArchiveKey`
+    // already constrains them to a strict pattern, keeping remote-derived text
+    // out of a file the app later reads removes the question entirely. The full
+    // keys are still in this run's log output for an operator.
+    const { pruned, ...persisted } = result;
+    writeStatus(config.statusPath, {
+      ...persisted,
+      prunedCount: pruned.length,
+      checkedAt: result.completedAt,
+    });
     log(
       `done — ${key} verified, ${pruneTargets.length} superseded archive(s) pruned, ` +
         `${config.keepGenerations} generation(s) retained`
