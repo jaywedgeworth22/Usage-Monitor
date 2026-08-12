@@ -3,10 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { encrypt, decrypt, encryptJson } from "@/lib/crypto";
 import { parseProviderCreateInput, readJsonBody } from "@/lib/provider-input";
-import {
-  isDecommissionedProviderName,
-  isLlmProviderName,
-} from "@/lib/provider-definitions";
+import { isDecommissionedProviderName } from "@/lib/provider-definitions";
 import { buildProviderAlertState } from "@/lib/provider-alerts";
 import { computeBudgetStatus, bustBudgetStatusCache } from "@/lib/budget-status";
 import { toPrismaProviderPlanData } from "@/lib/provider-plan";
@@ -541,18 +538,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "This built-in provider is dormant or retired and cannot be added" },
       { status: 409 }
-    );
-  }
-
-  // Same funding policy as PUT /api/providers/[id]: creation must not be a
-  // loophole for re-adding a mustKeepFunded flag on an LLM/AI provider.
-  if (input.plan?.mustKeepFunded === true && isLlmProviderName(input.name)) {
-    return NextResponse.json(
-      {
-        error:
-          "LLM/AI providers cannot be marked Must keep funded.  Chat inference routes through OpenRouter, so no direct LLM vendor has to stay funded.",
-      },
-      { status: 400 }
     );
   }
 

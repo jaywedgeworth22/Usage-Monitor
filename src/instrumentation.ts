@@ -43,9 +43,11 @@ export async function register() {
   );
   await deactivateDecommissionedBuiltInProviders();
 
-  // Fleet policy: LLM vendors are reached via OpenRouter, so no LLM/AI
-  // provider may demand funding. Clear any pre-policy mustKeepFunded flags;
-  // the PUT /api/providers/[id] handler rejects re-adding them.
+  // One-time cleanup (not a standing policy): clears any LLM/AI provider's
+  // mustKeepFunded flag that predated it, then records completion so it
+  // never runs again. The owner remains free to turn Must keep funded back
+  // on for any provider from the dashboard; this call is a no-op after its
+  // first successful pass. See src/lib/provider-funding-policy.ts.
   const { clearLlmMustKeepFundedFlags } = await import(
     "@/lib/provider-funding-policy"
   );
