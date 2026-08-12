@@ -38,11 +38,12 @@
     "test:receipt-inbox-worker": "vitest run --config workers/receipt-inbox/vitest.config.mjs",
     "test:migrate-safe": "node scripts/test-migrate-safe-repro.mjs",
     "test:sqlite-backup": "node scripts/test-sqlite-pre-migration-backup.mjs",
+    "test:r2-archive": "node scripts/test-r2-weekly-archive.mjs",
     "test:startup-config": "node scripts/test-startup-config.mjs",
     "test:oracle-deploy": "node scripts/test-oracle-deploy-config.mjs",
     "test:apple-projects": "bash scripts/verify-apple-projects.sh",
     "test:antigravity-collector": "node scripts/test-antigravity-collector.mjs",
-    "verify": "npm run lint && npm run typecheck && npm test && npm run test:receipt-inbox-worker && npm run test:migrate-safe && npm run test:sqlite-backup && npm run test:startup-config && npm run test:oracle-deploy && npm run test:apple-projects && npm run test:antigravity-collector && npm run build"
+    "verify": "npm run lint && npm run typecheck && npm test && npm run test:receipt-inbox-worker && npm run test:migrate-safe && npm run test:sqlite-backup && npm run test:r2-archive && npm run test:startup-config && npm run test:oracle-deploy && npm run test:apple-projects && npm run test:antigravity-collector && npm run build"
   },
   "dependencies": {
     "@jaywedgeworth22/congress-trading-shared": "github:jaywedgeworth22/congress-trading-shared#v2.5.2",

@@ -959,6 +959,88 @@ export interface R2HistoricBackupStatus {
   role: "historic" | "active" | "unconfigured";
   ok: boolean;
   reason: string | null;
+  /**
+   * Weekly verified snapshot written by `scripts/ops/r2-weekly-archive.mjs`.
+   * Null when the job has never run on this host. A backup that silently
+   * stops is the classic failure mode, so staleness is reported explicitly
+   * rather than inferred from "the bucket still has objects in it".
+   */
+  weeklyArchive: R2WeeklyArchiveStatus | null;
+}
+
+export interface R2WeeklyArchiveStatus {
+  /** Last run succeeded AND landed inside the freshness window. */
+  ok: boolean;
+  /** Age of the last successful archive, in seconds. */
+  ageSeconds: number | null;
+  /** Object key of the most recent verified archive. */
+  key: string | null;
+  /** How many superseded generations the last run pruned. */
+  prunedCount: number | null;
+  reason: string | null;
+}
+
+/**
+ * Weekly cadence with slack for one missed run: 8 days. A single skipped week
+ * is worth flagging, because this is the only second-vendor copy.
+ */
+const R2_ARCHIVE_MAX_AGE_SECONDS = 8 * 24 * 60 * 60;
+
+export function getR2WeeklyArchiveStatus(): R2WeeklyArchiveStatus | null {
+  const statusPath =
+    process.env.R2_ARCHIVE_STATUS_PATH?.trim() || "/data/.r2-archive-status.json";
+  try {
+    if (!existsSync(statusPath)) return null;
+    const parsed = JSON.parse(readFileSync(statusPath, "utf8")) as {
+      ok?: unknown;
+      key?: unknown;
+      checkedAt?: unknown;
+      completedAt?: unknown;
+      prunedCount?: unknown;
+      reason?: unknown;
+    };
+
+    const stamp =
+      (typeof parsed.completedAt === "string" && parsed.completedAt) ||
+      (typeof parsed.checkedAt === "string" && parsed.checkedAt) ||
+      null;
+    const parsedAt = stamp ? Date.parse(stamp) : Number.NaN;
+    const ageSeconds = Number.isFinite(parsedAt)
+      ? Math.max(0, Math.round((Date.now() - parsedAt) / 1000))
+      : null;
+    const key = typeof parsed.key === "string" ? parsed.key : null;
+
+    if (parsed.ok !== true) {
+      return {
+        ok: false,
+        ageSeconds,
+        key,
+        prunedCount: null,
+        // A fixed reason code written by the archive job — never remote text.
+        reason:
+          typeof parsed.reason === "string" && /^[a-z_]{1,40}$/.test(parsed.reason)
+            ? parsed.reason
+            : "archive_failed",
+      };
+    }
+
+    const stale = ageSeconds === null || ageSeconds > R2_ARCHIVE_MAX_AGE_SECONDS;
+    return {
+      ok: !stale,
+      ageSeconds,
+      key,
+      prunedCount: typeof parsed.prunedCount === "number" ? parsed.prunedCount : null,
+      reason: stale ? "archive_stale" : null,
+    };
+  } catch {
+    return {
+      ok: false,
+      ageSeconds: null,
+      key: null,
+      prunedCount: null,
+      reason: "archive_status_unreadable",
+    };
+  }
 }
 
 /**
@@ -980,6 +1062,7 @@ export function getR2HistoricBackupStatus(): R2HistoricBackupStatus {
   const configured = Boolean(account && token);
   const litestreamUsesR2 = litestreamEndpointIsR2();
   const autoDisabled = r2FreeTierKillEngaged();
+  const weeklyArchive = getR2WeeklyArchiveStatus();
 
   if (litestreamUsesR2) {
     // Still writing (or intending to write) to R2 — not the desired steady state
@@ -996,6 +1079,7 @@ export function getR2HistoricBackupStatus(): R2HistoricBackupStatus {
         : configured
           ? null
           : "r2_monitor_unconfigured",
+      weeklyArchive,
     };
   }
 
@@ -1007,16 +1091,22 @@ export function getR2HistoricBackupStatus(): R2HistoricBackupStatus {
       role: "unconfigured",
       ok: true, // historic freeze without monitor credentials is not an outage
       reason: "r2_monitor_unconfigured",
+      weeklyArchive,
     };
   }
 
+  // Once the weekly archive is running, its freshness — not the mere presence
+  // of a frozen bucket — is what makes R2 a trustworthy second copy. A failed
+  // or stale archive is observability-only (it never gates the service), so it
+  // surfaces as amber via `reason` rather than flipping readiness.
   return {
     configured: true,
     litestreamUsesR2: false,
     autoDisabled,
     role: "historic",
     ok: true,
-    reason: null,
+    reason: weeklyArchive && !weeklyArchive.ok ? weeklyArchive.reason : null,
+    weeklyArchive,
   };
 }
 

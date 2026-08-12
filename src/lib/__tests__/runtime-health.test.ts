@@ -20,6 +20,7 @@ import {
   getLocalBackupRuntimeStatus,
   getLitestreamReplicaTarget,
   getR2HistoricBackupStatus,
+  getR2WeeklyArchiveStatus,
   getRuntimeIdentity,
   getSchedulerReadiness,
   getSchedulerRuntimeStatus,
@@ -393,6 +394,96 @@ describe("runtime health state", () => {
     expect(layers.primary.label).toBe("b2");
     expect(layers.r2Historic.role).toBe("historic");
     expect(layers.local).toBeDefined();
+  });
+
+  describe("weekly R2 archive status", () => {
+    function writeArchiveStatus(payload: unknown): string {
+      const dir = mkdtempSync(join(tmpdir(), "r2-archive-status-"));
+      const path = join(dir, "status.json");
+      writeFileSync(path, JSON.stringify(payload), "utf8");
+      return path;
+    }
+
+    it("returns null when the job has never run", () => {
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", join(tmpdir(), "definitely-absent.json"));
+      expect(getR2WeeklyArchiveStatus()).toBeNull();
+    });
+
+    it("reports a fresh successful archive as ok", () => {
+      const path = writeArchiveStatus({
+        ok: true,
+        key: "weekly/prod-2026-08-12T00-00-00Z.db.gz",
+        completedAt: new Date(Date.now() - 3_600_000).toISOString(),
+        prunedCount: 1,
+      });
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
+
+      const status = getR2WeeklyArchiveStatus();
+      expect(status).toMatchObject({ ok: true, prunedCount: 1, reason: null });
+      expect(status?.ageSeconds).toBeGreaterThanOrEqual(3_500);
+    });
+
+    it("flags an archive older than the weekly window as stale", () => {
+      const path = writeArchiveStatus({
+        ok: true,
+        key: "weekly/old.db.gz",
+        completedAt: new Date(Date.now() - 9 * 24 * 3_600_000).toISOString(),
+        pruned: [],
+      });
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
+      expect(getR2WeeklyArchiveStatus()).toMatchObject({
+        ok: false,
+        reason: "archive_stale",
+      });
+    });
+
+    it("surfaces a failed run's reason code", () => {
+      const path = writeArchiveStatus({
+        ok: false,
+        reason: "verify_hash_mismatch",
+        checkedAt: new Date().toISOString(),
+      });
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
+      expect(getR2WeeklyArchiveStatus()).toMatchObject({
+        ok: false,
+        reason: "verify_hash_mismatch",
+      });
+    });
+
+    it("rejects a reason that is not one of the job's own codes", () => {
+      // Defence in depth: the file should only ever contain a fixed code, so
+      // anything free-form is treated as an unlabelled failure rather than
+      // rendered verbatim in the UI.
+      const path = writeArchiveStatus({
+        ok: false,
+        reason: "<Error><Message>Unauthorized</Message></Error>",
+        checkedAt: new Date().toISOString(),
+      });
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
+      expect(getR2WeeklyArchiveStatus()).toMatchObject({
+        ok: false,
+        reason: "archive_failed",
+      });
+    });
+
+    it("a stale archive is amber on r2Historic but never gates readiness", () => {
+      vi.stubEnv("LITESTREAM_S3_ENDPOINT", "https://s3.eu-central-003.backblazeb2.com");
+      vi.stubEnv("R2_USAGE_ACCOUNT_ID", "acct");
+      vi.stubEnv("R2_USAGE_API_TOKEN", "tok");
+      const path = writeArchiveStatus({
+        ok: true,
+        key: "weekly/old.db.gz",
+        completedAt: new Date(Date.now() - 30 * 24 * 3_600_000).toISOString(),
+      });
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
+
+      const status = getR2HistoricBackupStatus();
+      // Observability-only: the second-vendor copy going stale must not make
+      // /api/ready claim the service itself is unhealthy.
+      expect(status.ok).toBe(true);
+      expect(status.reason).toBe("archive_stale");
+      expect(status.weeklyArchive?.ok).toBe(false);
+    });
   });
 
   describe("database file identity", () => {
