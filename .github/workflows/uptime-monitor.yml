@@ -51,11 +51,13 @@ jobs:
       # keeping its systemd timer green; Production Deploy Verification only fails
       # once per merge). Drift is flagged only when SUSTAINED: main HEAD must
       # be older than this many minutes before the live revision counts as
-      # stale. 360 sits comfortably above the 240-minute deploy transaction
-      # ceiling in production-deploy-verify.yml, so a legitimate in-flight
-      # deploy can never raise the alert — stateless and self-healing, no
-      # cross-run bookkeeping needed.
-      DRIFT_GRACE_MINUTES: 360
+      # stale. 120 is a deliberately tighter bar than the 240-minute observer
+      # ceiling in production-deploy-verify.yml (owner, 2026-08-12): a deploy
+      # still in flight past 2 hours is itself worth a warning issue, and
+      # drift never pages PagerDuty, so the cost of flagging a slow-but-
+      # legitimate deploy is one GitHub issue. Stateless and self-healing,
+      # no cross-run bookkeeping needed.
+      DRIFT_GRACE_MINUTES: 120
       DRIFT_INCIDENT_TITLE: "[Uptime] Usage Monitor production is stale vs main"
       # GitHub-hosted runner IPs receive Cloudflare 403 bot challenges. Probe
       # the Hetzner Coolify origin (fleet-hetzner-nbg1) with the public hostname retained for TLS;
