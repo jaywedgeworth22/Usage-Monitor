@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { isUsageReadAuthorized } from "@/lib/ingest-auth";
 import type { NextRequest } from "next/server";
 
@@ -56,7 +57,7 @@ export async function recordMacHeartbeat(data: Partial<MacHostTelemetry>): Promi
       billingMode: "estimated",
       confidence: "estimated",
       occurredAt: now,
-      metadata: telemetry as unknown as Record<string, unknown>,
+      metadata: telemetry as unknown as Prisma.JsonObject,
     },
   });
 
