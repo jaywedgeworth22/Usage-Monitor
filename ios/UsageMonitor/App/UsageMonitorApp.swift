@@ -5,6 +5,7 @@ import Providers
 import Alerts
 import Platforms
 import ProjectBudgets
+import ServerStatus
 import Settings
 import AppLock
 import Networking
@@ -137,6 +138,7 @@ private extension AppFeatures {
         dashboard: { AnyView(DashboardRootView()) },
         providers: { AnyView(ProvidersRootView()) },
         alerts: { AnyView(AlertsRootView()) },
+        serverStatus: { AnyView(ServerStatusRootView()) },
         platforms: { AnyView(PlatformsRootView()) },
         projects: { AnyView(ProjectBudgetsRootView()) },
         settings: { AnyView(SettingsRootView()) }

@@ -10,8 +10,10 @@ import Networking
 ///      token via a disposable client **before** writing it to the Keychain
 ///      (`AppEnvironment.setToken`); never persists to `UserDefaults`.
 ///   2. Full dashboard-session access with native management inventory.
-///   3. Live server status from the public health probes (`ServerStatusSection`).
-///   4. Appearance, security, notifications, and app information.
+///   3. Appearance, security, notifications, and app information.
+///
+/// Live server status moved to its own tab (`ServerStatusRootView` in the
+/// ServerStatus lane).
 ///
 /// Contract: keeps `public struct SettingsRootView: View` + `public init()`,
 /// owns its own `NavigationStack` + title, and reads everything through
@@ -19,21 +21,18 @@ import Networking
 public struct SettingsRootView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var model: SettingsViewModel
-    @State private var status: ServerStatusStore
     @State private var hostUsage: HostUsageStore
     @State private var access: ManagementAccessStore
 
     public init() {
         _model = State(initialValue: SettingsViewModel())
-        _status = State(initialValue: ServerStatusStore())
         _hostUsage = State(initialValue: HostUsageStore())
         _access = State(initialValue: ManagementAccessStore())
     }
 
-    /// Preview/test seam — inject a stubbed view-model and status store.
-    init(model: SettingsViewModel, status: ServerStatusStore) {
+    /// Preview/test seam — inject a stubbed view-model.
+    init(model: SettingsViewModel) {
         _model = State(initialValue: model)
-        _status = State(initialValue: status)
         _hostUsage = State(initialValue: HostUsageStore())
         _access = State(initialValue: ManagementAccessStore())
     }
@@ -49,9 +48,6 @@ public struct SettingsRootView: View {
                 ConnectionSection(model: model)
                 FullAccessSection(store: access)
                 TokenConnectionSection(model: model)
-                ServerStatusSection(store: status) {
-                    await status.refresh(using: env.apiClient)
-                }
                 HostUsageSection(
                     store: hostUsage,
                     hasCredential: hasHostCredential
@@ -69,7 +65,6 @@ public struct SettingsRootView: View {
             .scrollDismissesKeyboard(.interactively)
             .task {
                 model.bind(to: env)
-                await status.loadIfNeeded(using: env.apiClient)
             }
             .task(id: env.accessIdentityRevision) {
                 access.resetForIdentityChange()
@@ -85,7 +80,6 @@ public struct SettingsRootView: View {
                 }
             }
             .refreshable {
-                await status.refresh(using: env.apiClient)
                 await access.refresh(using: env.apiClient)
                 if hasHostCredential {
                     await hostUsage.refresh(using: env.apiClient)
@@ -177,8 +171,7 @@ private struct AboutSection: View {
 
 #Preview("Not connected — Light") {
     SettingsRootView(
-        model: SettingsViewModel(verifier: StubTokenVerifier(.failure(.unauthorized))),
-        status: ServerStatusStore(probe: PreviewProbe.healthy)
+        model: SettingsViewModel(verifier: StubTokenVerifier(.failure(.unauthorized)))
     )
     .environment(AppEnvironment.preview(token: nil))
     .preferredColorScheme(.light)
@@ -186,58 +179,8 @@ private struct AboutSection: View {
 
 #Preview("Connected — Dark") {
     SettingsRootView(
-        model: SettingsViewModel(verifier: StubTokenVerifier(.success(()))),
-        status: ServerStatusStore(probe: PreviewProbe.healthy)
+        model: SettingsViewModel(verifier: StubTokenVerifier(.success(())))
     )
     .environment(AppEnvironment.preview(token: "verified-token"))
     .preferredColorScheme(.dark)
-}
-
-#Preview("Status degraded — Light") {
-    SettingsRootView(
-        model: SettingsViewModel(verifier: StubTokenVerifier(.success(()))),
-        status: ServerStatusStore(probe: PreviewProbe.degraded)
-    )
-    .environment(AppEnvironment.preview(token: "verified-token"))
-    .preferredColorScheme(.light)
-}
-
-/// Deterministic probes for the SwiftUI canvas (no network).
-private enum PreviewProbe {
-    static let healthy: @Sendable (Networking.APIClient) async throws -> ServerStatusSnapshot = { _ in
-        try? await Task.sleep(nanoseconds: 200_000_000)
-        return ServerStatusSnapshot(
-            health: .init(
-                ok: true,
-                status: "ok",
-                uptimeSeconds: 273_600,
-                service: "usage-monitor",
-                version: "1.8.2",
-                commit: "fe6d9c6d1a"
-            ),
-            readiness: .sample,
-            fetchedAt: Date()
-        )
-    }
-
-    static let degraded: @Sendable (Networking.APIClient) async throws -> ServerStatusSnapshot = { _ in
-        ServerStatusSnapshot(
-            health: .init(ok: true, status: "ok", uptimeSeconds: 3_600, service: "usage-monitor", version: "1.8.2"),
-            readiness: .init(
-                ok: false,
-                status: "degraded",
-                checks: .init(
-                    database: .init(ok: true),
-                    scheduler: .init(ok: false),
-                    backup: .init(ok: true),
-                    backupLayers: .init(
-                        local: .init(ok: true, present: true, count: 1),
-                        primary: .init(ok: false, target: "b2", label: "b2", reason: "replica_status_stale"),
-                        r2Historic: .init(ok: true, configured: true, role: "historic")
-                    )
-                )
-            ),
-            fetchedAt: Date()
-        )
-    }
 }

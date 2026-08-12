@@ -73,17 +73,4 @@ enum AppInfo {
     }
 }
 
-/// Format a server uptime (seconds) into a compact "3d 4h" / "5m" string.
-enum UptimeFormat {
-    static func string(fromSeconds seconds: Int) -> String {
-        guard seconds > 0 else { return "just started" }
-        let days = seconds / 86_400
-        let hours = (seconds % 86_400) / 3_600
-        let minutes = (seconds % 3_600) / 60
-
-        if days > 0 { return "\(days)d \(hours)h" }
-        if hours > 0 { return "\(hours)h \(minutes)m" }
-        if minutes > 0 { return "\(minutes)m" }
-        return "\(seconds)s"
-    }
-}
+// UptimeFormat / DiskFormat live in DesignSystem (shared with ServerStatus).

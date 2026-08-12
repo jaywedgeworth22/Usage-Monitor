@@ -26,6 +26,7 @@ let package = Package(
         .library(name: "Alerts", targets: ["Alerts"]),
         .library(name: "ProjectBudgets", targets: ["ProjectBudgets"]),
         .library(name: "Platforms", targets: ["Platforms"]),
+        .library(name: "ServerStatus", targets: ["ServerStatus"]),
         .library(name: "Settings", targets: ["Settings"]),
         .library(name: "AppLock", targets: ["AppLock"]),
         .library(name: "OfflineCache", targets: ["OfflineCache"]),
@@ -70,6 +71,10 @@ let package = Package(
             dependencies: ["AppCore", "DesignSystem", "Networking", "Models"]
         ),
         .target(
+            name: "ServerStatus",
+            dependencies: ["AppCore", "DesignSystem", "Networking", "Models"]
+        ),
+        .target(
             name: "Settings",
             dependencies: ["AppCore", "DesignSystem", "Networking", "Models", "PushScaffold"]
         ),
@@ -107,7 +112,7 @@ let package = Package(
             dependencies: [
                 "Models", "Networking", "AppCore", "DesignSystem",
                 "Dashboard", "Providers", "Alerts", "ProjectBudgets",
-                "Platforms", "Settings", "AppLock", "OfflineCache", "WidgetShared",
+                "Platforms", "ServerStatus", "Settings", "AppLock", "OfflineCache", "WidgetShared",
                 "PushScaffold",
                 "LocalStore", "LocalSecrets", "LocalAdapters", "LocalBudget", "LocalDataPlane",
             ]
