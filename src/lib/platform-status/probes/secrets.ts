@@ -150,9 +150,9 @@ function allowedBaseUrl(): string | null {
 
 type ScopeOutcome =
   | { kind: "ok"; label: string; secrets: number }
-  | { kind: "http"; status: number }
-  | { kind: "invalid" }
-  | { kind: "error"; error: unknown };
+  | { kind: "http"; label: string; status: number }
+  | { kind: "invalid"; label: string }
+  | { kind: "error"; label: string; error: unknown };
 
 /**
  * Log one machine identity in and count the secret names it can see.  Values
@@ -176,11 +176,11 @@ async function readScope(
       },
       { security: "untrusted" }
     );
-    if (!login.ok) return { kind: "http", status: login.status };
+    if (!login.ok) return { kind: "http", label: scope.label, status: login.status };
 
     const accessToken = asRecord(login.data)?.accessToken;
     if (typeof accessToken !== "string" || accessToken.length === 0) {
-      return { kind: "invalid" };
+      return { kind: "invalid", label: scope.label };
     }
 
     const params = new URLSearchParams({
@@ -198,13 +198,13 @@ async function readScope(
       { headers: { authorization: `Bearer ${accessToken}` } },
       { security: "untrusted" }
     );
-    if (!listed.ok) return { kind: "http", status: listed.status };
+    if (!listed.ok) return { kind: "http", label: scope.label, status: listed.status };
 
     const body = asRecord(listed.data);
-    if (!body || !Array.isArray(body.secrets)) return { kind: "invalid" };
+    if (!body || !Array.isArray(body.secrets)) return { kind: "invalid", label: scope.label };
     return { kind: "ok", label: scope.label, secrets: asArray(body.secrets).length };
   } catch (error) {
-    return { kind: "error", error };
+    return { kind: "error", label: scope.label, error };
   }
 }
 
@@ -240,35 +240,47 @@ async function probe(): Promise<PlatformProbeResult> {
     ready.map((scope) => readScope(baseUrl, scope, environment))
   );
 
-  // Rejected credentials outrank everything else: that is the failure mode that
-  // silently stops provider keys from rotating.
-  const rejected = outcomes.find(
-    (outcome) => outcome.kind === "http" && (outcome.status === 401 || outcome.status === 403)
+  // Aggregate PER SCOPE.  The four machine identities are independent — the
+  // whole reason they exist separately — so one rejected identity must not
+  // erase the three that still work.  In production exactly that happened: a
+  // single stale Socratic Trade client secret made this card claim Infisical
+  // had "rejected the machine identity credentials" wholesale, while boot,
+  // CT, Shared and Automation were all fine.  Failure only outranks success
+  // when NOTHING succeeded.
+  const authenticated = outcomes.filter(
+    (outcome): outcome is Extract<ScopeOutcome, { kind: "ok" }> => outcome.kind === "ok"
   );
-  if (rejected && rejected.kind === "http") {
-    return upstreamFailure(
-      rejected.status,
-      "Infisical rejected the machine identity credentials.  Provider credential sync cannot refresh secrets."
-    );
-  }
+  const rejectedScopes = outcomes.filter(
+    (outcome): outcome is Extract<ScopeOutcome, { kind: "http" }> =>
+      outcome.kind === "http" && (outcome.status === 401 || outcome.status === 403)
+  );
 
-  const failed = outcomes.find((outcome) => outcome.kind === "http");
-  if (failed && failed.kind === "http") {
-    return upstreamFailure(
-      failed.status,
-      `Infisical returned HTTP ${failed.status}.  Secret visibility could not be confirmed.`
+  if (authenticated.length === 0) {
+    // Total failure — the old wholesale verdicts, worst first.
+    if (rejectedScopes.length > 0) {
+      return upstreamFailure(
+        rejectedScopes[0].status,
+        "Infisical rejected the machine identity credentials.  Provider credential sync cannot refresh secrets."
+      );
+    }
+    const failed = outcomes.find(
+      (outcome): outcome is Extract<ScopeOutcome, { kind: "http" }> => outcome.kind === "http"
     );
-  }
-
-  const unreachable = outcomes.find((outcome) => outcome.kind === "error");
-  if (unreachable && unreachable.kind === "error") {
-    return failureResult(
-      unreachable.error,
-      "Infisical did not respond.  Provider credential sync could not be verified."
+    if (failed) {
+      return upstreamFailure(
+        failed.status,
+        `Infisical returned HTTP ${failed.status}.  Secret visibility could not be confirmed.`
+      );
+    }
+    const unreachable = outcomes.find(
+      (outcome): outcome is Extract<ScopeOutcome, { kind: "error" }> => outcome.kind === "error"
     );
-  }
-
-  if (outcomes.some((outcome) => outcome.kind === "invalid")) {
+    if (unreachable) {
+      return failureResult(
+        unreachable.error,
+        "Infisical did not respond.  Provider credential sync could not be verified."
+      );
+    }
     return {
       state: "degraded",
       headline:
@@ -278,9 +290,32 @@ async function probe(): Promise<PlatformProbeResult> {
     };
   }
 
-  const authenticated = outcomes.filter(
-    (outcome): outcome is Extract<ScopeOutcome, { kind: "ok" }> => outcome.kind === "ok"
-  );
+  // Partial failure — degraded, naming exactly which identity needs attention
+  // so the operator rotates one client secret instead of suspecting all four.
+  const troubled = outcomes.filter((outcome) => outcome.kind !== "ok");
+  if (troubled.length > 0) {
+    const names = troubled.map((outcome) => outcome.label).join(", ");
+    const metrics: PlatformMetric[] = [
+      ...authenticated.map((outcome) =>
+        metric(outcome.label, formatCount(outcome.secrets, "secret"))
+      ),
+      ...troubled.map((outcome) =>
+        metric(
+          outcome.label,
+          outcome.kind === "http" && (outcome.status === 401 || outcome.status === 403)
+            ? "Rejected"
+            : "Unreachable",
+          outcome.kind === "http" ? `HTTP ${outcome.status}` : undefined
+        )
+      ),
+    ];
+    return {
+      state: "degraded",
+      headline: `${authenticated.length} of ${outcomes.length} machine identities authenticated.  ${rejectedScopes.length === troubled.length ? `The stored client secret for ${names} was rejected` : `The ${names} ${troubled.length === 1 ? "identity" : "identities"} could not be verified`}, so that scope's credential sync is stalled.`,
+      metrics,
+      error: rejectedScopes.length > 0 ? "identity_rejected" : "scope_unreachable",
+    };
+  }
   const empty = authenticated.filter((outcome) => outcome.secrets === 0);
   const total = authenticated.reduce((sum, outcome) => sum + outcome.secrets, 0);
 
