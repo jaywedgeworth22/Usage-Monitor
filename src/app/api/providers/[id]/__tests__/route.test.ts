@@ -154,8 +154,12 @@ function managedBinding() {
   };
 }
 
-describe("LLM funding policy (no LLM provider may demand funding)", () => {
-  it("rejects setting plan.mustKeepFunded=true on an LLM/AI provider", async () => {
+describe("provider plan.mustKeepFunded editing", () => {
+  // The owner remains free to turn Must keep funded back on for an LLM/AI
+  // provider from the dashboard whenever they choose to — PUT and POST no
+  // longer reject it.  See src/lib/provider-funding-policy.ts for the
+  // one-time boot cleanup this replaces.
+  it("accepts mustKeepFunded=true plan edits for an LLM/AI provider", async () => {
     const provider = await prisma.provider.create({
       data: {
         name: "anthropic",
@@ -170,17 +174,15 @@ describe("LLM funding policy (no LLM provider may demand funding)", () => {
       { params: Promise.resolve({ id: provider.id }) }
     );
 
-    expect(response.status).toBe(400);
-    expect((await response.json()).error).toMatch(/OpenRouter/);
+    expect(response.status).toBe(200);
     const stored = await prisma.provider.findUniqueOrThrow({
       where: { id: provider.id },
       include: { plan: true },
     });
     expect(stored.plan).toMatchObject({
-      mustKeepFunded: false,
+      mustKeepFunded: true,
       lowBalanceUsd: 10,
     });
-    expect(stored.alertConfigGeneration).toBe(0);
   });
 
   it("still accepts mustKeepFunded=false plan edits for an LLM/AI provider", async () => {
@@ -223,8 +225,8 @@ describe("LLM funding policy (no LLM provider may demand funding)", () => {
     ).toMatchObject({ plan: { mustKeepFunded: true } });
   });
 
-  it("rejects the same flag at creation so POST is not a loophole", async () => {
-    const rejected = await POST_COLLECTION(
+  it("accepts the same flag at creation for an LLM/AI provider", async () => {
+    const created = await POST_COLLECTION(
       new NextRequest("https://usage.jays.services/api/providers", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -236,9 +238,13 @@ describe("LLM funding policy (no LLM provider may demand funding)", () => {
         }),
       })
     );
-    expect(rejected.status).toBe(400);
-    expect((await rejected.json()).error).toMatch(/OpenRouter/);
-    expect(await prisma.provider.count({ where: { name: "deepseek" } })).toBe(0);
+    expect(created.status).toBe(201);
+    expect(
+      await prisma.provider.findFirstOrThrow({
+        where: { name: "deepseek" },
+        include: { plan: true },
+      })
+    ).toMatchObject({ plan: { mustKeepFunded: true } });
 
     const allowed = await POST_COLLECTION(
       new NextRequest("https://usage.jays.services/api/providers", {
