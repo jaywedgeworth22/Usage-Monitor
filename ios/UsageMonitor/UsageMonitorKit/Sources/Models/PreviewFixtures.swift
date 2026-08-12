@@ -264,7 +264,12 @@ public extension ServerReadiness {
                     replicaOk: true,
                     replicaAgeSeconds: 120
                 ),
-                r2Historic: .init(ok: true, configured: true, role: "historic")
+                r2Historic: .init(
+                    ok: true,
+                    configured: true,
+                    role: "historic",
+                    weeklyArchive: .init(ok: true, ageSeconds: 7_200)
+                )
             )
         )
     )

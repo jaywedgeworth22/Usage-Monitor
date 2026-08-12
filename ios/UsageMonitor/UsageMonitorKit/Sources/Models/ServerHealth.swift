@@ -27,6 +27,38 @@ public struct ServerHealth: Codable, Hashable, Sendable {
         self.version = version
         self.commit = commit
     }
+
+    /// `/api/health` emits `revision` (Coolify SOURCE_COMMIT).  Accept the
+    /// older `commit` key too so fixtures and any leftover encoder stay valid.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        status = try container.decode(String.self, forKey: .status)
+        uptimeSeconds = try container.decodeIfPresent(Int.self, forKey: .uptimeSeconds)
+        checkedAt = try container.decodeIfPresent(String.self, forKey: .checkedAt)
+        service = try container.decodeIfPresent(String.self, forKey: .service)
+        version = try container.decodeIfPresent(String.self, forKey: .version)
+        if let revision = try container.decodeIfPresent(String.self, forKey: .revision) {
+            commit = revision
+        } else {
+            commit = try container.decodeIfPresent(String.self, forKey: .commit)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(ok, forKey: .ok)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(uptimeSeconds, forKey: .uptimeSeconds)
+        try container.encodeIfPresent(checkedAt, forKey: .checkedAt)
+        try container.encodeIfPresent(service, forKey: .service)
+        try container.encodeIfPresent(version, forKey: .version)
+        try container.encodeIfPresent(commit, forKey: .revision)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ok, status, uptimeSeconds, checkedAt, service, version, commit, revision
+    }
 }
 
 /// `GET /api/ready` — public readiness probe with dependency detail.
@@ -145,6 +177,7 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
             public var autoDisabled: Bool?
             public var role: String?
             public var reason: String?
+            public var weeklyArchive: WeeklyArchive?
 
             public init(
                 ok: Bool,
@@ -152,7 +185,8 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
                 litestreamUsesR2: Bool? = nil,
                 autoDisabled: Bool? = nil,
                 role: String? = nil,
-                reason: String? = nil
+                reason: String? = nil,
+                weeklyArchive: WeeklyArchive? = nil
             ) {
                 self.ok = ok
                 self.configured = configured
@@ -160,6 +194,31 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
                 self.autoDisabled = autoDisabled
                 self.role = role
                 self.reason = reason
+                self.weeklyArchive = weeklyArchive
+            }
+
+            /// Weekly verified snapshot written by `r2-weekly-archive.mjs`.
+            /// Null when the job has never run on the host.
+            public struct WeeklyArchive: Codable, Hashable, Sendable {
+                public var ok: Bool
+                public var ageSeconds: Double?
+                public var key: String?
+                public var prunedCount: Int?
+                public var reason: String?
+
+                public init(
+                    ok: Bool,
+                    ageSeconds: Double? = nil,
+                    key: String? = nil,
+                    prunedCount: Int? = nil,
+                    reason: String? = nil
+                ) {
+                    self.ok = ok
+                    self.ageSeconds = ageSeconds
+                    self.key = key
+                    self.prunedCount = prunedCount
+                    self.reason = reason
+                }
             }
         }
     }

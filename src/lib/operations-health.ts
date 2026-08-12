@@ -559,31 +559,36 @@ export async function fetchCoolifyFleetSummary(): Promise<CoolifyFleetSummary> {
       if (serversRes.ok) {
         const serversBody = await readBoundedJson(serversRes, MAX_HEALTH_RESPONSE_BYTES);
         const servers = Array.isArray(serversBody) ? serversBody : [];
-        for (const server of servers.slice(0, 5)) {
-          const uuid =
-            typeof asRecord(server)?.uuid === "string"
-              ? (asRecord(server)!.uuid as string)
-              : null;
-          if (!uuid || !/^[a-z0-9]{8,64}$/i.test(uuid)) continue;
-          const resRes = await fetch(
-            `${config.host}/api/v1/servers/${encodeURIComponent(uuid)}/resources`,
-            {
-              headers,
-              cache: "no-store",
-              redirect: "error",
-              signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        const resourceLists = await Promise.all(
+          servers.slice(0, 5).map(async (server) => {
+            const uuid =
+              typeof asRecord(server)?.uuid === "string"
+                ? (asRecord(server)!.uuid as string)
+                : null;
+            if (!uuid || !/^[a-z0-9]{8,64}$/i.test(uuid)) return [];
+            const resRes = await fetch(
+              `${config.host}/api/v1/servers/${encodeURIComponent(uuid)}/resources`,
+              {
+                headers,
+                cache: "no-store",
+                redirect: "error",
+                signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+              }
+            );
+            if (!resRes.ok) return [];
+            const resBody = await readBoundedJson(resRes, MAX_HEALTH_RESPONSE_BYTES);
+            if (!Array.isArray(resBody)) return [];
+            const mappedRows: CoolifyFleetResource[] = [];
+            for (const row of resBody.slice(0, 40)) {
+              const rec = asRecord(row);
+              if (!rec) continue;
+              const mapped = mapCoolifyResource(rec, null);
+              if (mapped) mappedRows.push(mapped);
             }
-          );
-          if (!resRes.ok) continue;
-          const resBody = await readBoundedJson(resRes, MAX_HEALTH_RESPONSE_BYTES);
-          if (!Array.isArray(resBody)) continue;
-          for (const row of resBody.slice(0, 40)) {
-            const rec = asRecord(row);
-            if (!rec) continue;
-            const mapped = mapCoolifyResource(rec, null);
-            if (mapped) resources.push(mapped);
-          }
-        }
+            return mappedRows;
+          })
+        );
+        resources = resourceLists.flat();
       }
     } catch {
       // resources are supplementary
@@ -639,40 +644,45 @@ export async function fetchCoolifyFleetSummary(): Promise<CoolifyFleetSummary> {
 export async function fetchOperationsHealth(): Promise<OperationsHealthSummary> {
   const now = Date.now();
   if (operationsCache && operationsCache.expiresAt > now) return operationsCache.value;
-  if (operationsInFlight) return operationsInFlight;
-  operationsInFlight = (async () => {
-    const { fetchR2FleetSummary } = await import("@/lib/r2-usage");
-    const { fetchFleetBackupStatus } = await import("@/lib/fleet-backup-status");
-    const [receiptInbox, socraticInfrastructure, coolifyFleet, r2Fleet, fleetBackups] =
-      await Promise.all([
-        fetchReceiptInboxSummary(),
-        fetchSocraticInfrastructureSummary(),
-        fetchCoolifyFleetSummary(),
-        fetchR2FleetSummary().catch((error) => {
-          console.error("[operations] R2 fleet summary failed:", error);
-          return null;
-        }),
-        fetchFleetBackupStatus().catch((error) => {
-          console.error("[operations] fleet backup status failed:", error);
-          return null;
-        }),
-      ]);
-    const value: OperationsHealthSummary = {
-      receiptInbox,
-      socraticInfrastructure,
-      coolifyFleet,
-      r2Fleet,
-      fleetBackups,
-      fetchedAt: new Date().toISOString(),
-    };
-    operationsCache = { expiresAt: Date.now() + OPERATIONS_CACHE_TTL_MS, value };
-    return value;
-  })();
-  try {
-    return await operationsInFlight;
-  } finally {
-    operationsInFlight = undefined;
+
+  const stale = operationsCache?.value;
+  if (!operationsInFlight) {
+    operationsInFlight = (async () => {
+      const { fetchR2FleetSummary } = await import("@/lib/r2-usage");
+      const { fetchFleetBackupStatus } = await import("@/lib/fleet-backup-status");
+      const [receiptInbox, socraticInfrastructure, coolifyFleet, r2Fleet, fleetBackups] =
+        await Promise.all([
+          fetchReceiptInboxSummary(),
+          fetchSocraticInfrastructureSummary(),
+          fetchCoolifyFleetSummary(),
+          fetchR2FleetSummary().catch((error) => {
+            console.error("[operations] R2 fleet summary failed:", error);
+            return null;
+          }),
+          fetchFleetBackupStatus().catch((error) => {
+            console.error("[operations] fleet backup status failed:", error);
+            return null;
+          }),
+        ]);
+      const value: OperationsHealthSummary = {
+        receiptInbox,
+        socraticInfrastructure,
+        coolifyFleet,
+        r2Fleet,
+        fleetBackups,
+        fetchedAt: new Date().toISOString(),
+      };
+      operationsCache = { expiresAt: Date.now() + OPERATIONS_CACHE_TTL_MS, value };
+      return value;
+    })().finally(() => {
+      operationsInFlight = undefined;
+    });
   }
+
+  // Serve a just-expired snapshot immediately so the iOS 20–60s request
+  // timeout never waits on a cold Coolify+R2+B2 fan-out after the first load.
+  if (stale) return stale;
+  return operationsInFlight;
 }
 
 export function resetOperationsHealthCacheForTests(): void {

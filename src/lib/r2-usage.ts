@@ -1625,13 +1625,11 @@ export async function fetchR2FleetSummary(
 ): Promise<R2FleetSummary> {
   const configured = loadR2FleetAccounts(env);
   const byId = new Map(configured.map((a) => [a.id, a]));
-  const accounts: R2FleetAccountSnapshot[] = [];
-
-  for (const slot of FLEET_SLOTS) {
+  const accounts: R2FleetAccountSnapshot[] = await Promise.all(
+    FLEET_SLOTS.map(async (slot) => {
     const cfg = byId.get(slot.id);
     if (!cfg) {
-      accounts.push(unconfiguredAccount(slot.id, slot.label));
-      continue;
+      return unconfiguredAccount(slot.id, slot.label);
     }
     try {
       const metrics = await fetchR2UsageMetrics(
@@ -1660,7 +1658,7 @@ export async function fetchR2FleetSummary(
         now,
         { metricsSource: source, buckets }
       );
-      accounts.push({
+      return {
         id: slot.id,
         label: slot.label,
         accountIdSuffix: cfg.accountId.slice(-8),
@@ -1678,10 +1676,10 @@ export async function fetchR2FleetSummary(
         autoDisabled: slot.id === "um" ? isR2AutoDisabled() : undefined,
         litestreamUsesR2:
           slot.id === "um" ? isLitestreamR2Endpoint() : undefined,
-      });
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      accounts.push({
+      return {
         id: slot.id,
         label: slot.label,
         accountIdSuffix: cfg.accountId.slice(-8),
@@ -1694,9 +1692,10 @@ export async function fetchR2FleetSummary(
         overallOnTrackToExceed70Pct: false,
         metricsSource: "unavailable",
         buckets: [],
-      });
+      };
     }
-  }
+    })
+  );
 
   return {
     configured: configured.length > 0,

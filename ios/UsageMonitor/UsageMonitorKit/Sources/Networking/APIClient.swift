@@ -85,24 +85,30 @@ public actor APIClient {
         try await get("/api/ready", authorization: .none)
     }
 
+    /// Cold `/api/server-metrics` / `/api/operations` / `/api/platform-status`
+    /// fan out to Hetzner, Coolify, R2, and fleet backups.  A 20s default
+    /// aborts those before the server can answer; keep the short timeout for
+    /// ordinary reads.
+    private static let operationsTimeout: TimeInterval = 60
+
     /// `GET /api/server-metrics` — Hetzner host + Coolify app inventory.
     /// Bearer read token or dashboard session.
     public func serverMetrics() async throws -> ServerMetrics {
-        try await get("/api/server-metrics", authorization: .read)
+        try await get("/api/server-metrics", authorization: .read, timeout: Self.operationsTimeout)
     }
 
     /// `GET /api/platform-status` — one status card per external platform the
     /// fleet runs on.  Bearer read token or dashboard session, same dual-auth
     /// preamble as `/api/server-metrics`.
     public func platformStatus() async throws -> PlatformStatusPayload {
-        try await get("/api/platform-status", authorization: .read)
+        try await get("/api/platform-status", authorization: .read, timeout: Self.operationsTimeout)
     }
 
     /// `GET /api/operations` — fleet operations aggregator (receipt inbox,
     /// peer app health, Coolify fleet, R2 free tier, backup layers).  Bearer
     /// read token or dashboard session.
     public func operations() async throws -> OperationsHealth {
-        try await get("/api/operations", authorization: .read)
+        try await get("/api/operations", authorization: .read, timeout: Self.operationsTimeout)
     }
 
     /// Validate the currently stored bearer token without accepting a dashboard
@@ -511,14 +517,16 @@ public actor APIClient {
         _ path: String,
         queryItems: [URLQueryItem] = [],
         authorization: AuthorizationMode,
-        requireBearer: Bool = false
+        requireBearer: Bool = false,
+        timeout: TimeInterval? = nil
     ) async throws -> T {
         let request = try makeRequest(
             path: path,
             queryItems: queryItems,
             method: .get,
             authorization: authorization,
-            requireBearer: requireBearer
+            requireBearer: requireBearer,
+            timeout: timeout
         )
         return try await execute(request)
     }
@@ -605,13 +613,14 @@ public actor APIClient {
         queryItems: [URLQueryItem] = [],
         method: Method,
         authorization: AuthorizationMode,
-        requireBearer: Bool = false
+        requireBearer: Bool = false,
+        timeout: TimeInterval? = nil
     ) throws -> URLRequest {
         let url = try endpoint(path: path, queryItems: queryItems)
         var request = URLRequest(
             url: url,
             cachePolicy: .reloadIgnoringLocalCacheData,
-            timeoutInterval: configuration.timeout
+            timeoutInterval: timeout ?? configuration.timeout
         )
         request.httpMethod = method.rawValue
         request.setValue("application/json", forHTTPHeaderField: "Accept")

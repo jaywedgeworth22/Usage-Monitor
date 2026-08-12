@@ -383,11 +383,14 @@ describe("runtime health state", () => {
     );
     vi.stubEnv("R2_USAGE_ACCOUNT_ID", "acct");
     vi.stubEnv("R2_USAGE_API_TOKEN", "tok");
+    vi.stubEnv("R2_ARCHIVE_STATUS_PATH", join(tmpdir(), "definitely-absent.json"));
     expect(getR2HistoricBackupStatus()).toMatchObject({
       configured: true,
       litestreamUsesR2: false,
       role: "historic",
-      ok: true,
+      ok: false,
+      reason: "archive_not_run",
+      weeklyArchive: null,
     });
 
     const layers = getBackupLayersStatus();
@@ -478,11 +481,46 @@ describe("runtime health state", () => {
       vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
 
       const status = getR2HistoricBackupStatus();
-      // Observability-only: the second-vendor copy going stale must not make
-      // /api/ready claim the service itself is unhealthy.
-      expect(status.ok).toBe(true);
+      // Layer is not ok (iOS must not show a green check) but backup layers
+      // never flip `/api/ready` ok — that gate is tested via backupLayers
+      // exclusion in the ready route.
+      expect(status.ok).toBe(false);
       expect(status.reason).toBe("archive_stale");
       expect(status.weeklyArchive?.ok).toBe(false);
+    });
+
+    it("a never-run archive is not ok and names archive_not_run", () => {
+      vi.stubEnv("LITESTREAM_S3_ENDPOINT", "https://s3.eu-central-003.backblazeb2.com");
+      vi.stubEnv("R2_USAGE_ACCOUNT_ID", "acct");
+      vi.stubEnv("R2_USAGE_API_TOKEN", "tok");
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", join(tmpdir(), "definitely-absent.json"));
+
+      expect(getR2HistoricBackupStatus()).toMatchObject({
+        role: "historic",
+        ok: false,
+        reason: "archive_not_run",
+        weeklyArchive: null,
+      });
+    });
+
+    it("a fresh weekly archive makes historic R2 ok", () => {
+      vi.stubEnv("LITESTREAM_S3_ENDPOINT", "https://s3.eu-central-003.backblazeb2.com");
+      vi.stubEnv("R2_USAGE_ACCOUNT_ID", "acct");
+      vi.stubEnv("R2_USAGE_API_TOKEN", "tok");
+      const path = writeArchiveStatus({
+        ok: true,
+        key: "weekly/prod-2026-08-12T00-00-00Z.db.gz",
+        completedAt: new Date(Date.now() - 3_600_000).toISOString(),
+        prunedCount: 0,
+      });
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
+
+      expect(getR2HistoricBackupStatus()).toMatchObject({
+        role: "historic",
+        ok: true,
+        reason: null,
+      });
+      expect(getR2HistoricBackupStatus().weeklyArchive?.ok).toBe(true);
     });
   });
 

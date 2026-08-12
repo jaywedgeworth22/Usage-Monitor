@@ -152,7 +152,7 @@ private struct AboutSection: View {
 
     var body: some View {
         Section {
-            LabeledContent("Version", value: "\(AppInfo.version) (\(AppInfo.build))")
+            LabeledContent("App Version", value: "\(AppInfo.version) (\(AppInfo.build))")
             LabeledContent("Monitor", value: host)
             if let url = URL(string: "https://\(host)") {
                 Link(destination: url) {
