@@ -1,12 +1,17 @@
 import SwiftUI
 import DesignSystem
 
-/// The five tabs of the app. Also the deep-link / programmatic-selection
+/// The destinations of the app. Also the deep-link / programmatic-selection
 /// vocabulary (a notification tap or widget deep link can select a tab).
+///
+/// `allCases` order is the **canonical tab order**: the customizable bar
+/// renders pinned tabs in this order regardless of when they were pinned
+/// (membership set semantics, mirroring the socratictrade.com mobile console).
 public enum AppTab: String, CaseIterable, Hashable, Sendable, Identifiable {
     case dashboard
     case providers
     case alerts
+    case serverStatus
     case platforms
     case projects
     case settings
@@ -18,6 +23,7 @@ public enum AppTab: String, CaseIterable, Hashable, Sendable, Identifiable {
         case .dashboard: return "Overview"
         case .providers: return "Providers"
         case .alerts: return "Alerts"
+        case .serverStatus: return "Server"
         case .platforms: return "Platforms"
         case .projects: return "Projects"
         case .settings: return "Settings"
@@ -29,9 +35,23 @@ public enum AppTab: String, CaseIterable, Hashable, Sendable, Identifiable {
         case .dashboard: return "chart.pie.fill"
         case .providers: return "square.stack.3d.up.fill"
         case .alerts: return "bell.fill"
+        case .serverStatus: return "waveform.path.ecg"
         case .platforms: return "server.rack"
         case .projects: return "folder.fill"
         case .settings: return "gearshape.fill"
+        }
+    }
+
+    /// Concise explanation shown in the More sheet under each destination.
+    public var summary: String {
+        switch self {
+        case .dashboard: return "Budgets and spend at a glance."
+        case .providers: return "Per-provider usage and budgets."
+        case .alerts: return "Threshold alerts and notifications."
+        case .serverStatus: return "Live server health and backups."
+        case .platforms: return "Status across every platform."
+        case .projects: return "Project budgets and burn."
+        case .settings: return "Connection, appearance, security."
         }
     }
 }
@@ -48,6 +68,7 @@ public struct AppFeatures {
     public var dashboard: () -> AnyView
     public var providers: () -> AnyView
     public var alerts: () -> AnyView
+    public var serverStatus: () -> AnyView
     public var platforms: () -> AnyView
     public var projects: () -> AnyView
     public var settings: () -> AnyView
@@ -56,6 +77,7 @@ public struct AppFeatures {
         dashboard: @escaping () -> AnyView,
         providers: @escaping () -> AnyView,
         alerts: @escaping () -> AnyView,
+        serverStatus: @escaping () -> AnyView,
         platforms: @escaping () -> AnyView,
         projects: @escaping () -> AnyView,
         settings: @escaping () -> AnyView
@@ -63,19 +85,38 @@ public struct AppFeatures {
         self.dashboard = dashboard
         self.providers = providers
         self.alerts = alerts
+        self.serverStatus = serverStatus
         self.platforms = platforms
         self.projects = projects
         self.settings = settings
     }
+
+    func view(for tab: AppTab) -> AnyView {
+        switch tab {
+        case .dashboard: return dashboard()
+        case .providers: return providers()
+        case .alerts: return alerts()
+        case .serverStatus: return serverStatus()
+        case .platforms: return platforms()
+        case .projects: return projects()
+        case .settings: return settings()
+        }
+    }
 }
 
-/// The app's root scaffold: a five-tab `TabView` that mounts the injected
-/// feature roots, injects the shared environment, applies the accent tint and
-/// the user's appearance preference.
+/// The app's root scaffold: mounts the injected feature roots behind a
+/// **customizable glass tab bar** — the user picks which destinations live in
+/// the bar (2–4 pins, canonical order), and a permanent **More** control opens
+/// a sheet listing every destination with pin toggles, mirroring the
+/// socratictrade.com mobile console's bottom bar.
 ///
 /// Each feature root is responsible for its own `NavigationStack` and
 /// navigation title (a feature owns everything inside its tab). The shell owns
-/// only tab selection and app-wide chrome.
+/// only tab selection, pinning, and app-wide chrome.
+///
+/// Content mounting is lazy-once (a destination mounts on first visit and
+/// stays mounted), so tab state — scroll positions, navigation stacks — is
+/// preserved across switches, matching `TabView` behavior.
 public struct RootView: View {
     private let environment: AppEnvironment
     private let features: AppFeatures
@@ -83,6 +124,10 @@ public struct RootView: View {
     /// When the app drives tab selection externally (deep links / push taps),
     /// it passes a binding; otherwise the shell owns selection internally.
     private let externalSelection: Binding<AppTab>?
+    @State private var preferences: TabPreferences
+    /// Destinations that have been selected at least once (lazy-once mount).
+    @State private var visited: Set<AppTab>
+    @State private var moreSheetPresented = false
 
     public init(
         environment: AppEnvironment,
@@ -93,6 +138,8 @@ public struct RootView: View {
         self.features = features
         self.externalSelection = nil
         self._internalSelection = State(initialValue: initialTab)
+        self._preferences = State(initialValue: TabPreferences())
+        self._visited = State(initialValue: [initialTab])
     }
 
     /// Selection-driven initializer: the app owns an `AppTab` state (seeded from
@@ -107,6 +154,23 @@ public struct RootView: View {
         self.features = features
         self.externalSelection = selection
         self._internalSelection = State(initialValue: selection.wrappedValue)
+        self._preferences = State(initialValue: TabPreferences())
+        self._visited = State(initialValue: [selection.wrappedValue])
+    }
+
+    /// Preview/test seam — inject preferences backed by throwaway defaults.
+    init(
+        environment: AppEnvironment,
+        features: AppFeatures,
+        selection: Binding<AppTab>,
+        preferences: TabPreferences
+    ) {
+        self.environment = environment
+        self.features = features
+        self.externalSelection = selection
+        self._internalSelection = State(initialValue: selection.wrappedValue)
+        self._preferences = State(initialValue: preferences)
+        self._visited = State(initialValue: [selection.wrappedValue])
     }
 
     /// The effective selection binding: the app-provided one when present, else
@@ -116,13 +180,39 @@ public struct RootView: View {
     }
 
     public var body: some View {
-        TabView(selection: selection) {
-            tab(.dashboard) { features.dashboard() }
-            tab(.providers) { features.providers() }
-            tab(.alerts, badge: activeAlertCount) { features.alerts() }
-            tab(.platforms) { features.platforms() }
-            tab(.projects) { features.projects() }
-            tab(.settings) { features.settings() }
+        let selected = selection.wrappedValue
+        ZStack {
+            // Lazy-once mounting: only visited destinations exist in the
+            // hierarchy; the selected one is visible and hit-testable.
+            ForEach(AppTab.allCases) { tab in
+                if visited.contains(tab) {
+                    features.view(for: tab)
+                        .opacity(tab == selected ? 1 : 0)
+                        .allowsHitTesting(tab == selected)
+                        .accessibilityHidden(tab != selected)
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            GlassTabBar(
+                pinned: preferences.pinned,
+                selection: selected,
+                alertBadge: activeAlertCount,
+                onSelect: { select($0) },
+                onMore: { moreSheetPresented = true },
+                moreActive: !preferences.isPinned(selected) || moreSheetPresented
+            )
+        }
+        .sheet(isPresented: $moreSheetPresented) {
+            MoreSheet(
+                preferences: preferences,
+                selection: selected,
+                alertBadge: activeAlertCount,
+                onSelect: { tab in
+                    moreSheetPresented = false
+                    select(tab)
+                }
+            )
         }
         .tint(Theme.Colors.accent)
         // Give every lane a way to drive tab selection (e.g. an error-state CTA
@@ -130,6 +220,11 @@ public struct RootView: View {
         .onAppear {
             let binding = selection
             environment.selectTab = { binding.wrappedValue = $0 }
+            visited.insert(selected)
+        }
+        // External selection changes (deep links) must also mount the target.
+        .onChange(of: selected) { _, tab in
+            visited.insert(tab)
         }
         // Canonical injection: everything is reachable via AppEnvironment;
         // BudgetStore and AppSettings are also provided directly for ergonomic
@@ -140,19 +235,223 @@ public struct RootView: View {
         .preferredColorScheme(environment.settings.theme.colorScheme)
     }
 
+    private func select(_ tab: AppTab) {
+        guard tab != selection.wrappedValue else { return }
+        Haptics.selection()
+        visited.insert(tab)
+        selection.wrappedValue = tab
+    }
+
     /// Active provider alerts for the Alerts tab badge (0 hides the badge).
     private var activeAlertCount: Int {
         environment.budgetStore.alertItems.count
     }
+}
 
-    private func tab(
-        _ tab: AppTab,
-        badge: Int = 0,
-        @ViewBuilder content: () -> some View
+// MARK: - Glass tab bar
+
+/// The floating glass bar: pinned destinations plus the permanent More slot.
+/// Liquid Glass on OS versions that have it, ultra-thin material everywhere
+/// else — the bar always reads as glass over the content scrolling beneath it.
+struct GlassTabBar: View {
+    let pinned: [AppTab]
+    let selection: AppTab
+    let alertBadge: Int
+    let onSelect: (AppTab) -> Void
+    let onMore: () -> Void
+    let moreActive: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(pinned) { tab in
+                item(
+                    title: tab.title,
+                    systemImage: tab.systemImage,
+                    active: tab == selection && !moreActive,
+                    badge: tab == .alerts ? alertBadge : 0
+                ) {
+                    onSelect(tab)
+                }
+            }
+            item(
+                title: "More",
+                systemImage: "square.grid.2x2",
+                active: moreActive,
+                badge: pinned.contains(.alerts) ? 0 : alertBadge
+            ) {
+                onMore()
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .glassBarBackground()
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Tab bar")
+    }
+
+    private func item(
+        title: String,
+        systemImage: String,
+        active: Bool,
+        badge: Int,
+        action: @escaping () -> Void
     ) -> some View {
-        content()
-            .tabItem { Label(tab.title, systemImage: tab.systemImage) }
-            .badge(badge)
-            .tag(tab)
+        Button(action: action) {
+            VStack(spacing: 3) {
+                ZStack {
+                    // Active pill — the accent-soft highlight behind the icon,
+                    // same affordance as the web console's active tab pill.
+                    Capsule()
+                        .fill(active ? Theme.Colors.accentSoft : .clear)
+                        .frame(width: 44, height: 28)
+                    Image(systemName: systemImage)
+                        .font(.system(size: 17, weight: .medium))
+                        .symbolRenderingMode(.hierarchical)
+                        .overlay(alignment: .topTrailing) {
+                            if badge > 0 {
+                                Text("\(min(badge, 99))")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Theme.Colors.danger, in: Capsule())
+                                    .offset(x: 10, y: -8)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                }
+                Text(title)
+                    .font(.system(size: 10, weight: active ? .bold : .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(active ? Theme.Colors.accent : Theme.Colors.secondaryText)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(badge > 0 ? "\(title), \(badge) alerts" : title)
+        .accessibilityAddTraits(active ? [.isSelected] : [])
+    }
+}
+
+private extension View {
+    /// Liquid Glass when the OS provides it; ultra-thin material + hairline
+    /// stroke + soft shadow as the visually-equivalent fallback.
+    @ViewBuilder
+    func glassBarBackground() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: Capsule())
+        } else {
+            self
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(.primary.opacity(0.08)))
+                .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        }
+    }
+}
+
+// MARK: - More sheet
+
+/// Every destination, in canonical order, each with a pin toggle — the
+/// destination picker and the bar customizer are the same surface, exactly
+/// like the web console's More sheet. Tapping a row goes there; tapping the
+/// pin adds/removes it from the bar within the 2–4 bound.
+struct MoreSheet: View {
+    let preferences: TabPreferences
+    let selection: AppTab
+    let alertBadge: Int
+    let onSelect: (AppTab) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(AppTab.allCases) { tab in
+                        row(tab)
+                    }
+                } footer: {
+                    Text("Pin up to \(TabPreferences.maxPinned) destinations to the tab bar.  Keep at least \(TabPreferences.minPinned).  Everything stays reachable here.")
+                }
+            }
+            .navigationTitle("More")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(.thinMaterial)
+    }
+
+    @ViewBuilder
+    private func row(_ tab: AppTab) -> some View {
+        let pinned = preferences.isPinned(tab)
+        let canToggle = preferences.canToggle(tab)
+        HStack(spacing: 12) {
+            Button {
+                onSelect(tab)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: tab.systemImage)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(tab == selection ? Theme.Colors.accent : Theme.Colors.secondaryText)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(tab.title)
+                            .font(.body.weight(tab == selection ? .semibold : .regular))
+                            .foregroundStyle(Theme.Colors.primaryText)
+                        Text(tab.summary)
+                            .font(.caption)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    Spacer(minLength: 0)
+                    if tab == .alerts, alertBadge > 0 {
+                        Text("\(min(alertBadge, 99))")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Theme.Colors.danger, in: Capsule())
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                Haptics.selection()
+                preferences.togglePin(tab)
+            } label: {
+                Image(systemName: pinned ? "pin.fill" : "pin")
+                    .font(.system(size: 15))
+                    .foregroundStyle(
+                        canToggle
+                            ? (pinned ? Theme.Colors.accent : Theme.Colors.secondaryText)
+                            : Theme.Colors.secondaryText.opacity(0.4)
+                    )
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canToggle)
+            .accessibilityLabel(pinned ? "Remove \(tab.title) from tab bar" : "Add \(tab.title) to tab bar")
+            .accessibilityHint(
+                canToggle
+                    ? ""
+                    : pinned
+                        ? "Keep at least \(TabPreferences.minPinned) tabs"
+                        : "Up to \(TabPreferences.maxPinned) tabs — remove one first"
+            )
+        }
+        .accessibilityElement(children: .contain)
     }
 }
