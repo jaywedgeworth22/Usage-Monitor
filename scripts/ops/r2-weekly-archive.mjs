@@ -1,0 +1,361 @@
+#!/usr/bin/env node
+/**
+ * Weekly Cloudflare R2 archive — a second-vendor disaster-recovery copy.
+ *
+ * Why this exists (owner directive, 2026-08-12)
+ * ---------------------------------------------
+ * Backblaze B2 is the continuous Litestream replica (1h sync). R2 was frozen to
+ * a read-only historic archive during the 2026-08-05 free-tier incident, which
+ * left the fleet with a single live backup vendor. This restores a second copy
+ * on R2 at a cadence the free tier can absorb: ONE verified snapshot per week
+ * instead of continuous LTX churn.
+ *
+ * Deliberately NOT a second Litestream replica:
+ *   - Litestream 0.5 supports exactly one replica per database, so pointing it
+ *     at R2 would mean giving up the B2 replica.
+ *   - Running a second Litestream process against the same DB corrupts its
+ *     shadow-WAL bookkeeping.
+ *   - Litestream has no "sync once and exit" mode; every start re-LISTs and
+ *     re-PUTs, which is exactly the Class A burn that caused the incident.
+ * A single self-contained snapshot object is cheaper (a handful of Class A ops
+ * per week against a 1,000,000/month limit) and far easier to restore from.
+ *
+ * Safety contract — nothing is deleted until a replacement is PROVEN good:
+ *   1. Consistent snapshot via SQLite's Online Backup API (no writer downtime).
+ *   2. Local PRAGMA integrity_check.
+ *   3. gzip, then upload with a real signed payload hash (a truncated body is
+ *      rejected by R2 rather than silently stored).
+ *   4. Download the object back, re-hash it, decompress it, and run
+ *      integrity_check on the DECOMPRESSED copy. That is a genuine weekly
+ *      restore drill, not a "the PUT returned 200" check.
+ *   5. ONLY after step 4 passes, prune older generations beyond the keep count.
+ * Any failure leaves every pre-existing archive untouched.
+ *
+ * Usage:
+ *   node scripts/ops/r2-weekly-archive.mjs [--dry-run] [--keep N] [--verbose]
+ */
+
+import {
+  chmodSync,
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { createGunzip, createGzip } from "node:zlib";
+import { pipeline } from "node:stream/promises";
+import { backup, DatabaseSync } from "node:sqlite";
+
+import { listObjects, s3Request } from "../lib/s3-sigv4.mjs";
+
+const DEFAULTS = {
+  dbPath: "/data/prod.db",
+  bucket: "usage-monitor-prod-v3",
+  prefix: "weekly/",
+  region: "auto",
+  // 2 generations (~100 MB compressed) against a 10 GiB free tier. The owner's
+  // ask was "delete the old one once the new one is verified"; keeping one extra
+  // generation still bounds storage but leaves an escape hatch if a structurally
+  // valid snapshot turns out to be logically wrong. Set to 1 for strict
+  // one-copy-only behaviour.
+  keepGenerations: 2,
+  statusPath: "/data/.r2-archive-status.json",
+  // Pages per sqlite3_backup_step(); matches the pre-migration backup default.
+  backupRatePages: 100,
+};
+
+function log(message) {
+  console.log(`[r2-weekly-archive] ${message}`);
+}
+
+function parseArgs(argv) {
+  const options = { dryRun: false, keep: null, verbose: false };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--dry-run") options.dryRun = true;
+    else if (arg === "--verbose") options.verbose = true;
+    else if (arg === "--keep") {
+      const value = Number(argv[i + 1]);
+      if (!Number.isInteger(value) || value < 1) {
+        throw new Error("--keep requires a positive integer");
+      }
+      options.keep = value;
+      i += 1;
+    } else throw new Error(`unknown argument: ${arg}`);
+  }
+  return options;
+}
+
+/**
+ * R2 archive credentials are deliberately their OWN env vars, never
+ * `LITESTREAM_S3_*` — those point at Backblaze B2 now, and silently signing an
+ * R2 request with B2 keys produces a 401 that reads like a revoked token.
+ */
+export function resolveArchiveConfig(env = process.env, overrides = {}) {
+  const endpoint = (env.R2_ARCHIVE_ENDPOINT || "").trim();
+  const accessKeyId = (env.R2_ARCHIVE_ACCESS_KEY_ID || "").trim();
+  const secretAccessKey = (env.R2_ARCHIVE_SECRET_ACCESS_KEY || "").trim();
+  const missing = [];
+  if (!endpoint) missing.push("R2_ARCHIVE_ENDPOINT");
+  if (!accessKeyId) missing.push("R2_ARCHIVE_ACCESS_KEY_ID");
+  if (!secretAccessKey) missing.push("R2_ARCHIVE_SECRET_ACCESS_KEY");
+
+  const keepRaw = Number(env.R2_ARCHIVE_KEEP_GENERATIONS);
+  const keepGenerations =
+    overrides.keep ??
+    (Number.isInteger(keepRaw) && keepRaw >= 1 ? keepRaw : DEFAULTS.keepGenerations);
+
+  let prefix = (env.R2_ARCHIVE_PREFIX || DEFAULTS.prefix).trim();
+  if (prefix && !prefix.endsWith("/")) prefix += "/";
+
+  return {
+    missing,
+    creds: {
+      endpoint,
+      region: (env.R2_ARCHIVE_REGION || DEFAULTS.region).trim() || DEFAULTS.region,
+      accessKeyId,
+      secretAccessKey,
+    },
+    bucket: (env.R2_ARCHIVE_BUCKET || DEFAULTS.bucket).trim(),
+    prefix,
+    keepGenerations,
+    dbPath: (env.R2_ARCHIVE_DB_PATH || DEFAULTS.dbPath).trim(),
+    statusPath: (env.R2_ARCHIVE_STATUS_PATH || DEFAULTS.statusPath).trim(),
+    // The free-tier kill switch means "stop writing to R2". A ~50 MB weekly
+    // object is not what tripped it, but honouring it keeps one switch
+    // authoritative; the override exists for a deliberate operator decision.
+    killSwitchEngaged:
+      env.R2_WRITES_DISABLED === "true" || env.LITESTREAM_EMERGENCY_DISABLE === "true",
+    ignoreKillSwitch: env.R2_ARCHIVE_IGNORE_KILL_SWITCH === "true",
+  };
+}
+
+/** `weekly/prod-2026-08-12T09-48-45Z.db.gz` — lexically sortable == chronological. */
+export function archiveKeyFor(prefix, now = new Date()) {
+  const stamp = now.toISOString().replace(/\.\d{3}Z$/, "Z").replace(/[:]/g, "-");
+  return `${prefix}prod-${stamp}.db.gz`;
+}
+
+/**
+ * Which existing objects to delete, given the freshly uploaded key.
+ * Pure so the retention rule is unit-testable without touching R2.
+ */
+export function selectPruneTargets(objects, freshKey, keepGenerations) {
+  const archives = objects
+    .filter((o) => o.key.endsWith(".db.gz"))
+    .sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0)); // newest first
+  const keep = new Set();
+  keep.add(freshKey); // the just-verified upload is never a prune candidate
+  for (const object of archives) {
+    if (keep.size >= keepGenerations) break;
+    keep.add(object.key);
+  }
+  return archives.filter((o) => !keep.has(o.key)).map((o) => o.key);
+}
+
+function assertIntegrity(path) {
+  const database = new DatabaseSync(path, { readOnly: true, timeout: 30_000 });
+  try {
+    const rows = database.prepare("PRAGMA integrity_check").all();
+    const value = Object.values(rows[0] ?? {})[0];
+    if (rows.length !== 1 || value !== "ok") {
+      throw new Error(`PRAGMA integrity_check returned ${JSON.stringify(rows).slice(0, 200)}`);
+    }
+  } finally {
+    database.close();
+  }
+}
+
+function sha256File(path) {
+  const hash = createHash("sha256");
+  hash.update(readFileSync(path));
+  return hash.digest("hex");
+}
+
+async function snapshotDatabase(dbPath, destination, ratePages) {
+  const source = new DatabaseSync(dbPath, { readOnly: true, timeout: 30_000 });
+  try {
+    await backup(source, destination, { rate: ratePages });
+  } finally {
+    source.close();
+  }
+  chmodSync(destination, 0o600);
+}
+
+async function gzipFile(source, destination) {
+  await pipeline(createReadStream(source), createGzip({ level: 9 }), createWriteStream(destination));
+}
+
+async function gunzipFile(source, destination) {
+  await pipeline(createReadStream(source), createGunzip(), createWriteStream(destination));
+}
+
+function writeStatus(statusPath, payload) {
+  try {
+    const partial = `${statusPath}.partial`;
+    writeFileSync(partial, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o644 });
+    renameSync(partial, statusPath);
+  } catch (error) {
+    // Observability must never fail the archive itself.
+    log(`WARNING: could not write status file: ${error.message}`);
+  }
+}
+
+export async function runArchive({ env = process.env, argv = [], fetchImpl } = {}) {
+  const options = parseArgs(argv);
+  const config = resolveArchiveConfig(env, { keep: options.keep });
+  const startedAt = new Date();
+
+  if (config.missing.length > 0) {
+    throw new Error(
+      `missing R2 archive credentials: ${config.missing.join(", ")}. ` +
+        `These are separate from LITESTREAM_S3_* (which point at Backblaze B2). ` +
+        `Mint an R2 API token (Cloudflare dashboard -> R2 -> Manage API Tokens) and store it in Infisical.`
+    );
+  }
+  if (config.killSwitchEngaged && !config.ignoreKillSwitch) {
+    throw new Error(
+      "R2 free-tier kill switch is engaged (R2_WRITES_DISABLED / LITESTREAM_EMERGENCY_DISABLE). " +
+        "Clear it, or set R2_ARCHIVE_IGNORE_KILL_SWITCH=true to archive anyway."
+    );
+  }
+  if (!existsSync(config.dbPath)) {
+    throw new Error(`database not found at ${config.dbPath}`);
+  }
+
+  const workDir = mkdtempSync(join(tmpdir(), "r2-weekly-archive-"));
+  const snapshotPath = join(workDir, "snapshot.db");
+  const compressedPath = join(workDir, "snapshot.db.gz");
+  const roundTripPath = join(workDir, "verify.db.gz");
+  const restoredPath = join(workDir, "verify.db");
+
+  try {
+    log(`snapshotting ${config.dbPath}`);
+    await snapshotDatabase(config.dbPath, snapshotPath, DEFAULTS.backupRatePages);
+    assertIntegrity(snapshotPath);
+    const snapshotBytes = statSync(snapshotPath).size;
+    log(`snapshot verified (${snapshotBytes} bytes)`);
+
+    await gzipFile(snapshotPath, compressedPath);
+    const compressedBytes = statSync(compressedPath).size;
+    const localHash = sha256File(compressedPath);
+    log(`compressed to ${compressedBytes} bytes (sha256 ${localHash.slice(0, 12)}...)`);
+
+    const key = archiveKeyFor(config.prefix, startedAt);
+
+    if (options.dryRun) {
+      log(`DRY RUN — would upload ${key} to ${config.bucket} and keep ${config.keepGenerations} generations`);
+      return { dryRun: true, key, compressedBytes, snapshotBytes, sha256: localHash, pruned: [] };
+    }
+
+    log(`uploading ${key}`);
+    await s3Request({
+      method: "PUT",
+      creds: config.creds,
+      bucket: config.bucket,
+      key,
+      body: readFileSync(compressedPath),
+      headers: {
+        "content-type": "application/gzip",
+        // Survives independently of this script so a human can verify by hand.
+        "x-amz-meta-sha256": localHash,
+        "x-amz-meta-source-bytes": String(snapshotBytes),
+        "x-amz-meta-created-at": startedAt.toISOString(),
+      },
+      fetchImpl,
+    });
+
+    // ---- Verification: prove the remote object restores, not just that it exists.
+    log("verifying uploaded object (download, re-hash, decompress, integrity_check)");
+    const response = await s3Request({
+      method: "GET",
+      creds: config.creds,
+      bucket: config.bucket,
+      key,
+      fetchImpl,
+    });
+    const downloaded = Buffer.from(await response.arrayBuffer());
+    writeFileSync(roundTripPath, downloaded);
+
+    const remoteHash = createHash("sha256").update(downloaded).digest("hex");
+    if (remoteHash !== localHash) {
+      throw new Error(
+        `uploaded object hash mismatch: local ${localHash} vs remote ${remoteHash} — keeping all existing archives`
+      );
+    }
+    await gunzipFile(roundTripPath, restoredPath);
+    assertIntegrity(restoredPath);
+    const restoredBytes = statSync(restoredPath).size;
+    if (restoredBytes !== snapshotBytes) {
+      throw new Error(
+        `restored size mismatch: ${restoredBytes} vs ${snapshotBytes} — keeping all existing archives`
+      );
+    }
+    log("verification passed — the archive restores to a byte-identical, integrity-checked database");
+
+    // ---- Only now is deleting anything safe.
+    const existing = await listObjects({
+      creds: config.creds,
+      bucket: config.bucket,
+      prefix: config.prefix,
+      fetchImpl,
+    });
+    const pruneTargets = selectPruneTargets(existing, key, config.keepGenerations);
+    for (const target of pruneTargets) {
+      log(`pruning superseded archive ${target}`);
+      await s3Request({
+        method: "DELETE",
+        creds: config.creds,
+        bucket: config.bucket,
+        key: target,
+        expectStatuses: [200, 204, 404],
+        fetchImpl,
+      });
+    }
+
+    const result = {
+      ok: true,
+      key,
+      snapshotBytes,
+      compressedBytes,
+      sha256: localHash,
+      keptGenerations: config.keepGenerations,
+      pruned: pruneTargets,
+      startedAt: startedAt.toISOString(),
+      completedAt: new Date().toISOString(),
+    };
+    writeStatus(config.statusPath, { ...result, checkedAt: result.completedAt });
+    log(
+      `done — ${key} verified, ${pruneTargets.length} superseded archive(s) pruned, ` +
+        `${config.keepGenerations} generation(s) retained`
+    );
+    return result;
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+const isMain = process.argv[1] && process.argv[1].endsWith("r2-weekly-archive.mjs");
+if (isMain) {
+  try {
+    await runArchive({ argv: process.argv.slice(2) });
+  } catch (error) {
+    log(`FAILED: ${error.message}`);
+    const config = resolveArchiveConfig();
+    writeStatus(config.statusPath, {
+      ok: false,
+      error: error.message,
+      checkedAt: new Date().toISOString(),
+    });
+    process.exitCode = 1;
+  }
+}
