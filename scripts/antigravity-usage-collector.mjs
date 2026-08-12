@@ -81,16 +81,35 @@ function fail(message, code = 1) {
   process.exit(code);
 }
 
+// A healthy `agy -p /usage` returns in 7-11s. A second concurrent invocation
+// does not queue behind the first — it decides it has no usable session and
+// drops into the interactive OAuth flow, which sits for ~160s before giving
+// up (observed 2026-08-12, when a launchd tick overlapped a manual run). The
+// budget here is sized to cover a genuinely slow-but-real run without waiting
+// out that whole dead auth path; the launchd job only fires every 4h, so a
+// tick lost to an overlap is not worth a retry loop.
+const CLI_TIMEOUT_MS = 90_000;
+
 function runAntigravityCli() {
   try {
     return execFileSync(
       CLI_BIN,
       ["-p", "/usage", "--output-format", "json"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30_000 }
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: CLI_TIMEOUT_MS }
     );
   } catch (error) {
     if (error.code === "ENOENT") {
       fail(`"${CLI_BIN}" is not installed or not on PATH.`, 127);
+    }
+    if (error.code === "ETIMEDOUT") {
+      fail(
+        `"${CLI_BIN} -p /usage" did not answer within ${CLI_TIMEOUT_MS / 1000}s. ` +
+          "A healthy call takes about 10s, so this usually means another `agy` " +
+          "invocation was running at the same time and this one fell into the " +
+          "interactive login flow with nowhere to prompt. Re-run it on its own; " +
+          "if it still hangs, run `agy -p \"/usage\"` in a terminal to check the " +
+          "session is still authenticated."
+      );
     }
     fail(
       `"${CLI_BIN} -p /usage --output-format json" failed: ${
@@ -315,7 +334,15 @@ export function extractQuotaRecords(envelope, { debug = DEBUG } = {}) {
   if (typeof envelope?.status === "string" && envelope.status !== "SUCCESS") {
     fail(
       `agy reported a non-success status: ${envelope.status}` +
-        (envelope.error ? ` (${envelope.error})` : "")
+        (envelope.error ? ` (${envelope.error})` : "") +
+        // The headless CLI reports a lost/contended session this way rather
+        // than by exiting non-zero, so spell out the fix instead of leaving
+        // "authentication failed or timed out" as the whole message.
+        (/auth/i.test(String(envelope.error ?? ""))
+          ? ". Run `agy -p \"/usage\"` in a terminal to re-establish the cached " +
+            "session — headless mode can only use an existing one. Also check " +
+            "nothing else was invoking agy at the same time."
+          : "")
     );
   }
   if (debug && envelope?.usage) {

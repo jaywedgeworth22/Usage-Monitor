@@ -112,19 +112,46 @@ Two corrections to the original design:
 
 ## Setup (owner)
 
+**Done 2026-08-12** — recorded here as the reproducible procedure.
+
 1. **Infisical** — in the `usage-monitor` project
-   (`86e35e51-91bc-4dfd-a045-4484726b9c40`), append a new pair to the
-   `USAGE_INGEST_PRODUCER_TOKENS` secret value:
-   `antigravity-cli:<new random token>` (comma-separated if other pairs
-   already exist). The server picks this up on next restart via
-   `scripts/infisical-run.mjs` — no code change, no separate secret name.
-2. **Local Mac** — `infisical login` once (interactive, caches a session;
-   this is why the plist can call `infisical run` without embedding a
-   client secret). Confirm `agy` is on `PATH` and authenticated.
-3. Dry-run: `infisical run --projectId 86e35e51-91bc-4dfd-a045-4484726b9c40 \
+   (`86e35e51-91bc-4dfd-a045-4484726b9c40`), env `prod`, set **two** secrets
+   from one freshly generated random token:
+   - `USAGE_INGEST_PRODUCER_TOKENS` = `antigravity-cli:<token>` (append
+     comma-separated if other `producerId:token` pairs already exist)
+   - `ANTIGRAVITY_INGEST_TOKEN` = `<token>` — the collector reads this from
+     the env `infisical run` injects. Easy to miss: without it the script
+     exits on its missing-token guard even though the server side is correct.
+
+   Mint the token where it is used and write it straight to the secret store;
+   never paste it into a doc or commit. `scripts/infisical-secrets-safe.sh` is
+   the value-blind helper for this (`names` / `has` / `set`).
+2. **Restart** the usage-monitor app (a Coolify restart is enough — no
+   rebuild). `USAGE_INGEST_PRODUCER_TOKENS` is read once at startup by
+   `src/lib/ingest-auth.ts`, not hot-reloaded. Note this is additive: a
+   producer-scoped token does not disturb existing `USAGE_INGEST_TOKEN`
+   producers unless `USAGE_INGEST_REQUIRE_SCOPED_TOKENS=true`.
+3. **Local Mac** — `infisical login` once (interactive, caches a session;
+   this is why the plist can call `infisical run` without embedding a client
+   secret). Confirm `agy` is on `PATH` and authenticated.
+4. Dry-run: `infisical run --projectId 86e35e51-91bc-4dfd-a045-4484726b9c40 \
    --env prod -- node scripts/antigravity-usage-collector.mjs --dry-run --debug`
-4. Once the parsed output looks right, install the launchd job (see the
+5. Once the parsed output looks right, install the launchd job (see the
    `.plist.example` header for exact steps) and drop `--dry-run`.
+
+### launchd gotchas (both cost real time on 2026-08-12)
+
+- **`agy` is not on launchd's PATH.** launchd hands a job a bare PATH, not
+  your shell's, and the Antigravity CLI installs to `~/.local/bin`. Leave it
+  out of the plist's `EnvironmentVariables` and every tick dies with
+  `spawnSync agy ENOENT` while a manual run keeps working fine.
+- **Two `agy` invocations at once break the second one.** It does not queue —
+  it decides it has no usable session, prints an OAuth URL, and waits ~160s
+  for a code that a launchd job can never supply, returning
+  `status: "ERROR", error: "authentication failed or timed out"`. If a tick
+  fails that way, check whether something else was calling `agy` at the same
+  moment before suspecting the session. The collector's CLI budget is 90s and
+  its error text names this case.
 
 ## Dashboard
 
