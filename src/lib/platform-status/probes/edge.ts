@@ -92,34 +92,57 @@ async function countZones(
   }
 }
 
-/** Verify one account's token.  Never throws. */
+/**
+ * Verify one account's token.  Never throws.
+ *
+ * Cloudflare has TWO token verify endpoints, and each only answers for its
+ * own token kind: an ACCOUNT-OWNED token 401s at `/user/tokens/verify` while
+ * being perfectly valid, and a USER-OWNED token 401s at
+ * `/accounts/{id}/tokens/verify` the same way.  The fleet mixes both kinds
+ * (ST/CT are account-owned Analytics tokens, the jay/UM one is user-owned),
+ * so this tries the account endpoint first — every slot carries its account
+ * id — and falls back to the user endpoint.  A token is dead only when BOTH
+ * reject it.  Verifying only the user endpoint reported valid ST/CT tokens
+ * as expired for days and burned real operator trust; don't reintroduce it.
+ */
 async function verifyAccount(account: R2FleetAccountConfig): Promise<AccountOutcome> {
   const headers = authHeaders(account.apiToken);
+  const endpoints = [
+    `${CLOUDFLARE_API_BASE}/accounts/${encodeURIComponent(account.accountId)}/tokens/verify`,
+    `${CLOUDFLARE_API_BASE}/user/tokens/verify`,
+  ];
 
   let response;
-  try {
-    response = await requestJson(`${CLOUDFLARE_API_BASE}/user/tokens/verify`, {
-      headers,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      ok: false,
-      label: account.label,
-      kind: "unreachable",
-      status: null,
-      errorCode: /abort|timeout|timed out/i.test(message) ? "timeout" : "unreachable",
-      cause: error,
-    };
+  let lastRejection: { status: number } | null = null;
+  for (const endpoint of endpoints) {
+    try {
+      const attempt = await requestJson(endpoint, { headers });
+      if (attempt.ok) {
+        response = attempt;
+        break;
+      }
+      lastRejection = { status: attempt.status };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        label: account.label,
+        kind: "unreachable",
+        status: null,
+        errorCode: /abort|timeout|timed out/i.test(message) ? "timeout" : "unreachable",
+        cause: error,
+      };
+    }
   }
 
-  if (!response.ok) {
+  if (!response) {
+    const status = lastRejection?.status ?? 401;
     return {
       ok: false,
       label: account.label,
       kind: "rejected",
-      status: response.status,
-      errorCode: httpErrorCode(response.status),
+      status,
+      errorCode: httpErrorCode(status),
     };
   }
 
