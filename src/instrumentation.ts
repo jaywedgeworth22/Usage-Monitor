@@ -43,6 +43,14 @@ export async function register() {
   );
   await deactivateDecommissionedBuiltInProviders();
 
+  // Fleet policy: LLM vendors are reached via OpenRouter, so no LLM/AI
+  // provider may demand funding. Clear any pre-policy mustKeepFunded flags;
+  // the PUT /api/providers/[id] handler rejects re-adding them.
+  const { clearLlmMustKeepFundedFlags } = await import(
+    "@/lib/provider-funding-policy"
+  );
+  await clearLlmMustKeepFundedFlags();
+
   // Wave K / C10: production should set a distinct USAGE_READ_TOKEN so a
   // compromised read consumer cannot also forge ingest. resolveUsageReadToken
   // already denies the ingest fallback in production; surface a boot-time

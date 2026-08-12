@@ -3,7 +3,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { decrypt, encrypt, encryptJson } from "@/lib/crypto";
 import { parseProviderUpdateInput, readJsonBody } from "@/lib/provider-input";
-import { isDecommissionedProviderName } from "@/lib/provider-definitions";
+import {
+  isDecommissionedProviderName,
+  isLlmProviderName,
+} from "@/lib/provider-definitions";
 import { buildProviderAlertState } from "@/lib/provider-alerts";
 import { computeBudgetStatus, bustBudgetStatusCache } from "@/lib/budget-status";
 import {
@@ -515,6 +518,19 @@ export async function PUT(
   // under the writer lock instead of trusting the pre-parse `existing` read.
   let planData: Prisma.ProviderPlanCreateWithoutProviderInput | undefined;
   if (input.plan !== undefined) {
+    // Fleet policy: all chat inference routes through OpenRouter, so no
+    // LLM/AI provider is a hard production dependency and none may demand
+    // funding. Boot-time reconciliation (clearLlmMustKeepFundedFlags) clears
+    // pre-policy flags; this guard prevents re-adding one.
+    if (input.plan.mustKeepFunded === true && isLlmProviderName(existing.name)) {
+      return NextResponse.json(
+        {
+          error:
+            "LLM/AI providers cannot be marked Must keep funded.  Chat inference routes through OpenRouter, so no direct LLM vendor has to stay funded.",
+        },
+        { status: 400 }
+      );
+    }
     planData = toPrismaProviderPlanData(input.plan);
     const nextFixed =
       planData.fixedMonthlyCostUsd === undefined

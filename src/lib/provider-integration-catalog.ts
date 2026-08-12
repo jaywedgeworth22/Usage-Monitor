@@ -207,6 +207,18 @@ const CATALOG: Record<CatalogProviderName, ProviderIntegrationProfile> = {
     limitations: ["GET /api/v1/keys returns only the default workspace; accounts with additional workspaces need per-workspace enumeration, not implemented here.", "Derived month-to-date cost trusts activity data being complete for every day since the 1st of the month and is withheld when that cannot be proven."],
     source: "src/lib/adapters/openrouter.ts",
   }),
+  kimi: defineBlindProfile({
+    name: "kimi", displayName: "Kimi", category: "LLM/AI",
+    reason: "Kimi is accessed exclusively through OpenRouter in this fleet; the retired definition exists only so boot-time retirement deactivates stray rows using this name.",
+    cannotAdd: ["The provider is retired: no direct Kimi connection, key, or polling is supported."],
+    source: "src/lib/provider-definitions.ts",
+  }),
+  moonshot: defineBlindProfile({
+    name: "moonshot", displayName: "Moonshot AI", category: "LLM/AI",
+    reason: "Moonshot (Kimi) is accessed exclusively through OpenRouter in this fleet; the retired definition exists only so boot-time retirement deactivates stray rows using this name.",
+    cannotAdd: ["The provider is retired: no direct Moonshot connection, key, or polling is supported."],
+    source: "src/lib/provider-definitions.ts",
+  }),
   github: defineProfile({
     name: "github", displayName: "GitHub", category: "Developer Platform", mode: "direct",
     summary: "Reads direct enhanced-billing net usage, configured budget caps, and Copilot AI-credit/premium-request detail for one organization, personal user, or enterprise account boundary.",

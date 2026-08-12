@@ -154,6 +154,108 @@ function managedBinding() {
   };
 }
 
+describe("LLM funding policy (no LLM provider may demand funding)", () => {
+  it("rejects setting plan.mustKeepFunded=true on an LLM/AI provider", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "anthropic",
+        displayName: "Anthropic",
+        type: "builtin",
+        plan: { create: { lowBalanceUsd: 10 } },
+      },
+    });
+
+    const response = await PUT(
+      updateRequest(provider.id, { plan: { mustKeepFunded: true } }),
+      { params: Promise.resolve({ id: provider.id }) }
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/OpenRouter/);
+    const stored = await prisma.provider.findUniqueOrThrow({
+      where: { id: provider.id },
+      include: { plan: true },
+    });
+    expect(stored.plan).toMatchObject({
+      mustKeepFunded: false,
+      lowBalanceUsd: 10,
+    });
+    expect(stored.alertConfigGeneration).toBe(0);
+  });
+
+  it("still accepts mustKeepFunded=false plan edits for an LLM/AI provider", async () => {
+    const provider = await prisma.provider.create({
+      data: { name: "openai", displayName: "OpenAI", type: "builtin" },
+    });
+
+    const response = await PUT(
+      updateRequest(provider.id, {
+        plan: { mustKeepFunded: false, lowBalanceUsd: 25 },
+      }),
+      { params: Promise.resolve({ id: provider.id }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      await prisma.provider.findUniqueOrThrow({
+        where: { id: provider.id },
+        include: { plan: true },
+      })
+    ).toMatchObject({ plan: { mustKeepFunded: false, lowBalanceUsd: 25 } });
+  });
+
+  it("keeps mustKeepFunded available for non-LLM providers like twilio", async () => {
+    const provider = await prisma.provider.create({
+      data: { name: "twilio", displayName: "Twilio", type: "builtin" },
+    });
+
+    const response = await PUT(
+      updateRequest(provider.id, { plan: { mustKeepFunded: true } }),
+      { params: Promise.resolve({ id: provider.id }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      await prisma.provider.findUniqueOrThrow({
+        where: { id: provider.id },
+        include: { plan: true },
+      })
+    ).toMatchObject({ plan: { mustKeepFunded: true } });
+  });
+
+  it("rejects the same flag at creation so POST is not a loophole", async () => {
+    const rejected = await POST_COLLECTION(
+      new NextRequest("https://usage.jays.services/api/providers", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "deepseek",
+          displayName: "DeepSeek",
+          type: "builtin",
+          plan: { mustKeepFunded: true },
+        }),
+      })
+    );
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json()).error).toMatch(/OpenRouter/);
+    expect(await prisma.provider.count({ where: { name: "deepseek" } })).toBe(0);
+
+    const allowed = await POST_COLLECTION(
+      new NextRequest("https://usage.jays.services/api/providers", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "twilio",
+          displayName: "Twilio",
+          type: "builtin",
+          plan: { mustKeepFunded: true },
+        }),
+      })
+    );
+    expect(allowed.status).toBe(201);
+  });
+});
+
 describe("Infisical-managed provider API boundaries", () => {
   it("returns only safe ownership metadata and redacts key/binding details", async () => {
     const provider = await prisma.provider.create({

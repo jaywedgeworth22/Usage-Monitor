@@ -136,14 +136,8 @@ const ALLOWLIST: Record<Scope, readonly string[]> = {
     "LANGFUSE_SECRET_KEY",
     "MISTRAL_ADMIN_KEY",
     "MISTRAL_API_KEY",
-    "OCI_API_KEY_FINGERPRINT",
-    "OCI_API_SIGNING_PRIVATE_KEY",
-    "OCI_BUDGET_CURRENCY",
-    "OCI_COMPARTMENT_OCID",
-    "OCI_LIMIT_SERVICES",
-    "OCI_REGION",
-    "OCI_TENANCY_OCID",
-    "OCI_USER_OCID",
+    // OCI_* names are intentionally absent: the retired oracle built-in must
+    // never be re-provisioned from shared OCI credentials.
     "OPENAI_ADMIN_KEY",
     "OPENAI_API_KEY",
     "RESEND_API_KEY",
@@ -1060,19 +1054,11 @@ describe("Infisical provider credential sync", () => {
       },
     });
     expect(JSON.stringify(langfuse.config)).not.toContain("infisicalCredential");
-    const oracle = providers.find((provider) => provider.name === "oracle")!;
-    expect(oracle.secretConfig).not.toContain(secrets.shared.OCI_API_SIGNING_PRIVATE_KEY);
-    expect(decryptJson(oracle.secretConfig!)).toMatchObject({
-      privateKey: secrets.shared.OCI_API_SIGNING_PRIVATE_KEY,
-      infisicalCredential: { scope: "shared", source: "shared", providerName: "oracle" },
-    });
-    expect(oracle.config).toMatchObject({
-      tenancyOcid: secrets.shared.OCI_TENANCY_OCID,
-      userOcid: secrets.shared.OCI_USER_OCID,
-      fingerprint: secrets.shared.OCI_API_KEY_FINGERPRINT,
-      region: secrets.shared.OCI_REGION,
-      budgetCurrency: secrets.shared.OCI_BUDGET_CURRENCY,
-    });
+    // Oracle is retired: the sync must not read OCI_* secrets or provision a row.
+    expect(providers.some((provider) => provider.name === "oracle")).toBe(false);
+    expect(
+      capture.secretReads.some((read) => read.name.startsWith("OCI_"))
+    ).toBe(false);
   });
 
   it("splits comma-delimited LlamaParse keys into stable, deduplicated managed rows", async () => {

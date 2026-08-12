@@ -491,41 +491,9 @@ const CREDENTIAL_MAPPINGS: readonly CredentialMapping[] = [
       publicConfig: { accountId: values.get("TWILIO_ACCOUNT_SID") ?? "" },
     }),
   },
-  {
-    scope: "shared",
-    providerName: "oracle",
-    attempts: [{
-      source: "shared",
-      required: [
-        "OCI_TENANCY_OCID",
-        "OCI_USER_OCID",
-        "OCI_API_KEY_FINGERPRINT",
-        "OCI_API_SIGNING_PRIVATE_KEY",
-        "OCI_REGION",
-      ],
-      optional: ["OCI_COMPARTMENT_OCID", "OCI_LIMIT_SERVICES", "OCI_BUDGET_CURRENCY"],
-    }],
-    build: (values) => ({
-      publicConfig: {
-        tenancyOcid: values.get("OCI_TENANCY_OCID") ?? "",
-        userOcid: values.get("OCI_USER_OCID") ?? "",
-        fingerprint: values.get("OCI_API_KEY_FINGERPRINT") ?? "",
-        region: values.get("OCI_REGION") ?? "",
-        ...(values.get("OCI_COMPARTMENT_OCID")
-          ? { compartmentOcid: values.get("OCI_COMPARTMENT_OCID")! }
-          : {}),
-        ...(values.get("OCI_LIMIT_SERVICES")
-          ? { limitServices: values.get("OCI_LIMIT_SERVICES")! }
-          : {}),
-        ...(values.get("OCI_BUDGET_CURRENCY")
-          ? { budgetCurrency: values.get("OCI_BUDGET_CURRENCY")! }
-          : {}),
-      },
-      // privateKey is routed to encrypted Provider.secretConfig by the shared
-      // provider-config secret splitter and is never returned by provider APIs.
-      secretConfig: { privateKey: values.get("OCI_API_SIGNING_PRIVATE_KEY") ?? "" },
-    }),
-  },
+  // Oracle Cloud (OCI_*) is deliberately absent: the oracle built-in is
+  // retired (see provider-definitions.ts), so its shared OCI credentials must
+  // never re-provision a row that boot-time retirement would then deactivate.
   {
     scope: "shared",
     providerName: "coolify",
@@ -621,13 +589,8 @@ const SECRET_NAME_TO_PROVIDER: ReadonlyMap<string, string> = new Map<string, str
   ["CLOUDFLARE_API_TOKEN", "cloudflare"],
   ["CLOUDFLARE_API_KEY", "cloudflare"],
   ["CLOUDFLARE_GLOBAL_API_KEY", "cloudflare"],
-  // Oracle Cloud (multi-key)
-  ["OCI_TENANCY_OCID", "oracle"],
-  ["OCI_USER_OCID", "oracle"],
-  ["OCI_API_KEY_FINGERPRINT", "oracle"],
-  ["OCI_API_SIGNING_PRIVATE_KEY", "oracle"],
-  ["OCI_REGION", "oracle"],
-  ["OCI_COMPARTMENT_OCID", "oracle"],
+  // Oracle Cloud (OCI_*) is intentionally unmapped: the provider is retired,
+  // so lingering OCI secrets must not be flagged for (re)wiring.
   ["COOLIFY_API_TOKEN", "coolify"],
   ["COOLIFY_HOST", "coolify"],
   // Vector DB
