@@ -3788,7 +3788,11 @@ describe("PagerDuty incidents that used to strand", () => {
 
   function pagerDutyBodies(fetchMock: ReturnType<typeof vi.fn>) {
     return fetchMock.mock.calls
-      .filter((call) => String(call[0]).includes("events.pagerduty.com"))
+      .filter(
+        // Host equality, not a substring match: `.includes()` on a URL would
+        // also accept https://evil.example/?x=events.pagerduty.com.
+        (call) => new URL(String(call[0])).hostname === "events.pagerduty.com"
+      )
       .map((call) => JSON.parse(String(call[1]?.body ?? "{}")));
   }
 
