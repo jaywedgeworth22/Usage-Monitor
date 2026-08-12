@@ -34,7 +34,12 @@ RUN apt-get update \
        x86_64|amd64) cli_arch=amd64 ;; \
        *) echo "unsupported arch: ${arch}" >&2; exit 1 ;; \
      esac \
-  && curl -fsSL -o /tmp/infisical.tgz \
+  # --retry + --http1.1: this exact download killed two production deploys on
+  # 2026-08-12 with `curl: (16) Error in the HTTP2 framing layer` — a transient
+  # GitHub-CDN/HTTP2 flake with no retry to absorb it, which then stalled the
+  # whole serialized build queue behind the failed deploy. HTTP/1.1 sidesteps
+  # the framing bug class; --retry-all-errors covers the rest.
+  && curl -fsSL --http1.1 --retry 5 --retry-delay 2 --retry-all-errors -o /tmp/infisical.tgz \
        "https://github.com/Infisical/cli/releases/download/v${INFISICAL_CLI_VERSION}/cli_${INFISICAL_CLI_VERSION}_linux_${cli_arch}.tar.gz" \
   && tar -xzf /tmp/infisical.tgz -C /tmp \
   && install -m 0755 /tmp/infisical /usr/local/bin/infisical \
