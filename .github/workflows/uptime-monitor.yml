@@ -52,7 +52,7 @@ jobs:
       # once per merge). Drift is flagged only when SUSTAINED: main HEAD must
       # be older than this many minutes before the live revision counts as
       # stale. 360 sits comfortably above the 240-minute deploy transaction
-      # ceiling in oracle-production-deploy.yml, so a legitimate in-flight
+      # ceiling in production-deploy-verify.yml, so a legitimate in-flight
       # deploy can never raise the alert — stateless and self-healing, no
       # cross-run bookkeeping needed.
       DRIFT_GRACE_MINUTES: 360
