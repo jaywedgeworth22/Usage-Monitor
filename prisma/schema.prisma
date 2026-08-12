@@ -763,3 +763,15 @@ model AppBudgetSettings {
   globalMonthlyBudgetUsd Float?
   updatedAt              DateTime @updatedAt
 }
+
+// Generic durable key-value store for one-time boot markers and similar
+// small settings that do not warrant a dedicated model. First consumer:
+// provider-funding-policy.ts's "llm_must_keep_funded_cleared_v1" marker,
+// which records that the one-time LLM mustKeepFunded cleanup has already
+// run so it never re-runs and silently undoes an owner's later re-enable.
+model AppSetting {
+  key       String   @id
+  value     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

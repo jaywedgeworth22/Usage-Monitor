@@ -398,6 +398,13 @@ CREATE TABLE "ProviderAlertChannelDelivery" (
   CONSTRAINT "ProviderAlertChannelDelivery_notificationId_fkey" FOREIGN KEY ("notificationId") REFERENCES "ProviderAlertNotification" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+CREATE TABLE "AppSetting" (
+  "key" TEXT NOT NULL PRIMARY KEY,
+  "value" TEXT,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL
+);
+
 CREATE UNIQUE INDEX "ProviderPlan_providerId_key" ON "ProviderPlan"("providerId");
 CREATE UNIQUE INDEX "ProviderExternalBilling_providerId_source_externalId_key" ON "ProviderExternalBilling"("providerId", "source", "externalId");
 CREATE INDEX "ProviderExternalBilling_providerId_status_idx" ON "ProviderExternalBilling"("providerId", "status");

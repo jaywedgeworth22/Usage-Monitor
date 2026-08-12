@@ -25,7 +25,10 @@ afterAll(async () => {
 beforeEach(async () => {
   vi.spyOn(console, "info").mockImplementation(() => undefined);
   await prisma.provider.deleteMany();
+  await prisma.appSetting.deleteMany();
 });
+
+const MARKER_KEY = "llm_must_keep_funded_cleared_v1";
 
 async function createProviderWithPlan(options: {
   name: string;
@@ -114,5 +117,72 @@ describe("clearLlmMustKeepFundedFlags", () => {
 
     expect(await clearLlmMustKeepFundedFlags()).toBe(1);
     expect(await clearLlmMustKeepFundedFlags()).toBe(0);
+  });
+
+  // (a) Runs when the marker is absent.
+  it("runs and records completion when the marker is absent", async () => {
+    await createProviderWithPlan({ name: "anthropic", mustKeepFunded: true });
+    expect(await prisma.appSetting.findUnique({ where: { key: MARKER_KEY } })).toBeNull();
+
+    expect(await clearLlmMustKeepFundedFlags()).toBe(1);
+
+    expect(
+      await prisma.appSetting.findUnique({ where: { key: MARKER_KEY } })
+    ).toMatchObject({ key: MARKER_KEY });
+  });
+
+  // (b) Does NOT run when the marker is present, even if LLM rows are
+  // currently flagged (e.g. the owner re-enabled it after the one-time pass).
+  it("does not run when the marker is present", async () => {
+    await prisma.appSetting.create({ data: { key: MARKER_KEY, value: "0" } });
+    const anthropic = await createProviderWithPlan({
+      name: "anthropic",
+      mustKeepFunded: true,
+      alertConfigGeneration: 5,
+    });
+
+    expect(await clearLlmMustKeepFundedFlags()).toBe(0);
+
+    expect(
+      await prisma.provider.findUniqueOrThrow({
+        where: { id: anthropic.id },
+        include: { plan: true },
+      })
+    ).toMatchObject({
+      alertConfigGeneration: 5,
+      plan: { mustKeepFunded: true },
+    });
+  });
+
+  // (c) A provider the owner re-enabled (mustKeepFunded=true, marker
+  // present) is left alone across the boot path — clearLlmMustKeepFundedFlags
+  // is exactly what src/instrumentation.ts calls on every boot, so this is
+  // the regression the owner's correction exists to prevent.
+  it("leaves an owner re-enabled provider alone across repeated boots", async () => {
+    // First boot: nothing flagged yet, pass completes and records the marker.
+    expect(await clearLlmMustKeepFundedFlags()).toBe(0);
+    expect(await prisma.appSetting.findUnique({ where: { key: MARKER_KEY } })).not.toBeNull();
+
+    // Owner turns Must keep funded back on from the dashboard.
+    const anthropic = await createProviderWithPlan({
+      name: "anthropic",
+      mustKeepFunded: true,
+      alertConfigGeneration: 2,
+    });
+
+    // Simulate several later boots (each one calls this at startup).
+    for (let i = 0; i < 3; i += 1) {
+      expect(await clearLlmMustKeepFundedFlags()).toBe(0);
+    }
+
+    expect(
+      await prisma.provider.findUniqueOrThrow({
+        where: { id: anthropic.id },
+        include: { plan: true },
+      })
+    ).toMatchObject({
+      alertConfigGeneration: 2,
+      plan: { mustKeepFunded: true },
+    });
   });
 });
