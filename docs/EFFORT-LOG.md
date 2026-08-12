@@ -17,6 +17,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **[2026-08-12][AG] Mac Host Monitoring & Active Anthropic/Kimi Subscriptions — IN PR.** Add GET /api/health/mac, POST /api/ingest/mac-heartbeat, MacHealthCard in OperationsOverview, mac-server-watchdog.sh script, seed active Anthropic ($20/mo) & Kimi ($15/mo) subscriptions. Branch `ag/mac-host-monitoring`.
 - **[2026-08-11][AG] Mac TestFlight launch fix, Xcode.app enforcement & OpenRouter onboarding key filter — IN PR.** Guard BGTaskScheduler on isIOSAppOnMac (Mac TF launch fix), enforce DEVELOPER_DIR=/Applications/Xcode.app in ship scripts, filter onboarding/test keys & require positive limitUsd in evaluateKeys for UptimeRobot. Branch `grok/mac-tf-xcode-app-ship`.
 - **[2026-08-10][GROK] Fleet backup locations (B2 dumps + Litestream per UM/ST/CT) on server-metrics + Operations + iOS Host Usage — IN PR.**
 - **[Usage-Monitor][GROK] Default light theme — IN PROGRESS 2026-08-10 (branch `grok/default-light-theme`).** Web+iOS light default.
