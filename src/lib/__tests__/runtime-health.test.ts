@@ -437,16 +437,32 @@ describe("runtime health state", () => {
       });
     });
 
-    it("surfaces a failed run's error", () => {
+    it("surfaces a failed run's reason code", () => {
       const path = writeArchiveStatus({
         ok: false,
-        error: "uploaded object hash mismatch",
+        reason: "verify_hash_mismatch",
         checkedAt: new Date().toISOString(),
       });
       vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
       expect(getR2WeeklyArchiveStatus()).toMatchObject({
         ok: false,
-        reason: "uploaded object hash mismatch",
+        reason: "verify_hash_mismatch",
+      });
+    });
+
+    it("rejects a reason that is not one of the job's own codes", () => {
+      // Defence in depth: the file should only ever contain a fixed code, so
+      // anything free-form is treated as an unlabelled failure rather than
+      // rendered verbatim in the UI.
+      const path = writeArchiveStatus({
+        ok: false,
+        reason: "<Error><Message>Unauthorized</Message></Error>",
+        checkedAt: new Date().toISOString(),
+      });
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
+      expect(getR2WeeklyArchiveStatus()).toMatchObject({
+        ok: false,
+        reason: "archive_failed",
       });
     });
 

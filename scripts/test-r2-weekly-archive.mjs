@@ -17,6 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import { awsUriEncode, signS3Request } from "./lib/s3-sigv4.mjs";
 import {
   archiveKeyFor,
+  classifyFailure,
   isManagedArchiveKey,
   resolveArchiveConfig,
   runArchive,
@@ -191,6 +192,34 @@ await test("only keys this job could have written are ever DELETE candidates", (
     selectPruneTargets(hostile, "weekly/prod-2026-08-12T00-00-00Z.db.gz", 1, "weekly/"),
     ["weekly/prod-2026-08-05T00-00-00Z.db.gz"]
   );
+});
+
+// ------------------------------------------------------------ failures ----
+
+await test("classifyFailure never lets remote error text reach the status file", () => {
+  assert.equal(
+    classifyFailure(new Error("missing R2 archive credentials: R2_ARCHIVE_ENDPOINT")),
+    "credentials_missing"
+  );
+  assert.equal(classifyFailure(new Error("uploaded object hash mismatch: local a vs remote b")), "verify_hash_mismatch");
+  assert.equal(classifyFailure(new Error("restored size mismatch: 1 vs 2")), "verify_size_mismatch");
+  assert.equal(
+    classifyFailure(new Error('S3 PUT b/k failed: HTTP 401 <?xml?><Error><Code>Unauthorized</Code></Error>')),
+    "upload_failed"
+  );
+  assert.equal(classifyFailure(new Error("something nobody anticipated")), "archive_failed");
+
+  // Every code must be a bare snake_case token — the app validates the shape
+  // before rendering it, so anything else would be discarded as unlabelled.
+  for (const error of [
+    new Error("S3 GET x failed: HTTP 500 <html>boom</html>"),
+    new Error("S3 DELETE x failed: HTTP 403"),
+    new Error("PRAGMA integrity_check returned garbage"),
+    new Error("kill switch is engaged"),
+    new Error("database not found at /data/prod.db"),
+  ]) {
+    assert.match(classifyFailure(error), /^[a-z_]{1,40}$/);
+  }
 });
 
 // --------------------------------------------------------------- config ----

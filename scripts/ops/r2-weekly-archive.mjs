@@ -363,6 +363,30 @@ export async function runArchive({ env = process.env, argv = [], fetchImpl } = {
   }
 }
 
+/**
+ * Map a failure to one of a fixed set of reason codes.
+ *
+ * The status file is parsed by the app on the /api/ready path, and a raw
+ * `error.message` can embed an S3 error body — i.e. text controlled by the
+ * remote server. Rather than sanitizing vendor text, nothing remote-derived is
+ * persisted at all: the file gets a constant from this list, and the full
+ * message goes to stdout where an operator reads it. A stable machine-readable
+ * reason is also simply better for a health endpoint than arbitrary prose.
+ */
+export function classifyFailure(error) {
+  const message = String(error?.message ?? "");
+  if (/missing R2 archive credentials/.test(message)) return "credentials_missing";
+  if (/kill switch is engaged/.test(message)) return "kill_switch_engaged";
+  if (/database not found/.test(message)) return "database_missing";
+  if (/hash mismatch/.test(message)) return "verify_hash_mismatch";
+  if (/restored size mismatch/.test(message)) return "verify_size_mismatch";
+  if (/integrity_check/.test(message)) return "integrity_check_failed";
+  if (/^S3 PUT/.test(message)) return "upload_failed";
+  if (/^S3 GET/.test(message)) return "download_failed";
+  if (/^S3 DELETE/.test(message)) return "prune_failed";
+  return "archive_failed";
+}
+
 const isMain = process.argv[1] && process.argv[1].endsWith("r2-weekly-archive.mjs");
 if (isMain) {
   try {
@@ -372,7 +396,7 @@ if (isMain) {
     const config = resolveArchiveConfig();
     writeStatus(config.statusPath, {
       ok: false,
-      error: error.message,
+      reason: classifyFailure(error),
       checkedAt: new Date().toISOString(),
     });
     process.exitCode = 1;

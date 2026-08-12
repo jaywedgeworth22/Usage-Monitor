@@ -997,7 +997,7 @@ export function getR2WeeklyArchiveStatus(): R2WeeklyArchiveStatus | null {
       checkedAt?: unknown;
       completedAt?: unknown;
       prunedCount?: unknown;
-      error?: unknown;
+      reason?: unknown;
     };
 
     const stamp =
@@ -1016,9 +1016,10 @@ export function getR2WeeklyArchiveStatus(): R2WeeklyArchiveStatus | null {
         ageSeconds,
         key,
         prunedCount: null,
+        // A fixed reason code written by the archive job — never remote text.
         reason:
-          typeof parsed.error === "string" && parsed.error.trim()
-            ? parsed.error.trim().slice(0, 200)
+          typeof parsed.reason === "string" && /^[a-z_]{1,40}$/.test(parsed.reason)
+            ? parsed.reason
             : "archive_failed",
       };
     }
