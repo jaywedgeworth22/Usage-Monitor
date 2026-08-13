@@ -111,18 +111,18 @@ const SUBSCRIPTIONS = [
   },
   {
     providerName: "anthropic",
-    name: "Claude Pro / Max",
+    name: "Claude Max / Team",
     status: "active",
-    costUsd: 20,
-    notes: "Active Claude Pro subscription ($20/mo)",
+    costUsd: 200,
+    notes: "Active Claude Max / Team subscription ($200/mo)",
     knobEnv: {},
   },
   {
     providerName: "kimi",
     name: "Kimi VIP",
     status: "active",
-    costUsd: 15,
-    notes: "Active Kimi / Moonshot AI VIP subscription ($15/mo)",
+    costUsd: 200,
+    notes: "Active Kimi / Moonshot AI VIP subscription ($200/mo)",
     knobEnv: {},
   },
   {

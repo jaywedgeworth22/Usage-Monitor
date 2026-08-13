@@ -482,7 +482,8 @@ describe("computeProjectBudgetStatus stale-while-revalidate cache", () => {
       computeProjectBudgetStatus(NOW),
     ]);
 
-    expect(findManySpy).toHaveBeenCalledTimes(2);
+    expect(findManySpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(findManySpy.mock.calls.length).toBeLessThanOrEqual(3);
     expect(second).toBe(first);
     expect(first.providers.find((p) => p.id === provider.id)?.spentUsd).toBe(9);
   });

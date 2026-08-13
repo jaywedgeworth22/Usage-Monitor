@@ -103,9 +103,10 @@ function fleetAppSpecs(): FleetAppSpec[] {
       self: false,
       b2Bucket: "jays-congress-trade-eu",
       dumpPrefix: "hetzner/",
-      // CT currently ships full dumps only (no continuous B2 Litestream prefix).
-      litestreamPrefix: null,
-      peerHealthUrl: process.env.FLEET_CT_HEALTH_URL?.trim() || null,
+      litestreamPrefix: "congress-live/",
+      peerHealthUrl:
+        process.env.FLEET_CT_HEALTH_URL?.trim() ||
+        "https://congress.trade/api/health",
     },
   ];
 }
@@ -306,6 +307,35 @@ async function inventoryPrefix(
     const next = readText(data.nextFileName);
     if (!next || files.length === 0) break;
     startFileName = next;
+  }
+
+  // For high-volume Litestream prefixes where pagination hits maxPages, probe
+  // the tail of the prefix (where lexicographically higher WAL numbers live)
+  // so latestUploadMs reflects the newest upload rather than old initial files.
+  if (pages >= maxPages) {
+    try {
+      const tailData = await b2Post(auth, "b2_list_file_names", {
+        bucketId,
+        prefix,
+        startFileName: prefix + "z",
+        maxFileCount: 100,
+      });
+      const tailFiles = Array.isArray(tailData.files) ? tailData.files : [];
+      for (const f of tailFiles) {
+        if (!isRecord(f)) continue;
+        const action = readText(f.action);
+        if (action && action !== "upload") continue;
+        const ts =
+          typeof f.uploadTimestamp === "number" && Number.isFinite(f.uploadTimestamp)
+            ? f.uploadTimestamp
+            : null;
+        if (ts != null && (latestUploadMs == null || ts > latestUploadMs)) {
+          latestUploadMs = ts;
+        }
+      }
+    } catch {
+      // ignore optional tail probe failure
+    }
   }
 
   if (fileCount === 0) {
