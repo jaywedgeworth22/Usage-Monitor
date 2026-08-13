@@ -55,6 +55,8 @@ describe("operations health", () => {
       "CLOUDFLARE_ST_API_TOKEN",
       "CLOUDFLARE_CT_ACCOUNT_ID",
       "CLOUDFLARE_CT_API_TOKEN",
+      "CLOUDFLARE_OLD_ACCOUNT_ID",
+      "CLOUDFLARE_OLD_API_TOKEN",
       "LITESTREAM_S3_ENDPOINT",
       "AWS_S3_ENDPOINT",
       "LITESTREAM_S3_ACCESS_KEY_ID",
@@ -217,7 +219,7 @@ describe("operations health", () => {
     expect(result.receiptInbox.configured).toBe(false);
     expect(result.coolifyFleet.configured).toBe(false);
     expect(result.r2Fleet?.configured).toBe(false);
-    expect(result.r2Fleet?.accounts).toHaveLength(3);
+    expect(result.r2Fleet?.accounts).toHaveLength(4);
     expect(result.fleetBackups).not.toBeNull();
     expect(result.fleetBackups?.apps.map((a) => a.id)).toEqual([
       "usage-monitor",

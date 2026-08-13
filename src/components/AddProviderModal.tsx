@@ -11,6 +11,7 @@ import {
   PROVIDER_CATEGORIES,
   type ProviderDefinition,
 } from "@/lib/provider-definitions";
+import { isMustKeepFundedOptionVisible } from "@/lib/provider-funding-policy";
 import {
   FIXED_FEE_SUBSCRIPTION_WARNING,
   PROVIDER_WIZARD_STEPS,
@@ -398,6 +399,9 @@ export default function AddProviderModal({
     return parsed;
   };
 
+  const stayFundedVisible =
+    tab !== "builtin" || isMustKeepFundedOptionVisible(selectedBuiltin);
+
   const buildPlan = (): ProviderPlan => ({
     billingMode,
     fixedMonthlyCostUsd: parseNumberField(
@@ -414,7 +418,9 @@ export default function AddProviderModal({
     lowCredits: parseNumberField(lowCredits, "Low credit alert"),
     renewalDate: renewalDate || null,
     billingInterval,
-    mustKeepFunded,
+    // LLM/AI accounts hide the option; do not persist a stale true from a
+    // previous provider selection. API still accepts true if re-enabled later.
+    mustKeepFunded: stayFundedVisible ? mustKeepFunded : false,
     notes: planNotes.trim() || null,
   });
 
@@ -720,15 +726,17 @@ export default function AddProviderModal({
           />
         </div>
       </div>
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={mustKeepFunded}
-          onChange={(e) => setMustKeepFunded(e.target.checked)}
-          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-900"
-        />
-        <span className="text-sm text-gray-700 dark:text-gray-200">Must stay funded</span>
-      </label>
+      {stayFundedVisible ? (
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={mustKeepFunded}
+            onChange={(e) => setMustKeepFunded(e.target.checked)}
+            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-900"
+          />
+          <span className="text-sm text-gray-700 dark:text-gray-200">Must stay funded</span>
+        </label>
+      ) : null}
       <div>
         <label className="block text-xs text-gray-500 mb-1 dark:text-gray-400">Notes</label>
         <textarea

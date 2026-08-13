@@ -186,3 +186,19 @@ describe("clearLlmMustKeepFundedFlags", () => {
     });
   });
 });
+
+describe("isMustKeepFundedOptionVisible", () => {
+  it("hides the option for LLM/AI names and keeps it for everyone else", async () => {
+    const { isMustKeepFundedOptionVisible } = await import(
+      "@/lib/provider-funding-policy"
+    );
+    expect(isMustKeepFundedOptionVisible("openrouter")).toBe(false);
+    expect(isMustKeepFundedOptionVisible("anthropic")).toBe(false);
+    expect(isMustKeepFundedOptionVisible("openai")).toBe(false);
+    expect(isMustKeepFundedOptionVisible("google-ai")).toBe(false);
+    expect(isMustKeepFundedOptionVisible("deepseek")).toBe(false);
+    expect(isMustKeepFundedOptionVisible("twilio")).toBe(true);
+    expect(isMustKeepFundedOptionVisible("cloudflare")).toBe(true);
+    expect(isMustKeepFundedOptionVisible("custom-thing")).toBe(true);
+  });
+});

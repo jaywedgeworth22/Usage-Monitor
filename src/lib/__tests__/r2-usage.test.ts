@@ -52,6 +52,8 @@ describe("R2 usage monitoring & auto-disable", () => {
     delete process.env.CLOUDFLARE_ACCOUNT_ID;
     delete process.env.CLOUDFLARE_API_TOKEN;
     delete process.env.CLOUDFLARE_FLEET_API_TOKEN;
+    delete process.env.CLOUDFLARE_OLD_ACCOUNT_ID;
+    delete process.env.CLOUDFLARE_OLD_API_TOKEN;
     delete process.env.LITESTREAM_S3_ENDPOINT;
     delete process.env.AWS_S3_ENDPOINT;
     __resetR2UsageStateForTests();
@@ -247,16 +249,19 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(classifyR2Action("SomeFutureWriteOp")).toBe("A");
   });
 
-  it("loads fleet accounts for any configured ST/CT/UM env pair", () => {
+  it("loads fleet accounts for any configured UM/ST/CT/Old env pair", () => {
     const accounts = loadR2FleetAccounts({
       CLOUDFLARE_JAY_ACCOUNT_ID: "jay-account-id-12345678",
       CLOUDFLARE_JAY_API_TOKEN: "jay-token",
       CLOUDFLARE_ST_ACCOUNT_ID: "st-account-id-abcdef01",
       CLOUDFLARE_ST_API_TOKEN: "st-token",
+      CLOUDFLARE_OLD_ACCOUNT_ID: "old-account-id-254301ba",
+      CLOUDFLARE_OLD_API_TOKEN: "old-token",
     });
-    expect(accounts.map((a) => a.id)).toEqual(["um", "st"]);
+    expect(accounts.map((a) => a.id)).toEqual(["um", "st", "old"]);
     expect(accounts.find((a) => a.id === "um")?.label).toBe("Usage Monitor");
     expect(accounts.find((a) => a.id === "st")?.label).toBe("Socratic Trade");
+    expect(accounts.find((a) => a.id === "old")?.label).toBe("Jay (Old)");
   });
 
   it("returns unconfigured fleet slots without calling GraphQL", async () => {
@@ -267,8 +272,9 @@ describe("R2 usage monitoring & auto-disable", () => {
       {}
     );
     expect(summary.configured).toBe(false);
-    expect(summary.accounts).toHaveLength(3);
+    expect(summary.accounts).toHaveLength(4);
     expect(summary.accounts.every((a) => a.status === "unconfigured")).toBe(true);
+    expect(summary.accounts.map((a) => a.id)).toEqual(["um", "st", "ct", "old"]);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
