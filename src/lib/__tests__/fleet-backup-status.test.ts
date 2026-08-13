@@ -155,7 +155,7 @@ describe("fetchFleetBackupStatus", () => {
     expect(stPeer?.latestAgeSeconds).toBe(42);
     expect(stPeer?.ok).toBe(true);
     const stLtx = st!.locations.find((l) => l.id === "b2-litestream");
-    expect(stLtx?.present).toBe(true);
+    expect(stLtx).toBeUndefined();
 
     const ct = payload.apps.find((a) => a.id === "congress-trade");
     const ctLtx = ct!.locations.find((l) => l.id === "b2-litestream");

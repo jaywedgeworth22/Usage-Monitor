@@ -92,7 +92,7 @@ function fleetAppSpecs(): FleetAppSpec[] {
       self: false,
       b2Bucket: "jays-socratic-trade-eu",
       dumpPrefix: "hetzner/",
-      litestreamPrefix: "trading-live/",
+      litestreamPrefix: null,
       peerHealthUrl:
         process.env.FLEET_ST_HEALTH_URL?.trim() ||
         "https://socratictrade.com/api/health",
@@ -703,7 +703,7 @@ async function loadFresh(now: Date): Promise<FleetBackupStatusPayload> {
             });
           }
         }
-      } else if (!spec.litestreamPrefix) {
+      } else if (spec.litestreamPrefix === "") {
         locations.push({
           id: "b2-litestream",
           label: "B2 Litestream",
