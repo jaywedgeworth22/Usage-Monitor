@@ -58,41 +58,26 @@ keeping one extra generation leaves an escape hatch if a structurally valid
 snapshot turns out to be logically wrong. **Set it to 1 for strict
 one-copy-only behaviour.**
 
-## BLOCKED: the R2 credential is revoked
+## Credential status (GROK, 2026-08-12)
 
-`CLOUDFLARE_R2_ACCESS_KEY_ID` / `CLOUDFLARE_R2_SECRET_ACCESS_KEY` in
-`~/.secrets/global-api-keys` return **HTTP 401** everywhere. Ruled out, in
-order:
+Infisical `prod` now has non-empty `R2_ARCHIVE_*` for all three apps.  Proved
+with ListObjectsV2 (status + counts only; values never printed):
 
-- endpoint jurisdiction — plain, `.eu.`, `.fedramp.` → all 401
-- signing region — `us-east-1`, `auto`, `weur` → all 401
-- account — all four Cloudflare accounts → all 401
-- copy drift — value hashes identical across `global-api-keys`,
-  `global-api-keys.env`, and the dated backup
-- **signer correctness — disproved**: the same signer successfully listed the
-  live B2 bucket (146 objects, 2.575 GiB, newest LTX minutes old)
+| App | `R2_ARCHIVE_*` LIST | What that means |
+|---|---|---|
+| Usage Monitor | **200** (9 objects, `weekly/` was empty) | New key, distinct from the revoked `CLOUDFLARE_R2_*` pair. |
+| Socratic.Trade | **200** (18 objects) | Same fingerprint as `AWS_R2_HISTORIC_*`.  In-app Sunday cold snapshot is live. |
+| Congress.Trade | **401 Unauthorized** | `R2_ARCHIVE_*` was filled with the **old shared** `CLOUDFLARE_R2_*` / `AWS_ACCESS_KEY_ID` pair (`sha12=eec8fb10db4a`).  That token 401s on the CT account.  Needs a **new** Object Read & Write token minted on the CT Cloudflare account, then stored as `R2_ARCHIVE_*` (do not copy UM or the shared `CLOUDFLARE_R2_*` keys). |
 
-The key shape is right (32-hex id, 64-hex secret), so this is a revoked token,
-not a malformed one.
+`R2_ARCHIVE_IGNORE_KILL_SWITCH=true` is set in UM Infisical so the weekly job
+can write while Coolify still has `R2_WRITES_DISABLED=true` (that flag stays
+on so Litestream never resumes R2).
 
-**Owner action required:** Cloudflare dashboard → R2 → Manage API Tokens →
-create a token with **Object Read & Write** scoped to `usage-monitor-prod-v3`,
-then paste it into the two empty fields below.
-
-Every `R2_ARCHIVE_*` key is **already provisioned in Infisical** (env `prod`,
-path `/`, seeded 2026-08-12) — the non-secret ones filled in, the two
-credential fields created **empty on purpose** so the job fails closed with
-`credentials_missing` rather than producing a confusing 401:
-
-| Key | Usage Monitor | Congress.Trade | Socratic.Trade |
-|---|---|---|---|
-| `R2_ARCHIVE_ENDPOINT` | `https://3a936805….r2.cloudflarestorage.com` | `https://0e9f5a0c….r2.cloudflarestorage.com` | `https://94ec35cf….r2.cloudflarestorage.com` |
-| `R2_ARCHIVE_BUCKET` | `usage-monitor-prod-v3` | `congress-trade-bucket` | `socratic-trade-bucket` |
-| `R2_ARCHIVE_REGION` | `auto` | `auto` | `auto` |
-| `R2_ARCHIVE_PREFIX` | `weekly/` | `weekly/` | `weekly/` |
-| `R2_ARCHIVE_KEEP_GENERATIONS` | `2` | `2` | `2` |
-| `R2_ARCHIVE_ACCESS_KEY_ID` | **empty — fill this** | **empty** | **empty** |
-| `R2_ARCHIVE_SECRET_ACCESS_KEY` | **empty — fill this** | **empty** | **empty** |
+First UM archive ran in the prod container 2026-08-12T23:57Z:
+`weekly/prod-2026-08-12T23-57-10Z.db.gz`, 232 MB snapshot → 64 MB gzip,
+download+rehash+`integrity_check` passed, `/api/ready` `r2Historic.ok=true`
+with `weeklyArchive.ok=true`.  Coolify scheduled task `r2-weekly-archive`
+(`0 4 * * 0`, wraps `infisical-run`).
 
 Infisical project IDs: UM `86e35e51-91bc-4dfd-a045-4484726b9c40`, CT
 `f61a79de-8d77-4f0b-9361-4b7208598290`, ST
