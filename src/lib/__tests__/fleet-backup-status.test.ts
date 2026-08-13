@@ -158,7 +158,8 @@ describe("fetchFleetBackupStatus", () => {
 
     const ct = payload.apps.find((a) => a.id === "congress-trade");
     const ctLtx = ct!.locations.find((l) => l.id === "b2-litestream");
-    expect(ctLtx?.reason).toBe("not_configured");
+    expect(ctLtx?.present).toBe(false);
+    expect(ctLtx?.reason).toBe("empty_prefix");
     const ctDump = ct!.locations.find((l) => l.id === "b2-full-dump");
     expect(ctDump?.present).toBe(true);
   });
