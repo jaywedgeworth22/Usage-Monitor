@@ -377,6 +377,147 @@ struct LocalImportButton: View {
     }
 }
 
+struct LocalKeysImportButton: View {
+    @Bindable var model: LocalAppModel
+    @State private var showImporter = false
+    @State private var pendingBundle: Data?
+    @State private var message: String?
+    @State private var messageIsError = false
+    @State private var isImporting = false
+
+    private static var bundleTypes: [UTType] {
+        var types: [UTType] = []
+        if let umkeys = UTType(filenameExtension: "umkeys") {
+            types.append(umkeys)
+        }
+        types.append(.json)
+        types.append(.data)
+        return types
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Button {
+                showImporter = true
+            } label: {
+                if isImporting {
+                    ProgressView()
+                } else {
+                    Label("Import Keys", systemImage: "key.horizontal.fill")
+                }
+            }
+            .disabled(isImporting)
+            if let message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(messageIsError ? Theme.Colors.danger : Theme.Colors.secondaryText)
+            }
+            Text("Keys go straight to this device's Keychain.  Delete the bundle file after importing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .fileImporter(
+            isPresented: $showImporter,
+            allowedContentTypes: Self.bundleTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handlePick(result)
+        }
+        .sheet(isPresented: Binding(
+            get: { pendingBundle != nil },
+            set: { if !$0 { pendingBundle = nil } }
+        )) {
+            if let pendingBundle {
+                LocalKeysPassphraseSheet(model: model, bundle: pendingBundle) { line, failed in
+                    message = line
+                    messageIsError = failed
+                }
+            }
+        }
+    }
+
+    private func handlePick(_ result: Result<[URL], Error>) {
+        do {
+            let urls = try result.get()
+            guard let url = urls.first else { return }
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            pendingBundle = try Data(contentsOf: url)
+            message = nil
+            messageIsError = false
+        } catch {
+            message = error.localizedDescription
+            messageIsError = true
+        }
+    }
+}
+
+private struct LocalKeysPassphraseSheet: View {
+    @Bindable var model: LocalAppModel
+    let bundle: Data
+    let onFinish: (String, Bool) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var passphrase = ""
+    @State private var error: String?
+    @State private var isWorking = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    SecureField("Bundle passphrase", text: $passphrase)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } footer: {
+                    Text("Enter the passphrase used when the bundle was created.  Keys are written to this device's Keychain only.")
+                }
+                if let error {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Colors.danger)
+                }
+            }
+            .navigationTitle("Import Keys")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Import") { Task { await run() } }
+                        .disabled(isWorking || passphrase.isEmpty)
+                }
+            }
+            .interactiveDismissDisabled(isWorking)
+        }
+    }
+
+    private func run() async {
+        isWorking = true
+        error = nil
+        defer { isWorking = false }
+        do {
+            let r = try await LocalKeysImportBuilder.importBundle(
+                data: bundle,
+                passphrase: passphrase,
+                model: model
+            )
+            var line = "Imported \(r.imported) key\(r.imported == 1 ? "" : "s")"
+            if r.replaced > 0 { line += ", replaced \(r.replaced)" }
+            if r.skippedUnknown > 0 { line += ", skipped \(r.skippedUnknown) unknown" }
+            line += "."
+            if let c = r.configResult {
+                line += "  Config: \(c.providers) providers, \(c.subscriptions) fees, \(c.snapshots) snapshots."
+            }
+            line += "  Delete the bundle file now — this app cannot delete the original."
+            onFinish(line, false)
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
 #if canImport(UIKit)
 private struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
