@@ -57,6 +57,38 @@ instead of calling `/Users/jay/apps/ios-fleet/ship-testflight.sh` directly, so
 the workflow cannot drift from what a local operator runs and the wrappers'
 stable-Xcode pin always applies.
 
+### Review round 2 — the backstop could subtract verification
+
+The first pass gave the required `verify` job `needs: [schedule-gate]` with
+`if: needs.schedule-gate.outputs.should_run == '1'`.  The decide *step* always
+exits 0, but the *job* can still fail, hit `timeout-minutes: 5`, or be cancelled
+by runner/API trouble — and when a `needs:` dependency fails, every dependent job
+resolves to **skipped**, which GitHub reports as a **satisfied** required check.
+A gate outage would therefore have let a PR merge with the whole verify suite
+never having run: the exact inverse of the backstop's purpose.  Failing closed
+inside the step is not the same as failing closed at the job level.
+
+`verify` now uses:
+
+```yaml
+if: >-
+  !cancelled() &&
+  (github.event_name != 'schedule' ||
+  needs.schedule-gate.outputs.should_run != '0')
+```
+
+`!cancelled()` (not `always()`) so a superseded run still cancels cleanly, and
+`!= '0'` so an absent or unparseable output still **runs** — only an explicit
+"already verified" vote skips, and only on the scheduled path.  Congress.Trade
+got the identical change; Socratic.Trade already used this pattern (its PR #370,
+same reasoning).
+
+Note this repo's ship path is unaffected by the parallel export-compliance
+repair: `scripts/ios-ship-testflight.sh` and `-local.sh` exec the **runtime**
+`/Users/jay/apps/ios-fleet/ship-testflight.sh`, which already carries the fixed
+`ensure-tf-ready`.  Only Congress.Trade keeps an in-repo fleet copy, and that one
+had to be ported explicitly.
+
 Files touched:
 
 - `.github/workflows/auto-merge-prs.yml`

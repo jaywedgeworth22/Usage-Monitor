@@ -7,6 +7,18 @@ auto-merge with exactly that token.  PR #1145 (bot-merged, touching `ios/`)
 produced no `ios-ship` run; #1159 (human merge) produced the only one this repo
 has ever had.
 
+**Review round 2 (blocker fixed before landing).**  The required `verify` job
+used `needs: [schedule-gate]` with `if: should_run == '1'`.  The decide step
+always exits 0, but the JOB can fail, time out, or be cancelled — and a failed
+`needs:` dependency marks dependents **skipped**, which GitHub reports as a
+**satisfied** required check, so a gate outage could have let a PR merge with the
+whole verify suite never run.  It now uses
+`!cancelled() && (event != 'schedule' || should_run != '0')`, the pattern
+Socratic.Trade adopted in its PR #370.  This repo's ship wrappers exec the
+**runtime** `/Users/jay/apps/ios-fleet/ship-testflight.sh`, which already carries
+the fixed `ensure-tf-ready`, so no in-repo port was needed here — only
+Congress.Trade keeps its own fleet copy.
+
 Fix in three layers: both auto-merge workflows now refuse to arm without an
 elevated identity (`GH_PAT` / `SHEPHERD_TOKEN` — neither exists in any fleet
 repo) and print the `gh pr merge <n> --squash --auto` command instead; `ci.yml`

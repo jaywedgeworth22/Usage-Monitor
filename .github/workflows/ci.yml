@@ -104,7 +104,18 @@ jobs:
 
   verify:
     needs: [schedule-gate]
-    if: needs.schedule-gate.outputs.should_run == '1'
+    # `!cancelled()`, NOT the bare gate output. `needs:` alone would let a
+    # FAILED or timed-out schedule-gate job skip this one, and GitHub reports a
+    # skipped required check as SATISFIED -- so a gate outage would silently let
+    # a PR merge with the whole verify suite never having run. That is the exact
+    # inverse of what the backstop is for. Failing closed inside the step is not
+    # enough; the job-level condition has to fail closed too. `!= '0'` means an
+    # absent or unparseable output still RUNS; only an explicit "already
+    # verified" vote skips, and only on the scheduled path.
+    if: >-
+      !cancelled() &&
+      (github.event_name != 'schedule' ||
+      needs.schedule-gate.outputs.should_run != '0')
     # Self-hosted CI with automatic hosted fallback (fleet runner-offload).
     # Resolves to the runner label in the repo variable UM_CI_RUNNER when it is
     # set (e.g. usage-ci), otherwise to 'ubuntu-latest'. Dependabot PRs are
