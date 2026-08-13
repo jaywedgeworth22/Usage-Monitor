@@ -34,8 +34,10 @@ permissions:
 jobs:
   # Cheap decision job. Every non-schedule event votes "run" immediately and CI
   # behaves exactly as it always has. A scheduled tick asks the Actions API
-  # whether this workflow already has a run (successful, queued, or in
-  # progress) for main's current HEAD, and skips when one exists.
+  # whether main's current HEAD was already VERIFIED -- meaning some other run
+  # of this workflow ran the `verify` job itself to success, not merely that a
+  # run for that sha concluded green (a gate-skipped tick concludes green while
+  # verifying nothing). A run already in flight also suppresses this tick.
   #
   # Fail-closed on purpose: any API error, empty response, or unparseable
   # result votes RUN. A backstop that silently stops backstopping is worse than
@@ -71,13 +73,32 @@ jobs:
             exit 0
           fi
 
-          # Exclude this very run (it is itself in_progress for the same sha).
-          existing="$(printf '%s' "$resp" | jq -r --arg me "${GITHUB_RUN_ID}" '
+          # A run's own CONCLUSION is not proof that anything was verified.
+          # When this gate votes skip, every downstream job is `skipped`, and a
+          # workflow run whose jobs all skipped concludes as **success**. So a
+          # no-op scheduled tick looks identical to a real CI pass. Left
+          # unhandled that is self-latching: tick 1 sees a queued run and skips;
+          # that queued run then fails or is cancelled; tick 2 now counts tick
+          # 1's own no-op "success" as proof and skips forever, and the backstop
+          # silently stops backstopping -- the exact failure class this whole PR
+          # exists to fix. (Reported by the Codex reviewer on PR #1165.)
+          #
+          # So proof requires the VERIFICATION JOB itself to have succeeded, not
+          # merely the run wrapping it. in_progress/queued still short-circuit
+          # THIS tick (no point duplicating work already under way), and that is
+          # now safe precisely because such a tick no longer becomes proof for
+          # the next one.
+          active="$(printf '%s' "$resp" | jq -r --arg me "${GITHUB_RUN_ID}" '
             [ .workflow_runs[]
               | select((.id|tostring) != $me)
-              | select(.conclusion == "success" or .status == "in_progress" or .status == "queued")
-            ] | length')" || existing=""
-          case "$existing" in
+              | select(.status == "in_progress" or .status == "queued")
+            ] | length')" || active=""
+          candidates="$(printf '%s' "$resp" | jq -r --arg me "${GITHUB_RUN_ID}" '
+            .workflow_runs[]
+            | select((.id|tostring) != $me)
+            | select(.conclusion == "success")
+            | .id')" || candidates=""
+          case "$active" in
             ''|*[!0-9]*)
               echo "::warning::Unparseable run list for ${SHA}; failing closed and running CI."
               echo "should_run=1" >> "$GITHUB_OUTPUT"
@@ -85,9 +106,31 @@ jobs:
               ;;
           esac
 
-          if [ "$existing" -gt 0 ]; then
+          verified=0
+          for run_id in $candidates; do
+            jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100")" || jobs=""
+            if [ -z "$jobs" ]; then
+              # Cannot tell what that run actually did. Fail closed: treat it as
+              # NOT proof, so at worst the backstop re-runs.
+              echo "could not read jobs for run ${run_id}; not counting it as proof."
+              continue
+            fi
+            hit="$(printf '%s' "$jobs" | jq -r --arg n "verify" '
+              [ .jobs[] | select(.name == $n) | select(.conclusion == "success") ] | length')" || hit=""
+            case "$hit" in
+              ''|*[!0-9]*) hit=0 ;;
+            esac
+            if [ "$hit" -gt 0 ]; then
+              echo "run ${run_id} genuinely ran verify to success."
+              verified=$((verified + 1))
+            else
+              echo "run ${run_id} concluded success but verify did not run (a skipped no-op); not proof."
+            fi
+          done
+
+          if [ "$verified" -gt 0 ] || [ "$active" -gt 0 ]; then
             echo "should_run=0" >> "$GITHUB_OUTPUT"
-            echo "CI already ran (or is running) for ${SHA}; backstop skips."
+            echo "CI already verified (${verified}) or is running (${active}) for ${SHA}; backstop skips."
           else
             echo "should_run=1" >> "$GITHUB_OUTPUT"
             echo "::warning::No CI run exists for main sha ${SHA} -- a bot merge dispatched nothing. Running the backstop."
