@@ -126,6 +126,40 @@ cmd_set() {
   set_secret "$key" "${2:-$key}"
 }
 
+# Delete KEY(s) from Infisical. `infisical secrets delete` prints nothing
+# useful and would happily echo context, so its output is suppressed the same
+# way every other write here is — the caller learns the outcome from the
+# OK/FAIL line and the exit code, never from CLI chatter.
+#
+# Defaults to --type shared: these are project secrets, not the per-user
+# personal overrides the CLI assumes by default. Deleting the personal copy of
+# a shared secret silently does nothing, which looks like success.
+cmd_delete() {
+  [ "$#" -gt 0 ] || die "usage: delete KEY [KEY...]"
+  ensure_token
+  local rc=0
+  for key in "$@"; do
+    if ! cmd_has "$key"; then
+      note "  SKIP  $key  (not present)"
+      continue
+    fi
+    if infisical secrets delete "$key" --type=shared \
+        --token="$TOKEN" --projectId="$PROJECT_ID" \
+        --env="$ENV_SLUG" --path="$SECRET_PATH" >/dev/null 2>/dev/null; then
+      if cmd_has "$key"; then
+        note "  FAIL  $key  (CLI reported success but the key is still present)"
+        rc=1
+      else
+        note "  OK    $key  deleted"
+      fi
+    else
+      note "  FAIL  $key  (CLI rejected the delete)"
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
 # ---------------------------------------------------------------------------
 # sync-platforms — the platform-status probe tokens.
 #
@@ -197,6 +231,7 @@ case "${1:-}" in
   names)          shift; cmd_names "$@" ;;
   has)            shift; cmd_has "$@" ;;
   set)            shift; cmd_set "$@" ;;
+  delete)         shift; cmd_delete "$@" ;;
   sync-platforms) shift; cmd_sync_platforms "$@" ;;
   *)
     cat <<'USAGE'
@@ -205,6 +240,7 @@ infisical-secrets-safe.sh — value-blind Infisical access.
   names                       list secret KEY NAMES only
   has KEY                     exit 0 if KEY exists with a non-empty value
   set KEY [DEST_KEY]          copy KEY from the local secrets file
+  delete KEY [KEY...]         delete shared secret(s), verifying they are gone
   sync-platforms [--dry-run]  batch-copy the platform-status tokens
 
 Load credentials first:
