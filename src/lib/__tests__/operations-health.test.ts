@@ -105,6 +105,26 @@ describe("operations health", () => {
     expect(serialized).not.toContain("135.181.192.190");
   });
 
+  it("does not hard-degrade Peer App Health on a last-resort filingapi 401", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      Response.json(
+        healthBody({
+          tradingLiveness: { activeAccounts: 2, degraded: 2, marketOpen: false },
+          dataProvidersDegraded: true,
+          dependencies: {
+            fmp: { ok: true },
+            filingapi: { ok: false },
+            "usage-monitor": { ok: true },
+          },
+        })
+      )
+    );
+    const result = await fetchSocraticInfrastructureSummary();
+    expect(result.state).toBe("healthy");
+    expect(result.failedDependencies).toEqual([]);
+    expect(result.marketOpen).toBe(false);
+  });
+
   it("does not hard-degrade Peer App Health on overnight VIX misses", async () => {
     vi.spyOn(global, "fetch").mockResolvedValue(
       Response.json(

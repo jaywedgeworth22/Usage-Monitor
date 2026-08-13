@@ -295,6 +295,10 @@ function dependencyFailures(value: unknown): string[] {
     // failures made Peer App Health stay Degraded all night on a healthy
     // ST process (release 08fcc353).
     .filter((name) => !/^vix[-:]/i.test(name))
+    // Last-resort scarce FilingAPI is env-keyed and currently 401s.  It is
+    // not required for ST to trade or stay up, so it must not paint Peer App
+    // Health Degraded the same way a dead DB or Litestream would.
+    .filter((name) => name !== "filingapi")
     .filter((name) => /^[a-z0-9._:-]{1,80}$/i.test(name))
     .slice(0, 20);
 }
