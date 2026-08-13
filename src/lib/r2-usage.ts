@@ -1614,19 +1614,24 @@ const FLEET_SLOTS: Array<{
     id: "um",
     label: "Usage Monitor",
     accountEnv: ["R2_USAGE_ACCOUNT_ID", "CLOUDFLARE_JAY_ACCOUNT_ID", "CLOUDFLARE_ACCOUNT_ID"],
-    tokenEnv: ["R2_USAGE_API_TOKEN", "CLOUDFLARE_JAY_API_TOKEN", "CLOUDFLARE_API_TOKEN"],
+    tokenEnv: [
+      "CLOUDFLARE_FLEET_API_TOKEN",
+      "R2_USAGE_API_TOKEN",
+      "CLOUDFLARE_JAY_API_TOKEN",
+      "CLOUDFLARE_API_TOKEN",
+    ],
   },
   {
     id: "st",
     label: "Socratic Trade",
     accountEnv: ["CLOUDFLARE_ST_ACCOUNT_ID"],
-    tokenEnv: ["CLOUDFLARE_ST_API_TOKEN"],
+    tokenEnv: ["CLOUDFLARE_FLEET_API_TOKEN", "CLOUDFLARE_ST_API_TOKEN"],
   },
   {
     id: "ct",
     label: "Congress.Trade",
     accountEnv: ["CLOUDFLARE_CT_ACCOUNT_ID"],
-    tokenEnv: ["CLOUDFLARE_CT_API_TOKEN"],
+    tokenEnv: ["CLOUDFLARE_FLEET_API_TOKEN", "CLOUDFLARE_CT_API_TOKEN"],
   },
 ];
 

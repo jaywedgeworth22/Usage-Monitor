@@ -51,6 +51,7 @@ describe("R2 usage monitoring & auto-disable", () => {
     delete process.env.CLOUDFLARE_JAY_API_TOKEN;
     delete process.env.CLOUDFLARE_ACCOUNT_ID;
     delete process.env.CLOUDFLARE_API_TOKEN;
+    delete process.env.CLOUDFLARE_FLEET_API_TOKEN;
     delete process.env.LITESTREAM_S3_ENDPOINT;
     delete process.env.AWS_S3_ENDPOINT;
     __resetR2UsageStateForTests();
@@ -59,6 +60,15 @@ describe("R2 usage monitoring & auto-disable", () => {
   afterEach(() => {
     process.env = originalEnv;
     __resetR2UsageStateForTests();
+  });
+
+  it("prefers CLOUDFLARE_FLEET_API_TOKEN over legacy per-account tokens", () => {
+    process.env.CLOUDFLARE_CT_ACCOUNT_ID = "acct-ct";
+    process.env.CLOUDFLARE_CT_API_TOKEN = "legacy-ct";
+    process.env.CLOUDFLARE_FLEET_API_TOKEN = "fleet-token";
+    const accounts = loadR2FleetAccounts(process.env);
+    const ct = accounts.find((a) => a.id === "ct");
+    expect(ct?.apiToken).toBe("fleet-token");
   });
 
   it("calculates linear month pace projection accurately for ops (absolute_or_pace)", () => {
