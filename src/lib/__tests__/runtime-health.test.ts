@@ -450,7 +450,33 @@ describe("runtime health state", () => {
       expect(getR2WeeklyArchiveStatus()).toMatchObject({
         ok: false,
         reason: "verify_hash_mismatch",
+        ageSeconds: null,
       });
+    });
+
+    it("does not treat a failed attempt's checkedAt as archive age", () => {
+      const path = writeArchiveStatus({
+        ok: false,
+        reason: "upload_failed",
+        checkedAt: new Date().toISOString(),
+      });
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
+      expect(getR2WeeklyArchiveStatus()?.ageSeconds).toBeNull();
+    });
+
+    it("keeps last-success age when a later run fails", () => {
+      const path = writeArchiveStatus({
+        ok: false,
+        reason: "verify_hash_mismatch",
+        checkedAt: new Date().toISOString(),
+        completedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+        key: "weekly/prod-last-good.db.gz",
+      });
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
+      const status = getR2WeeklyArchiveStatus();
+      expect(status).toMatchObject({ ok: false, reason: "verify_hash_mismatch" });
+      expect(status?.ageSeconds).toBeGreaterThanOrEqual(7_000);
+      expect(status?.ageSeconds).toBeLessThan(8_000);
     });
 
     it("rejects a reason that is not one of the job's own codes", () => {
