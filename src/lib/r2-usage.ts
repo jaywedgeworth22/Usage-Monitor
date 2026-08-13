@@ -49,6 +49,26 @@ export const DEFAULT_R2_FREE_TIER_LIMITS: R2UsageLimits = {
 export const R2_THRESHOLD_PCT = 70;
 
 export const R2_DISABLED_FLAG_FILENAME = "r2-disabled-70pct.flag";
+/**
+ * Durable record that auto-resume decided the kill switch should be off.
+ *
+ * Without this, a kill switch sourced from deploy config could never actually
+ * be cleared: clearR2AutoDisable() only mutates process.env, so the resume
+ * lasted exactly as long as the process, and the next restart re-injected
+ * `LITESTREAM_EMERGENCY_DISABLE=true` from the environment. That is not
+ * theoretical — production sat kill-switched from 2026-08-04 to 2026-08-12
+ * with storage at 4.4% of the free tier, because the switch was pinned as a
+ * Coolify env var and every maintenance-cycle resume was silently undone.
+ *
+ * Precedence, and it must match `r2_kill_active()` in
+ * scripts/start-with-litestream.sh exactly:
+ *   1. the disable flag FILE wins — an explicit, persisted kill
+ *   2. otherwise an env-set kill applies UNLESS this marker exists
+ *   3. otherwise not killed
+ * enforceR2AutoDisable() deletes this marker, so a fresh breach always
+ * supersedes an older resume and the two can never both be live.
+ */
+export const R2_AUTO_RESUMED_FLAG_FILENAME = "r2-auto-resumed.flag";
 export const R2_EMERGENCY_ALERT_FLAG_FILENAME = "r2-emergency-alert-sent.flag";
 export const R2_DAILY_PUSHOVER_FILENAME = "r2-last-daily-pushover.json";
 
@@ -222,6 +242,7 @@ export function __getR2FlagFilePathForTests(filename: string): string {
 export function __resetR2UsageStateForTests(): void {
   inMemoryLastDailyPushoverDate = "";
   inMemoryEmergencyAlertSent = false;
+  loggedResumeOverride = false;
   liveS3ListCache = null;
   if (cachedFallbackFlagDir) {
     try {
@@ -401,14 +422,49 @@ export function assessR2Usage(
   };
 }
 
-export function isR2AutoDisabled(): boolean {
-  if (process.env.LITESTREAM_EMERGENCY_DISABLE === "true") return true;
-  if (process.env.R2_WRITES_DISABLED === "true") return true;
+function flagFileExists(filename: string): boolean {
   try {
-    return fs.existsSync(getFlagFilePath(R2_DISABLED_FLAG_FILENAME));
+    return fs.existsSync(getFlagFilePath(filename));
   } catch {
     return false;
   }
+}
+
+/** Has auto-resume durably decided an env-pinned kill switch should be off? */
+export function hasR2AutoResumeMarker(): boolean {
+  return flagFileExists(R2_AUTO_RESUMED_FLAG_FILENAME);
+}
+
+let loggedResumeOverride = false;
+
+export function isR2AutoDisabled(): boolean {
+  // An explicit, persisted kill beats everything — including a resume marker,
+  // though enforceR2AutoDisable() deletes the marker so they never coexist.
+  if (flagFileExists(R2_DISABLED_FLAG_FILENAME)) return true;
+
+  const envKill =
+    process.env.LITESTREAM_EMERGENCY_DISABLE === "true" ||
+    process.env.R2_WRITES_DISABLED === "true";
+  if (!envKill) return false;
+
+  // See R2_AUTO_RESUMED_FLAG_FILENAME: an env-sourced kill is a default, not a
+  // verdict. Once auto-resume has confirmed usage is back under the resume
+  // threshold, that decision has to survive the restart that re-injects the
+  // variable — otherwise the switch can never come off without a human.
+  if (hasR2AutoResumeMarker()) {
+    if (!loggedResumeOverride) {
+      loggedResumeOverride = true;
+      console.warn(
+        "[r2-usage] LITESTREAM_EMERGENCY_DISABLE/R2_WRITES_DISABLED is set in this " +
+          "environment, but a recorded auto-resume overrides it. Remove those " +
+          "variables from deploy config — they are stale. To force the kill switch " +
+          `back on, delete ${R2_AUTO_RESUMED_FLAG_FILENAME} (a fresh breach also ` +
+          "clears it automatically)."
+      );
+    }
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -417,16 +473,32 @@ export function isR2AutoDisabled(): boolean {
  * watcher stop R2-backed Litestream without needing a redeploy.
  */
 /** Clear free-tier kill switch so litestream can resume after prune/restart. */
-export function clearR2AutoDisable(): void {
+export function clearR2AutoDisable(reason = "usage back under the resume threshold"): void {
   delete process.env.LITESTREAM_EMERGENCY_DISABLE;
   delete process.env.R2_WRITES_DISABLED;
   process.env.LITESTREAM_EMERGENCY_DISABLE = "false";
   process.env.R2_WRITES_DISABLED = "false";
+  loggedResumeOverride = false;
   try {
     const flag = getFlagFilePath(R2_DISABLED_FLAG_FILENAME);
     if (fs.existsSync(flag)) fs.unlinkSync(flag);
   } catch (err) {
     console.error("[r2-usage] Failed clearing emergency disable flag:", err);
+  }
+  // Persist the decision. Mutating process.env alone made this a no-op across
+  // restarts whenever the switch came from deploy config — see the constant's
+  // doc comment for the production incident that caused.
+  try {
+    fs.writeFileSync(
+      getFlagFilePath(R2_AUTO_RESUMED_FLAG_FILENAME),
+      `Auto-resumed at ${new Date().toISOString()}: ${reason}\n` +
+        "This overrides LITESTREAM_EMERGENCY_DISABLE / R2_WRITES_DISABLED if they\n" +
+        "are still set in the environment. Delete this file to force the kill\n" +
+        "switch back on; a fresh free-tier breach deletes it automatically.\n",
+      { encoding: "utf8", mode: 0o600 }
+    );
+  } catch (err) {
+    console.error("[r2-usage] Failed writing auto-resume marker:", err);
   }
   try {
     const alert = getFlagFilePath(R2_EMERGENCY_ALERT_FLAG_FILENAME);
@@ -440,6 +512,14 @@ export function clearR2AutoDisable(): void {
 export function enforceR2AutoDisable(reason: string): void {
   process.env.LITESTREAM_EMERGENCY_DISABLE = "true";
   process.env.R2_WRITES_DISABLED = "true";
+  // A fresh breach supersedes any earlier auto-resume, so drop the marker
+  // before writing the kill flag — the two must never both be live.
+  try {
+    const resumed = getFlagFilePath(R2_AUTO_RESUMED_FLAG_FILENAME);
+    if (fs.existsSync(resumed)) fs.unlinkSync(resumed);
+  } catch (err) {
+    console.error("[r2-usage] Failed clearing auto-resume marker:", err);
+  }
   // Also clear the "active" claim so readiness/runtime-health immediately
   // report backup as stopped (start-with-litestream only sets this at boot).
   process.env.LITESTREAM_ACTIVE = "false";
@@ -1927,7 +2007,9 @@ export async function runR2UsageCheck(
     console.warn(
       `[r2-usage] auto-resume: live storage ${assessment.storage.mtdPct}% < ${R2_RESUME_STORAGE_PCT}% resume threshold; clearing kill switch`
     );
-    clearR2AutoDisable();
+    clearR2AutoDisable(
+      `live storage ${assessment.storage.mtdPct}% < ${R2_RESUME_STORAGE_PCT}% resume threshold`
+    );
   }
 
   assessment.autoDisabled = isR2AutoDisabled();

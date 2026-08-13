@@ -87,9 +87,23 @@ if [[ "${endpoint_lc}" == *"backblazeb2.com"* ]]; then
   litestream_endpoint_is_b2=true
 fi
 
+# R2 free-tier kill switch. Precedence must match isR2AutoDisabled() in
+# src/lib/r2-usage.ts exactly:
+#   1. the disable flag FILE wins — an explicit, persisted kill
+#   2. otherwise an env-set kill applies UNLESS the auto-resume marker exists
+#   3. otherwise replication runs
+# The marker exists because an env-sourced kill used to be unclearable: the
+# app could only resume by mutating its own process.env, so every restart
+# re-injected the variable from deploy config and undid it.
 r2_free_tier_kill=false
-if [[ "${LITESTREAM_EMERGENCY_DISABLE:-false}" == "true" || "${R2_WRITES_DISABLED:-false}" == "true" || -f "/data/r2-disabled-70pct.flag" ]]; then
+if [[ -f "/data/r2-disabled-70pct.flag" ]]; then
   r2_free_tier_kill=true
+elif [[ "${LITESTREAM_EMERGENCY_DISABLE:-false}" == "true" || "${R2_WRITES_DISABLED:-false}" == "true" ]]; then
+  if [[ -f "/data/r2-auto-resumed.flag" ]]; then
+    log "R2 kill switch is set in the environment, but /data/r2-auto-resumed.flag records an auto-resume — honouring the resume. Remove the stale env vars."
+  else
+    r2_free_tier_kill=true
+  fi
 fi
 
 litestream_enabled=false
@@ -212,10 +226,15 @@ if [[ "${litestream_enabled}" == "true" && "${litestream_endpoint_is_r2}" == "tr
     fi
     : >"${LITESTREAM_PID_FILE}"
   }
+  # Same precedence as the boot-time check above and isR2AutoDisabled().
   r2_kill_active() {
-    [[ "${LITESTREAM_EMERGENCY_DISABLE:-false}" == "true" \
-      || "${R2_WRITES_DISABLED:-false}" == "true" \
-      || -f "/data/r2-disabled-70pct.flag" ]]
+    if [[ -f "/data/r2-disabled-70pct.flag" ]]; then return 0; fi
+    if [[ "${LITESTREAM_EMERGENCY_DISABLE:-false}" == "true" \
+      || "${R2_WRITES_DISABLED:-false}" == "true" ]]; then
+      [[ -f "/data/r2-auto-resumed.flag" ]] && return 1
+      return 0
+    fi
+    return 1
   }
   start_replica_heartbeat
   start_r2_litestream

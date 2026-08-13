@@ -7,6 +7,9 @@ import {
   assessR2Usage,
   isR2AutoDisabled,
   enforceR2AutoDisable,
+  clearR2AutoDisable,
+  hasR2AutoResumeMarker,
+  R2_AUTO_RESUMED_FLAG_FILENAME,
   sendPushoverNotification,
   formatDailyPushoverMessage,
   runR2UsageCheck,
@@ -380,6 +383,98 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(isR2AutoDisabled()).toBe(true);
     expect(process.env.LITESTREAM_EMERGENCY_DISABLE).toBe("true");
     expect(process.env.R2_WRITES_DISABLED).toBe("true");
+  });
+
+  // Regression: production sat kill-switched from 2026-08-04 to 2026-08-12
+  // with storage at 4.4% of the free tier, because the switch was pinned as a
+  // deploy-config env var. clearR2AutoDisable() only mutated process.env, so
+  // every maintenance-cycle resume died with the process and the next restart
+  // re-injected the variable. The resume has to outlive the process.
+  describe("durable auto-resume over an env-pinned kill switch", () => {
+    // These write real flag files; on a host that has /data (production
+    // containers) __resetR2UsageStateForTests only clears the mkdtemp
+    // fallback, so clean both up explicitly.
+    afterEach(() => {
+      for (const name of [R2_DISABLED_FLAG_FILENAME, R2_AUTO_RESUMED_FLAG_FILENAME]) {
+        try {
+          fs.rmSync(__getR2FlagFilePathForTests(name), { force: true });
+        } catch {
+          // best-effort
+        }
+      }
+    });
+
+    it("keeps an env-set kill switch engaged when nothing has resumed it", () => {
+      process.env.LITESTREAM_EMERGENCY_DISABLE = "true";
+      expect(hasR2AutoResumeMarker()).toBe(false);
+      expect(isR2AutoDisabled()).toBe(true);
+    });
+
+    it("overrides an env-set kill switch once auto-resume has recorded a marker", () => {
+      process.env.LITESTREAM_EMERGENCY_DISABLE = "true";
+      process.env.R2_WRITES_DISABLED = "true";
+      expect(isR2AutoDisabled()).toBe(true);
+
+      clearR2AutoDisable("storage 4.4% < 65% resume threshold");
+      expect(hasR2AutoResumeMarker()).toBe(true);
+      expect(isR2AutoDisabled()).toBe(false);
+
+      // The restart: deploy config re-injects the variables over a fresh
+      // process.env. Without the persisted marker this is where the resume
+      // used to silently evaporate.
+      process.env.LITESTREAM_EMERGENCY_DISABLE = "true";
+      process.env.R2_WRITES_DISABLED = "true";
+      expect(isR2AutoDisabled()).toBe(false);
+    });
+
+    it("lets a fresh breach supersede an earlier resume", () => {
+      clearR2AutoDisable("first resume");
+      expect(isR2AutoDisabled()).toBe(false);
+
+      enforceR2AutoDisable("storage back over 70%");
+      expect(hasR2AutoResumeMarker()).toBe(false);
+      expect(isR2AutoDisabled()).toBe(true);
+
+      // ...and a re-injected env var on the next restart must not be undone
+      // by the marker that the breach just deleted.
+      delete process.env.LITESTREAM_EMERGENCY_DISABLE;
+      delete process.env.R2_WRITES_DISABLED;
+      expect(isR2AutoDisabled()).toBe(true);
+    });
+
+    it("lets an explicit persisted kill flag win over a stale resume marker", () => {
+      clearR2AutoDisable("resumed earlier");
+      expect(isR2AutoDisabled()).toBe(false);
+
+      // Hand-written flag file, the documented operator override — the marker
+      // must not be able to veto it.
+      fs.writeFileSync(
+        __getR2FlagFilePathForTests(R2_DISABLED_FLAG_FILENAME),
+        "operator kill\n",
+        { encoding: "utf8", mode: 0o600 }
+      );
+      expect(hasR2AutoResumeMarker()).toBe(true);
+      expect(isR2AutoDisabled()).toBe(true);
+    });
+
+    it.skipIf(hasDataVolume)(
+      "writes the resume marker owner-only, with the reason and how to undo it",
+      () => {
+        clearR2AutoDisable("storage 4.4% < 65% resume threshold");
+
+        const markerPath = __getR2FlagFilePathForTests(R2_AUTO_RESUMED_FLAG_FILENAME);
+        const fd = fs.openSync(markerPath, "r");
+        try {
+          expect(fs.fstatSync(fd).mode & 0o777).toBe(0o600);
+          const body = fs.readFileSync(fd, "utf8");
+          expect(body).toContain("storage 4.4% < 65% resume threshold");
+          expect(body).toContain("LITESTREAM_EMERGENCY_DISABLE");
+          expect(body).toContain("Delete this file");
+        } finally {
+          fs.closeSync(fd);
+        }
+      }
+    );
   });
 
   it.skipIf(hasDataVolume)(
