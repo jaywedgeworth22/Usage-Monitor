@@ -1,3 +1,27 @@
+## Current (2026-08-13 MONET — CI and iOS ship never ran on bot-merged PRs)
+
+Branch `monet/ci-ship-trigger-bot-merge`.  A PR merged by `github-actions[bot]`
+lands on `main` and dispatches **zero** workflow runs — GitHub raises no workflow
+events for actions taken with `GITHUB_TOKEN`, and `auto-merge-prs.yml` arms
+auto-merge with exactly that token.  PR #1145 (bot-merged, touching `ios/`)
+produced no `ios-ship` run; #1159 (human merge) produced the only one this repo
+has ever had.
+
+Fix in three layers: both auto-merge workflows now refuse to arm without an
+elevated identity (`GH_PAT` / `SHEPHERD_TOKEN` — neither exists in any fleet
+repo) and print the `gh pr merge <n> --squash --auto` command instead; `ci.yml`
+gains an hourly `schedule:` backstop behind a fail-closed gate job that skips
+when `main`'s HEAD already has a run; `ios-ship.yml` gains
+`cron: '13,43 * * * *'` plus `scripts/ios-scheduled-ship-gate.sh`, which ships
+on a scheduled tick only when `ios/` actually changed since that app's last
+successful ship, per app.  Without that gate a cron would ship a TestFlight
+build for every backend commit — the owner does not want TestFlight spammed.
+
+**Owner action:** add a `GH_PAT` secret to re-activate auto-merge.  Rollout:
+`docs/rollouts/2026-08-13-ci-ship-trigger-bot-merge.md`.
+
+## Prior
+
 ## Current (2026-08-12 CLAUDE — PagerDuty alert correctness)
 
 Branch `claude/pd-alert-correctness`: zero pushed telemetry now records `unverifiable` instead of manufacturing a 100%-of-bill discrepancy (PD #64/#70 Twilio); `stale_snapshot` CLEAR stamps the same watermark as ACTIVE so resolves stop deadlocking; provider deletion resolves outstanding PagerDuty incidents first (409 + `?force=true` override). Rollout: `docs/rollouts/2026-08-12-pagerduty-alert-correctness.md`.

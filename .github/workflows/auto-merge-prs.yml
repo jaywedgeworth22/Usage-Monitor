@@ -2,6 +2,33 @@ name: Auto-merge PRs
 
 # Enable GitHub auto-merge on every non-draft, same-repo PR so green CI
 # lands without a human click (owner fleet policy: always auto-merge).
+#
+# WHY THIS WORKFLOW NO LONGER ARMS AUTO-MERGE BY DEFAULT (2026-08-13)
+# -------------------------------------------------------------------
+# Arming auto-merge with `secrets.GITHUB_TOKEN` makes github-actions[bot] the
+# MERGING identity, and GitHub's recursion guard means events produced by the
+# GITHUB_TOKEN never start a workflow run. The resulting push to main therefore
+# dispatches NOTHING -- no CI, no CodeQL, no Security, no effort sync, and no
+# iOS TestFlight ship.
+#
+# Measured on this repo: PR #1145 (bot-merged, touches ios/) produced no
+# ios-ship run at all, while #1159 (human-merged) produced the only ios-ship
+# run this repo has ever had. The same A/B on Congress.Trade: sha c38b6787
+# (bot) -> 0 runs, sha ceaca097 (human) -> 5 push runs.
+#
+# So this workflow now refuses to arm unless an elevated identity is available
+# (GH_PAT or SHEPHERD_TOKEN). Neither secret exists today, so this workflow is
+# a deliberate, logged no-op and PRs are landed the way AGENTS.md already
+# prescribes -- the landing agent runs, under the owner's own gh credentials:
+#
+#     gh pr merge <n> --squash --auto
+#
+# which makes merged_by=jaywedgeworth22 and re-dispatches every push workflow.
+#
+# TO RE-ACTIVATE (owner action; agents never mint credentials): add a
+# fine-grained PAT or GitHub App installation token with contents+pull_requests
+# write as the repo secret GH_PAT. No code change is needed -- this workflow
+# self-activates and arms under that identity.
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, labeled, ready_for_review, unlabeled]
@@ -19,9 +46,41 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       !contains(github.event.pull_request.labels.*.name, 'do-not-automerge')
     steps:
-      - name: Enable auto-merge (squash + delete branch)
+      # `secrets` is not available in a job-level `if:`, so the presence test
+      # happens here in `env` and gates the arming step below.
+      - name: Check for an elevated (non-GITHUB_TOKEN) merge identity
+        id: identity
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HAS_ELEVATED_TOKEN: ${{ (secrets.GH_PAT != '' || secrets.SHEPHERD_TOKEN != '') && '1' || '0' }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -uo pipefail
+          if [ "$HAS_ELEVATED_TOKEN" = "1" ]; then
+            echo "arm=1" >> "$GITHUB_OUTPUT"
+            echo "Elevated merge identity present; auto-merge will be armed."
+            exit 0
+          fi
+          echo "arm=0" >> "$GITHUB_OUTPUT"
+          echo "::notice::No GH_PAT / SHEPHERD_TOKEN configured. Not arming auto-merge:"
+          echo "::notice::a GITHUB_TOKEN merge dispatches no post-merge workflows (CI, ship, sync)."
+          {
+            echo "### Auto-merge not armed"
+            echo
+            echo "No \`GH_PAT\` / \`SHEPHERD_TOKEN\` secret is configured, so arming"
+            echo "auto-merge here would merge as \`github-actions[bot]\` and GitHub's"
+            echo "recursion guard would suppress **every** post-merge workflow on main."
+            echo
+            echo "Land this PR with the owner's own credentials instead:"
+            echo
+            echo '```'
+            echo "gh pr merge $PR_URL --squash --auto"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enable auto-merge (squash + delete branch)
+        if: steps.identity.outputs.arm == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.SHEPHERD_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           set -euo pipefail

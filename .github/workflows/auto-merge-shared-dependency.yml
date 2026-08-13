@@ -1,5 +1,12 @@
 name: Auto-merge congress-trading-shared PRs
 
+# Same elevated-identity rule as .github/workflows/auto-merge-prs.yml: arming
+# auto-merge with GITHUB_TOKEN makes github-actions[bot] the merging identity,
+# and GitHub's recursion guard then suppresses every post-merge workflow on
+# main (CI, CodeQL, Security, effort sync, iOS ship). Without GH_PAT /
+# SHEPHERD_TOKEN this workflow is a logged no-op; land the PR with the owner's
+# own gh credentials instead (`gh pr merge <n> --squash --auto`).
+
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, labeled, ready_for_review]
@@ -28,10 +35,26 @@ jobs:
           fi
           echo "is_shared=$IS_SHARED" >> "$GITHUB_OUTPUT"
 
-      - name: Enable auto-merge
+      - name: Check for an elevated (non-GITHUB_TOKEN) merge identity
+        id: identity
         if: steps.check.outputs.is_shared == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HAS_ELEVATED_TOKEN: ${{ (secrets.GH_PAT != '' || secrets.SHEPHERD_TOKEN != '') && '1' || '0' }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -uo pipefail
+          if [ "$HAS_ELEVATED_TOKEN" = "1" ]; then
+            echo "arm=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "arm=0" >> "$GITHUB_OUTPUT"
+          echo "::notice::No GH_PAT / SHEPHERD_TOKEN configured; not arming auto-merge."
+          echo "::notice::Land it with: gh pr merge $PR_URL --squash --auto"
+
+      - name: Enable auto-merge
+        if: steps.identity.outputs.arm == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.SHEPHERD_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           echo "Enabling auto-merge for $PR_URL"

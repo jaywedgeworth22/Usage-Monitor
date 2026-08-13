@@ -1,20 +1,110 @@
 name: CI
 
+# The `schedule:` trigger is a BACKSTOP, not a second CI cadence. A PR merged
+# by github-actions[bot] (auto-merge armed with GITHUB_TOKEN) produces a push
+# to main that GitHub's recursion guard suppresses entirely, so the post-merge
+# squash sha on main is never verified. Measured fleet-wide 2026-08-13: bot
+# merges dispatched zero runs, human merges dispatched the full set.
+# `schedule:` events are NOT subject to that guard.
+#
+# The schedule-gate job below makes every other tick a ~10-second no-op, so the
+# normal case costs one short hosted job per hour and nothing else. The
+# root-cause fix is in .github/workflows/auto-merge-prs.yml (stop merging as
+# github-actions[bot]); this stays as defence in depth for any bot merge that
+# still slips through, e.g. Dependabot.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch: {}
+  schedule:
+    # Hourly, off the top of the hour (GitHub throttles :00 stampedes).
+    - cron: '41 * * * *'
 
+# Keyed on the event as well as the ref so the scheduled backstop and a real
+# push to main cannot cancel each other; push-vs-push and PR-vs-PR still
+# supersede exactly as before.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  # Cheap decision job. Every non-schedule event votes "run" immediately and CI
+  # behaves exactly as it always has. A scheduled tick asks the Actions API
+  # whether this workflow already has a run (successful, queued, or in
+  # progress) for main's current HEAD, and skips when one exists.
+  #
+  # Fail-closed on purpose: any API error, empty response, or unparseable
+  # result votes RUN. A backstop that silently stops backstopping is worse than
+  # one that occasionally re-runs.
+  schedule-gate:
+    name: scheduled backstop gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether this run should proceed
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          if [ "$EVENT" != "schedule" ]; then
+            echo "should_run=1" >> "$GITHUB_OUTPUT"
+            echo "event=${EVENT}: normal CI, gate does not apply."
+            exit 0
+          fi
+
+          resp="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=100")" || resp=""
+          if [ -z "$resp" ]; then
+            echo "::warning::Could not read prior CI runs for ${SHA}; failing closed and running CI."
+            echo "should_run=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Exclude this very run (it is itself in_progress for the same sha).
+          existing="$(printf '%s' "$resp" | jq -r --arg me "${GITHUB_RUN_ID}" '
+            [ .workflow_runs[]
+              | select((.id|tostring) != $me)
+              | select(.conclusion == "success" or .status == "in_progress" or .status == "queued")
+            ] | length')" || existing=""
+          case "$existing" in
+            ''|*[!0-9]*)
+              echo "::warning::Unparseable run list for ${SHA}; failing closed and running CI."
+              echo "should_run=1" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          if [ "$existing" -gt 0 ]; then
+            echo "should_run=0" >> "$GITHUB_OUTPUT"
+            echo "CI already ran (or is running) for ${SHA}; backstop skips."
+          else
+            echo "should_run=1" >> "$GITHUB_OUTPUT"
+            echo "::warning::No CI run exists for main sha ${SHA} -- a bot merge dispatched nothing. Running the backstop."
+            {
+              echo "### CI backstop engaged"
+              echo
+              echo "main sha \`${SHA}\` had no CI run. That is the bot-merge dispatch"
+              echo "dropout; see \`.github/workflows/auto-merge-prs.yml\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # `verify` is a REQUIRED check and now `needs:` this job, so this step
+          # must never be the reason a PR cannot merge.
+          exit 0
+
   verify:
+    needs: [schedule-gate]
+    if: needs.schedule-gate.outputs.should_run == '1'
     # Self-hosted CI with automatic hosted fallback (fleet runner-offload).
     # Resolves to the runner label in the repo variable UM_CI_RUNNER when it is
     # set (e.g. usage-ci), otherwise to 'ubuntu-latest'. Dependabot PRs are
@@ -107,6 +197,20 @@ jobs:
 
       - name: Verify Apple projects
         run: npm run test:apple-projects
+
+      # ios-ship.yml now runs on a cron, and a cron carries no `paths:` filter.
+      # scripts/ios-scheduled-ship-gate.sh is the only thing keeping a
+      # backend-only commit from becoming a TestFlight build. It executes
+      # exclusively on the Mac runner, so a defect in it would otherwise be
+      # invisible until testers were spammed (or until an iOS change silently
+      # never shipped). Fully offline: throwaway git repos in a scratch dir.
+      - name: Test the scheduled iOS ship gate
+        run: |
+          bash -n scripts/ios-scheduled-ship-gate.sh
+          bash -n scripts/test-ios-scheduled-ship-gate.sh
+          bash -n scripts/ios-ship-testflight.sh
+          bash -n scripts/ios-ship-testflight-local.sh
+          bash scripts/test-ios-scheduled-ship-gate.sh
 
       # Replays a captured `agy -p "/usage"` envelope — the CLI itself is only
       # installed on the Mac that runs Antigravity, so this is the only place
