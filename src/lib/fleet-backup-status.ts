@@ -103,7 +103,10 @@ function fleetAppSpecs(): FleetAppSpec[] {
       self: false,
       b2Bucket: "jays-congress-trade-eu",
       dumpPrefix: "hetzner/",
-      litestreamPrefix: "congress-live/",
+      // Live replica path is congress-trade/db.sqlite (app/litestream.yml).
+      // The old congress-live/ prefix was never written; listing it made
+      // Platforms show B2 Litestream as Not Configured.
+      litestreamPrefix: "congress-trade/",
       peerHealthUrl:
         process.env.FLEET_CT_HEALTH_URL?.trim() ||
         "https://congress.trade/api/health",
@@ -309,32 +312,43 @@ async function inventoryPrefix(
     startFileName = next;
   }
 
-  // For high-volume Litestream prefixes where pagination hits maxPages, probe
-  // the tail of the prefix (where lexicographically higher WAL numbers live)
-  // so latestUploadMs reflects the newest upload rather than old initial files.
+  // High-volume Litestream trees exceed maxPages.  b2_list_file_names is
+  // lexicographic, so the first pages are the oldest L0 WAL names.
+  // `prefix + "z"` is *after* `…/app.db/…` and `…/db.sqlite/…`, so it
+  // never saw the live objects (ST B2 row stayed ~2 days stale while Live
+  // Litestream was 35s).  Probe each known L0 directory from a high hex
+  // start name so we pick up current uploads.
   if (pages >= maxPages) {
-    try {
-      const tailData = await b2Post(auth, "b2_list_file_names", {
-        bucketId,
-        prefix,
-        startFileName: prefix + "z",
-        maxFileCount: 100,
-      });
-      const tailFiles = Array.isArray(tailData.files) ? tailData.files : [];
-      for (const f of tailFiles) {
-        if (!isRecord(f)) continue;
-        const action = readText(f.action);
-        if (action && action !== "upload") continue;
-        const ts =
-          typeof f.uploadTimestamp === "number" && Number.isFinite(f.uploadTimestamp)
-            ? f.uploadTimestamp
-            : null;
-        if (ts != null && (latestUploadMs == null || ts > latestUploadMs)) {
-          latestUploadMs = ts;
+    const base = prefix.replace(/\/$/, "");
+    const l0Prefixes = [
+      `${base}/app.db/ltx/0/`,
+      `${base}/db.sqlite/ltx/0/`,
+      `${base}/ltx/0/`,
+    ];
+    for (const l0 of l0Prefixes) {
+      try {
+        const tailData = await b2Post(auth, "b2_list_file_names", {
+          bucketId,
+          prefix: l0,
+          startFileName: `${l0}000000000003`,
+          maxFileCount: 200,
+        });
+        const tailFiles = Array.isArray(tailData.files) ? tailData.files : [];
+        for (const f of tailFiles) {
+          if (!isRecord(f)) continue;
+          const action = readText(f.action);
+          if (action && action !== "upload") continue;
+          const ts =
+            typeof f.uploadTimestamp === "number" && Number.isFinite(f.uploadTimestamp)
+              ? f.uploadTimestamp
+              : null;
+          if (ts != null && (latestUploadMs == null || ts > latestUploadMs)) {
+            latestUploadMs = ts;
+          }
         }
+      } catch {
+        // ignore optional tail probe failure
       }
-    } catch {
-      // ignore optional tail probe failure
     }
   }
 

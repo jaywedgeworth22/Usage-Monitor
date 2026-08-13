@@ -103,6 +103,27 @@ describe("operations health", () => {
     expect(serialized).not.toContain("135.181.192.190");
   });
 
+  it("does not hard-degrade Peer App Health on overnight VIX misses", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      Response.json(
+        healthBody({
+          tradingLiveness: { activeAccounts: 2, degraded: 0, marketOpen: false },
+          dataProvidersDegraded: true,
+          dependencies: {
+            fmp: { ok: true },
+            "vix-cboe": { ok: false },
+            "vix-yahoo": { ok: false },
+          },
+        })
+      )
+    );
+    const result = await fetchSocraticInfrastructureSummary();
+    expect(result.state).toBe("healthy");
+    expect(result.failedDependencies).toEqual([]);
+    expect(result.dataProvidersDegraded).toBe(true);
+    expect(result.marketOpen).toBe(false);
+  });
+
   it("preserves last-good Socratic data as explicitly stale after an outage", async () => {
     const fetchMock = vi.spyOn(global, "fetch").mockResolvedValueOnce(Response.json(healthBody({ dependencies: {} })));
     const fresh = await fetchSocraticInfrastructureSummary();
