@@ -137,7 +137,11 @@ for app in $APPS; do
           since_changed="$(git -C "$REPO_ROOT" log --since="@${last_ts}" --format= --name-only -- "$PATH_PREFIX" 2>/dev/null | sed '/^$/d' | sort -u | head -20)"
           if [[ -n "$since_changed" ]]; then
             log "[${app}] falling back to time: ${PATH_PREFIX} changed after the last ship:"
-            printf '  %s\n' $since_changed
+            # Line-by-line, NOT `printf ... $var`: Socratic.Trade's iOS path is
+            # "ios/Socratic Trade.xcodeproj/...", and unquoted word-splitting
+            # printed that one file as two bogus lines. Decision logic is
+            # unaffected; the log was just lying about what changed.
+            printf '%s\n' "$since_changed" | while IFS= read -r f; do echo "  $f"; done
             decision=1
           else
             log "[${app}] falling back to time: no ${PATH_PREFIX} commits since the last ship; skip."
@@ -159,7 +163,7 @@ for app in $APPS; do
       changed="$(git -C "$REPO_ROOT" diff --name-only "$last_sha" HEAD -- "$PATH_PREFIX" 2>/dev/null | head -20)"
       if [[ -n "$changed" ]]; then
         log "[${app}] ${PATH_PREFIX} changed since ${last_sha}:"
-        printf '  %s\n' $changed
+        printf '%s\n' "$changed" | while IFS= read -r f; do echo "  $f"; done
         decision=1
       else
         log "[${app}] no ${PATH_PREFIX} changes since ${last_sha}; skip (TestFlight is not a commit log)."
