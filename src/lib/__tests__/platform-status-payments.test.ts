@@ -125,6 +125,52 @@ describe("platform status payments probes", () => {
     expect(init.headers.Authorization).toContain("Basic ");
   });
 
+  it("reads the pre-2017 transfers_enabled name and stays healthy", async () => {
+    // Regression for a live false alarm: a 2016-era account whose pinned API
+    // version predates Stripe's 2017-04-06 rename answers with
+    // `transfers_enabled` and NO `payouts_enabled` at all.  Reading only the
+    // modern name scored a healthy, paying-out account as "cannot pay out".
+    vi.stubEnv("STRIPE_SECRET_KEY", LIVE_KEY);
+    const body = accountBody({ transfers_enabled: true });
+    delete (body as Record<string, unknown>).payouts_enabled;
+    fetchJson.mockResolvedValue(okResponse(body));
+
+    const result = await stripeProbe().probe();
+
+    expect(result.state).toBe("healthy");
+    expect(result.error).toBeUndefined();
+    const payouts = result.metrics.find((m) => m.label === "Payouts");
+    expect(payouts?.value).toBe("Enabled");
+  });
+
+  it("reports payouts as not reported, without degrading, when neither field exists", async () => {
+    // Absence of both names is not evidence of anything.  The card must say
+    // so instead of inventing a disabled state.
+    vi.stubEnv("STRIPE_SECRET_KEY", LIVE_KEY);
+    const body = accountBody();
+    delete (body as Record<string, unknown>).payouts_enabled;
+    fetchJson.mockResolvedValue(okResponse(body));
+
+    const result = await stripeProbe().probe();
+
+    expect(result.state).toBe("healthy");
+    expect(result.error).toBeUndefined();
+    expect(result.headline).toBe("Live key is working.  Charges are enabled.");
+    const payouts = result.metrics.find((m) => m.label === "Payouts");
+    expect(payouts?.value).toBe("Not reported");
+    expect(payouts?.hint).toBe("account API version predates the field");
+  });
+
+  it("still degrades when payouts_enabled is explicitly false", async () => {
+    vi.stubEnv("STRIPE_SECRET_KEY", LIVE_KEY);
+    fetchJson.mockResolvedValue(okResponse(accountBody({ payouts_enabled: false })));
+
+    const result = await stripeProbe().probe();
+
+    expect(result.state).toBe("degraded");
+    expect(result.error).toBe("payouts_disabled");
+  });
+
   it("never leaks the key into the rendered card", async () => {
     vi.stubEnv("STRIPE_SECRET_KEY", LIVE_KEY);
     fetchJson.mockResolvedValue(okResponse(accountBody()));

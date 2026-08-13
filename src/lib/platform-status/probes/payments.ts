@@ -96,7 +96,18 @@ function renderAccount(data: unknown, mode: StripeKeyMode): PlatformProbeResult 
   }
 
   const chargesEnabled = account.charges_enabled === true;
-  const payoutsEnabled = account.payouts_enabled === true;
+  // Payouts is tri-state, and the field NAME depends on the account's pinned
+  // API version: `payouts_enabled` today, `transfers_enabled` before Stripe's
+  // 2017-04-06 rename — a 2016-era account answers with only the old name.
+  // Reading just the modern name scored a healthy paying-out account as
+  // "cannot pay out", a fabricated problem.  Absence of both names is
+  // "unknown", never "disabled" — a missing field is not evidence.
+  const payoutsFlag =
+    typeof account.payouts_enabled === "boolean"
+      ? account.payouts_enabled
+      : typeof account.transfers_enabled === "boolean"
+        ? account.transfers_enabled
+        : null;
   const detailsSubmitted = account.details_submitted === true;
 
   const requirements = asRecord(account.requirements);
@@ -124,7 +135,11 @@ function renderAccount(data: unknown, mode: StripeKeyMode): PlatformProbeResult 
       chargesEnabled ? "Enabled" : "Disabled",
       !chargesEnabled && disabledReason ? `reason: ${disabledReason}` : undefined
     ),
-    metric("Payouts", payoutsEnabled ? "Enabled" : "Disabled"),
+    metric(
+      "Payouts",
+      payoutsFlag === null ? "Not reported" : payoutsFlag ? "Enabled" : "Disabled",
+      payoutsFlag === null ? "account API version predates the field" : undefined
+    ),
     metric("Onboarding", detailsSubmitted ? "Complete" : "Details outstanding"),
     metric(
       "Requirements Due",
@@ -144,7 +159,7 @@ function renderAccount(data: unknown, mode: StripeKeyMode): PlatformProbeResult 
   if (!chargesEnabled) {
     problems.push({ code: "charges_disabled", text: "The account cannot accept charges." });
   }
-  if (!payoutsEnabled) {
+  if (payoutsFlag === false) {
     problems.push({ code: "payouts_disabled", text: "The account cannot pay out." });
   }
   if (pastDue > 0) {
@@ -157,7 +172,10 @@ function renderAccount(data: unknown, mode: StripeKeyMode): PlatformProbeResult 
   if (problems.length === 0) {
     return {
       state: "healthy",
-      headline: `${MODE_SUBJECTS[mode]} is working.  Charges and payouts are enabled.`,
+      headline:
+        payoutsFlag === null
+          ? `${MODE_SUBJECTS[mode]} is working.  Charges are enabled.`
+          : `${MODE_SUBJECTS[mode]} is working.  Charges and payouts are enabled.`,
       metrics,
     };
   }
