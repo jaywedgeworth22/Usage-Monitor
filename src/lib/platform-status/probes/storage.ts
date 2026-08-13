@@ -395,6 +395,7 @@ export const STORAGE_PROBES: readonly PlatformProbe[] = [
     category: "storage",
     requiredEnv: [
       "R2_USAGE_ACCOUNT_ID",
+      "CLOUDFLARE_FLEET_API_TOKEN",
       "R2_USAGE_API_TOKEN",
       "CLOUDFLARE_ST_ACCOUNT_ID",
       "CLOUDFLARE_ST_API_TOKEN",
