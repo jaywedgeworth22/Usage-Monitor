@@ -109,7 +109,8 @@ describe("fetchFleetBackupStatus", () => {
                   },
                 ]
               : body.prefix?.includes("trading-live") ||
-                  body.prefix?.includes("api-usage-monitor")
+                  body.prefix?.includes("api-usage-monitor") ||
+                  body.prefix?.includes("congress-trade")
                 ? [
                     {
                       action: "upload",
@@ -158,8 +159,8 @@ describe("fetchFleetBackupStatus", () => {
 
     const ct = payload.apps.find((a) => a.id === "congress-trade");
     const ctLtx = ct!.locations.find((l) => l.id === "b2-litestream");
-    expect(ctLtx?.present).toBe(false);
-    expect(ctLtx?.reason).toBe("empty_prefix");
+    expect(ctLtx?.present).toBe(true);
+    expect(ctLtx?.ok).toBe(true);
     const ctDump = ct!.locations.find((l) => l.id === "b2-full-dump");
     expect(ctDump?.present).toBe(true);
   });

@@ -290,6 +290,11 @@ function dependencyFailures(value: unknown): string[] {
   return Object.entries(dependencies)
     .filter(([, raw]) => asRecord(raw)?.ok === false)
     .map(([name]) => name)
+    // Overnight VIX/Cboe misses are expected (market closed) and already
+    // surface as dataProvidersDegraded.  Counting them as hard dependency
+    // failures made Peer App Health stay Degraded all night on a healthy
+    // ST process (release 08fcc353).
+    .filter((name) => !/^vix[-:]/i.test(name))
     .filter((name) => /^[a-z0-9._:-]{1,80}$/i.test(name))
     .slice(0, 20);
 }
@@ -380,7 +385,12 @@ export async function fetchSocraticInfrastructureSummary(): Promise<SocraticInfr
         litestreamState !== "replicating" &&
         litestreamState !== "known") ||
       recentRestart;
-    const softDegraded = tradingLivenessDegraded || dataProvidersDegraded;
+    const marketOpen = typeof trading?.marketOpen === "boolean" ? trading.marketOpen : null;
+    // When the cash session is closed, ST marks quote/VIX providers degraded
+    // without that meaning the app is sick.  Keep the flag for the detail
+    // payload, but do not paint Peer App Health Degraded overnight.
+    const softDegraded =
+      tradingLivenessDegraded || (dataProvidersDegraded && marketOpen !== false);
     const degraded = hardDegraded || softDegraded;
     const result: SocraticInfrastructureSummary = {
       state: degraded ? "degraded" : "healthy",
@@ -398,7 +408,7 @@ export async function fetchSocraticInfrastructureSummary(): Promise<SocraticInfr
       activeTradingAccounts: boundedInteger(trading?.activeAccounts, 10_000),
       degradedTradingAccounts: boundedInteger(trading?.degraded, 10_000),
       tradingLivenessDegraded,
-      marketOpen: typeof trading?.marketOpen === "boolean" ? trading.marketOpen : null,
+      marketOpen,
       dataProvidersDegraded,
       dependencyCount: dependencyCount(checks.dependencies),
       failedDependencies,
