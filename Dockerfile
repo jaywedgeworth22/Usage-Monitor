@@ -12,7 +12,17 @@ RUN npm ci
 
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build && bash scripts/fetch-litestream.sh
+# FETCH_LITESTREAM_REQUIRED: this image runs with replication configured, so a
+# missing binary is a broken image, not a degraded one — start-with-litestream.sh
+# fails closed and the container crash-loops. Without this the fetch only warned,
+# so a transient CDN flake produced a green build and a deploy that could never
+# succeed (and stayed unfixable, because the bad image is cached against the
+# commit SHA). The explicit test after it guards against the fetch script ever
+# regaining a silent-skip path.
+RUN npm run build \
+  && FETCH_LITESTREAM_REQUIRED=true bash scripts/fetch-litestream.sh \
+  && test -x bin/litestream \
+  && ./bin/litestream version
 
 FROM node:24.14.1-bookworm-slim AS runtime
 
