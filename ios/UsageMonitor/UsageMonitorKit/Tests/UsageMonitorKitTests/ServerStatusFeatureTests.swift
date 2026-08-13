@@ -108,7 +108,7 @@ final class ServerStatusFeatureTests: XCTestCase {
         )
         XCTAssertEqual(
             layered.backupLayerChecks.map(\.name),
-            ["Local Backup", "B2 Backup", "R2 Historic"]
+            ["Local Backup", "B2 Backup", "R2 Weekly Archive"]
         )
         XCTAssertTrue(layered.backupLayerChecks.allSatisfy(\.ok))
         XCTAssertTrue(layered.backupLayerChecks.allSatisfy { !$0.gatesService })
@@ -116,9 +116,10 @@ final class ServerStatusFeatureTests: XCTestCase {
             layered.backupLayerChecks.first { $0.name == "Local Backup" }?.detail?
                 .contains("2 snapshots") == true
         )
-        let r2Detail = layered.backupLayerChecks.first { $0.name == "R2 Historic" }?.detail
-        XCTAssertTrue(r2Detail?.contains("weekly archive") == true)
+        let r2Detail = layered.backupLayerChecks.first { $0.name == "R2 Weekly Archive" }?.detail
+        XCTAssertTrue(r2Detail?.contains("latest") == true)
         XCTAssertFalse(r2Detail?.contains("weekly freeze") == true)
+        XCTAssertFalse(r2Detail?.contains("Historic") == true)
 
         let down = ServerStatusSnapshot(
             health: .init(ok: false, status: "fail"),
@@ -155,9 +156,9 @@ final class ServerStatusFeatureTests: XCTestCase {
             ),
             fetchedAt: Date()
         )
-        let row = snapshot.backupLayerChecks.first { $0.name == "R2 Historic" }
+        let row = snapshot.backupLayerChecks.first { $0.name == "R2 Weekly Archive" }
         XCTAssertEqual(row?.ok, false)
-        XCTAssertTrue(row?.detail?.contains("weekly archive not run") == true)
+        XCTAssertTrue(row?.detail?.contains("not run this week") == true)
         XCTAssertFalse(row?.detail?.contains("writes paused") == true)
         XCTAssertFalse(row?.detail?.contains("weekly freeze") == true)
     }
@@ -176,9 +177,9 @@ final class ServerStatusFeatureTests: XCTestCase {
             ),
             fetchedAt: Date()
         )
-        let row = snapshot.backupLayerChecks.first { $0.name == "R2 Historic" }
+        let row = snapshot.backupLayerChecks.first { $0.name == "R2 Weekly Archive" }
         XCTAssertEqual(row?.ok, false)
-        XCTAssertEqual(row?.detail, "weekly archive not run")
+        XCTAssertEqual(row?.detail, "not run this week")
     }
 
     func testR2HistoricStaleArchiveShowsLaggingDetail() {
@@ -205,7 +206,7 @@ final class ServerStatusFeatureTests: XCTestCase {
             ),
             fetchedAt: Date()
         )
-        let row = snapshot.backupLayerChecks.first { $0.name == "R2 Historic" }
+        let row = snapshot.backupLayerChecks.first { $0.name == "R2 Weekly Archive" }
         XCTAssertEqual(row?.ok, false)
         XCTAssertTrue(row?.detail?.contains("archive stale") == true)
     }

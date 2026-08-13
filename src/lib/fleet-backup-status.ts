@@ -425,10 +425,10 @@ function buildR2HistoricLocation(now: Date): FleetBackupLocationStatus {
   const r2 = layers.r2Historic;
   return {
     id: "r2-historic",
-    label: "R2 Historic",
+    label: "R2 Weekly Archive",
     ok: r2.ok,
     present: r2.configured,
-    latestAgeSeconds: null,
+    latestAgeSeconds: r2.weeklyArchive?.ageSeconds ?? null,
     bytes: null,
     fileCount: null,
     reason: r2.reason,
