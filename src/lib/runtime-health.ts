@@ -1000,20 +1000,23 @@ export function getR2WeeklyArchiveStatus(): R2WeeklyArchiveStatus | null {
       reason?: unknown;
     };
 
-    const stamp =
-      (typeof parsed.completedAt === "string" && parsed.completedAt) ||
-      (typeof parsed.checkedAt === "string" && parsed.checkedAt) ||
-      null;
-    const parsedAt = stamp ? Date.parse(stamp) : Number.NaN;
-    const ageSeconds = Number.isFinite(parsedAt)
-      ? Math.max(0, Math.round((Date.now() - parsedAt) / 1000))
+    const completedAt =
+      typeof parsed.completedAt === "string" ? parsed.completedAt : null;
+    const checkedAt =
+      typeof parsed.checkedAt === "string" ? parsed.checkedAt : null;
+    const lastSuccessMs = completedAt ? Date.parse(completedAt) : Number.NaN;
+    const lastSuccessAge = Number.isFinite(lastSuccessMs)
+      ? Math.max(0, Math.round((Date.now() - lastSuccessMs) / 1000))
       : null;
     const key = typeof parsed.key === "string" ? parsed.key : null;
 
     if (parsed.ok !== true) {
       return {
         ok: false,
-        ageSeconds,
+        // Last successful archive only.  A failed run writes checkedAt=now
+        // with no completedAt; publishing that as ageSeconds makes the UI
+        // say "Lagging · 1m" as if a fresh archive existed.
+        ageSeconds: lastSuccessAge,
         key,
         prunedCount: null,
         // A fixed reason code written by the archive job — never remote text.
@@ -1024,6 +1027,11 @@ export function getR2WeeklyArchiveStatus(): R2WeeklyArchiveStatus | null {
       };
     }
 
+    const stamp = completedAt || checkedAt;
+    const parsedAt = stamp ? Date.parse(stamp) : Number.NaN;
+    const ageSeconds = Number.isFinite(parsedAt)
+      ? Math.max(0, Math.round((Date.now() - parsedAt) / 1000))
+      : null;
     const stale = ageSeconds === null || ageSeconds > R2_ARCHIVE_MAX_AGE_SECONDS;
     return {
       ok: !stale,

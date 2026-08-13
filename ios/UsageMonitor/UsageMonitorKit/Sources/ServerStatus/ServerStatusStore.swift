@@ -90,7 +90,7 @@ struct ServerStatusSnapshot: Equatable, Sendable {
             }
             if let r2 = layers.r2Historic {
                 rows.append(.init(
-                    name: "R2 Historic",
+                    name: "R2 Weekly Archive",
                     ok: r2HistoricRowOk(r2),
                     gatesService: false,
                     detail: r2Detail(r2)
@@ -160,17 +160,18 @@ struct ServerStatusSnapshot: Equatable, Sendable {
         case "historic":
             if let archive = r2.weeklyArchive {
                 if archive.ok {
-                    parts.append("weekly archive")
                     if let age = archive.ageSeconds {
                         parts.append("latest \(UptimeFormat.string(fromSeconds: Int(age))) ago")
+                    } else {
+                        parts.append("verified this week")
                     }
                 } else if let reason = archive.reason, !reason.isEmpty {
                     parts.append(humanReason(reason))
                 } else {
-                    parts.append("weekly archive lagging")
+                    parts.append("lagging")
                 }
             } else {
-                parts.append("weekly archive not run")
+                parts.append("not run this week")
             }
         case "active": parts.append("still primary")
         case "unconfigured": parts.append("not monitored")
