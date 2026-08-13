@@ -8,6 +8,7 @@ import AddProviderModal, {
   validateGoogleIntegrationSubmission,
   withoutGoogleBillingConfig,
 } from "@/components/AddProviderModal";
+import { isMustKeepFundedOptionVisible } from "@/lib/provider-funding-policy";
 
 describe("AddProviderModal billing normalization", () => {
   const manualPlan: ProviderPlan = {
@@ -128,5 +129,12 @@ describe("AddProviderModal billing normalization", () => {
     expect(html).toContain("Next");
     expect(CLOUDFLARE_RESOURCE_PROBE_DISCLOSURE).toMatch(/metadata/i);
     expect(CLOUDFLARE_RESOURCE_PROBE_DISCLOSURE).toMatch(/do not affect billing/i);
+  });
+
+  it("hides Must stay funded for LLM/AI names and keeps it for other builtins", () => {
+    expect(isMustKeepFundedOptionVisible("openrouter")).toBe(false);
+    expect(isMustKeepFundedOptionVisible("anthropic")).toBe(false);
+    expect(isMustKeepFundedOptionVisible("twilio")).toBe(true);
+    expect(isMustKeepFundedOptionVisible("cloudflare")).toBe(true);
   });
 });

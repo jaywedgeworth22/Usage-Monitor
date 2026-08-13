@@ -1554,11 +1554,19 @@ export async function fetchR2UsageMetrics(
   return parseR2GraphqlUsage(payload);
 }
 
-// ── Fleet (3 Cloudflare accounts = 3 free tiers) ─────────────────────────────
-// Owner ops hub: show ST / CT / UM R2 free-tier side-by-side on the dashboard.
-// Kill-switch still only runs against THIS app's Jay/UM account via runR2UsageCheck.
+// ── Fleet (4 Cloudflare accounts = 4 free tiers) ─────────────────────────────
+// Owner ops hub: show UM / ST / CT / Old R2 free-tier side-by-side.
+// Kill-switch still only runs against THIS app's UM account via runR2UsageCheck.
+//
+// Account map (confirmed via GET /accounts on the fleet token):
+//   um  Usage.Jays.Services   R2_USAGE_* / CLOUDFLARE_JAY_* / CLOUDFLARE_ACCOUNT_ID
+//   st  SocraticTrade.com     CLOUDFLARE_ST_ACCOUNT_ID
+//   ct  Congress.Trade        CLOUDFLARE_CT_ACCOUNT_ID
+//   old jay (legacy)          CLOUDFLARE_OLD_ACCOUNT_ID
+// CLOUDFLARE_JAY_* is a historical alias for the UM account, not the "jay"
+// dashboard account. Do not point the UM slot at CLOUDFLARE_OLD_*.
 
-export type R2FleetAppId = "um" | "st" | "ct";
+export type R2FleetAppId = "um" | "st" | "ct" | "old";
 
 export interface R2FleetAccountConfig {
   id: R2FleetAppId;
@@ -1633,6 +1641,12 @@ const FLEET_SLOTS: Array<{
     accountEnv: ["CLOUDFLARE_CT_ACCOUNT_ID"],
     tokenEnv: ["CLOUDFLARE_FLEET_API_TOKEN", "CLOUDFLARE_CT_API_TOKEN"],
   },
+  {
+    id: "old",
+    label: "Jay (Old)",
+    accountEnv: ["CLOUDFLARE_OLD_ACCOUNT_ID"],
+    tokenEnv: ["CLOUDFLARE_FLEET_API_TOKEN", "CLOUDFLARE_OLD_API_TOKEN"],
+  },
 ];
 
 function firstEnv(
@@ -1647,7 +1661,7 @@ function firstEnv(
 }
 
 /**
- * Load any configured fleet account credentials (ST / CT / UM).
+ * Load any configured fleet account credentials (UM / ST / CT / Old).
  * Unset slots are skipped so a subset still works.
  */
 export function loadR2FleetAccounts(

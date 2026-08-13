@@ -1,4 +1,14 @@
-## Current (2026-08-13 MONET — CI and iOS ship never ran on bot-merged PRs)
+## Current (2026-08-13 GROK — hide LLM stay-funded + fourth CF account)
+
+Branch `grok/pickup-um-cf-accounts`, worktree `~/apps/usage-grok-pickup`.  Pickup after Monet/Claude quota cap.
+
+- LLM/AI providers no longer show "Must stay funded".  API still accepts a later re-enable.
+- Fourth Cloudflare fleet slot **Jay (Old)** (`CLOUDFLARE_OLD_ACCOUNT_ID`, fleet token).  Usage.Jays.Services / ST / CT were already wired.
+- Infisical UM prod now has `CLOUDFLARE_OLD_ACCOUNT_ID` (len 32).  No token minted.
+
+Rollout: `docs/rollouts/2026-08-13-pickup-stay-funded-and-cf-accounts.md`.
+
+## Prior (2026-08-13 MONET — CI and iOS ship never ran on bot-merged PRs)
 
 Branch `monet/ci-ship-trigger-bot-merge`.  A PR merged by `github-actions[bot]`
 lands on `main` and dispatches **zero** workflow runs — GitHub raises no workflow
