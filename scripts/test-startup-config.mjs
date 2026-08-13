@@ -62,6 +62,26 @@ try {
   if (/^\s*healthCheckPath:\s*\/api\/ready\s*$/m.test(renderSource)) {
     throw new Error("strict /api/ready must not be Render's restart trigger");
   }
+
+  // The production image runs with replication configured, so a missing
+  // bin/litestream is a broken image: the startup wrapper fails closed and the
+  // container crash-loops. fetch-litestream.sh only WARNS by default, which on
+  // 2026-08-13 turned a transient CDN flake into a green build and a deploy
+  // that could never succeed — and stayed unfixable, because the bad image is
+  // cached against the commit SHA. Keep the build fatal.
+  const dockerfileSource = readFileSync(join(repoRoot, "Dockerfile"), "utf8");
+  if (!/FETCH_LITESTREAM_REQUIRED=true\s+bash\s+scripts\/fetch-litestream\.sh/.test(dockerfileSource)) {
+    throw new Error(
+      "Dockerfile must run fetch-litestream.sh with FETCH_LITESTREAM_REQUIRED=true so a " +
+        "failed download fails the build instead of shipping an image that cannot start"
+    );
+  }
+  if (!/test -x bin\/litestream/.test(dockerfileSource)) {
+    throw new Error(
+      "Dockerfile must assert bin/litestream exists after fetching it, so a future " +
+        "silent-skip path in the fetch script cannot ship a replication-less image"
+    );
+  }
   const backupIndex = startupSource.indexOf(
     'node "${REPO_ROOT}/scripts/backup-sqlite-before-migrate.mjs"'
   );
