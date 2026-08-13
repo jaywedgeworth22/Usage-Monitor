@@ -1,20 +1,164 @@
 name: CI
 
+# The `schedule:` trigger is a BACKSTOP, not a second CI cadence. A PR merged
+# by github-actions[bot] (auto-merge armed with GITHUB_TOKEN) produces a push
+# to main that GitHub's recursion guard suppresses entirely, so the post-merge
+# squash sha on main is never verified. Measured fleet-wide 2026-08-13: bot
+# merges dispatched zero runs, human merges dispatched the full set.
+# `schedule:` events are NOT subject to that guard.
+#
+# The schedule-gate job below makes every other tick a ~10-second no-op, so the
+# normal case costs one short hosted job per hour and nothing else. The
+# root-cause fix is in .github/workflows/auto-merge-prs.yml (stop merging as
+# github-actions[bot]); this stays as defence in depth for any bot merge that
+# still slips through, e.g. Dependabot.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch: {}
+  schedule:
+    # Hourly, off the top of the hour (GitHub throttles :00 stampedes).
+    - cron: '41 * * * *'
 
+# Keyed on the event as well as the ref so the scheduled backstop and a real
+# push to main cannot cancel each other; push-vs-push and PR-vs-PR still
+# supersede exactly as before.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  # Cheap decision job. Every non-schedule event votes "run" immediately and CI
+  # behaves exactly as it always has. A scheduled tick asks the Actions API
+  # whether main's current HEAD was already VERIFIED -- meaning some other run
+  # of this workflow ran the `verify` job itself to success, not merely that a
+  # run for that sha concluded green (a gate-skipped tick concludes green while
+  # verifying nothing). A run already in flight also suppresses this tick.
+  #
+  # Fail-closed on purpose: any API error, empty response, or unparseable
+  # result votes RUN. A backstop that silently stops backstopping is worse than
+  # one that occasionally re-runs.
+  schedule-gate:
+    name: scheduled backstop gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether this run should proceed
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          if [ "$EVENT" != "schedule" ]; then
+            echo "should_run=1" >> "$GITHUB_OUTPUT"
+            echo "event=${EVENT}: normal CI, gate does not apply."
+            exit 0
+          fi
+
+          resp="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=100")" || resp=""
+          if [ -z "$resp" ]; then
+            echo "::warning::Could not read prior CI runs for ${SHA}; failing closed and running CI."
+            echo "should_run=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A run's own CONCLUSION is not proof that anything was verified.
+          # When this gate votes skip, every downstream job is `skipped`, and a
+          # workflow run whose jobs all skipped concludes as **success**. So a
+          # no-op scheduled tick looks identical to a real CI pass. Left
+          # unhandled that is self-latching: tick 1 sees a queued run and skips;
+          # that queued run then fails or is cancelled; tick 2 now counts tick
+          # 1's own no-op "success" as proof and skips forever, and the backstop
+          # silently stops backstopping -- the exact failure class this whole PR
+          # exists to fix. (Reported by the Codex reviewer on PR #1165.)
+          #
+          # So proof requires the VERIFICATION JOB itself to have succeeded, not
+          # merely the run wrapping it. in_progress/queued still short-circuit
+          # THIS tick (no point duplicating work already under way), and that is
+          # now safe precisely because such a tick no longer becomes proof for
+          # the next one.
+          active="$(printf '%s' "$resp" | jq -r --arg me "${GITHUB_RUN_ID}" '
+            [ .workflow_runs[]
+              | select((.id|tostring) != $me)
+              | select(.status == "in_progress" or .status == "queued")
+            ] | length')" || active=""
+          candidates="$(printf '%s' "$resp" | jq -r --arg me "${GITHUB_RUN_ID}" '
+            .workflow_runs[]
+            | select((.id|tostring) != $me)
+            | select(.conclusion == "success")
+            | .id')" || candidates=""
+          case "$active" in
+            ''|*[!0-9]*)
+              echo "::warning::Unparseable run list for ${SHA}; failing closed and running CI."
+              echo "should_run=1" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          verified=0
+          for run_id in $candidates; do
+            jobs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100")" || jobs=""
+            if [ -z "$jobs" ]; then
+              # Cannot tell what that run actually did. Fail closed: treat it as
+              # NOT proof, so at worst the backstop re-runs.
+              echo "could not read jobs for run ${run_id}; not counting it as proof."
+              continue
+            fi
+            hit="$(printf '%s' "$jobs" | jq -r --arg n "verify" '
+              [ .jobs[] | select(.name == $n) | select(.conclusion == "success") ] | length')" || hit=""
+            case "$hit" in
+              ''|*[!0-9]*) hit=0 ;;
+            esac
+            if [ "$hit" -gt 0 ]; then
+              echo "run ${run_id} genuinely ran verify to success."
+              verified=$((verified + 1))
+            else
+              echo "run ${run_id} concluded success but verify did not run (a skipped no-op); not proof."
+            fi
+          done
+
+          if [ "$verified" -gt 0 ] || [ "$active" -gt 0 ]; then
+            echo "should_run=0" >> "$GITHUB_OUTPUT"
+            echo "CI already verified (${verified}) or is running (${active}) for ${SHA}; backstop skips."
+          else
+            echo "should_run=1" >> "$GITHUB_OUTPUT"
+            echo "::warning::No CI run exists for main sha ${SHA} -- a bot merge dispatched nothing. Running the backstop."
+            {
+              echo "### CI backstop engaged"
+              echo
+              echo "main sha \`${SHA}\` had no CI run. That is the bot-merge dispatch"
+              echo "dropout; see \`.github/workflows/auto-merge-prs.yml\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # `verify` is a REQUIRED check and now `needs:` this job, so this step
+          # must never be the reason a PR cannot merge.
+          exit 0
+
   verify:
+    needs: [schedule-gate]
+    # `!cancelled()`, NOT the bare gate output. `needs:` alone would let a
+    # FAILED or timed-out schedule-gate job skip this one, and GitHub reports a
+    # skipped required check as SATISFIED -- so a gate outage would silently let
+    # a PR merge with the whole verify suite never having run. That is the exact
+    # inverse of what the backstop is for. Failing closed inside the step is not
+    # enough; the job-level condition has to fail closed too. `!= '0'` means an
+    # absent or unparseable output still RUNS; only an explicit "already
+    # verified" vote skips, and only on the scheduled path.
+    if: >-
+      !cancelled() &&
+      (github.event_name != 'schedule' ||
+      needs.schedule-gate.outputs.should_run != '0')
     # Self-hosted CI with automatic hosted fallback (fleet runner-offload).
     # Resolves to the runner label in the repo variable UM_CI_RUNNER when it is
     # set (e.g. usage-ci), otherwise to 'ubuntu-latest'. Dependabot PRs are
@@ -107,6 +251,20 @@ jobs:
 
       - name: Verify Apple projects
         run: npm run test:apple-projects
+
+      # ios-ship.yml now runs on a cron, and a cron carries no `paths:` filter.
+      # scripts/ios-scheduled-ship-gate.sh is the only thing keeping a
+      # backend-only commit from becoming a TestFlight build. It executes
+      # exclusively on the Mac runner, so a defect in it would otherwise be
+      # invisible until testers were spammed (or until an iOS change silently
+      # never shipped). Fully offline: throwaway git repos in a scratch dir.
+      - name: Test the scheduled iOS ship gate
+        run: |
+          bash -n scripts/ios-scheduled-ship-gate.sh
+          bash -n scripts/test-ios-scheduled-ship-gate.sh
+          bash -n scripts/ios-ship-testflight.sh
+          bash -n scripts/ios-ship-testflight-local.sh
+          bash scripts/test-ios-scheduled-ship-gate.sh
 
       # Replays a captured `agy -p "/usage"` envelope — the CLI itself is only
       # installed on the Mac that runs Antigravity, so this is the only place
