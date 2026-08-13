@@ -118,6 +118,8 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
             public var latestAgeSeconds: Double?
             public var latestSizeBytes: Int64?
             public var reason: String?
+            public var title: String?
+            public var detail: String?
 
             public init(
                 ok: Bool,
@@ -125,7 +127,9 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
                 count: Int? = nil,
                 latestAgeSeconds: Double? = nil,
                 latestSizeBytes: Int64? = nil,
-                reason: String? = nil
+                reason: String? = nil,
+                title: String? = nil,
+                detail: String? = nil
             ) {
                 self.ok = ok
                 self.present = present
@@ -133,6 +137,8 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
                 self.latestAgeSeconds = latestAgeSeconds
                 self.latestSizeBytes = latestSizeBytes
                 self.reason = reason
+                self.title = title
+                self.detail = detail
             }
         }
 
@@ -146,6 +152,8 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
             public var replicaOk: Bool?
             public var replicaAgeSeconds: Double?
             public var reason: String?
+            public var title: String?
+            public var detail: String?
 
             public init(
                 ok: Bool,
@@ -156,7 +164,9 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
                 envOnly: Bool? = nil,
                 replicaOk: Bool? = nil,
                 replicaAgeSeconds: Double? = nil,
-                reason: String? = nil
+                reason: String? = nil,
+                title: String? = nil,
+                detail: String? = nil
             ) {
                 self.ok = ok
                 self.target = target
@@ -167,6 +177,8 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
                 self.replicaOk = replicaOk
                 self.replicaAgeSeconds = replicaAgeSeconds
                 self.reason = reason
+                self.title = title
+                self.detail = detail
             }
         }
 
@@ -178,6 +190,8 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
             public var role: String?
             public var reason: String?
             public var weeklyArchive: WeeklyArchive?
+            public var title: String?
+            public var detail: String?
 
             public init(
                 ok: Bool,
@@ -186,7 +200,9 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
                 autoDisabled: Bool? = nil,
                 role: String? = nil,
                 reason: String? = nil,
-                weeklyArchive: WeeklyArchive? = nil
+                weeklyArchive: WeeklyArchive? = nil,
+                title: String? = nil,
+                detail: String? = nil
             ) {
                 self.ok = ok
                 self.configured = configured
@@ -195,6 +211,8 @@ public struct ServerReadiness: Codable, Hashable, Sendable {
                 self.role = role
                 self.reason = reason
                 self.weeklyArchive = weeklyArchive
+                self.title = title
+                self.detail = detail
             }
 
             /// Weekly verified snapshot written by `r2-weekly-archive.mjs`.

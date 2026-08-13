@@ -21,6 +21,8 @@ import {
   getLitestreamReplicaTarget,
   getR2HistoricBackupStatus,
   getR2WeeklyArchiveStatus,
+  presentR2HistoricLayer,
+  formatBackupAgeSeconds,
   getRuntimeIdentity,
   getSchedulerReadiness,
   getSchedulerRuntimeStatus,
@@ -527,6 +529,24 @@ describe("runtime health state", () => {
         reason: "archive_not_run",
         weeklyArchive: null,
       });
+    });
+
+    it("phones render server title/detail so copy can change without an iOS build", () => {
+      vi.stubEnv("LITESTREAM_S3_ENDPOINT", "https://s3.eu-central-003.backblazeb2.com");
+      vi.stubEnv("R2_USAGE_ACCOUNT_ID", "acct");
+      vi.stubEnv("R2_USAGE_API_TOKEN", "tok");
+      const path = writeArchiveStatus({
+        ok: true,
+        key: "weekly/prod-2026-08-12T00-00-00Z.db.gz",
+        completedAt: new Date(Date.now() - 3_600_000).toISOString(),
+      });
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", path);
+
+      const layers = getBackupLayersStatus();
+      expect(layers.r2Historic.title).toBe("R2 Weekly Archive");
+      expect(layers.r2Historic.detail).toMatch(/latest 1h ago/);
+      expect(presentR2HistoricLayer(layers.r2Historic).title).toBe("R2 Weekly Archive");
+      expect(formatBackupAgeSeconds(3600)).toBe("latest 1h ago");
     });
 
     it("a fresh weekly archive makes historic R2 ok", () => {

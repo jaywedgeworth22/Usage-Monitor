@@ -93,7 +93,7 @@ session or the expected `USAGE_READ_TOKEN` (falling back to
 | `GET /api/budget-status` | **Yes** | Primary data source. Bearer or dashboard session. Returns **503** for a non-session client when no read token is configured server-side. |
 | `GET /api/subscriptions` | **Yes** | Bearer- OR session-authorized. Collection GET only. |
 | `GET /api/health` | **Yes** (public) | No token. |
-| `GET /api/ready` | **Yes** (public) | No token. Per-IP rate limited (30/60s). Includes layered backup status (`checks.backupLayers`: local pre-migration, B2/primary Litestream, R2 historic) plus disk. |
+| `GET /api/ready` | **Yes** (public) | No token. Per-IP rate limited (30/60s). Includes layered backup status (`checks.backupLayers`: local, B2/primary, R2 weekly archive) plus disk. Each layer carries `title` + `detail` — the phone renders those strings so copy can change on a Coolify deploy without a new IPA. |
 | `GET /api/server-metrics` | **Yes** | Bearer or dashboard session. Hetzner host CPU/network/disk series + Coolify app inventory (`self` marks Usage Monitor). |
 | `GET /api/providers?view=dashboard` | **Session only** | Bounded native management inventory; secret values are not modeled client-side. |
 | `PUT /api/providers/{id}` | **Session only** | Native exposes active-state and full-plan-preserving budget edits. |

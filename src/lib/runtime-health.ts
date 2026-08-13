@@ -1125,21 +1125,105 @@ export function getR2HistoricBackupStatus(): R2HistoricBackupStatus {
   };
 }
 
+/** Operator-facing copy. Phones render these so a Coolify deploy can retitle a row. */
+export interface BackupLayerPresentation {
+  title: string;
+  detail: string | null;
+}
+
 export interface BackupLayersStatus {
-  local: LocalBackupRuntimeStatus;
+  local: LocalBackupRuntimeStatus & BackupLayerPresentation;
   /** Primary off-site Litestream replica (Backblaze B2 in production). */
   primary: BackupRuntimeStatus & {
     ok: boolean;
     target: LitestreamReplicaTarget;
     label: "b2" | "r2" | "offsite";
-  };
-  /** Historic Cloudflare R2 freeze / free-tier monitor. */
-  r2Historic: R2HistoricBackupStatus;
+  } & BackupLayerPresentation;
+  /** Cloudflare R2 weekly archive (not the live Litestream replica). */
+  r2Historic: R2HistoricBackupStatus & BackupLayerPresentation;
+}
+
+export function formatBackupAgeSeconds(seconds: number | null | undefined): string | null {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return null;
+  const s = Math.round(seconds);
+  if (s < 90) return `latest ${Math.max(1, s)}s ago`;
+  if (s < 3600) return `latest ${Math.round(s / 60)}m ago`;
+  if (s < 86_400) return `latest ${Math.round(s / 3600)}h ago`;
+  const days = Math.floor(s / 86_400);
+  const hours = Math.round((s % 86_400) / 3600);
+  return hours > 0 ? `latest ${days}d ${hours}h ago` : `latest ${days}d ago`;
+}
+
+export function presentLocalBackupLayer(
+  local: LocalBackupRuntimeStatus
+): BackupLayerPresentation {
+  const parts: string[] = [];
+  if (typeof local.count === "number") {
+    parts.push(local.count === 1 ? "1 snapshot" : `${local.count} snapshots`);
+  }
+  const age = formatBackupAgeSeconds(local.latestAgeSeconds);
+  if (age) parts.push(age);
+  if (!local.ok && local.reason) {
+    parts.push(local.reason.replace(/_/g, " "));
+  }
+  return { title: "Local Backup", detail: parts.length ? parts.join(" · ") : null };
+}
+
+export function presentPrimaryBackupLayer(
+  primary: BackupRuntimeStatus & {
+    label: "b2" | "r2" | "offsite";
+    ok?: boolean;
+    active?: boolean;
+    envOnly?: boolean;
+  }
+): BackupLayerPresentation {
+  const title =
+    primary.label === "b2"
+      ? "B2 Backup"
+      : primary.label === "r2"
+        ? "R2 Backup"
+        : "Off-Site Backup";
+  const parts: string[] = [];
+  if (primary.active === false) parts.push("inactive");
+  else {
+    const age = formatBackupAgeSeconds(primary.replicaAgeSeconds);
+    if (age) parts.push(age.replace(/^latest /, "replica ").replace(/ ago$/, " ago"));
+    else if (primary.envOnly === true) parts.push("env only");
+  }
+  if (primary.ok === false && primary.reason) {
+    parts.push(String(primary.reason).replace(/_/g, " "));
+  }
+  return { title, detail: parts.length ? parts.join(" · ") : null };
+}
+
+export function presentR2HistoricLayer(
+  r2: R2HistoricBackupStatus
+): BackupLayerPresentation {
+  const title = "R2 Weekly Archive";
+  const parts: string[] = [];
+  if (r2.role === "active") {
+    parts.push("still primary");
+    if (r2.autoDisabled) parts.push("writes paused");
+  } else if (r2.role === "unconfigured") {
+    parts.push("not monitored");
+  } else if (r2.weeklyArchive?.ok) {
+    const age = formatBackupAgeSeconds(r2.weeklyArchive.ageSeconds);
+    parts.push(age ?? "verified this week");
+  } else if (r2.weeklyArchive?.reason) {
+    parts.push(r2.weeklyArchive.reason.replace(/_/g, " "));
+  } else {
+    parts.push("not run this week");
+  }
+  if (!r2.ok && r2.reason && !parts.includes(r2.reason.replace(/_/g, " "))) {
+    parts.push(r2.reason.replace(/_/g, " "));
+  }
+  return { title, detail: parts.length ? parts.join(" · ") : null };
 }
 
 /**
  * Three-layer backup picture for Settings / operations UIs.
  * Does not gate readiness `ok` — same contract as `checks.backup`.
+ * `title` / `detail` are the phone-facing strings; change them here, not in iOS.
  */
 export function getBackupLayersStatus(now = new Date()): BackupLayersStatus {
   const primary = getBackupRuntimeStatus(now);
@@ -1149,15 +1233,21 @@ export function getBackupLayersStatus(now = new Date()): BackupLayersStatus {
     (primary.active &&
       primary.replicaOk !== false &&
       !(primary.envOnly && primary.verificationRequired));
+  const primaryLayer = {
+    ok: primaryHealthy,
+    target,
+    label: (target === "b2" ? "b2" : target === "r2" ? "r2" : "offsite") as
+      | "b2"
+      | "r2"
+      | "offsite",
+    ...primary,
+  };
+  const local = getLocalBackupRuntimeStatus(now);
+  const r2Historic = getR2HistoricBackupStatus();
   return {
-    local: getLocalBackupRuntimeStatus(now),
-    primary: {
-      ok: primaryHealthy,
-      target,
-      label: target === "b2" ? "b2" : target === "r2" ? "r2" : "offsite",
-      ...primary,
-    },
-    r2Historic: getR2HistoricBackupStatus(),
+    local: { ...local, ...presentLocalBackupLayer(local) },
+    primary: { ...primaryLayer, ...presentPrimaryBackupLayer(primaryLayer) },
+    r2Historic: { ...r2Historic, ...presentR2HistoricLayer(r2Historic) },
   };
 }
 
