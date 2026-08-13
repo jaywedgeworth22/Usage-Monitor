@@ -140,22 +140,30 @@ function readSecretsMap(secretsPath) {
 
 /** Refuse group/world-readable passphrase files; read and trim one trailing newline. */
 export function readPassphraseFile(passphrasePath) {
-  let stat;
+  // Stat and read through ONE file descriptor so the permission check and the
+  // read cannot be split by a path swap (TOCTOU).  A stat-then-read on the
+  // path would validate one file and read another.
+  let fd;
   try {
-    stat = fs.statSync(passphrasePath);
+    fd = fs.openSync(passphrasePath, "r");
   } catch {
     throw new CliError(`Cannot read passphrase file at ${passphrasePath}.`);
   }
-  if ((stat.mode & 0o077) !== 0) {
-    throw new CliError(
-      `Refusing to use ${passphrasePath}: it is group- or world-readable.  Run chmod 600 on it first.`
-    );
+  try {
+    const stat = fs.fstatSync(fd);
+    if ((stat.mode & 0o077) !== 0) {
+      throw new CliError(
+        `Refusing to use ${passphrasePath}: it is group- or world-readable.  Run chmod 600 on it first.`
+      );
+    }
+    const passphrase = fs.readFileSync(fd, "utf8").replace(/\r?\n$/, "");
+    if (passphrase === "") {
+      throw new CliError("Passphrase file is empty.");
+    }
+    return passphrase;
+  } finally {
+    fs.closeSync(fd);
   }
-  const passphrase = fs.readFileSync(passphrasePath, "utf8").replace(/\r?\n$/, "");
-  if (passphrase === "") {
-    throw new CliError("Passphrase file is empty.");
-  }
-  return passphrase;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +280,25 @@ function hasValue(map, name) {
  * Returns { status: "present", secret } | { status: "absent" | "partial", note }.
  * The returned note never contains a value.
  */
+/**
+ * Presence verdict for one provider from key NAMES alone.  `list` uses this
+ * instead of resolveProvider so no code path that touches secret values feeds
+ * the printed table — the same rules, evaluated over a Set of names.
+ */
+export function providerPresence(source, presentNames) {
+  if (source.compositeEnvs) {
+    const missing = source.compositeEnvs.filter((name) => !presentNames.has(name));
+    if (missing.length === source.compositeEnvs.length) return { status: "absent" };
+    if (missing.length > 0) return { status: "partial", note: `missing ${missing.join(", ")}` };
+    return { status: "present" };
+  }
+  if (!presentNames.has(source.apiKeyEnv)) return { status: "absent" };
+  if (source.teamIdEnv && !presentNames.has(source.teamIdEnv)) {
+    return { status: "partial", note: `${source.apiKeyEnv} is set but ${source.teamIdEnv} is missing` };
+  }
+  return { status: "present" };
+}
+
 export function resolveProvider(source, secretsMap) {
   if (source.compositeEnvs) {
     const missing = source.compositeEnvs.filter((name) => !hasValue(secretsMap, name));
@@ -305,14 +332,16 @@ export function resolveProvider(source, secretsMap) {
 
 function cmdList(args) {
   const secretsPath = args.get("--secrets-file") ?? DEFAULT_SECRETS_FILE;
-  const secretsMap = readSecretsMap(secretsPath);
+  // Names only: the values in the file are discarded at the parse boundary so
+  // nothing value-bearing can reach the console below.
+  const presentNames = new Set(readSecretsMap(secretsPath).keys());
   const rows = PROVIDER_SOURCES.map((source) => {
-    const resolved = resolveProvider(source, secretsMap);
+    const presence = providerPresence(source, presentNames);
     const status =
-      resolved.status === "present"
+      presence.status === "present"
         ? "Present"
-        : resolved.status === "partial"
-          ? `Partial (${resolved.note})`
+        : presence.status === "partial"
+          ? `Partial (${presence.note})`
           : "Absent";
     return { provider: source.provider, source: sourceLabel(source), status };
   });
@@ -387,6 +416,9 @@ function cmdBuild(args) {
   const secretsMap = readSecretsMap(secretsPath);
 
   const secrets = [];
+  // Names-only mirror of `secrets`, kept separate so the console summary below
+  // never reads from the objects that carry values.
+  const includedProviders = [];
   const skipped = [];
   const sources = requested
     ? PROVIDER_SOURCES.filter((source) => requested.includes(source.provider))
@@ -395,6 +427,7 @@ function cmdBuild(args) {
     const resolved = resolveProvider(source, secretsMap);
     if (resolved.status === "present") {
       secrets.push(resolved.secret);
+      includedProviders.push(source.provider);
     } else {
       skipped.push(`${source.provider} (${resolved.note})`);
     }
@@ -426,7 +459,7 @@ function cmdBuild(args) {
   }
 
   console.log("Local Keys Bundle Built");
-  console.log(`Included providers (${secrets.length}): ${secrets.map((s) => s.provider).join(", ")}`);
+  console.log(`Included providers (${includedProviders.length}): ${includedProviders.join(", ")}`);
   for (const note of skipped) {
     console.log(`Skipped: ${note}`);
   }
