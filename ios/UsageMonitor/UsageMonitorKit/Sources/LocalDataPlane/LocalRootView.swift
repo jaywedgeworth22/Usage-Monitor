@@ -260,6 +260,7 @@ public struct LocalRootView: View {
                 Section("Backup") {
                     LocalExportButton(model: model)
                     LocalImportButton(model: model)
+                    LocalKeysImportButton(model: model)
                     Text("Export/import providers, plans, fees, charges, and snapshots as JSON. Never includes API keys — re-enter keys after import.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

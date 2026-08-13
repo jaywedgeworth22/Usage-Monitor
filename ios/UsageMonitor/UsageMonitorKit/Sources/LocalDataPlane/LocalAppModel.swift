@@ -118,47 +118,21 @@ public final class LocalAppModel {
             throw LocalWriteError.conflict("Provider '\(entry.displayName)' is already added.")
         }
 
-        let trimmedKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let needsKey = entry.mode == .poll || (entry.mode == .keyPlusSubscription && !trimmedKey.isEmpty)
-        if entry.mode == .poll && trimmedKey.isEmpty {
-            throw LocalWriteError.validation("API key required for \(entry.displayName)")
-        }
-        if entry.adapterKind == "xai", (teamId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw LocalWriteError.validation("xAI requires Management API team id")
-        }
-        if entry.adapterKind == "twilio", (accountSid ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw LocalWriteError.validation("Twilio requires Account SID")
-        }
-
+        let credentials = try Self.validatedCredentials(
+            entry: entry,
+            apiKey: apiKey,
+            teamId: teamId,
+            accountSid: accountSid,
+            apiKeySid: apiKeySid
+        )
         var keychainAccountId: String?
-        if needsKey && !trimmedKey.isEmpty {
+        if let credentials {
             let accountId = UUID().uuidString
-            try secrets.save(
-                accountId: accountId,
-                credentials: ProviderCredentials(
-                    apiKey: trimmedKey,
-                    teamId: teamId?.trimmingCharacters(in: .whitespacesAndNewlines),
-                    accountSid: accountSid?.trimmingCharacters(in: .whitespacesAndNewlines),
-                    apiKeySid: apiKeySid?.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
-            )
+            try secrets.save(accountId: accountId, credentials: credentials)
             keychainAccountId = accountId
         }
 
-        // Prefer catalog-resolved kind (poll when phone can poll; else fee-only).
-        let resolvedKind = entry.isPhonePollable
-            ? entry.resolvedAdapterKind
-            : (entry.mode == .subscription ? "subscription_only" : entry.resolvedAdapterKind)
-        // If no phone poll yet, still store the product adapter kind when known so
-        // future poll ports activate without re-adding — but never pretend we can fetch.
-        let storeKind: String = {
-            if entry.isPhonePollable { return resolvedKind }
-            if entry.mode == .subscription { return "subscription_only" }
-            // keyPlus / server-only: keep slug for identity, mark non-pollable kinds as fee-only for fetch gates
-            return LocalProviderCatalogEntry.phonePollAdapterKinds.contains(entry.adapterKind)
-                ? entry.adapterKind
-                : "subscription_only"
-        }()
+        let storeKind = Self.storeAdapterKind(for: entry)
 
         var p = LocalProvider(
             name: name,
@@ -188,6 +162,101 @@ public final class LocalAppModel {
         }
 
         try await reload()
+    }
+
+    /// Single source of per-adapter credential rules for the Add form and the
+    /// key-bundle importer (xai needs teamId, twilio needs Account SID, poll
+    /// mode needs a key).  Returns nil when the entry takes no key (fee-only)
+    /// or none was provided.  Never includes secret values in errors.
+    private static func validatedCredentials(
+        entry: LocalProviderCatalogEntry,
+        apiKey: String?,
+        teamId: String?,
+        accountSid: String?,
+        apiKeySid: String?
+    ) throws -> ProviderCredentials? {
+        let trimmedKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if entry.mode == .poll && trimmedKey.isEmpty {
+            throw LocalWriteError.validation("API key required for \(entry.displayName)")
+        }
+        if entry.adapterKind == "xai", (teamId ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw LocalWriteError.validation("xAI requires Management API team id")
+        }
+        if entry.adapterKind == "twilio", (accountSid ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw LocalWriteError.validation("Twilio requires Account SID")
+        }
+        let needsKey = entry.mode == .poll || (entry.mode == .keyPlusSubscription && !trimmedKey.isEmpty)
+        guard needsKey, !trimmedKey.isEmpty else { return nil }
+        return ProviderCredentials(
+            apiKey: trimmedKey,
+            teamId: teamId?.trimmingCharacters(in: .whitespacesAndNewlines),
+            accountSid: accountSid?.trimmingCharacters(in: .whitespacesAndNewlines),
+            apiKeySid: apiKeySid?.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    /// Adapter kind to store for a catalog entry — catalog-resolved poll kind
+    /// when the phone can poll; fee-only otherwise.  If no phone poll yet,
+    /// still store the product adapter kind when known so future poll ports
+    /// activate without re-adding — but never pretend we can fetch.
+    private static func storeAdapterKind(for entry: LocalProviderCatalogEntry) -> String {
+        if entry.isPhonePollable { return entry.resolvedAdapterKind }
+        if entry.mode == .subscription { return "subscription_only" }
+        // keyPlus / server-only: keep slug for identity, mark non-pollable kinds as fee-only for fetch gates
+        return LocalProviderCatalogEntry.phonePollAdapterKinds.contains(entry.adapterKind)
+            ? entry.adapterKind
+            : "subscription_only"
+    }
+
+    /// Key-bundle import connect path.  Reuses the Add-provider rules
+    /// (validation, Keychain write, keychainAccountId linking, adapter-kind
+    /// resolution) so imported keys behave exactly like keys typed into the
+    /// Add form.  Existing credentials are replaced and the superseded
+    /// Keychain account is deleted — never orphaned.  Returns true when an
+    /// existing credential was replaced.
+    @discardableResult
+    public func connectImportedCredentials(
+        entry: LocalProviderCatalogEntry,
+        apiKey: String,
+        teamId: String? = nil,
+        accountSid: String? = nil,
+        apiKeySid: String? = nil
+    ) async throws -> Bool {
+        guard var provider = try await store.listProviders().first(where: { $0.name == entry.name }) else {
+            try await addFromCatalog(
+                entry: entry,
+                displayName: nil,
+                apiKey: apiKey,
+                monthlyBudgetUsd: nil,
+                subscriptionCostUsd: nil,
+                subscriptionName: nil,
+                teamId: teamId,
+                accountSid: accountSid,
+                apiKeySid: apiKeySid
+            )
+            return false
+        }
+        guard let credentials = try Self.validatedCredentials(
+            entry: entry,
+            apiKey: apiKey,
+            teamId: teamId,
+            accountSid: accountSid,
+            apiKeySid: apiKeySid
+        ) else {
+            throw LocalWriteError.validation("\(entry.displayName) does not take an API key on this phone")
+        }
+        let superseded = provider.keychainAccountId
+        let accountId = UUID().uuidString
+        try secrets.save(accountId: accountId, credentials: credentials)
+        provider.keychainAccountId = accountId
+        provider.adapterKind = Self.storeAdapterKind(for: entry)
+        provider.updatedAt = Date()
+        try await store.upsertProvider(provider)
+        if let superseded {
+            try? secrets.delete(accountId: superseded)
+        }
+        try await reload()
+        return superseded != nil
     }
 
     /// Insert every catalog provider not already present as **inactive $0 shells**,
