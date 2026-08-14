@@ -24,8 +24,9 @@ never reaching a phone.
 
 No upload from this Mac.  `/Applications/Xcode.app` is 26.6, but the host is
 macOS 27.0 beta (`BuildMachineOSBuild=26A5406e`).  Earlier App Store builds
-from this host were Invalid Binary.  Do not resubmit until a stable macOS
-(or Xcode Cloud) archive exists.
+from this host were Invalid Binary.  `ios-ship.yml` now skips upload when the
+host build ends in a letter-after-digits (beta).  Do not resubmit until a
+stable macOS (or Xcode Cloud) archive exists.
 
 #1167 (server-driven backup-row copy) is the Client IPA that should ride the
 next stable-host ship.

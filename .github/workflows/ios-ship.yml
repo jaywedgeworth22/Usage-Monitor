@@ -86,7 +86,8 @@ jobs:
             --repo-root "$GITHUB_WORKSPACE" \
             usage usage-local
 
-      - name: Assert stable Xcode 26 (never beta)
+      - name: Assert stable Xcode 26 and a non-beta host OS
+        id: host
         if: steps.gate.outputs.should_ship == '1'
         run: |
           echo "DEVELOPER_DIR=${DEVELOPER_DIR}"
@@ -99,14 +100,25 @@ jobs:
               exit 1
               ;;
           esac
+          # Apple stamps BuildMachineOSBuild into the IPA. A beta host
+          # (trailing letter after digits, e.g. 26A5406e) is Invalid Binary.
+          os=$(sw_vers -productVersion)
+          build=$(sw_vers -buildVersion)
+          echo "macOS ${os} (${build})"
+          if echo "$build" | grep -Eq '[0-9][a-z]$'; then
+            echo "ok=0" >> "$GITHUB_OUTPUT"
+            echo "::warning::macOS ${os} build ${build} is a beta host. Skipping upload (Invalid Binary)."
+            exit 0
+          fi
+          echo "ok=1" >> "$GITHUB_OUTPUT"
 
       # Via the in-repo wrappers rather than /Users/jay/apps/ios-fleet directly:
       # the wrappers pin DEVELOPER_DIR to stable Xcode and resolve --repo-root,
       # so the workflow cannot drift from what a local operator runs.
       - name: Ship UsageMonitor to TestFlight
-        if: steps.gate.outputs.ship_usage == '1'
+        if: steps.gate.outputs.ship_usage == '1' && steps.host.outputs.ok == '1'
         run: bash "$GITHUB_WORKSPACE/scripts/ios-ship-testflight.sh"
 
       - name: Ship LocalUsageMonitor to TestFlight
-        if: steps.gate.outputs.ship_usage_local == '1'
+        if: steps.gate.outputs.ship_usage_local == '1' && steps.host.outputs.ok == '1'
         run: bash "$GITHUB_WORKSPACE/scripts/ios-ship-testflight-local.sh"
