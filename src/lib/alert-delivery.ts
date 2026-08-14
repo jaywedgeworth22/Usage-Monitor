@@ -21,6 +21,7 @@ import {
   PROJECT_BUDGETS_PROVIDER_DISPLAY_NAME as PROJECT_ALERTS_PROVIDER_DISPLAY_NAME,
   PROJECT_BUDGETS_PROVIDER_NAME as PROJECT_ALERTS_PROVIDER_NAME,
 } from "@/lib/system-providers";
+import { formatAlertEmailHtml } from "@/lib/alert-email";
 
 export type AlertDeliveryChannel =
   | { kind: "slack"; url: string }
@@ -930,13 +931,12 @@ async function sendToChannelOnce(
         from: channel.from,
         to: channel.to,
         subject: `[${alert.severity.toUpperCase()}] Alert for ${provider.displayName || provider.name}`,
-        html: `
-          <h2>Usage Monitor Alert</h2>
-          <p><strong>Provider:</strong> ${provider.displayName || provider.name}</p>
-          <p><strong>Severity:</strong> ${alert.severity}</p>
-          <p><strong>Message:</strong> ${alert.message}</p>
-          <p><strong>Detected At:</strong> ${now.toISOString()}</p>
-        `,
+        html: formatAlertEmailHtml({
+          providerLabel: provider.displayName || provider.name,
+          severity: alert.severity,
+          message: alert.message,
+          detectedAtIso: now.toISOString(),
+        }),
       },
       fetchImpl,
       timeoutMs
