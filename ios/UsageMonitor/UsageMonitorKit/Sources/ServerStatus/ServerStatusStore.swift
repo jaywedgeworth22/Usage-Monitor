@@ -74,26 +74,26 @@ struct ServerStatusSnapshot: Equatable, Sendable {
             var rows: [DependencyCheck] = []
             if let local = layers.local {
                 rows.append(.init(
-                    name: "Local Backup",
+                    name: trimmedOrNil(local.title) ?? "Local Backup",
                     ok: local.ok,
                     gatesService: false,
-                    detail: localDetail(local)
+                    detail: trimmedOrNil(local.detail) ?? localDetail(local)
                 ))
             }
             if let primary = layers.primary {
                 rows.append(.init(
-                    name: primaryBackupName(primary),
+                    name: trimmedOrNil(primary.title) ?? primaryBackupName(primary),
                     ok: primary.ok,
                     gatesService: false,
-                    detail: primaryDetail(primary)
+                    detail: trimmedOrNil(primary.detail) ?? primaryDetail(primary)
                 ))
             }
             if let r2 = layers.r2Historic {
                 rows.append(.init(
-                    name: "R2 Weekly Archive",
+                    name: trimmedOrNil(r2.title) ?? "R2 Weekly Archive",
                     ok: r2HistoricRowOk(r2),
                     gatesService: false,
-                    detail: r2Detail(r2)
+                    detail: trimmedOrNil(r2.detail) ?? r2Detail(r2)
                 ))
             }
             if !rows.isEmpty { return rows }
@@ -194,6 +194,12 @@ struct ServerStatusSnapshot: Equatable, Sendable {
             }
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func trimmedOrNil(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func humanReason(_ reason: String) -> String {

@@ -121,6 +121,34 @@ final class ServerStatusFeatureTests: XCTestCase {
         XCTAssertFalse(r2Detail?.contains("weekly freeze") == true)
         XCTAssertFalse(r2Detail?.contains("Historic") == true)
 
+        let serverDriven = ServerStatusSnapshot(
+            health: .init(ok: true, status: "ok"),
+            readiness: .init(
+                ok: true,
+                status: "ready",
+                checks: .init(
+                    backupLayers: .init(
+                        r2Historic: .init(
+                            ok: true,
+                            configured: true,
+                            role: "historic",
+                            title: "R2 From Server",
+                            detail: "server wrote this"
+                        )
+                    )
+                )
+            ),
+            fetchedAt: Date()
+        )
+        XCTAssertEqual(
+            serverDriven.backupLayerChecks.first?.name,
+            "R2 From Server"
+        )
+        XCTAssertEqual(
+            serverDriven.backupLayerChecks.first?.detail,
+            "server wrote this"
+        )
+
         let down = ServerStatusSnapshot(
             health: .init(ok: false, status: "fail"),
             readiness: nil,
