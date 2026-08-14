@@ -466,12 +466,14 @@ public actor APIClient {
     public func registerApnsDeviceToken(
         deviceToken: String,
         deviceModel: String? = nil,
-        osVersion: String? = nil
+        osVersion: String? = nil,
+        environment: String? = nil
     ) async throws {
         struct RegisterPayload: Encodable {
             let deviceToken: String
             let deviceModel: String?
             let osVersion: String?
+            let environment: String?
         }
         struct RegisterResponse: Decodable {
             let ok: Bool
@@ -480,7 +482,12 @@ public actor APIClient {
             "/api/apns/device-tokens",
             method: .post,
             authorization: .session,
-            body: RegisterPayload(deviceToken: deviceToken, deviceModel: deviceModel, osVersion: osVersion)
+            body: RegisterPayload(
+                deviceToken: deviceToken,
+                deviceModel: deviceModel,
+                osVersion: osVersion,
+                environment: environment
+            )
         )
     }
 

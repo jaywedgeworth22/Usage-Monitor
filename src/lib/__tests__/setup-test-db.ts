@@ -405,6 +405,18 @@ CREATE TABLE "AppSetting" (
   "updatedAt" DATETIME NOT NULL
 );
 
+CREATE TABLE "ApnsDeviceToken" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "deviceToken" TEXT NOT NULL,
+  "deviceModel" TEXT,
+  "osVersion" TEXT,
+  "environment" TEXT NOT NULL DEFAULT 'production',
+  "isActive" BOOLEAN NOT NULL DEFAULT true,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL
+);
+CREATE UNIQUE INDEX "ApnsDeviceToken_deviceToken_key" ON "ApnsDeviceToken"("deviceToken");
+
 CREATE UNIQUE INDEX "ProviderPlan_providerId_key" ON "ProviderPlan"("providerId");
 CREATE UNIQUE INDEX "ProviderExternalBilling_providerId_source_externalId_key" ON "ProviderExternalBilling"("providerId", "source", "externalId");
 CREATE INDEX "ProviderExternalBilling_providerId_status_idx" ON "ProviderExternalBilling"("providerId", "status");

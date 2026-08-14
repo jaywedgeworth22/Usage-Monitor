@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readAlertDeliveryConfig } from "@/lib/alert-delivery";
+import { apnsConfigured, loadApnsConfig } from "@/lib/apns";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
 import { isUsageReadAuthorized, resolveUsageReadToken } from "@/lib/ingest-auth";
 import { prisma } from "@/lib/prisma";
@@ -37,6 +38,7 @@ export async function GET(request: NextRequest) {
       emailConfigured: hasEmail,
       slackConfigured: hasSlack,
       pagerdutyConfigured: hasPagerDuty,
+      apnsConfigured: apnsConfigured(loadApnsConfig()),
       activeApnsDeviceCount: apnsTokenCount,
       minSeverity: config.minSeverity,
       reminderHours: config.reminderHours,
@@ -87,6 +89,7 @@ export async function PUT(request: NextRequest) {
       notifications: {
         pushoverConfigured: updatedConfig.channels.some((c) => c.kind === "pushover"),
         emailConfigured: updatedConfig.channels.some((c) => c.kind === "email"),
+        apnsConfigured: updatedConfig.channels.some((c) => c.kind === "apns"),
         minSeverity: updatedConfig.minSeverity,
         activeApnsDeviceCount: apnsTokenCount,
       },

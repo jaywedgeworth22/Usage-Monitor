@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { setupPrismaSqliteTestDb } from "./setup-test-db";
 import { tryAcquireIngestAdmission } from "../ingest-admission";
 
@@ -2472,6 +2472,80 @@ describe("alert delivery", () => {
     expect(params.get("message")).toContain("low");
   });
 
+  it("fans budget alerts out over APNs with a mocked transport", async () => {
+    const privateKeyPem = generateKeyPairSync("ec", { namedCurve: "P-256" })
+      .privateKey.export({ type: "pkcs8", format: "pem" })
+      .toString();
+    const liveToken = "a".repeat(64);
+    const deadToken = "b".repeat(64);
+    await prisma.apnsDeviceToken.createMany({
+      data: [
+        { id: "apns-live", deviceToken: liveToken, environment: "production", isActive: true },
+        { id: "apns-dead", deviceToken: deadToken, environment: "sandbox", isActive: true },
+      ],
+    });
+
+    const provider = await prisma.provider.create({
+      data: {
+        name: "test_apns",
+        displayName: "Test APNs",
+        type: "builtin",
+      },
+    });
+    await prisma.providerPlan.create({
+      data: {
+        providerId: provider.id,
+        billingMode: "actual",
+        lowBalanceUsd: 10,
+      },
+    });
+    await prisma.usageSnapshot.create({
+      data: {
+        providerId: provider.id,
+        fetchedAt: new Date("2026-07-20T08:00:00.000Z"),
+        balance: 5,
+      },
+    });
+
+    const origins: string[] = [];
+    const first = await deliverProviderAlerts({
+      now: new Date("2026-07-20T12:00:00.000Z"),
+      config: {
+        channels: [
+          {
+            kind: "apns",
+            config: {
+              keyId: "KEY123456",
+              teamId: "CC8UTF7ATG",
+              bundleId: "services.jays.usage.client.monitor",
+              privateKeyPem,
+            },
+            transport: async (request) => {
+              origins.push(request.origin);
+              if (request.path.endsWith(deadToken)) {
+                return { status: 410, body: JSON.stringify({ reason: "Unregistered" }) };
+              }
+              return { status: 200, body: "" };
+            },
+          },
+        ],
+        minSeverity: "warning",
+        reminderHours: 24,
+      },
+    });
+
+    expect(first.sent).toBe(1);
+    expect(origins).toEqual([
+      "https://api.push.apple.com",
+      "https://api.sandbox.push.apple.com",
+    ]);
+    const remaining = await prisma.apnsDeviceToken.findMany({
+      where: { isActive: true },
+      select: { deviceToken: true },
+    });
+    expect(remaining.map((row) => row.deviceToken)).toEqual([liveToken]);
+  });
+
   it("retries an idempotent PagerDuty resolve after an unknown trigger and failed resolve", async () => {
     const provider = await prisma.provider.create({
       data: {
@@ -3456,6 +3530,24 @@ describe("S12: per-code severity overrides and channel routing (env parsing)", (
     expect(config.channels).toEqual([
       { kind: "pushover", userKey: "user-key-123", apiToken: "api-token-456" },
     ]);
+  });
+
+  it("adds an APNs channel when APNS_P8 and ids are present", () => {
+    const pem = generateKeyPairSync("ec", { namedCurve: "P-256" })
+      .privateKey.export({ type: "pkcs8", format: "pem" })
+      .toString();
+    const config = readAlertDeliveryConfig({
+      APNS_KEY_ID: "KEY123456",
+      APNS_TEAM_ID: "CC8UTF7ATG",
+      APNS_BUNDLE_ID: "services.jays.usage.client.monitor",
+      APNS_P8: pem,
+    } as unknown as NodeJS.ProcessEnv);
+    expect(config.channels).toHaveLength(1);
+    expect(config.channels[0]?.kind).toBe("apns");
+    if (config.channels[0]?.kind === "apns") {
+      expect(config.channels[0].config.keyId).toBe("KEY123456");
+      expect(config.channels[0].config.bundleId).toBe("services.jays.usage.client.monitor");
+    }
   });
 });
 
