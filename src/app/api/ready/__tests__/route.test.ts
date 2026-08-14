@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -174,18 +174,74 @@ describe("GET /api/ready", () => {
     });
 
     // Explicit verification opt-out still flips checks.backup.ok to true.
+    // Layer AND stays false here because this fixture has no local snapshots
+    // and no weekly R2 archive — gatesOverallOk is no longer hard-coded.
     vi.stubEnv("LITESTREAM_REPLICA_VERIFICATION_REQUIRED", "false");
     const optedOutResponse = await GET(
       new Request("https://usage.jays.services/api/ready?strict=1")
     );
     expect(optedOutResponse.status).toBe(200);
-    await expect(optedOutResponse.json()).resolves.toMatchObject({
+    const optedOutBody = await optedOutResponse.json();
+    expect(optedOutBody).toMatchObject({
       ok: true,
       status: "ready",
       checks: {
-        backup: { ok: true, gatesOverallOk: false, envOnly: true, verificationRequired: false },
+        backup: { ok: true, envOnly: true, verificationRequired: false },
       },
     });
+    expect(optedOutBody.checks.backup.gatesOverallOk).toBe(
+      Boolean(
+        optedOutBody.checks.backupLayers?.local?.ok &&
+          optedOutBody.checks.backupLayers?.primary?.ok &&
+          optedOutBody.checks.backupLayers?.r2Historic?.ok
+      )
+    );
+    expect(optedOutBody.ok).toBe(true);
+  });
+
+  it("reports gatesOverallOk true when every backup layer is healthy, without flipping ready ok", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "usage-monitor-ready-layers-"));
+    try {
+      const dbPath = join(dir, "prod.db");
+      writeFileSync(dbPath, "sqlite-placeholder\n");
+      const backupDir = join(dir, ".pre-migration-backups");
+      mkdirSync(backupDir, { recursive: true });
+      writeFileSync(join(backupDir, "prod.backup.db"), "backup-bytes\n");
+      const archivePath = join(dir, "archive.json");
+      writeFileSync(
+        archivePath,
+        JSON.stringify({
+          ok: true,
+          key: "weekly/prod-2026-08-14T00-00-00Z.db.gz",
+          completedAt: new Date().toISOString(),
+          prunedCount: 0,
+        })
+      );
+      vi.stubEnv("DATABASE_URL", `file:${dbPath}`);
+      vi.stubEnv("APP_STARTUP_WRAPPER", "start-with-litestream-v2");
+      vi.stubEnv("LITESTREAM_REQUIRED", "true");
+      vi.stubEnv("LITESTREAM_ACTIVE", "true");
+      vi.stubEnv("LITESTREAM_REPLICA_VERIFICATION_REQUIRED", "false");
+      vi.stubEnv(
+        "LITESTREAM_S3_ENDPOINT",
+        "https://s3.eu-central-003.backblazeb2.com"
+      );
+      vi.stubEnv("R2_USAGE_ACCOUNT_ID", "acct");
+      vi.stubEnv("R2_USAGE_API_TOKEN", "tok");
+      vi.stubEnv("R2_ARCHIVE_STATUS_PATH", archivePath);
+
+      const response = await GET(READY_REQUEST);
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.status).toBe("ready");
+      expect(body.checks.backupLayers.local.ok).toBe(true);
+      expect(body.checks.backupLayers.primary.ok).toBe(true);
+      expect(body.checks.backupLayers.r2Historic.ok).toBe(true);
+      expect(body.checks.backup.gatesOverallOk).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("exposes secret-free usage-read-token observability, never gating ok", async () => {

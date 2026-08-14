@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   captureDatabaseFileBaseline,
+  backupLayersGatesOk,
   getBackupLayersStatus,
   getBackupRuntimeStatus,
   getDatabaseFileStatus,
@@ -399,6 +400,90 @@ describe("runtime health state", () => {
     expect(layers.primary.label).toBe("b2");
     expect(layers.r2Historic.role).toBe("historic");
     expect(layers.local).toBeDefined();
+    expect(backupLayersGatesOk(layers)).toBe(
+      layers.local.ok && layers.primary.ok && layers.r2Historic.ok
+    );
+  });
+
+  it("backupLayersGatesOk is the AND of the three layer ok flags", () => {
+    expect(
+      backupLayersGatesOk({
+        local: {
+          ok: true,
+          present: true,
+          count: 1,
+          latestAgeSeconds: 1,
+          latestSizeBytes: 1,
+          reason: null,
+          title: "Local Backup",
+          detail: null,
+        },
+        primary: {
+          ok: true,
+          target: "b2",
+          label: "b2",
+          required: true,
+          active: true,
+          replicaOk: true,
+          replicaAgeSeconds: 12,
+          envOnly: false,
+          verificationRequired: false,
+          reason: null,
+          title: "B2",
+          detail: null,
+        },
+        r2Historic: {
+          configured: true,
+          litestreamUsesR2: false,
+          autoDisabled: false,
+          role: "historic",
+          ok: true,
+          reason: null,
+          weeklyArchive: null,
+          title: "R2 Historic",
+          detail: null,
+        },
+      })
+    ).toBe(true);
+    expect(
+      backupLayersGatesOk({
+        local: {
+          ok: true,
+          present: true,
+          count: 1,
+          latestAgeSeconds: 1,
+          latestSizeBytes: 1,
+          reason: null,
+          title: "Local Backup",
+          detail: null,
+        },
+        primary: {
+          ok: true,
+          target: "b2",
+          label: "b2",
+          required: true,
+          active: true,
+          replicaOk: true,
+          replicaAgeSeconds: 12,
+          envOnly: false,
+          verificationRequired: false,
+          reason: null,
+          title: "B2",
+          detail: null,
+        },
+        r2Historic: {
+          configured: true,
+          litestreamUsesR2: false,
+          autoDisabled: false,
+          role: "historic",
+          ok: false,
+          reason: "archive_not_run",
+          weeklyArchive: null,
+          title: "R2 Historic",
+          detail: "archive not run",
+        },
+      })
+    ).toBe(false);
   });
 
   describe("weekly R2 archive status", () => {
