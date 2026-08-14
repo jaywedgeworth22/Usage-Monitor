@@ -86,4 +86,29 @@ final class TabPreferencesTests: XCTestCase {
         XCTAssertEqual(AppTab(rawValue: "serverStatus"), .serverStatus)
         XCTAssertEqual(AppTab.serverStatus.title, "Server")
     }
+
+    func testMoreSheetDetentFitsEveryDestinationOnAPhone() {
+        // iPhone 16 logical height is 852.  Medium (~50%) is ~426 and clips
+        // Settings; the fitted detent must clear every row.
+        let phone: CGFloat = 852
+        let height = MoreSheetLayout.detentHeight(
+            tabCount: AppTab.allCases.count,
+            maxDetentValue: phone
+        )
+        let needed = MoreSheetLayout.chromeHeight
+            + MoreSheetLayout.rowHeight * CGFloat(AppTab.allCases.count)
+        XCTAssertEqual(AppTab.allCases.count, 7)
+        XCTAssertEqual(height, needed)
+        XCTAssertGreaterThan(height, phone * 0.5)
+        XCTAssertLessThanOrEqual(height, phone * MoreSheetLayout.maxScreenFraction)
+    }
+
+    func testMoreSheetDetentCapsAtEightyEightPercent() {
+        let shortPhone: CGFloat = 667
+        let height = MoreSheetLayout.detentHeight(
+            tabCount: AppTab.allCases.count,
+            maxDetentValue: shortPhone
+        )
+        XCTAssertEqual(height, shortPhone * MoreSheetLayout.maxScreenFraction)
+    }
 }

@@ -221,6 +221,9 @@ public struct RootView: View {
             let binding = selection
             environment.selectTab = { binding.wrappedValue = $0 }
             visited.insert(selected)
+            if ProcessInfo.processInfo.arguments.contains("-ScreenshotMore") {
+                moreSheetPresented = true
+            }
         }
         // External selection changes (deep links) must also mount the target.
         .onChange(of: selected) { _, tab in
@@ -356,6 +359,29 @@ private extension View {
 
 // MARK: - More sheet
 
+/// Sheet height for the More menu: tall enough for every destination row,
+/// never more than 88% of the available sheet height.  `.medium` is ~50%
+/// and clips Settings (and Dynamic Type) behind a scroll.
+enum MoreSheetLayout {
+    static let maxScreenFraction: CGFloat = 0.88
+    static let rowHeight: CGFloat = 68
+    static let chromeHeight: CGFloat = 200
+
+    static func detentHeight(tabCount: Int, maxDetentValue: CGFloat) -> CGFloat {
+        let needed = chromeHeight + rowHeight * CGFloat(max(tabCount, 1))
+        return min(needed, maxDetentValue * maxScreenFraction)
+    }
+}
+
+private struct MoreMenuDetent: CustomPresentationDetent {
+    static func height(in context: Context) -> CGFloat? {
+        MoreSheetLayout.detentHeight(
+            tabCount: AppTab.allCases.count,
+            maxDetentValue: context.maxDetentValue
+        )
+    }
+}
+
 /// Every destination, in canonical order, each with a pin toggle — the
 /// destination picker and the bar customizer are the same surface, exactly
 /// like the web console's More sheet. Tapping a row goes there; tapping the
@@ -387,7 +413,10 @@ struct MoreSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        // Fit the destination list (not the system .medium ~50% detent) and
+        // cap at 88% so every tab is on screen without covering the whole phone.
+        .presentationDetents([.custom(MoreMenuDetent.self), .large])
+        .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.visible)
         .presentationBackground(.thinMaterial)
     }
