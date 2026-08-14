@@ -6,7 +6,8 @@
  *   - B2 Litestream continuous LTX (when the app replicates there)
  *   - Local pre-migration / SQLite snapshots (Usage Monitor only, in-process)
  *   - Peer litestream age from public health when available (Socratic.Trade)
- *   - R2 historic freeze (Usage Monitor monitor only)
+ *   - Peer R2 weekly archive from public health (ST + CT; optional until peers ship)
+ *   - R2 historic freeze (Usage Monitor self, in-process)
  *
  * Never gates product readiness. Cached separately so B2 list traffic stays
  * bounded. Uses the read-only Backblaze monitor key (same as the B2 adapter).
@@ -376,9 +377,62 @@ async function inventoryPrefix(
   };
 }
 
-async function fetchPeerLitestreamAge(
+interface PeerR2WeeklyStatus {
+  /** null when the peer has not shipped the field (or health failed). */
+  ok: boolean | null;
+  present: boolean;
+  ageSeconds: number | null;
+  reason: string | null;
+}
+
+interface PeerStorageHealth {
+  litestreamAgeSeconds: number | null;
+  litestreamReason: string | null;
+  r2Weekly: PeerR2WeeklyStatus;
+}
+
+function missingPeerR2Weekly(reason: string): PeerR2WeeklyStatus {
+  return {
+    ok: null,
+    present: false,
+    ageSeconds: null,
+    reason,
+  };
+}
+
+function parsePeerR2Weekly(
+  storage: Record<string, unknown>
+): PeerR2WeeklyStatus {
+  if (!Object.prototype.hasOwnProperty.call(storage, "r2Weekly")) {
+    return missingPeerR2Weekly("peer_r2_weekly_missing");
+  }
+  const raw = storage.r2Weekly;
+  if (raw == null) {
+    return missingPeerR2Weekly("peer_r2_weekly_missing");
+  }
+  if (!isRecord(raw)) {
+    return missingPeerR2Weekly("peer_r2_weekly_invalid");
+  }
+  const ok = typeof raw.ok === "boolean" ? raw.ok : null;
+  const ageSeconds =
+    typeof raw.ageSeconds === "number" &&
+    Number.isFinite(raw.ageSeconds) &&
+    raw.ageSeconds >= 0
+      ? raw.ageSeconds
+      : null;
+  const reason = readText(raw.reason) ?? null;
+  return {
+    ok,
+    present: true,
+    ageSeconds,
+    reason,
+  };
+}
+
+/** One peer /api/health fetch: litestream age + optional R2 weekly archive. */
+async function fetchPeerStorageHealth(
   url: string
-): Promise<{ ageSeconds: number | null; reason: string | null }> {
+): Promise<PeerStorageHealth> {
   try {
     const response = await fetch(url, {
       signal: AbortSignal.timeout(8_000),
@@ -386,35 +440,76 @@ async function fetchPeerLitestreamAge(
       headers: { Accept: "application/json" },
     });
     if (!response.ok) {
-      return { ageSeconds: null, reason: `peer_health_http_${response.status}` };
+      const reason = `peer_health_http_${response.status}`;
+      return {
+        litestreamAgeSeconds: null,
+        litestreamReason: reason,
+        r2Weekly: missingPeerR2Weekly(reason),
+      };
     }
     const data = (await response.json()) as unknown;
     if (!isRecord(data)) {
-      return { ageSeconds: null, reason: "peer_health_invalid" };
+      return {
+        litestreamAgeSeconds: null,
+        litestreamReason: "peer_health_invalid",
+        r2Weekly: missingPeerR2Weekly("peer_health_invalid"),
+      };
     }
     const checks = isRecord(data.checks) ? data.checks : null;
     const storage = checks && isRecord(checks.storage) ? checks.storage : null;
     if (!storage) {
-      return { ageSeconds: null, reason: "peer_storage_missing" };
+      return {
+        litestreamAgeSeconds: null,
+        litestreamReason: "peer_storage_missing",
+        r2Weekly: missingPeerR2Weekly("peer_storage_missing"),
+      };
     }
+
+    let litestreamAgeSeconds: number | null = null;
+    let litestreamReason: string | null = null;
     const age = storage.litestreamAgeSeconds;
     if (typeof age === "number" && Number.isFinite(age) && age >= 0) {
-      return { ageSeconds: age, reason: null };
-    }
-    const lastSync = readText(storage.litestreamLastSyncAt);
-    if (lastSync) {
-      const ms = Date.parse(lastSync);
-      if (Number.isFinite(ms)) {
-        return {
-          ageSeconds: Math.max(0, (Date.now() - ms) / 1000),
-          reason: null,
-        };
+      litestreamAgeSeconds = age;
+    } else {
+      const lastSync = readText(storage.litestreamLastSyncAt);
+      if (lastSync) {
+        const ms = Date.parse(lastSync);
+        if (Number.isFinite(ms)) {
+          litestreamAgeSeconds = Math.max(0, (Date.now() - ms) / 1000);
+        }
+      }
+      if (litestreamAgeSeconds == null) {
+        litestreamReason = "peer_litestream_age_missing";
       }
     }
-    return { ageSeconds: null, reason: "peer_litestream_age_missing" };
+
+    return {
+      litestreamAgeSeconds,
+      litestreamReason,
+      r2Weekly: parsePeerR2Weekly(storage),
+    };
   } catch {
-    return { ageSeconds: null, reason: "peer_health_unreachable" };
+    return {
+      litestreamAgeSeconds: null,
+      litestreamReason: "peer_health_unreachable",
+      r2Weekly: missingPeerR2Weekly("peer_health_unreachable"),
+    };
   }
+}
+
+function buildPeerR2WeeklyLocation(
+  r2Weekly: PeerR2WeeklyStatus
+): FleetBackupLocationStatus {
+  return {
+    id: "r2-historic",
+    label: "R2 Weekly Archive",
+    ok: r2Weekly.ok,
+    present: r2Weekly.present,
+    latestAgeSeconds: r2Weekly.ageSeconds,
+    bytes: null,
+    fileCount: null,
+    reason: r2Weekly.reason,
+  };
 }
 
 function buildLocalLocation(
@@ -636,25 +731,27 @@ async function loadFresh(now: Date): Promise<FleetBackupStatusPayload> {
       locations.push(buildLocalLocation(now));
       locations.push(buildR2HistoricLocation(now));
     } else {
-      // Peer apps: peer health litestream + B2 LTX prefix when configured
+      // Peer apps: peer health litestream + B2 LTX + optional peer R2 weekly
+      let peerR2Weekly: PeerR2WeeklyStatus | null = null;
       if (spec.peerHealthUrl) {
-        const peer = await fetchPeerLitestreamAge(spec.peerHealthUrl);
+        const peer = await fetchPeerStorageHealth(spec.peerHealthUrl);
         const ok = locationOk(
-          peer.ageSeconds != null,
-          peer.ageSeconds,
+          peer.litestreamAgeSeconds != null,
+          peer.litestreamAgeSeconds,
           FLEET_LITESTREAM_MAX_AGE_SECONDS,
           false
         );
         locations.push({
           id: "peer-litestream",
           label: "Live Litestream",
-          ok: peer.ageSeconds != null ? ok : null,
-          present: peer.ageSeconds != null,
-          latestAgeSeconds: peer.ageSeconds,
+          ok: peer.litestreamAgeSeconds != null ? ok : null,
+          present: peer.litestreamAgeSeconds != null,
+          latestAgeSeconds: peer.litestreamAgeSeconds,
           bytes: null,
           fileCount: null,
-          reason: peer.reason,
+          reason: peer.litestreamReason,
         });
+        peerR2Weekly = peer.r2Weekly;
       }
 
       if (auth && spec.litestreamPrefix) {
@@ -714,6 +811,11 @@ async function loadFresh(now: Date): Promise<FleetBackupStatusPayload> {
           fileCount: null,
           reason: "not_configured",
         });
+      }
+
+      // Optional: do not require for summarizeApp off-site health.
+      if (peerR2Weekly) {
+        locations.push(buildPeerR2WeeklyLocation(peerR2Weekly));
       }
     }
 
