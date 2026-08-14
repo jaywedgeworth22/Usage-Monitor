@@ -9,6 +9,12 @@ delivering to iCloud (`mx01`/`mx02.mail.icloud.com`, SPF `include:icloud.com`).
 Email Routing stays enabled only so `receipts.jays.services` can keep its own
 Cloudflare MX.  The dashboard will show the apex as misconfigured; do **not**
 click Repair / Enable on apex DNS or iCloud stops receiving `*@jays.services`.
+
+Cloudflare exposes **one** Catch-all toggle, labeled on the apex domain page.
+Leave it pointed at this Worker — that is the `*@receipts.jays.services`
+catch-all (Cloudflare never receives apex mail).  Apex catch-all is Apple's
+**Allow All** switch under iCloud+ → Custom Email Domain → `jays.services`.
+See `docs/rollouts/2026-08-14-apex-icloud-receipts-routing.md`.
 The Worker stores each complete MIME message in a private R2 bucket and keeps a
 chronological, transactional review index in a Durable Object. It exposes only
 bounded, non-content metadata to Usage Monitor. This Worker never receives the

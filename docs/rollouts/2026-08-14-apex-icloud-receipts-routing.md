@@ -60,12 +60,41 @@ Worker is the MX split.
 - Put receipt intake on `*@jays.services`.  The Worker rejects apex
   recipients.
 
-## Owner check (Apple side)
+## Two catch-alls (apex iCloud + receipts Worker)
 
-iCloud Custom Email Domain only accepts local-parts you added under Apple ID →
-iCloud → Custom Email Domain, plus Catch All if that toggle is on.  Restore of
-MX does not create those addresses.  Turn Catch All on in iCloud if you want
-every unknown `*@jays.services` local-part in Mail.
+Cloudflare Email Routing allows **one** catch-all per zone.  The API rejects a
+second `type: all` rule (HTTP 409).  The dashboard therefore shows a single
+Catch-all control, and it is labeled on the apex domain page even when the
+apex MX is iCloud.
+
+That is a UI label, not where the mail goes:
+
+| Catch-all | Where it lives | Destination |
+| --- | --- | --- |
+| `*@jays.services` | iCloud Custom Email Domain | Apple Mail |
+| `*@receipts.jays.services` | the one Cloudflare Catch-all (`usage-monitor-receipts-catchall` → Worker) | `usage-monitor-receipt-inbox` |
+
+Cloudflare only receives `receipts.jays.services` (its MX).  Selecting
+`receipts.jays.services` in Email Routing lists the three literal addresses
+and hides the zone catch-all, so the receipts catch-all looks missing.  It
+is not: any unmatched `*@receipts.jays.services` address is what that
+zone catch-all is for.  The Worker already admits any local-part on that
+host.
+
+Do **not** retarget the Cloudflare catch-all to iCloud.  That would send
+receipt intake to Mail instead of the Worker.
+
+### Apex catch-all (owner, Apple)
+
+Unknown `*@jays.services` local-parts need Apple's own toggle, not Cloudflare:
+
+1. Open [icloud.com/icloudplus](https://www.icloud.com/icloudplus) and sign in.
+2. Select **Custom Email Domain**, then `jays.services`.
+3. Scroll down and turn on **Allow All**.
+
+Apple's steps: [Allow all incoming emails to a custom email domain](https://support.apple.com/guide/icloud/allow-all-incoming-emails-mm9e3ee0680f/icloud).
+If Allow All is off, iCloud only accepts addresses you created and bounces
+the rest.
 
 ## Verification
 
