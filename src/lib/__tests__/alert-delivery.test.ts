@@ -3443,6 +3443,20 @@ describe("S12: per-code severity overrides and channel routing (env parsing)", (
       { kind: "pushover", userKey: "user-key-123", apiToken: "api-token-456" },
     ]);
   });
+
+  it("drops Resend when Pushover is configured even if email env is present", () => {
+    const config = readAlertDeliveryConfig({
+      PUSHOVER_USER_KEY: "user-key-123",
+      PUSHOVER_USAGE_API_TOKEN: "api-token-456",
+      ALERT_RESEND_API_KEY: "re_123",
+      ALERT_EMAIL_FROM: "from@example.com",
+      ALERT_EMAIL_TO: "to@example.com",
+    } as unknown as NodeJS.ProcessEnv);
+
+    expect(config.channels).toEqual([
+      { kind: "pushover", userKey: "user-key-123", apiToken: "api-token-456" },
+    ]);
+  });
 });
 
 describe("S12: severity overrides drive delivery eligibility", () => {
