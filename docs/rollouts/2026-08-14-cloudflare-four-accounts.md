@@ -32,4 +32,6 @@ alone so a dashboard off-switch survives restarts.
 
 ## Verification
 
-Targeted vitest + `npx tsc --noEmit`.
+Targeted vitest + CI verify on #1187 (2m43s).  Live `d674904` at 2026-08-14T05:00Z:
+four ON Provider rows, first seed `created=4 updated=0 skipped=0`, scheduler
+`lastRun.total=26` (22+4) with `successes=4`.
