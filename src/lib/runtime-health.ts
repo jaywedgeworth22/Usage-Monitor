@@ -1251,6 +1251,11 @@ export function getBackupLayersStatus(now = new Date()): BackupLayersStatus {
   };
 }
 
+/** AND of the three layer `.ok` flags. Observability only — never part of ready `ok`. */
+export function backupLayersGatesOk(layers: BackupLayersStatus): boolean {
+  return layers.local.ok && layers.primary.ok && layers.r2Historic.ok;
+}
+
 export function resetRuntimeHealthForTests(): void {
   if (process.env.NODE_ENV !== "test") {
     throw new Error("Runtime health state can only be reset in tests");

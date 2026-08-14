@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter, getClientIp } from "@/lib/rate-limit";
 import {
+  backupLayersGatesOk,
   getBackupLayersStatus,
   getBackupRuntimeStatus,
   getDatabaseFileStatus,
@@ -351,9 +352,11 @@ export async function GET(request: Request) {
         ...scheduler,
       },
       // Observability only — never part of `ok` (see backupHealthy comment above).
+      // gatesOverallOk is the AND of local + primary + historic layer gates so
+      // Settings/iOS stop painting a hard-coded failure when every layer is green.
       backup: {
         ok: backupHealthy,
-        gatesOverallOk: false,
+        gatesOverallOk: backupLayersGatesOk(backupLayers),
         ...backup,
       },
       // Layered backup picture for Settings/ops UIs: local pre-migration
