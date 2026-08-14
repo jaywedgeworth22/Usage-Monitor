@@ -1,4 +1,11 @@
-## Current (2026-08-13 GROK — hide LLM stay-funded + fourth CF account)
+## Current (2026-08-14 GROK — four Cloudflare provider rows)
+
+Live Provider table had **zero** cloudflare rows.  Boot now seeds four builtin
+accounts: Usage.Jays.Services, Socratic.Trade, Congress.Trade, Jay Old.
+Usage.Jays.Services uses `CLOUDFLARE_JAY_*` first (not ST/CT/Old).  Fleet token
+is the fallback.  Adapter routes `cloudflare-*`.  mustKeepFunded stays owner-owned.
+
+## Prior (2026-08-13 GROK — hide LLM stay-funded + fourth CF account)
 
 Branch `grok/pickup-um-cf-accounts`, worktree `~/apps/usage-grok-pickup`.  Pickup after Monet/Claude quota cap.
 

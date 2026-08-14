@@ -73,6 +73,15 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(ct?.apiToken).toBe("fleet-token");
   });
 
+  it("uses the Usage.Jays.Services token before the fleet token", () => {
+    process.env.R2_USAGE_ACCOUNT_ID = "acct-um";
+    process.env.CLOUDFLARE_JAY_API_TOKEN = "ujs-own-token";
+    process.env.CLOUDFLARE_FLEET_API_TOKEN = "fleet-token";
+    const accounts = loadR2FleetAccounts(process.env);
+    const um = accounts.find((a) => a.id === "um");
+    expect(um?.apiToken).toBe("ujs-own-token");
+  });
+
   it("calculates linear month pace projection accurately for ops (absolute_or_pace)", () => {
     const testDate = new Date("2026-07-15T12:00:00.000Z");
     const limit = 1_000_000;

@@ -1623,9 +1623,9 @@ const FLEET_SLOTS: Array<{
     label: "Usage Monitor",
     accountEnv: ["R2_USAGE_ACCOUNT_ID", "CLOUDFLARE_JAY_ACCOUNT_ID", "CLOUDFLARE_ACCOUNT_ID"],
     tokenEnv: [
-      "CLOUDFLARE_FLEET_API_TOKEN",
-      "R2_USAGE_API_TOKEN",
       "CLOUDFLARE_JAY_API_TOKEN",
+      "R2_USAGE_API_TOKEN",
+      "CLOUDFLARE_FLEET_API_TOKEN",
       "CLOUDFLARE_API_TOKEN",
     ],
   },
