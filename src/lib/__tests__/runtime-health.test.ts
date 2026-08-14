@@ -408,7 +408,16 @@ describe("runtime health state", () => {
   it("backupLayersGatesOk is the AND of the three layer ok flags", () => {
     expect(
       backupLayersGatesOk({
-        local: { ok: true, present: true, count: 1, latestAgeSeconds: 1, latestSizeBytes: 1, reason: null },
+        local: {
+          ok: true,
+          present: true,
+          count: 1,
+          latestAgeSeconds: 1,
+          latestSizeBytes: 1,
+          reason: null,
+          title: "Local Backup",
+          detail: null,
+        },
         primary: {
           ok: true,
           target: "b2",
@@ -420,6 +429,8 @@ describe("runtime health state", () => {
           envOnly: false,
           verificationRequired: false,
           reason: null,
+          title: "B2",
+          detail: null,
         },
         r2Historic: {
           configured: true,
@@ -429,12 +440,23 @@ describe("runtime health state", () => {
           ok: true,
           reason: null,
           weeklyArchive: null,
+          title: "R2 Historic",
+          detail: null,
         },
       })
     ).toBe(true);
     expect(
       backupLayersGatesOk({
-        local: { ok: true, present: true, count: 1, latestAgeSeconds: 1, latestSizeBytes: 1, reason: null },
+        local: {
+          ok: true,
+          present: true,
+          count: 1,
+          latestAgeSeconds: 1,
+          latestSizeBytes: 1,
+          reason: null,
+          title: "Local Backup",
+          detail: null,
+        },
         primary: {
           ok: true,
           target: "b2",
@@ -446,6 +468,8 @@ describe("runtime health state", () => {
           envOnly: false,
           verificationRequired: false,
           reason: null,
+          title: "B2",
+          detail: null,
         },
         r2Historic: {
           configured: true,
@@ -455,6 +479,8 @@ describe("runtime health state", () => {
           ok: false,
           reason: "archive_not_run",
           weeklyArchive: null,
+          title: "R2 Historic",
+          detail: "archive not run",
         },
       })
     ).toBe(false);
