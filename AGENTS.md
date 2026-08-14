@@ -324,6 +324,7 @@ The Infisical project `usage-monitor` (ID: `86e35e51-91bc-4dfd-a045-4484726b9c40
 - `node scripts/infisical-run.mjs --check` verifies project secret access.
 - `node scripts/infisical-run.mjs -- npm run start` runs the application with Infisical secrets.
 - `src/lib/infisical-provider-sync.ts` supports the `"um"` scope (`86e35e51-91bc-4dfd-a045-4484726b9c40`) and falls back to `INFISICAL_AUTOMATION_CLIENT_ID` / `INFISICAL_AUTOMATION_CLIENT_SECRET` when scope-specific client credentials are omitted.
+- `bash scripts/cf-token-map.sh` (after `set -a; . ~/.secrets/global-api-keys; set +a`) prints which Cloudflare token *names* in UM Infisical can see which CF accounts.  Never prints a token value.  Use this before picking `CLOUDFLARE_*_API_TOKEN` / `R2_USAGE_API_TOKEN`.  Intended slots: fleet = all four accounts; JAY/R2_USAGE = Usage.Jays.Services; ST = Socratic.Trade; CT = Congress.Trade; OLD = Jay Old (often absent — fleet fallback).  Live 2026-08-14: fleet/CT/legacy/`R2_USAGE` share one token (all four accounts); JAY is a distinct all-accounts token; ST is scoped to SocraticTrade.com only.  Re-run the script; do not assume names stay distinct.
 
 `SQLITE_PRE_MIGRATION_BACKUP_RETENTION` controls how many verified local SQLite
 Online Backup API snapshots are retained beside the production DB (default `3`,
