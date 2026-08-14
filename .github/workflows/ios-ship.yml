@@ -31,7 +31,7 @@ name: iOS TestFlight ship (Mac runner)
 #      spammed; this is the guard that prevents it. It decides per app, so a
 #      caught-up app is not re-shipped alongside a behind one.
 #   2. The fleet ship script then rate-limits successful uploads to one per app
-#      per DEFAULT_MIN_INTERVAL_SEC=9000 seconds (2.5 hours) and independently
+#      per DEFAULT_MIN_INTERVAL_SEC=3600 seconds (1 hour) and independently
 #      skips when git HEAD already shipped. Those runs print "ship-gate: skip"
 #      and exit 0. Neither kind of skip consumes a build number.
 
