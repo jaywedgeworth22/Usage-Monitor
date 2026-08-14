@@ -51,6 +51,31 @@ interface PricingSnapshot {
 
 const CATALOG = (snapshot as PricingSnapshot).pricing;
 
+/** Live OpenRouter Gemini 3.7 rates (2026-08-14).  The LiteLLM snapshot dump
+ *  is not rewritten; these keys are what ingest derivation actually looks up. */
+const RUNTIME_PRICING_OVERRIDES: Record<string, ModelPricingEntry> = {
+  "gemini-3.7-flash": {
+    input_cost_per_token: 3.75e-7,
+    output_cost_per_token: 1.875e-6,
+    cache_read_input_token_cost: 3.75e-8,
+    cache_creation_input_token_cost: 2.08333333333333e-8,
+    litellm_provider: "gemini",
+    mode: "chat",
+  },
+  "gemini-3.7-flash:batch": {
+    input_cost_per_token: 1.875e-7,
+    output_cost_per_token: 9.375e-7,
+    cache_read_input_token_cost: 1.875e-8,
+    cache_creation_input_token_cost: 2.08333333333333e-8,
+    litellm_provider: "gemini",
+    mode: "chat",
+  },
+};
+
+function catalogEntry(key: string): ModelPricingEntry | undefined {
+  return RUNTIME_PRICING_OVERRIDES[key] ?? CATALOG[key];
+}
+
 /** Provenance of the bundled catalog — surfaced in API responses and UI so a
  * derived cost can always be traced to an exact upstream pricing revision. */
 export const PRICING_SNAPSHOT_META = (snapshot as PricingSnapshot).meta;
@@ -119,29 +144,29 @@ export function resolvePricingKey(model: string): string | null {
 function resolvePricingKeyUncached(model: string): string | null {
   const trimmed = model.trim();
   if (!trimmed) return null;
-  if (CATALOG[trimmed]) return trimmed;
+  if (catalogEntry(trimmed)) return trimmed;
 
   const lower = trimmed.toLowerCase();
-  if (CATALOG[lower]) return lower;
+  if (catalogEntry(lower)) return lower;
 
   if (trimmed.includes("/")) {
     const segments = trimmed.split("/");
     for (let i = 1; i < segments.length; i++) {
       const remainder = segments.slice(i).join("/");
-      if (CATALOG[remainder]) return remainder;
+      if (catalogEntry(remainder)) return remainder;
       const remainderLower = remainder.toLowerCase();
-      if (CATALOG[remainderLower]) return remainderLower;
+      if (catalogEntry(remainderLower)) return remainderLower;
       // Also try stripping just recognized provider segments even when
       // intermediate segments remain (e.g. "openrouter/anthropic/X" -> "X").
       const withoutProviders = segments
         .filter((s) => !PROVIDER_PREFIXES.includes(s.toLowerCase()))
         .join("/");
-      if (withoutProviders && CATALOG[withoutProviders]) return withoutProviders;
+      if (withoutProviders && catalogEntry(withoutProviders)) return withoutProviders;
     }
   }
 
   let best: string | null = null;
-  for (const key of Object.keys(CATALOG)) {
+  for (const key of [...Object.keys(RUNTIME_PRICING_OVERRIDES), ...Object.keys(CATALOG)]) {
     if (key.length < 8 || key.includes("/")) continue;
     if (
       lower.startsWith(`${key.toLowerCase()}-`) &&
@@ -160,7 +185,9 @@ export function getModelPricing(model: string): {
 } | null {
   const key = resolvePricingKey(model);
   if (!key) return null;
-  return { key, pricing: CATALOG[key] };
+  const pricing = catalogEntry(key);
+  if (!pricing) return null;
+  return { key, pricing };
 }
 
 function pickRate(
