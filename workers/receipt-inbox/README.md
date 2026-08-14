@@ -5,7 +5,10 @@ subdomain `receipts.jays.services` (for example `receipts@receipts.jays.services
 or a high-entropy `rcpt-…@receipts.jays.services`). Cloudflare Email Routing
 should deliver that subdomain to this Worker (catch-all or explicit rules).
 Do **not** onboard or change the apex `jays.services` MX records: they continue
-delivering to iCloud.
+delivering to iCloud (`mx01`/`mx02.mail.icloud.com`, SPF `include:icloud.com`).
+Email Routing stays enabled only so `receipts.jays.services` can keep its own
+Cloudflare MX.  The dashboard will show the apex as misconfigured; do **not**
+click Repair / Enable on apex DNS or iCloud stops receiving `*@jays.services`.
 The Worker stores each complete MIME message in a private R2 bucket and keeps a
 chronological, transactional review index in a Durable Object. It exposes only
 bounded, non-content metadata to Usage Monitor. This Worker never receives the
