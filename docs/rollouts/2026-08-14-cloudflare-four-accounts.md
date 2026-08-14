@@ -19,6 +19,10 @@ Boot now seeds four builtin rows:
 
 `mustKeepFunded` is not touched.  Retired kimi/oracle rows are not touched.
 
+Existing rows are never force-activated.  The first missing-row pass creates
+them; later ticks refresh account id / display name only and leave `isActive`
+alone so a dashboard off-switch survives restarts.
+
 ## Files
 
 - `src/lib/ensure-cloudflare-fleet-providers.ts`

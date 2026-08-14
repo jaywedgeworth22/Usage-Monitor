@@ -125,15 +125,35 @@ describe("ensureCloudflareFleetProvidersSeeded", () => {
     expect(decrypt(old.apiKey!)).toBe("fleet-token");
   });
 
-  it("does not duplicate and reactivates a row the operator turned off", async () => {
+  it("does not duplicate and leaves a row the operator turned off", async () => {
     Object.assign(process.env, SLOT_ENV);
     await ensureCloudflareFleetProvidersSeeded();
     await prisma.provider.updateMany({ data: { isActive: false } });
     const second = await ensureCloudflareFleetProvidersSeeded();
-    expect(second).toEqual({ created: 0, updated: 4, skipped: 0 });
+    expect(second).toEqual({ created: 0, updated: 0, skipped: 4 });
     const rows = await prisma.provider.findMany();
     expect(rows).toHaveLength(4);
-    expect(rows.every((r) => r.isActive)).toBe(true);
+    expect(rows.every((r) => r.isActive)).toBe(false);
+  });
+
+  it("leaves a deliberately re-enabled row active across repeated seeds", async () => {
+    Object.assign(process.env, SLOT_ENV);
+    await ensureCloudflareFleetProvidersSeeded();
+    await prisma.provider.updateMany({ data: { isActive: false } });
+    await prisma.provider.updateMany({
+      where: { name: "cloudflare-usage-jays" },
+      data: { isActive: true },
+    });
+    await ensureCloudflareFleetProvidersSeeded();
+    await ensureCloudflareFleetProvidersSeeded();
+    const ujs = await prisma.provider.findFirst({
+      where: { name: "cloudflare-usage-jays" },
+    });
+    const others = await prisma.provider.findMany({
+      where: { NOT: { name: "cloudflare-usage-jays" } },
+    });
+    expect(ujs?.isActive).toBe(true);
+    expect(others.every((r) => r.isActive === false)).toBe(true);
   });
 
   it("skips slots that lack an account id or token", async () => {
