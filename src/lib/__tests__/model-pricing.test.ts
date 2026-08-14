@@ -31,6 +31,18 @@ describe("resolvePricingKey", () => {
     expect(resolvePricingKey("")).toBeNull();
   });
 
+  it("prices current Gemini 3.7 Flash without rewriting the LiteLLM snapshot", () => {
+    expect(resolvePricingKey("gemini-3.7-flash")).toBe("gemini-3.7-flash");
+    expect(resolvePricingKey("google/gemini-3.7-flash")).toBe("gemini-3.7-flash");
+    expect(resolvePricingKey("google/gemini-3.7-flash:batch")).toBe("gemini-3.7-flash:batch");
+    const interactive = getModelPricing("google/gemini-3.7-flash");
+    const batch = getModelPricing("google/gemini-3.7-flash:batch");
+    expect(interactive?.pricing.input_cost_per_token).toBeCloseTo(3.75e-7, 12);
+    expect(interactive?.pricing.output_cost_per_token).toBeCloseTo(1.875e-6, 12);
+    expect(batch?.pricing.input_cost_per_token).toBeCloseTo(1.875e-7, 12);
+    expect(batch?.pricing.output_cost_per_token).toBeCloseTo(9.375e-7, 12);
+  });
+
   it("caches lookups without changing results", () => {
     const first = resolvePricingKey("gpt-4o");
     const second = resolvePricingKey("gpt-4o");

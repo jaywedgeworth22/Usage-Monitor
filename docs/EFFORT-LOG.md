@@ -1,3 +1,4 @@
+- **[Usage-Monitor][GROK] Price Gemini 3.7 Flash for cost derivation — IN PROGRESS 2026-08-14 (branch `grok/gemini-3-7-flash`, worktree `~/apps/usage-grok-gemini-37`).**  Runtime lookup override for `gemini-3.7-flash` / `:batch`.  LiteLLM snapshot dump left alone.
 - **[Usage-Monitor][GROK] Prefer Pushover over Resend for alerts — IN PR 2026-08-13 (branch `grok/litestream-fix-and-pushover`).** Skip email when Pushover is configured.  Keep `(sent by Usage Monitor)` on remaining mail.
 - **[Usage-Monitor][GROK] Alert email sign-off (sent by Usage Monitor) — MERGED 2026-08-13 #1171.** Resend HTML now ends with `(sent by Usage Monitor)`.
 - **[Usage-Monitor][GROK] Peer App Health last-resort FilingAPI 401 — IN PROGRESS 2026-08-13 (branch `grok/peer-health-last-resort`).** ST env FILINGAPI 401s (35/35).  Last-resort scarce; drop from hard failedDependencies so the card matches a healthy ST process.
