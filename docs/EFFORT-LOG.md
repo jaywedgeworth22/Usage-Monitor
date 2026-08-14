@@ -1,3 +1,4 @@
+- **[Usage-Monitor][GROK] iOS agent build-loop policy — IN PROGRESS 2026-08-13 (branch `grok/ios-agent-rules`, worktree `~/apps/usage-grok-ios-rules`).** Docs/hooks only: `ios/CLAUDE.md`, AGENTS stanza, Claude pbxproj write-block. xcodebuild via bash is pre-approved; do not stand up Xcode MCP.
 - **[Usage-Monitor][GROK] Prefer Pushover over Resend for alerts — IN PR 2026-08-13 (branch `grok/litestream-fix-and-pushover`).** Skip email when Pushover is configured.  Keep `(sent by Usage Monitor)` on remaining mail.
 - **[Usage-Monitor][GROK] Alert email sign-off (sent by Usage Monitor) — MERGED 2026-08-13 #1171.** Resend HTML now ends with `(sent by Usage Monitor)`.
 - **[Usage-Monitor][GROK] Peer App Health last-resort FilingAPI 401 — IN PROGRESS 2026-08-13 (branch `grok/peer-health-last-resort`).** ST env FILINGAPI 401s (35/35).  Last-resort scarce; drop from hard failedDependencies so the card matches a healthy ST process.
