@@ -1187,7 +1187,7 @@ export function presentPrimaryBackupLayer(
   if (primary.active === false) parts.push("inactive");
   else {
     const age = formatBackupAgeSeconds(primary.replicaAgeSeconds);
-    if (age) parts.push(age.replace(/^latest /, "replica ").replace(/ ago$/, " ago"));
+    if (age) parts.push(age.replace(/^latest /, "replica "));
     else if (primary.envOnly === true) parts.push("env only");
   }
   if (primary.ok === false && primary.reason) {
