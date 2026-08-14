@@ -21,6 +21,7 @@ const bootstrapStGeminiCredentialToInfisical = vi.fn();
 const syncProviderCredentialsFromInfisical = vi.fn();
 const ensureAgentSyncProviderSeeded = vi.fn();
 const ensureRoicProviderSeeded = vi.fn();
+const ensureCloudflareFleetProvidersSeeded = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -46,6 +47,11 @@ vi.mock("@/lib/ensure-agent-sync-provider", () => ({
 
 vi.mock("@/lib/ensure-roic-provider", () => ({
   ensureRoicProviderSeeded: () => ensureRoicProviderSeeded(),
+}));
+
+vi.mock("@/lib/ensure-cloudflare-fleet-providers", () => ({
+  ensureCloudflareFleetProvidersSeeded: () =>
+    ensureCloudflareFleetProvidersSeeded(),
 }));
 
 vi.mock("@/lib/infisical-provider-sync", () => ({
@@ -96,6 +102,8 @@ describe("fetchAllDueProviders budget-breach pause skip", () => {
     ensureAgentSyncProviderSeeded.mockResolvedValue(undefined);
     ensureRoicProviderSeeded.mockReset();
     ensureRoicProviderSeeded.mockResolvedValue(undefined);
+    ensureCloudflareFleetProvidersSeeded.mockReset();
+    ensureCloudflareFleetProvidersSeeded.mockResolvedValue(undefined);
     bootstrapStGeminiCredentialToInfisical.mockReset();
     bootstrapStGeminiCredentialToInfisical.mockResolvedValue({
       enabled: false,

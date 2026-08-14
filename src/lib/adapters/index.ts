@@ -184,7 +184,9 @@ export async function fetchProviderUsage(
     const adapterName =
       canonicalProviderKey(providerName) === "google-ai"
         ? "google-ai"
-        : providerName;
+        : providerName === "cloudflare" || providerName.startsWith("cloudflare-")
+          ? "cloudflare"
+          : providerName;
     isGeminiAdapter = adapterName === "google-ai";
     const builtinAdapter =
       providerName === "custom" ? undefined : adapters[adapterName];
