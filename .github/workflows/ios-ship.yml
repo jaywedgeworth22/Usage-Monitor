@@ -18,6 +18,11 @@ name: iOS TestFlight ship (Mac runner)
 # ios-ship run this repo has ever had. iOS code was reaching main and never
 # reaching a phone. `schedule:` events are exempt from the recursion guard.
 #
+# GH_PAT (2026-08-13): the repo secret is the elevated merge identity. Auto-merge
+# armed with GH_PAT merges as that PAT, so a bot squash still fires this
+# workflow. The cron is now a backstop, not the only path. Do not fall back to
+# GITHUB_TOKEN for merges.
+#
 # NOT EVERY TICK SHIPS -- the scheduled path is guarded twice.
 #   1. scripts/ios-scheduled-ship-gate.sh refuses to try unless ios/ actually
 #      changed between an app's last successful ship and HEAD. A cron carries
@@ -36,6 +41,7 @@ on:
     paths:
       - 'ios/**'
       - '.github/workflows/ios-ship.yml'
+      - 'scripts/ios-*.sh'
   workflow_dispatch:
   schedule:
     # Twice an hour, offset from Socratic.Trade ('*/30') and Congress.Trade
@@ -80,7 +86,8 @@ jobs:
             --repo-root "$GITHUB_WORKSPACE" \
             usage usage-local
 
-      - name: Assert stable Xcode 26 (never beta)
+      - name: Assert stable Xcode 26 and a non-beta host OS
+        id: host
         if: steps.gate.outputs.should_ship == '1'
         run: |
           echo "DEVELOPER_DIR=${DEVELOPER_DIR}"
@@ -93,14 +100,25 @@ jobs:
               exit 1
               ;;
           esac
+          # Apple stamps BuildMachineOSBuild into the IPA. A beta host
+          # (trailing letter after digits, e.g. 26A5406e) is Invalid Binary.
+          os=$(sw_vers -productVersion)
+          build=$(sw_vers -buildVersion)
+          echo "macOS ${os} (${build})"
+          if echo "$build" | grep -Eq '[0-9][a-z]$'; then
+            echo "ok=0" >> "$GITHUB_OUTPUT"
+            echo "::warning::macOS ${os} build ${build} is a beta host. Skipping upload (Invalid Binary)."
+            exit 0
+          fi
+          echo "ok=1" >> "$GITHUB_OUTPUT"
 
       # Via the in-repo wrappers rather than /Users/jay/apps/ios-fleet directly:
       # the wrappers pin DEVELOPER_DIR to stable Xcode and resolve --repo-root,
       # so the workflow cannot drift from what a local operator runs.
       - name: Ship UsageMonitor to TestFlight
-        if: steps.gate.outputs.ship_usage == '1'
+        if: steps.gate.outputs.ship_usage == '1' && steps.host.outputs.ok == '1'
         run: bash "$GITHUB_WORKSPACE/scripts/ios-ship-testflight.sh"
 
       - name: Ship LocalUsageMonitor to TestFlight
-        if: steps.gate.outputs.ship_usage_local == '1'
+        if: steps.gate.outputs.ship_usage_local == '1' && steps.host.outputs.ok == '1'
         run: bash "$GITHUB_WORKSPACE/scripts/ios-ship-testflight-local.sh"
