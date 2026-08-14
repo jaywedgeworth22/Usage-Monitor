@@ -133,9 +133,9 @@ final class PushScaffoldTests: XCTestCase {
     /// `production` for distribution builds, so a hardcoded `production` here
     /// would be the regression to catch.
     ///
-    /// The server still has no APNs *sender*, which is exactly why
+    /// Alert pushes are visible notifications (not silent), so
     /// ``testBackgroundModesDeclareFetchOnly`` keeps `remote-notification` out
-    /// of `UIBackgroundModes`: silent push has nothing behind it.
+    /// of `UIBackgroundModes`. Background fetch still drives local fallback.
     func testAppEntitlementsMatchShippedPushCapability() throws {
         let entitlements = try plist(named: "UsageMonitor.entitlements")
         XCTAssertEqual(entitlements["aps-environment"] as? String, "development")

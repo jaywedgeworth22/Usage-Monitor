@@ -8,6 +8,7 @@ interface NotificationSettings {
   emailConfigured: boolean;
   slackConfigured: boolean;
   pagerdutyConfigured: boolean;
+  apnsConfigured?: boolean;
   activeApnsDeviceCount: number;
   minSeverity: "info" | "warning" | "critical";
   reminderHours: number;
@@ -149,12 +150,19 @@ export default function NotificationsSettingsPanel() {
                       : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
                   }`}
                 >
-                  {(settings?.activeApnsDeviceCount ?? 0) > 0 ? `${settings?.activeApnsDeviceCount} Devices` : "0 Devices"}
+                  {settings?.apnsConfigured
+                    ? (settings.activeApnsDeviceCount ?? 0) > 0
+                      ? `${settings.activeApnsDeviceCount} Devices`
+                      : "Configured"
+                    : (settings?.activeApnsDeviceCount ?? 0) > 0
+                      ? `${settings?.activeApnsDeviceCount} Devices, sender not configured`
+                      : "Not configured"}
                 </span>
               </div>
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                Devices that completed APNs registration from the iOS app Settings → Notifications.
-                Zero devices means remote push is not active yet (local/background still possible with a read token).
+                Native iPhone alerts for the same budget and provider pages that go to Pushover.
+                Devices register from the iOS app Settings → Notifications.  The server sends only
+                when APNS_KEY_ID / APNS_TEAM_ID / APNS_BUNDLE_ID / APNS_P8 are set in Infisical.
               </p>
             </div>
 

@@ -22,13 +22,21 @@ import {
   PROJECT_BUDGETS_PROVIDER_NAME as PROJECT_ALERTS_PROVIDER_NAME,
 } from "@/lib/system-providers";
 import { formatAlertEmailHtml } from "@/lib/alert-email";
+import {
+  apnsConfigured,
+  fanOutApnsAlert,
+  loadApnsConfig,
+  type ApnsConfig,
+  type ApnsTransport,
+} from "@/lib/apns";
 
 export type AlertDeliveryChannel =
   | { kind: "slack"; url: string }
   | { kind: "webhook"; url: string }
   | { kind: "email"; apiKey: string; from: string; to: string }
   | { kind: "pagerduty"; routingKey: string }
-  | { kind: "pushover"; userKey: string; apiToken: string };
+  | { kind: "pushover"; userKey: string; apiToken: string }
+  | { kind: "apns"; config: ApnsConfig; transport?: ApnsTransport };
 
 export interface AlertDeliveryConfig {
   channels: AlertDeliveryChannel[];
@@ -300,6 +308,10 @@ export function readAlertDeliveryConfig(env: NodeJS.ProcessEnv = process.env): A
   if (pushoverUserKey && pushoverApiToken) {
     channels.push({ kind: "pushover", userKey: pushoverUserKey, apiToken: pushoverApiToken });
   }
+  const apns = loadApnsConfig(env);
+  if (apnsConfigured(apns)) {
+    channels.push({ kind: "apns", config: apns });
+  }
 
   const preferred = suppressEmailWhenPushoverConfigured(channels);
 
@@ -343,6 +355,7 @@ const ALERT_CHANNEL_KIND_SET: ReadonlySet<string> = new Set([
   "email",
   "pagerduty",
   "pushover",
+  "apns",
 ]);
 
 function parseJsonObjectEnv(raw: string | undefined, envName: string): Record<string, unknown> | null {
@@ -692,7 +705,9 @@ function channelKey(channel: AlertDeliveryChannel): string {
         ? channel.routingKey
         : channel.kind === "pushover"
           ? `${channel.userKey}\0${channel.apiToken}`
-          : channel.url;
+          : channel.kind === "apns"
+            ? `${channel.config.teamId}\0${channel.config.keyId}\0${channel.config.bundleId}`
+            : channel.url;
   const digest = createHash("sha256")
     .update(`${channel.kind}\0${destination}`)
     .digest("hex");
@@ -1009,6 +1024,41 @@ async function sendToChannelOnce(
       timeoutMs
     );
     return;
+  }
+
+  if (channel.kind === "apns") {
+    const devices = await prisma.apnsDeviceToken.findMany({
+      where: { isActive: true },
+      select: { deviceToken: true, environment: true },
+    });
+    if (devices.length === 0) return;
+    const fanout = await fanOutApnsAlert({
+      title: `[${alert.severity.toUpperCase()}] ${provider.displayName || provider.name}`,
+      body: alert.message,
+      collapseId: `um-${provider.id}-${alert.code}`.slice(0, 64),
+      data: {
+        tab: "alerts",
+        alertCode: alert.code,
+        providerId: provider.id,
+      },
+      devices,
+      config: channel.config,
+      transport: channel.transport,
+      timeoutMs,
+      retireToken: async (token) => {
+        await prisma.apnsDeviceToken.updateMany({
+          where: { deviceToken: token, isActive: true },
+          data: { isActive: false },
+        });
+      },
+    });
+    if (fanout.delivered > 0 || (fanout.retryable === 0 && fanout.authErrors === 0)) {
+      return;
+    }
+    if (fanout.authErrors > 0) {
+      throw new Error("APNs auth/config failure");
+    }
+    throw new ChannelHttpError("APNs retryable failure", 429);
   }
 
   await postJson(
