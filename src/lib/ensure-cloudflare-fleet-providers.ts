@@ -143,24 +143,40 @@ export async function ensureCloudflareFleetProvidersSeeded(): Promise<{
       continue;
     }
 
+    // Existing row: refresh account id / token, but never force isActive.
+    // Owner can turn the switch off; later ticks must leave that choice alone.
     const prev =
       row.config && typeof row.config === "object" && !Array.isArray(row.config)
         ? (row.config as Record<string, unknown>)
         : {};
     const nextConfig = { ...prev, ...publicConfig };
+    const configUnchanged =
+      prev.accountId === publicConfig.accountId &&
+      prev.authMode === publicConfig.authMode;
+    const metaUnchanged =
+      row.displayName === slot.displayName &&
+      configUnchanged;
+    if (metaUnchanged) {
+      skipped += 1;
+      continue;
+    }
     await prisma.provider.update({
       where: { id: row.id },
       data: {
         displayName: slot.displayName,
         type: "builtin",
         category: "Infrastructure",
-        isActive: true,
         apiKey,
         config: nextConfig,
-        alertConfigGeneration: { increment: 1 },
       },
     });
     updated += 1;
+  }
+
+  if (created > 0 || updated > 0) {
+    console.info(
+      `[cloudflare-fleet-seed] created=${created} updated=${updated} skipped=${skipped}`
+    );
   }
 
   return { created, updated, skipped };
