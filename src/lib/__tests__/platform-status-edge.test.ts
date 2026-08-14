@@ -7,7 +7,7 @@ vi.mock("@/lib/adapters/helpers", () => ({ fetchJson: fetchJsonMock }));
 
 import { EDGE_PROBES } from "../platform-status/probes/edge";
 
-/** Every env var `loadR2FleetAccounts` reads, across all three fleet slots. */
+/** Every env var `loadR2FleetAccounts` reads, across all four fleet slots. */
 const CLOUDFLARE_ENV_KEYS = [
   "R2_USAGE_ACCOUNT_ID",
   "R2_USAGE_API_TOKEN",
@@ -20,11 +20,14 @@ const CLOUDFLARE_ENV_KEYS = [
   "CLOUDFLARE_ST_API_TOKEN",
   "CLOUDFLARE_CT_ACCOUNT_ID",
   "CLOUDFLARE_CT_API_TOKEN",
+  "CLOUDFLARE_OLD_ACCOUNT_ID",
+  "CLOUDFLARE_OLD_API_TOKEN",
 ];
 
 const UM_TOKEN = "um-token-do-not-leak";
 const ST_TOKEN = "st-token-do-not-leak";
 const CT_TOKEN = "ct-token-do-not-leak";
+const OLD_TOKEN = "old-token-do-not-leak";
 
 function probeResponse(status: number, data: unknown) {
   return {
@@ -108,6 +111,7 @@ describe("EDGE_PROBES — Cloudflare", () => {
     expect(probe.requiredEnv).toContain("CLOUDFLARE_API_TOKEN");
     expect(probe.requiredEnv).toContain("CLOUDFLARE_ST_ACCOUNT_ID");
     expect(probe.requiredEnv).toContain("CLOUDFLARE_CT_API_TOKEN");
+    expect(probe.requiredEnv).toContain("CLOUDFLARE_OLD_ACCOUNT_ID");
   });
 
   it("is not configured, and makes no request, when no Cloudflare env is set", () => {
@@ -247,6 +251,45 @@ describe("EDGE_PROBES — Cloudflare", () => {
     for (const token of [UM_TOKEN, ST_TOKEN, CT_TOKEN]) {
       expect(serialized).not.toContain(token);
     }
+  });
+
+  it("rolls up four accounts and still stays inside the six-metric budget", async () => {
+    vi.stubEnv("CLOUDFLARE_ACCOUNT_ID", "acct-um-0001");
+    vi.stubEnv("CLOUDFLARE_API_TOKEN", UM_TOKEN);
+    vi.stubEnv("CLOUDFLARE_ST_ACCOUNT_ID", "acct-st-0002");
+    vi.stubEnv("CLOUDFLARE_ST_API_TOKEN", ST_TOKEN);
+    vi.stubEnv("CLOUDFLARE_CT_ACCOUNT_ID", "acct-ct-0003");
+    vi.stubEnv("CLOUDFLARE_CT_API_TOKEN", CT_TOKEN);
+    vi.stubEnv("CLOUDFLARE_OLD_ACCOUNT_ID", "acct-old-0004");
+    vi.stubEnv("CLOUDFLARE_OLD_API_TOKEN", OLD_TOKEN);
+
+    fetchJsonMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const token = bearerToken(init);
+      if (url.includes("/tokens/verify")) {
+        return probeResponse(200, verifyBody());
+      }
+      if (url.includes("/zones?")) {
+        const zones =
+          token === UM_TOKEN ? 2 : token === ST_TOKEN ? 2 : token === CT_TOKEN ? 1 : 0;
+        return probeResponse(200, zonesBody(zones));
+      }
+      throw new Error(`unexpected request to ${url}`);
+    });
+
+    const result = await probe.probe();
+
+    expect(result.state).toBe("healthy");
+    expect(result.headline).toBe("All 4 Cloudflare API tokens are valid.");
+    expect(result.metrics.length).toBeLessThanOrEqual(6);
+    expect(result.metrics).toContainEqual({
+      label: "Accounts Verified",
+      value: "4 of 4",
+    });
+    expect(result.metrics).toContainEqual({
+      label: "Jay (Old)",
+      value: "Token active",
+    });
+    expect(JSON.stringify(result)).not.toContain(OLD_TOKEN);
   });
 
   it("degrades and names the failing account by label when one token is rejected", async () => {

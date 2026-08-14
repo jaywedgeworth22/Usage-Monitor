@@ -21,6 +21,7 @@ import {
   PROJECT_BUDGETS_PROVIDER_DISPLAY_NAME as PROJECT_ALERTS_PROVIDER_DISPLAY_NAME,
   PROJECT_BUDGETS_PROVIDER_NAME as PROJECT_ALERTS_PROVIDER_NAME,
 } from "@/lib/system-providers";
+import { formatAlertEmailHtml } from "@/lib/alert-email";
 
 export type AlertDeliveryChannel =
   | { kind: "slack"; url: string }
@@ -259,6 +260,15 @@ function readBoolEnvValue(env: NodeJS.ProcessEnv, name: string, fallback: boolea
   return fallback;
 }
 
+/** Resend costs money.  Drop email when Pushover is already configured. */
+export function suppressEmailWhenPushoverConfigured(
+  channels: AlertDeliveryChannel[]
+): AlertDeliveryChannel[] {
+  return channels.some((c) => c.kind === "pushover")
+    ? channels.filter((c) => c.kind !== "email")
+    : channels;
+}
+
 export function readAlertDeliveryConfig(env: NodeJS.ProcessEnv = process.env): AlertDeliveryConfig {
   const channels: AlertDeliveryChannel[] = [];
   const slackUrl = env.ALERT_SLACK_WEBHOOK_URL?.trim();
@@ -291,6 +301,8 @@ export function readAlertDeliveryConfig(env: NodeJS.ProcessEnv = process.env): A
     channels.push({ kind: "pushover", userKey: pushoverUserKey, apiToken: pushoverApiToken });
   }
 
+  const preferred = suppressEmailWhenPushoverConfigured(channels);
+
   const minSeverity = normalizeSeverity(env.ALERT_MIN_SEVERITY) ?? "warning";
   const reminderHours = normalizePositiveNumber(env.ALERT_REMINDER_HOURS) ?? DEFAULT_REMINDER_HOURS;
   const timeoutMs = boundedPositiveNumber(
@@ -313,7 +325,7 @@ export function readAlertDeliveryConfig(env: NodeJS.ProcessEnv = process.env): A
   const severityOverrides = parseCodeSeverityOverrides(env.ALERT_CODE_SEVERITY_OVERRIDES);
   const channelRouting = parseCodeChannelRouting(env.ALERT_CODE_CHANNEL_ROUTING);
   return {
-    channels,
+    channels: preferred,
     minSeverity,
     reminderHours,
     timeoutMs,
@@ -930,13 +942,12 @@ async function sendToChannelOnce(
         from: channel.from,
         to: channel.to,
         subject: `[${alert.severity.toUpperCase()}] Alert for ${provider.displayName || provider.name}`,
-        html: `
-          <h2>Usage Monitor Alert</h2>
-          <p><strong>Provider:</strong> ${provider.displayName || provider.name}</p>
-          <p><strong>Severity:</strong> ${alert.severity}</p>
-          <p><strong>Message:</strong> ${alert.message}</p>
-          <p><strong>Detected At:</strong> ${now.toISOString()}</p>
-        `,
+        html: formatAlertEmailHtml({
+          providerLabel: provider.displayName || provider.name,
+          severity: alert.severity,
+          message: alert.message,
+          detectedAtIso: now.toISOString(),
+        }),
       },
       fetchImpl,
       timeoutMs
@@ -2291,7 +2302,9 @@ export async function deliverProviderAlerts(options: {
   // The env reader emits one destination of each kind, but injected test/config
   // objects may repeat a destination. De-duplicate by the same persistent key so
   // one maintenance pass never sends it twice.
-  const channels = [...new Map(config.channels.map((channel) => [channelKey(channel), channel])).values()];
+  const channels = suppressEmailWhenPushoverConfigured(
+    [...new Map(config.channels.map((channel) => [channelKey(channel), channel])).values()]
+  );
   const pagerDutyChannels = channels.filter(
     (channel): channel is Extract<AlertDeliveryChannel, { kind: "pagerduty" }> =>
       channel.kind === "pagerduty"

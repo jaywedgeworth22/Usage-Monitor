@@ -55,6 +55,8 @@ describe("operations health", () => {
       "CLOUDFLARE_ST_API_TOKEN",
       "CLOUDFLARE_CT_ACCOUNT_ID",
       "CLOUDFLARE_CT_API_TOKEN",
+      "CLOUDFLARE_OLD_ACCOUNT_ID",
+      "CLOUDFLARE_OLD_API_TOKEN",
       "LITESTREAM_S3_ENDPOINT",
       "AWS_S3_ENDPOINT",
       "LITESTREAM_S3_ACCESS_KEY_ID",
@@ -101,6 +103,26 @@ describe("operations health", () => {
     expect(serialized).not.toContain("userId");
     expect(serialized).not.toContain("accountNumber");
     expect(serialized).not.toContain("135.181.192.190");
+  });
+
+  it("does not hard-degrade Peer App Health on a last-resort filingapi 401", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      Response.json(
+        healthBody({
+          tradingLiveness: { activeAccounts: 2, degraded: 2, marketOpen: false },
+          dataProvidersDegraded: true,
+          dependencies: {
+            fmp: { ok: true },
+            filingapi: { ok: false },
+            "usage-monitor": { ok: true },
+          },
+        })
+      )
+    );
+    const result = await fetchSocraticInfrastructureSummary();
+    expect(result.state).toBe("healthy");
+    expect(result.failedDependencies).toEqual([]);
+    expect(result.marketOpen).toBe(false);
   });
 
   it("does not hard-degrade Peer App Health on overnight VIX misses", async () => {
@@ -217,7 +239,7 @@ describe("operations health", () => {
     expect(result.receiptInbox.configured).toBe(false);
     expect(result.coolifyFleet.configured).toBe(false);
     expect(result.r2Fleet?.configured).toBe(false);
-    expect(result.r2Fleet?.accounts).toHaveLength(3);
+    expect(result.r2Fleet?.accounts).toHaveLength(4);
     expect(result.fleetBackups).not.toBeNull();
     expect(result.fleetBackups?.apps.map((a) => a.id)).toEqual([
       "usage-monitor",

@@ -6,7 +6,7 @@
  *    that the read-only monitor key still authorizes and can see the buckets,
  *    because a silently rotated or re-scoped key is how backup monitoring dies
  *    without anyone noticing.
- *  - Cloudflare R2 — three accounts, three separate free tiers.  We reuse the
+ *  - Cloudflare R2 — four accounts, four separate free tiers.  We reuse the
  *    existing read-only fleet summary so this card and the Ops dashboard can
  *    never disagree about who is close to the limit.
  *
@@ -194,7 +194,7 @@ async function probeBackblaze(): Promise<PlatformProbeResult> {
 // Cloudflare R2
 // ---------------------------------------------------------------------------
 
-/** Per-request ceiling for the fleet sweep; three accounts run in sequence. */
+/** Per-request ceiling for the fleet sweep; four accounts run in parallel. */
 const R2_REQUEST_TIMEOUT_MS = 6_000;
 /** Whole-sweep ceiling, so one hung account cannot stall the platforms page. */
 const R2_SWEEP_DEADLINE_MS = 14_000;
@@ -401,6 +401,8 @@ export const STORAGE_PROBES: readonly PlatformProbe[] = [
       "CLOUDFLARE_ST_API_TOKEN",
       "CLOUDFLARE_CT_ACCOUNT_ID",
       "CLOUDFLARE_CT_API_TOKEN",
+      "CLOUDFLARE_OLD_ACCOUNT_ID",
+      "CLOUDFLARE_OLD_API_TOKEN",
     ],
     consoleUrl: R2_CONSOLE_URL,
     isConfigured: () => loadR2FleetAccounts(process.env).length > 0,

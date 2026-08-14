@@ -26,14 +26,15 @@ import {
   upstreamFailure,
 } from "../probe-helpers";
 import type { PlatformMetric, PlatformProbe, PlatformProbeResult } from "../types";
+import { MAX_PLATFORM_METRICS } from "../types";
 
 const CLOUDFLARE_API_BASE = "https://api.cloudflare.com/client/v4";
 const CLOUDFLARE_CONSOLE_URL = "https://dash.cloudflare.com";
 
 /**
- * Shown verbatim on an unconfigured card.  The generic pair covers the primary
+ * Shown verbatim on an unconfigured card.  The generic pair covers the UM
  * account (`loadR2FleetAccounts` also accepts the `R2_USAGE_*` / `CLOUDFLARE_JAY_*`
- * aliases for it); the ST/CT pairs add the two peer accounts.
+ * aliases for it); ST/CT/Old add the other three dashboard accounts.
  */
 const CLOUDFLARE_REQUIRED_ENV = [
   "CLOUDFLARE_ACCOUNT_ID",
@@ -43,6 +44,8 @@ const CLOUDFLARE_REQUIRED_ENV = [
   "CLOUDFLARE_ST_API_TOKEN",
   "CLOUDFLARE_CT_ACCOUNT_ID",
   "CLOUDFLARE_CT_API_TOKEN",
+  "CLOUDFLARE_OLD_ACCOUNT_ID",
+  "CLOUDFLARE_OLD_API_TOKEN",
 ];
 
 interface VerifiedAccount {
@@ -234,7 +237,9 @@ function buildMetrics(
       : metric("Token Expiry", "No expiry set")
   );
 
-  return metrics;
+  // Four accounts + roll-up + Zones + Expiry is 7.  Keep per-account
+  // status; drop the trailing expiry row if we would overflow the card.
+  return metrics.slice(0, MAX_PLATFORM_METRICS);
 }
 
 async function probeCloudflare(): Promise<PlatformProbeResult> {
