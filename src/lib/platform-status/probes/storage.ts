@@ -336,7 +336,12 @@ async function probeCloudflareR2(): Promise<PlatformProbeResult> {
 
   const freeTierBytes = summary.freeTier.storageBytes;
   const metrics: PlatformMetric[] = [];
+  const notEnabled = accounts.filter((account) => account.metricsSource === "r2_not_enabled");
   for (const account of accounts) {
+    if (account.metricsSource === "r2_not_enabled") {
+      metrics.push(metric(account.label, "R2 not enabled"));
+      continue;
+    }
     if (account.status === "error" || !account.storage) {
       metrics.push(
         metric(account.label, "Unavailable", usageReadHint(account.error))
@@ -388,9 +393,20 @@ async function probeCloudflareR2(): Promise<PlatformProbeResult> {
     };
   }
 
+  if (notEnabled.length > 0 && notEnabled.length === accounts.length) {
+    return {
+      state: "healthy",
+      headline: "No Cloudflare account in this fleet has R2 enabled.",
+      metrics,
+    };
+  }
+
   return {
     state: "healthy",
-    headline: `Every R2 account is under the ${R2_THRESHOLD_PCT}% free-tier guard.`,
+    headline:
+      notEnabled.length > 0
+        ? `Every live R2 account is under the ${R2_THRESHOLD_PCT}% free-tier guard.`
+        : `Every R2 account is under the ${R2_THRESHOLD_PCT}% free-tier guard.`,
     metrics,
   };
 }

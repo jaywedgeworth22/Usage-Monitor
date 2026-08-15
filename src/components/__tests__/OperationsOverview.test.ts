@@ -321,4 +321,36 @@ describe("OperationsOverview cards", () => {
     expect(html).toContain("Class B ops");
     expect(html).toContain("Top buckets");
   });
+
+  it("renders Jay Old as R2 not enabled instead of leftover storage", () => {
+    const html = renderToStaticMarkup(createElement(R2FleetCard, {
+      data: {
+        configured: true,
+        thresholdPct: 70,
+        freeTier: { storageBytes: 10 * 1024 ** 3, classAOps: 1_000_000, classBOps: 10_000_000 },
+        anyOnTrackToExceed: false,
+        fetchedAt: "2026-08-15T12:00:00.000Z",
+        localBackup: { autoDisabled: false, litestreamUsesR2: false },
+        accounts: [
+          {
+            id: "old",
+            label: "Jay (Old)",
+            accountIdSuffix: "a9608c73",
+            configured: true,
+            status: "ok",
+            storage: null,
+            classA: null,
+            classB: null,
+            overallOnTrackToExceed70Pct: false,
+            metricsSource: "r2_not_enabled",
+            buckets: [],
+          },
+        ],
+      },
+    }));
+    expect(html).toContain("Jay (Old)");
+    expect(html).toContain("R2 is not enabled on this account.");
+    expect(html).not.toContain("116");
+    expect(html).not.toContain("Class A ops");
+  });
 });

@@ -14,6 +14,7 @@ import {
   formatDailyPushoverMessage,
   runR2UsageCheck,
   parseR2GraphqlUsage,
+  isR2ProductDisabledPayload,
   classifyR2Action,
   isLitestreamR2Endpoint,
   resolveR2UsageCredentials,
@@ -508,6 +509,140 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(um?.status).toBe("ok");
     expect(um?.metricsSource).toBe("cloudflare_graphql");
     expect(um?.storage?.actual).toBe(storageBytes);
+  });
+
+  it("recognizes Cloudflare 10042 as R2-not-enabled", () => {
+    expect(
+      isR2ProductDisabledPayload({
+        success: false,
+        errors: [{ code: 10042, message: "Please enable R2 through the Cloudflare Dashboard." }],
+      })
+    ).toBe(true);
+    expect(
+      isR2ProductDisabledPayload({
+        success: false,
+        errors: [{ code: 10000, message: "Authentication error" }],
+      })
+    ).toBe(false);
+  });
+
+  it("treats GraphQL leftovers as unused when REST says R2 is not enabled", async () => {
+    const now = new Date("2026-08-15T12:00:00.000Z");
+    const ghostBytes = 116 * 1024 * 1024 * 1024;
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("/r2/buckets")) {
+        return {
+          ok: false,
+          status: 403,
+          text: async () =>
+            JSON.stringify({
+              success: false,
+              errors: [
+                {
+                  code: 10042,
+                  message: "Please enable R2 through the Cloudflare Dashboard.",
+                },
+              ],
+            }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            data: {
+              viewer: {
+                accounts: [
+                  {
+                    r2OperationsAdaptiveGroups: [],
+                    r2StorageAdaptiveGroups: [
+                      {
+                        max: { payloadSize: ghostBytes, metadataSize: 0, objectCount: 4 },
+                        dimensions: {
+                          datetime: now.toISOString(),
+                          bucketName: "api-usage-monitor",
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          }),
+      };
+    });
+
+    const summary = await fetchR2FleetSummary(
+      mockFetch as unknown as typeof fetch,
+      now,
+      {
+        CLOUDFLARE_OLD_ACCOUNT_ID: "254301ba6b6323381932ddbca9608c73",
+        CLOUDFLARE_OLD_API_TOKEN: "old-token",
+      }
+    );
+    const old = summary.accounts.find((a) => a.id === "old");
+    expect(old?.status).toBe("ok");
+    expect(old?.metricsSource).toBe("r2_not_enabled");
+    expect(old?.overallOnTrackToExceed70Pct).toBe(false);
+    expect(old?.storage).toBeNull();
+    expect(summary.anyOnTrackToExceed).toBe(false);
+    expect(mockFetch.mock.calls.some((call) => String(call[0]).includes("/r2/buckets"))).toBe(
+      true
+    );
+  });
+
+  it("does not ListBuckets for an under-threshold live account", async () => {
+    const now = new Date("2026-08-15T12:00:00.000Z");
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("/r2/buckets")) {
+        throw new Error("ListBuckets should not run under the storage guard");
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            data: {
+              viewer: {
+                accounts: [
+                  {
+                    r2OperationsAdaptiveGroups: [],
+                    r2StorageAdaptiveGroups: [
+                      {
+                        max: {
+                          payloadSize: 500 * 1024 * 1024,
+                          metadataSize: 0,
+                          objectCount: 2,
+                        },
+                        dimensions: {
+                          datetime: now.toISOString(),
+                          bucketName: "usage-monitor-prod-v3",
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          }),
+      };
+    });
+
+    const summary = await fetchR2FleetSummary(
+      mockFetch as unknown as typeof fetch,
+      now,
+      {
+        R2_USAGE_ACCOUNT_ID: "3a9368057468d0909cafaa85df12d1b7",
+        R2_USAGE_API_TOKEN: "um-token",
+      }
+    );
+    const um = summary.accounts.find((a) => a.id === "um");
+    expect(um?.metricsSource).toBe("cloudflare_graphql");
+    expect(um?.storage?.actual).toBe(500 * 1024 * 1024);
+    expect(mockFetch.mock.calls.every((call) => String(call[0]).includes("graphql"))).toBe(
+      true
+    );
   });
 
   it("enforces R2 auto-disable when emergency flag or env is set", () => {

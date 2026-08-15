@@ -233,6 +233,21 @@ function FleetAccountBlock({
       </div>
     );
   }
+  if (account.metricsSource === "r2_not_enabled") {
+    return (
+      <div className="rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-700">
+        <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{account.label}</p>
+        {account.accountIdSuffix ? (
+          <p className="font-mono text-[10px] text-gray-500 dark:text-gray-400">
+            …{account.accountIdSuffix}
+          </p>
+        ) : null}
+        <p className="mt-1.5 text-[11px] text-gray-600 dark:text-gray-300">
+          R2 is not enabled on this account.{"  "}GraphQL leftovers are ignored.
+        </p>
+      </div>
+    );
+  }
   const metrics = [
     {
       key: "storage",
