@@ -198,6 +198,13 @@ async function probeBackblaze(): Promise<PlatformProbeResult> {
 const R2_REQUEST_TIMEOUT_MS = 6_000;
 /** Whole-sweep ceiling, so one hung account cannot stall the platforms page. */
 const R2_SWEEP_DEADLINE_MS = 14_000;
+/**
+ * Trusted Cloudflare GraphQL only.  The default probe cap is 256 KiB so a
+ * status check cannot pull an unbounded dump; this query is compile-time
+ * pinned and now asks for a 24h latest-per-bucket storage window.  1 MiB
+ * leaves headroom if an account grows more buckets without failing the card.
+ */
+export const R2_GRAPHQL_MAX_RESPONSE_BYTES = 1024 * 1024;
 
 const R2_CONSOLE_URL = "https://dash.cloudflare.com/?to=/:account/r2/overview";
 
@@ -246,9 +253,11 @@ function createRecordingFetch(): RecordingFetch {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     try {
+      const isGraphql = /\/client\/v4\/graphql(?:\?|$)/i.test(url);
       const response = await requestJson(url, init, {
         security: isCloudflareApiUrl(url) ? "trusted" : "untrusted",
         timeoutMs: R2_REQUEST_TIMEOUT_MS,
+        maxResponseBytes: isGraphql ? R2_GRAPHQL_MAX_RESPONSE_BYTES : undefined,
       });
       if (!response.ok && firstErrorStatus === null) firstErrorStatus = response.status;
       return toResponse(response.status, response.data);
@@ -281,6 +290,13 @@ async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
 
 function isResponseTooLarge(error: unknown): boolean {
   return error instanceof AdapterError && error.code === "RESPONSE_TOO_LARGE";
+}
+
+function usageReadHint(error?: string): string {
+  if (error && /too large|RESPONSE_TOO_LARGE|size limit/i.test(error)) {
+    return "analytics payload too large";
+  }
+  return "usage read failed";
 }
 
 async function probeCloudflareR2(): Promise<PlatformProbeResult> {
@@ -322,7 +338,9 @@ async function probeCloudflareR2(): Promise<PlatformProbeResult> {
   const metrics: PlatformMetric[] = [];
   for (const account of accounts) {
     if (account.status === "error" || !account.storage) {
-      metrics.push(metric(account.label, "Unavailable", "usage read failed"));
+      metrics.push(
+        metric(account.label, "Unavailable", usageReadHint(account.error))
+      );
       continue;
     }
     metrics.push(

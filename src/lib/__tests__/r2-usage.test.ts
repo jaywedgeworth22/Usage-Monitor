@@ -19,6 +19,10 @@ import {
   resolveR2UsageCredentials,
   loadR2FleetAccounts,
   fetchR2FleetSummary,
+  fetchR2UsageMetrics,
+  utcStorageLookbackIso,
+  R2_STORAGE_GRAPHQL_GROUP_LIMIT,
+  R2_STORAGE_GRAPHQL_LOOKBACK_MS,
   r2FreeTierFailClosedRequired,
   graphqlStorageSamplesAreFresh,
   planLtxTipPrune,
@@ -399,6 +403,111 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(metrics.storageBytes).toBe(5 * 1024 * 1024 * 1024 + 1024 + 100);
     expect(metrics.buckets).toHaveLength(2);
     expect(metrics.buckets[0].bucketName).toBe("usage-monitor-bucket");
+  });
+
+  it("asks GraphQL for a short latest-per-bucket storage window, not a month dump", async () => {
+    const now = new Date("2026-08-14T18:00:00.000Z");
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          data: {
+            viewer: {
+              accounts: [
+                {
+                  r2OperationsAdaptiveGroups: [],
+                  r2StorageAdaptiveGroups: [],
+                },
+              ],
+            },
+          },
+        }),
+    });
+
+    await fetchR2UsageMetrics(
+      { accountId: "acct-um", apiToken: "tok-um" },
+      now,
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const init = mockFetch.mock.calls[0][1] as { body: string };
+    const body = JSON.parse(init.body) as {
+      query: string;
+      variables: { startDate: string; endDate: string; storageStartDate: string };
+    };
+    expect(body.variables.startDate).toBe("2026-08-01T00:00:00.000Z");
+    expect(body.variables.endDate).toBe(now.toISOString());
+    expect(body.variables.storageStartDate).toBe(utcStorageLookbackIso(now));
+    expect(Date.parse(body.variables.storageStartDate)).toBe(
+      now.getTime() - R2_STORAGE_GRAPHQL_LOOKBACK_MS
+    );
+    expect(body.query).toContain(`limit: ${R2_STORAGE_GRAPHQL_GROUP_LIMIT}`);
+    expect(body.query).toContain("datetime_geq: $storageStartDate");
+    expect(R2_STORAGE_GRAPHQL_GROUP_LIMIT).toBeLessThan(1000);
+  });
+
+  it("keeps GraphQL storage when the UM live S3 overlay throws", async () => {
+    const now = new Date("2026-08-14T18:00:00.000Z");
+    const storageBytes = 2 * 1024 * 1024 * 1024;
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("graphql")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              data: {
+                viewer: {
+                  accounts: [
+                    {
+                      r2OperationsAdaptiveGroups: [
+                        {
+                          sum: { requests: 10 },
+                          dimensions: { actionType: "PutObject" },
+                        },
+                      ],
+                      r2StorageAdaptiveGroups: [
+                        {
+                          max: {
+                            payloadSize: storageBytes,
+                            metadataSize: 0,
+                            objectCount: 4,
+                          },
+                          dimensions: {
+                            datetime: now.toISOString(),
+                            bucketName: "usage-monitor-prod-v3",
+                          },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            }),
+        };
+      }
+      throw new Error("S3 list exploded");
+    });
+
+    const summary = await fetchR2FleetSummary(
+      mockFetch as unknown as typeof fetch,
+      now,
+      {
+        R2_USAGE_ACCOUNT_ID: "acct-um-12345678",
+        R2_USAGE_API_TOKEN: "tok-um",
+        LITESTREAM_S3_ENDPOINT: "https://acct.r2.cloudflarestorage.com",
+        LITESTREAM_S3_ACCESS_KEY_ID: "AKIAEXAMPLE",
+        LITESTREAM_S3_SECRET_ACCESS_KEY: "secret-example",
+        LITESTREAM_S3_BUCKET: "usage-monitor-prod-v3",
+      }
+    );
+
+    const um = summary.accounts.find((a) => a.id === "um");
+    expect(um?.status).toBe("ok");
+    expect(um?.metricsSource).toBe("cloudflare_graphql");
+    expect(um?.storage?.actual).toBe(storageBytes);
   });
 
   it("enforces R2 auto-disable when emergency flag or env is set", () => {

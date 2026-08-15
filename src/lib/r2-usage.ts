@@ -150,6 +150,15 @@ export type R2MetricsSource =
 /** Max age of GraphQL storage samples before we refuse to kill on them (stale). */
 export const R2_GRAPHQL_STORAGE_MAX_AGE_MS = 90 * 60 * 1000;
 
+/**
+ * Storage analytics are latest-per-bucket only (datetime_DESC, first win).
+ * A month-long `limit: 10000` dump is 300–400 KiB for busy accounts and
+ * overflows the Platforms probe's 256 KiB cap — that is why UM and Jay Old
+ * rendered "Unavailable usage read failed" while ST/CT still fit.
+ */
+export const R2_STORAGE_GRAPHQL_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+export const R2_STORAGE_GRAPHQL_GROUP_LIMIT = 400;
+
 /** Auto-resume hysteresis: clear kill switch when live storage is below this. */
 export const R2_RESUME_STORAGE_PCT = 65;
 
@@ -764,6 +773,7 @@ query R2FreeTierUsage(
   $accountTag: string!
   $startDate: Time
   $endDate: Time
+  $storageStartDate: Time
 ) {
   viewer {
     accounts(filter: { accountTag: $accountTag }) {
@@ -775,8 +785,8 @@ query R2FreeTierUsage(
         dimensions { actionType }
       }
       r2StorageAdaptiveGroups(
-        limit: 10000
-        filter: { datetime_geq: $startDate, datetime_leq: $endDate }
+        limit: ${R2_STORAGE_GRAPHQL_GROUP_LIMIT}
+        filter: { datetime_geq: $storageStartDate, datetime_leq: $endDate }
         orderBy: [datetime_DESC]
       ) {
         max {
@@ -799,6 +809,13 @@ function utcMonthStartIso(now: Date): string {
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0)
   ).toISOString();
+}
+
+/** Newest of (month start, now − lookback).  Ops still use the full UTC month. */
+export function utcStorageLookbackIso(now: Date): string {
+  const lookback = new Date(now.getTime() - R2_STORAGE_GRAPHQL_LOOKBACK_MS);
+  const monthStart = new Date(utcMonthStartIso(now));
+  return (lookback > monthStart ? lookback : monthStart).toISOString();
 }
 
 /**
@@ -1523,6 +1540,7 @@ export async function fetchR2UsageMetrics(
       accountTag: credentials.accountId,
       startDate: utcMonthStartIso(now),
       endDate: now.toISOString(),
+      storageStartDate: utcStorageLookbackIso(now),
     },
   });
 
@@ -1737,16 +1755,24 @@ export async function fetchR2FleetSummary(
         fetchImpl
       );
       // For UM only, prefer live S3 list for storage when credentials match
-      // this host's litestream bucket (authoritative inventory).
+      // this host's litestream bucket (authoritative inventory).  Overlay
+      // only — a failed list must not discard a successful GraphQL read.
       let storageBytes = metrics.storageBytes;
       let buckets = metrics.buckets;
       let source: R2MetricsSource = "cloudflare_graphql";
       if (slot.id === "um") {
-        const live = await fetchLiveR2StorageViaS3(fetchImpl, now);
-        if (live) {
-          storageBytes = live.storageBytes;
-          buckets = live.buckets;
-          source = "live_s3_storage+graphql_ops";
+        try {
+          const live = await fetchLiveR2StorageViaS3(fetchImpl, now, env);
+          if (live) {
+            storageBytes = live.storageBytes;
+            buckets = live.buckets;
+            source = "live_s3_storage+graphql_ops";
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.warn(
+            `[r2-usage] live S3 overlay failed; keeping GraphQL storage: ${message}`
+          );
         }
       }
       const assessment = assessR2Usage(

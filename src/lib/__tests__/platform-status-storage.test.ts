@@ -7,8 +7,17 @@ vi.mock("@/lib/adapters/helpers", async (importOriginal) => {
   return { ...actual, fetchJson };
 });
 
-import { STORAGE_PROBES } from "@/lib/platform-status/probes/storage";
-import { __resetR2UsageStateForTests } from "@/lib/r2-usage";
+import { AdapterError } from "@/lib/adapters/helpers";
+import {
+  R2_GRAPHQL_MAX_RESPONSE_BYTES,
+  STORAGE_PROBES,
+} from "@/lib/platform-status/probes/storage";
+import { PROBE_MAX_RESPONSE_BYTES } from "@/lib/platform-status/probe-helpers";
+import {
+  R2_STORAGE_GRAPHQL_GROUP_LIMIT,
+  R2_STORAGE_GRAPHQL_LOOKBACK_MS,
+  __resetR2UsageStateForTests,
+} from "@/lib/r2-usage";
 import type { PlatformProbe } from "@/lib/platform-status/types";
 
 /**
@@ -84,6 +93,13 @@ function securityOfCall(index: number): string | undefined {
     | { security?: string }
     | undefined;
   return options?.security;
+}
+
+function maxBytesOfCall(index: number): number | undefined {
+  const options = fetchJson.mock.calls[index]?.[2] as
+    | { maxResponseBytes?: number }
+    | undefined;
+  return options?.maxResponseBytes;
 }
 
 describe("STORAGE_PROBES", () => {
@@ -313,6 +329,19 @@ describe("STORAGE_PROBES", () => {
       expect(fetchJson).toHaveBeenCalledTimes(1);
       expect(fetchJson.mock.calls[0][0]).toBe("https://api.cloudflare.com/client/v4/graphql");
       expect(securityOfCall(0)).toBe("trusted");
+      expect(maxBytesOfCall(0)).toBe(R2_GRAPHQL_MAX_RESPONSE_BYTES);
+      expect(R2_GRAPHQL_MAX_RESPONSE_BYTES).toBeGreaterThan(PROBE_MAX_RESPONSE_BYTES);
+
+      const init = fetchJson.mock.calls[0][1] as { body: string };
+      const body = JSON.parse(init.body) as {
+        query: string;
+        variables: { storageStartDate: string; endDate: string };
+      };
+      expect(body.query).toContain(`limit: ${R2_STORAGE_GRAPHQL_GROUP_LIMIT}`);
+      expect(body.query).toContain("$storageStartDate");
+      expect(
+        Date.parse(body.variables.endDate) - Date.parse(body.variables.storageStartDate)
+      ).toBe(R2_STORAGE_GRAPHQL_LOOKBACK_MS);
       expect(JSON.stringify(result)).not.toContain("st-analytics-token");
     });
 
@@ -380,6 +409,34 @@ describe("STORAGE_PROBES", () => {
           usagePct: 10,
         },
         { label: "Congress.Trade", value: "Unavailable", hint: "usage read failed" },
+        { label: "Accounts Reporting", value: "1 of 2" },
+      ]);
+    });
+
+    it("names an oversized analytics payload instead of a generic read failure", async () => {
+      vi.stubEnv("CLOUDFLARE_ST_ACCOUNT_ID", "aaaabbbbccccdddd");
+      vi.stubEnv("CLOUDFLARE_ST_API_TOKEN", "st-analytics-token");
+      vi.stubEnv("CLOUDFLARE_CT_ACCOUNT_ID", "eeeeffff00001111");
+      vi.stubEnv("CLOUDFLARE_CT_API_TOKEN", "ct-analytics-token");
+
+      fetchJson
+        .mockResolvedValueOnce(jsonResponse(200, graphqlUsage(1024 * 1024 * 1024)))
+        .mockRejectedValueOnce(
+          new AdapterError("Provider response exceeded the configured size limit", {
+            code: "RESPONSE_TOO_LARGE",
+          })
+        );
+
+      const result = await probeById("cloudflare-r2").probe();
+
+      expect(result.state).toBe("degraded");
+      expect(result.metrics).toEqual([
+        {
+          label: "Socratic Trade",
+          value: "1.0 GB / 10 GB Free Tier",
+          usagePct: 10,
+        },
+        { label: "Congress.Trade", value: "Unavailable", hint: "analytics payload too large" },
         { label: "Accounts Reporting", value: "1 of 2" },
       ]);
     });

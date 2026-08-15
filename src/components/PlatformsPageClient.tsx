@@ -61,7 +61,7 @@ function UsageBar({ pct }: { pct: number }) {
     tone === "over" ? "bg-red-500" : tone === "watch" ? "bg-amber-500" : "bg-emerald-500";
   return (
     <div
-      className="mt-1 h-1.5 w-28 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"
+      className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"
       role="meter"
       aria-label="Free-tier storage used"
       aria-valuemin={0}
@@ -201,12 +201,12 @@ function PlatformCardView({ platform }: { platform: PlatformStatusCard }) {
       ) : null}
 
       {platform.configured && platform.metrics.length > 0 ? (
-        <dl className="mt-3 space-y-2">
+        <dl className="mt-3 space-y-4">
           {platform.metrics.map((entry) => (
-            <div key={entry.label} className="flex items-start justify-between gap-3 text-sm">
+            <div key={entry.label} className="flex items-center justify-between gap-3 text-sm">
               <dt className="text-gray-500 dark:text-gray-400">{entry.label}</dt>
-              <dd className="flex flex-col items-end">
-                <span className="text-right font-medium text-gray-900 dark:text-gray-100">
+              <dd className="flex min-w-0 flex-col items-stretch">
+                <span className="whitespace-nowrap text-right font-medium text-gray-900 dark:text-gray-100">
                   {entry.value}
                   {entry.hint ? (
                     <span className="ml-1 font-normal text-xs text-gray-500 dark:text-gray-400">
