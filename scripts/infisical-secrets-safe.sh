@@ -15,17 +15,19 @@
 #   names            list secret KEY NAMES only
 #   has KEY          exit 0/1 — does KEY exist, with a non-empty value
 #   set KEY          copy KEY from a local secrets file into Infisical
+#   pull KEY         copy KEY from Infisical into the local secrets file
 #   sync-platforms   batch-copy the platform-status tokens (see MAP below)
 #
-# A value only ever travels: local file -> shell variable -> CLI stdin.
-# It is never interpolated into a command line (visible in `ps`), never echoed,
-# and never written to a log.
+# A value only ever travels: local file <-> shell variable <-> CLI (stdin or
+# captured --plain). It is never interpolated into a command line (visible in
+# `ps`), never echoed, and never written to a log.
 #
 # Usage
 # -----
 #   bash scripts/infisical-secrets-safe.sh names
 #   bash scripts/infisical-secrets-safe.sh has UPTIMEROBOT_API_KEY
 #   bash scripts/infisical-secrets-safe.sh set UPTIMEROBOT_API_KEY
+#   bash scripts/infisical-secrets-safe.sh pull USAGE_INGEST_TOKEN
 #   bash scripts/infisical-secrets-safe.sh sync-platforms --dry-run
 #   bash scripts/infisical-secrets-safe.sh sync-platforms
 #
@@ -124,6 +126,49 @@ set_secret() {
 cmd_set() {
   local key="${1:?usage: set KEY [DEST_KEY]}"
   set_secret "$key" "${2:-$key}"
+}
+
+# Read KEY from Infisical without printing it.
+read_infisical_value() {
+  local key="$1"
+  ensure_token
+  infisical secrets get "$key" --plain --silent \
+    --token="$TOKEN" --projectId="$PROJECT_ID" \
+    --env="$ENV_SLUG" --path="$SECRET_PATH" 2>/dev/null
+}
+
+# Copy KEY from Infisical into the local secrets file as KEY="value".
+# Inverse of `set`. Reports only presence, length, and match — never the value.
+cmd_pull() {
+  local key="${1:?usage: pull KEY}" dest="${2:-$1}" value escaped existing
+  value="$(read_infisical_value "$key")" || die "Infisical has no $key (or it is empty)."
+  [ -n "$value" ] || die "Infisical $key is empty."
+  existing="$(read_local_value "$dest" 2>/dev/null || true)"
+  if [ -n "$existing" ] && [ "$existing" = "$value" ]; then
+    note "  OK    $dest  already matches Infisical (len=${#value})"
+    return 0
+  fi
+  escaped="${value//\\/\\\\}"
+  escaped="${escaped//\"/\\\"}"
+  if [ -n "$existing" ]; then
+    python3 - "$SECRETS_FILE" "$dest" "$escaped" <<'PY'
+import pathlib, re, sys
+path, key, escaped = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+text = path.read_text()
+line = f'{key}="{escaped}"\n'
+new, n = re.subn(rf'^{re.escape(key)}=.*\n?', line, text, count=1, flags=re.M)
+if n != 1:
+    raise SystemExit(f"failed to replace {key}")
+path.write_text(new)
+PY
+    note "  OK    $dest  <- Infisical $key  (replaced, len=${#value})"
+  else
+    printf '%s="%s"\n' "$dest" "$escaped" >>"$SECRETS_FILE"
+    note "  OK    $dest  <- Infisical $key  (appended, len=${#value})"
+  fi
+  chmod 600 "$SECRETS_FILE"
+  existing="$(read_local_value "$dest")" || die "wrote $dest but cannot re-read it"
+  [ "$existing" = "$value" ] || die "wrote $dest but the re-read does not match Infisical"
 }
 
 # Delete KEY(s) from Infisical. `infisical secrets delete` prints nothing
@@ -231,6 +276,7 @@ case "${1:-}" in
   names)          shift; cmd_names "$@" ;;
   has)            shift; cmd_has "$@" ;;
   set)            shift; cmd_set "$@" ;;
+  pull)           shift; cmd_pull "$@" ;;
   delete)         shift; cmd_delete "$@" ;;
   sync-platforms) shift; cmd_sync_platforms "$@" ;;
   *)
@@ -240,6 +286,7 @@ infisical-secrets-safe.sh — value-blind Infisical access.
   names                       list secret KEY NAMES only
   has KEY                     exit 0 if KEY exists with a non-empty value
   set KEY [DEST_KEY]          copy KEY from the local secrets file
+  pull KEY [DEST_KEY]         copy KEY from Infisical into the local secrets file
   delete KEY [KEY...]         delete shared secret(s), verifying they are gone
   sync-platforms [--dry-run]  batch-copy the platform-status tokens
 
