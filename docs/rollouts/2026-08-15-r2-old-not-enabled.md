@@ -28,9 +28,9 @@ and a **weekly R2 archive**.  This change does not alter that.  Checked live
 
 | App | Frequent B2 | Weekly R2 |
 |-----|-------------|-----------|
-| Usage Monitor | Yes — replica ~1 min | Yes — `weekly/prod-2026-08-12T23-57-10Z.db.gz` |
-| Socratic.Trade | Yes — Litestream replicating ~2 min; L2 compaction still wedged | Health `archive_not_run`.  Bucket still holds `cold-snapshots/app-2026-08-09.db` (2.2 GiB) plus leftover LTX |
-| Congress.Trade | Yes — replicating ~3 s | Health `archive_not_run` (archive credentials still 401) |
+| Usage Monitor | Yes — replica ~4 min | Yes — `weekly/prod-2026-08-12T23-57-10Z.db.gz` |
+| Socratic.Trade | Yes — Litestream to B2 `trading-live/` | Health ok on `cold-snapshots/app-2026-08-09.db`.  Leftover R2 LTX deleted.  See `2026-08-15-weekly-r2-all-three.md` |
+| Congress.Trade | Yes — host Litestream | Yes — `weekly/congress-trade-20260815T211942Z.db` after new account-write token |
 
 Jay Old is not a backup target.
 
