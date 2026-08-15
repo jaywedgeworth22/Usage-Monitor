@@ -27,14 +27,20 @@ stores, so deleting only the Coolify entry would have changed nothing.
 | --- | --- | --- |
 | `INFISICAL_CLIENT_ID` | prod + preview | The credential that unlocks the vault. Chicken-and-egg. |
 | `INFISICAL_CLIENT_SECRET` | prod + preview | Same. |
-| `INFISICAL_PROJECT_ID` | prod + preview | *Which* vault to read. Cannot come from the vault. |
-| `INFISICAL_ENV` | prod + preview | *Which* environment to read. Same. |
 
-The last two are technically redundant — the Dockerfile bakes
-`INFISICAL_ENV=prod` and `INFISICAL_UM_PROJECT_ID`, and both entrypoints
-default to the same project id — but they are the address of the secret store,
-they are not secrets, and keeping the bootstrap explicit is worth four rows.
-Delete them if you would rather the repo be the only place that address exists.
+That is the entire Coolify env surface (4 rows: those two keys × prod + preview).
+`INFISICAL_PROJECT_ID` and `INFISICAL_ENV` were deleted from Coolify on 2026-08-14.
+They are not secrets and they are not chicken-and-egg — the Dockerfile already
+bakes `INFISICAL_ENV=prod` and `INFISICAL_UM_PROJECT_ID=86e35e51-…`, and both
+entrypoints (`scripts/start-with-infisical.sh`, `scripts/infisical-run.mjs`)
+default to the same project id / `prod` if the env is unset. Leaving the
+address in Coolify made Coolify look like the control plane: an agent would
+edit the Coolify copy, think they had retargeted the vault, and change
+nothing (or worse, fight the image). The repo is the only place that address
+lives.
+
+`INFISICAL_CLIENT_ID` / `_SECRET` cannot move. They unlock the vault, so they
+cannot come from the vault, and they cannot be baked into the image.
 
 ## What moved into Infisical
 
@@ -87,3 +93,24 @@ Force-rebuilt and redeployed (a plain restart does **not** re-read Coolify env).
 - weekly R2 archive present and healthy
 
 121 secrets inject from Infisical at boot.
+
+## 2026-08-14 follow-up (owner: drop the Dockerfile-redundant Coolify address)
+
+Owner asked whether "Dockerfile defaults" meant the Infisical project/env lived
+in the image, so a Coolify copy would look like the control plane. Yes. The
+image already sets `INFISICAL_ENV=prod` and `INFISICAL_UM_PROJECT_ID`. Coolify
+`INFISICAL_PROJECT_ID` / `INFISICAL_ENV` (prod + preview) were deleted. Coolify
+now holds only `INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET`. No rebuild
+was needed: the running container already has the same address from the image,
+and the next deploy will stop injecting the deleted keys.
+
+Also checked the local handoff files (`~/.secrets/global-api-keys`,
+`.env` sibling, `usage-monitor.env`) against Infisical, value-blind:
+
+- `USAGE_INGEST_TOKEN` and `USAGE_READ_TOKEN` already matched (len 64).
+- `ANTIGRAVITY_INGEST_TOKEN` and `USAGE_INGEST_PRODUCER_TOKENS` were in
+  Infisical only (Monet minted them for the collector and did not copy them
+  into the handoff file). Both were pulled into all three local files.
+
+`scripts/infisical-secrets-safe.sh` gained a `pull` subcommand for the
+Infisical → local direction.
