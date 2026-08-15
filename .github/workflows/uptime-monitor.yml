@@ -44,7 +44,9 @@ jobs:
       # Actions tab/badge/GitHub notifications sees red immediately even
       # below this threshold.
       FAILURE_THRESHOLD: 3
-      INCIDENT_TITLE: "[Uptime] Usage Monitor Oracle origin readiness failure"
+      INCIDENT_TITLE: "[Uptime] Usage Monitor Hetzner origin readiness failure"
+      # Historical key — do not rename.  Changing it would fork open PagerDuty
+      # incidents onto a new identity.  The host is Coolify on Hetzner NBG1.
       PAGERDUTY_DEDUP_KEY: "usage-monitor-oracle-origin-readiness"
       # Release-drift alerting: a process can be fully "ready" while pinned N
       # commits behind main (the host poller writes blocked-sha and exits 0,

@@ -60,6 +60,21 @@ forbidText(workflow, /secrets\./, "the observer workflow must not hold a product
 forbidText(workflow, /ssh-keyscan|StrictHostKeyChecking=no/, "unsafe SSH bootstrap is forbidden");
 requireText(uptimeWorkflow, /PRODUCTION_ORIGIN_IPV4:\s*"167\.233\.254\.55"/, "GitHub uptime must pin the Hetzner Coolify origin");
 requireText(uptimeWorkflow, /--resolve "usage\.jays\.services:443:\$\{PRODUCTION_ORIGIN_IPV4\}"/, "GitHub uptime must avoid Cloudflare false failures while retaining TLS validation");
+requireText(
+  uptimeWorkflow,
+  /INCIDENT_TITLE:\s*"\[Uptime\] Usage Monitor Hetzner origin readiness failure"/,
+  "uptime issue title must name the live Hetzner origin, not the retired Oracle host",
+);
+forbidText(
+  uptimeWorkflow,
+  /INCIDENT_TITLE:.*Oracle/,
+  "uptime issue title must not mention the retired Oracle host",
+);
+requireText(
+  uptimeWorkflow,
+  /PAGERDUTY_DEDUP_KEY:\s*"usage-monitor-oracle-origin-readiness"/,
+  "PagerDuty dedup key stays historical so open incidents do not fork",
+);
 requireText(ci, /npm run test:oracle-deploy/, "hosted CI must exercise deployment contracts");
 
 // Production uses the Cloudflare-proxied public hostname. The old sslip.io

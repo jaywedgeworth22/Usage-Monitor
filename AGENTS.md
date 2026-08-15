@@ -286,8 +286,11 @@ a recoverable `pending -> R2 put -> committed` protocol: pending rows are never
 listed, retries resume them, and committed rows are visible only after evidence
 storage succeeds. Pending metadata expires after one day; committed index,
 dedupe/group, and review metadata expire after 180 days alongside the required
-`evidence/` R2 lifecycle. `npm run receipt-inbox:deploy` refuses deployment if
-the live lifecycle rule cannot be verified. A 12-hour scheduled read-only
+`evidence/` R2 lifecycle. Source stays in this repo — do not split a separate
+receipts GitHub repo.  `usage-monitor-receipt-inbox` is Git-linked to
+`main` via Workers Builds (inbox-only, no lifecycle gate).  The auditor is
+CLI-deployed; `npm run receipt-inbox:deploy` still deploys auditor first and
+refuses if the live lifecycle rule cannot be verified.  A 12-hour scheduled read-only
 Cloudflare lifecycle audit uses `CLOUDFLARE_ACCOUNT_ID` plus a separately scoped
 `RECEIPT_LIFECYCLE_AUDIT_TOKEN`; readiness fails closed after 24 hours without
 an exact non-conflicting 180-day rule. Durable Object alarms drain expiry work
