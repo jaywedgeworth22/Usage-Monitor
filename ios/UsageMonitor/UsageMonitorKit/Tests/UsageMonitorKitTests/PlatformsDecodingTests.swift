@@ -346,6 +346,7 @@ final class PlatformsDecodingTests: XCTestCase {
         XCTAssertEqual(hetzner.state, .healthy)
         XCTAssertEqual(hetzner.metrics.count, 2)
         XCTAssertEqual(hetzner.metrics.last?.hint, "Nuremberg")
+        XCTAssertNil(hetzner.metrics.last?.usagePct)
     }
 
     /// An unconfigured platform is not an outage: no headline, no metrics, and
@@ -361,6 +362,23 @@ final class PlatformsDecodingTests: XCTestCase {
         XCTAssertTrue(netlify.metrics.isEmpty)
         XCTAssertEqual(netlify.requiredEnv, ["NETLIFY_API_TOKEN"])
         XCTAssertFalse(netlify.state.needsAttention, "missing config is not an incident")
+    }
+
+    func testPlatformMetricDecodesUsagePctForTheFillBar() throws {
+        let json = """
+            {
+              "label": "Socratic Trade",
+              "value": "4.1 GB / 10 GB Free Tier",
+              "usagePct": 41
+            }
+            """
+        let metric = try JSONDecoder().decode(
+            PlatformStatusPayload.Metric.self,
+            from: Data(json.utf8)
+        )
+        XCTAssertEqual(metric.value, "4.1 GB / 10 GB Free Tier")
+        XCTAssertEqual(metric.usagePct ?? 0, 41, accuracy: 0.001)
+        XCTAssertNil(metric.hint)
     }
 
     /// Unknown category / state values from a newer server must fall back

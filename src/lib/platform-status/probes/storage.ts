@@ -28,8 +28,8 @@ import {
   envValue,
   failureResult,
   formatBytes,
+  formatBytesCompact,
   formatCount,
-  formatPercent,
   hasEnv,
   httpErrorCode,
   metric,
@@ -328,8 +328,9 @@ async function probeCloudflareR2(): Promise<PlatformProbeResult> {
     metrics.push(
       metric(
         account.label,
-        `${formatBytes(account.storage.actual)} of ${formatBytes(freeTierBytes)}`,
-        `${formatPercent(account.storage.mtdPct)} of free tier`
+        `${formatBytes(account.storage.actual)} / ${formatBytesCompact(freeTierBytes)} Free Tier`,
+        undefined,
+        account.storage.mtdPct
       )
     );
   }

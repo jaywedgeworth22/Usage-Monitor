@@ -119,6 +119,11 @@ export function formatBytes(value: number | null): string {
   return `${amount.toFixed(unit >= 3 ? 1 : 0)} ${units[unit]}`;
 }
 
+/** Like {@link formatBytes} but drops a trailing `.0` so 10 GiB reads "10 GB". */
+export function formatBytesCompact(value: number | null): string {
+  return formatBytes(value).replace(/\.0 /g, " ");
+}
+
 export function formatCount(value: number | null, singular: string, plural?: string): string {
   if (value === null) return "Unavailable";
   const word = value === 1 ? singular : (plural ?? `${singular}s`);
@@ -142,6 +147,16 @@ export function formatAge(value: string | number | null): string {
   return `${Math.floor(seconds / 86_400)}d ago`;
 }
 
-export function metric(label: string, value: string, hint?: string): PlatformMetric {
-  return hint ? { label, value, hint } : { label, value };
+export function metric(
+  label: string,
+  value: string,
+  hint?: string,
+  usagePct?: number
+): PlatformMetric {
+  return {
+    label,
+    value,
+    ...(hint ? { hint } : {}),
+    ...(typeof usagePct === "number" && Number.isFinite(usagePct) ? { usagePct } : {}),
+  };
 }

@@ -47,6 +47,32 @@ export function withSentenceGaps(text: string): string {
  */
 export const REQUIRED_ENV_LEAD_IN = "Set the environment variables this card uses:";
 
+/** Color the R2 fill bar by closeness to the 10 GB free-tier cap (70% is the guard). */
+export function usageBarTone(pct: number): "ok" | "watch" | "over" {
+  if (pct >= 70) return "over";
+  if (pct >= 50) return "watch";
+  return "ok";
+}
+
+function UsageBar({ pct }: { pct: number }) {
+  const width = Math.min(Math.max(pct, 0), 100);
+  const tone = usageBarTone(pct);
+  const fill =
+    tone === "over" ? "bg-red-500" : tone === "watch" ? "bg-amber-500" : "bg-emerald-500";
+  return (
+    <div
+      className="mt-1 h-1.5 w-28 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"
+      role="meter"
+      aria-label="Free-tier storage used"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(width)}
+    >
+      <div className={`h-full rounded-full ${fill}`} style={{ width: `${width}%` }} />
+    </div>
+  );
+}
+
 /** Separator between env var names.  A comma asserts nothing; "or"/"and" would. */
 export const REQUIRED_ENV_SEPARATOR = ", ";
 
@@ -175,17 +201,20 @@ function PlatformCardView({ platform }: { platform: PlatformStatusCard }) {
       ) : null}
 
       {platform.configured && platform.metrics.length > 0 ? (
-        <dl className="mt-3 space-y-1.5">
+        <dl className="mt-3 space-y-2">
           {platform.metrics.map((entry) => (
-            <div key={entry.label} className="flex items-baseline justify-between gap-3 text-sm">
+            <div key={entry.label} className="flex items-start justify-between gap-3 text-sm">
               <dt className="text-gray-500 dark:text-gray-400">{entry.label}</dt>
-              <dd className="text-right font-medium text-gray-900 dark:text-gray-100">
-                {entry.value}
-                {entry.hint ? (
-                  <span className="ml-1 font-normal text-xs text-gray-500 dark:text-gray-400">
-                    {entry.hint}
-                  </span>
-                ) : null}
+              <dd className="flex flex-col items-end">
+                <span className="text-right font-medium text-gray-900 dark:text-gray-100">
+                  {entry.value}
+                  {entry.hint ? (
+                    <span className="ml-1 font-normal text-xs text-gray-500 dark:text-gray-400">
+                      {entry.hint}
+                    </span>
+                  ) : null}
+                </span>
+                {typeof entry.usagePct === "number" ? <UsageBar pct={entry.usagePct} /> : null}
               </dd>
             </div>
           ))}

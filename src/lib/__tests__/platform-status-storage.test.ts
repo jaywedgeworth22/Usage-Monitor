@@ -304,8 +304,8 @@ describe("STORAGE_PROBES", () => {
       expect(result.metrics).toEqual([
         {
           label: "Socratic Trade",
-          value: "1.0 GB of 10.0 GB",
-          hint: "10% of free tier",
+          value: "1.0 GB / 10 GB Free Tier",
+          usagePct: 10,
         },
         { label: "Accounts Reporting", value: "1 of 1" },
       ]);
@@ -332,8 +332,8 @@ describe("STORAGE_PROBES", () => {
       );
       expect(result.metrics[0]).toEqual({
         label: "Socratic Trade",
-        value: "8.0 GB of 10.0 GB",
-        hint: "80% of free tier",
+        value: "8.0 GB / 10 GB Free Tier",
+        usagePct: 80,
       });
     });
 
@@ -376,8 +376,8 @@ describe("STORAGE_PROBES", () => {
       expect(result.metrics).toEqual([
         {
           label: "Socratic Trade",
-          value: "1.0 GB of 10.0 GB",
-          hint: "10% of free tier",
+          value: "1.0 GB / 10 GB Free Tier",
+          usagePct: 10,
         },
         { label: "Congress.Trade", value: "Unavailable", hint: "usage read failed" },
         { label: "Accounts Reporting", value: "1 of 2" },
