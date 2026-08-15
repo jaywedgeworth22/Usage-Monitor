@@ -34,7 +34,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
-- **2026-08-14 — GROK — IN PROGRESS — R2 card layout + UM/Old usage read (branch `grok/r2-bar-layout-and-um-read`).**  Bar as wide as the GB / 10 GB line, more row gap, vertically center labels.  UM+Jay Old failed because month-long GraphQL storage dumps (337–416 KiB) overflowed the 256 KiB probe cap; shrink to 24h latest-per-bucket + 1 MiB trusted GraphQL cap.  #1204 already shipped the copy+bar.
+- **2026-08-14 — GROK — COMPLETED/MERGED #1206 `8c1d6dd0` — R2 card layout + UM/Old usage read (branch `grok/r2-bar-layout-and-um-read`).**  Bar as wide as the GB / 10 GB line, more row gap, vertically center labels.  UM+Jay Old failed because month-long GraphQL storage dumps (337–416 KiB) overflowed the 256 KiB probe cap; shrink to 24h latest-per-bucket + 1 MiB trusted GraphQL cap.  #1204 already shipped the copy+bar.
 - **2026-08-14 — GROK — COMPLETED/MERGED #1204 — R2 card: GB / 10 GB Free Tier + colored bar (branch `grok/r2-usage-bar`).**  Drop “% of free tier” text.  Show used / 10 GB Free Tier and a fill bar (green / amber / red by closeness to 10 GB).
 - **2026-08-14 — GROK — IN PROGRESS — Point UM AGENTS.md at Mac process list (branch `grok/mac-local-processes`).**  One table row.  Canonical list is `~/apps/MAC-LOCAL-PROCESSES.md`.
 - **2026-08-14 — GROK — COMPLETED/MERGED #1198 `2ac7b9d4` — iOS More sheet opens at ~50% (branch `grok/ios-more-sheet-height`).**  Fitted custom detent, cap 88%.  All 7 destinations on screen.  Closed #1197.
