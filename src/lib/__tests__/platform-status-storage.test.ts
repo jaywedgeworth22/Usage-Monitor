@@ -441,6 +441,38 @@ describe("STORAGE_PROBES", () => {
       ]);
     });
 
+    it("shows R2 not enabled instead of leftover GraphQL storage", async () => {
+      vi.stubEnv("CLOUDFLARE_OLD_ACCOUNT_ID", "254301ba6b6323381932ddbca9608c73");
+      vi.stubEnv("CLOUDFLARE_OLD_API_TOKEN", "old-analytics-token");
+
+      fetchJson.mockImplementation(async (url: string) => {
+        if (String(url).includes("/r2/buckets")) {
+          return jsonResponse(403, {
+            success: false,
+            errors: [
+              {
+                code: 10042,
+                message: "Please enable R2 through the Cloudflare Dashboard.",
+              },
+            ],
+          });
+        }
+        return jsonResponse(200, graphqlUsage(116 * 1024 * 1024 * 1024));
+      });
+
+      const result = await probeById("cloudflare-r2").probe();
+
+      expect(result.state).toBe("healthy");
+      expect(result.error).toBeUndefined();
+      expect(result.headline).toBe("No Cloudflare account in this fleet has R2 enabled.");
+      expect(result.metrics).toEqual([
+        { label: "Jay (Old)", value: "R2 not enabled" },
+        { label: "Accounts Reporting", value: "1 of 1" },
+      ]);
+      expect(JSON.stringify(result)).not.toContain("116");
+      expect(JSON.stringify(result)).not.toContain("old-analytics-token");
+    });
+
     it("maps a transport failure to unreachable", async () => {
       vi.stubEnv("CLOUDFLARE_ST_ACCOUNT_ID", "aaaabbbbccccdddd");
       vi.stubEnv("CLOUDFLARE_ST_API_TOKEN", "st-analytics-token");

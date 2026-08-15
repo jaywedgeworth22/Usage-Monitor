@@ -145,7 +145,14 @@ export interface R2MetricStatus {
 export type R2MetricsSource =
   | "live_s3_storage+graphql_ops"
   | "cloudflare_graphql"
+  | "r2_not_enabled"
   | "unavailable";
+
+/** Cloudflare REST code when the account does not have the R2 product. */
+export const R2_PRODUCT_DISABLED_ERROR_CODE = 10042;
+
+/** Cache “R2 not enabled” so a fleet sweep does not ListBuckets every minute (Class A). */
+export const R2_PRODUCT_STATUS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** Max age of GraphQL storage samples before we refuse to kill on them (stale). */
 export const R2_GRAPHQL_STORAGE_MAX_AGE_MS = 90 * 60 * 1000;
@@ -224,6 +231,10 @@ let liveS3ListCache: {
   atMs: number;
   value: { storageBytes: number; buckets: R2BucketStorageSample[] };
 } | null = null;
+let r2ProductStatusCache = new Map<
+  string,
+  { atMs: number; status: "enabled" | "disabled" }
+>();
 
 function getFlagDir(): string {
   if (fs.existsSync("/data")) return "/data";
@@ -253,6 +264,7 @@ export function __resetR2UsageStateForTests(): void {
   inMemoryEmergencyAlertSent = false;
   loggedResumeOverride = false;
   liveS3ListCache = null;
+  r2ProductStatusCache = new Map();
   if (cachedFallbackFlagDir) {
     try {
       fs.rmSync(cachedFallbackFlagDir, { recursive: true, force: true });
@@ -907,6 +919,99 @@ export function parseR2GraphqlUsage(
     classBOps,
     buckets,
     rawActionCounts,
+  };
+}
+
+/**
+ * True when Cloudflare says this account does not have the R2 product.
+ * GraphQL can still return leftover analytics for a disabled account
+ * (Jay Old: 116 GiB of ghost buckets, 0 Class A/B, REST 10042).
+ */
+export function isR2ProductDisabledPayload(payload: unknown): boolean {
+  const root = payload as {
+    errors?: Array<{ code?: number | string; message?: string }>;
+    error?: { code?: number | string; message?: string };
+  };
+  const errors = Array.isArray(root.errors)
+    ? root.errors
+    : root.error
+      ? [root.error]
+      : [];
+  for (const entry of errors) {
+    const code = Number(entry?.code);
+    if (code === R2_PRODUCT_DISABLED_ERROR_CODE) return true;
+    const message = String(entry?.message ?? "");
+    if (/please enable r2/i.test(message)) return true;
+  }
+  return false;
+}
+
+export type R2ProductStatus = "enabled" | "disabled" | "unknown";
+
+/**
+ * REST ListBuckets is Class A.  Call only when GraphQL storage would trip the
+ * guard (or for the retired `old` slot).  Cache the verdict for 24h.
+ */
+export async function probeR2ProductStatus(
+  credentials: R2UsageCredentials,
+  fetchImpl: typeof fetch = fetch,
+  now: Date = new Date(),
+  cache: Map<string, { atMs: number; status: "enabled" | "disabled" }> = r2ProductStatusCache
+): Promise<R2ProductStatus> {
+  const cached = cache.get(credentials.accountId);
+  if (
+    cached &&
+    now.getTime() - cached.atMs < R2_PRODUCT_STATUS_CACHE_TTL_MS
+  ) {
+    return cached.status;
+  }
+
+  const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(credentials.accountId)}/r2/buckets`;
+  try {
+    const res = await fetchImpl(url, {
+      method: "GET",
+      headers: { authorization: `Bearer ${credentials.apiToken}` },
+    });
+    const text = await res.text();
+    let payload: unknown = null;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { errors: [{ message: text.slice(0, 200) }] };
+    }
+    if (isR2ProductDisabledPayload(payload)) {
+      cache.set(credentials.accountId, { atMs: now.getTime(), status: "disabled" });
+      return "disabled";
+    }
+    if (res.ok) {
+      cache.set(credentials.accountId, { atMs: now.getTime(), status: "enabled" });
+      return "enabled";
+    }
+    // 403/10000 = token cannot list.  Do not treat that as disabled — UM's
+    // JAY token GraphQL-reads Usage.Jays.Services but REST-lists 403.
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function r2NotEnabledSnapshot(
+  id: R2FleetAppId,
+  label: string,
+  accountId: string
+): R2FleetAccountSnapshot {
+  return {
+    id,
+    label,
+    accountIdSuffix: accountId.slice(-8),
+    configured: true,
+    status: "ok",
+    storage: null,
+    classA: null,
+    classB: null,
+    overallOnTrackToExceed70Pct: false,
+    metricsSource: "r2_not_enabled",
+    buckets: [],
   };
 }
 
@@ -1783,6 +1888,21 @@ export async function fetchR2FleetSummary(
         now,
         { metricsSource: source, buckets }
       );
+      // GraphQL keeps serving leftover analytics after R2 is turned off
+      // (Jay Old 2026-08-15: 116 GiB, REST 10042).  ListBuckets is Class A,
+      // so only confirm when storage would trip the guard or this is the
+      // retired `old` slot.
+      const storageWouldTrip = assessment.storage.onTrackToExceed;
+      if (storageWouldTrip || slot.id === "old") {
+        const product = await probeR2ProductStatus(
+          { accountId: cfg.accountId, apiToken: cfg.apiToken },
+          fetchImpl,
+          now
+        );
+        if (product === "disabled") {
+          return r2NotEnabledSnapshot(slot.id, slot.label, cfg.accountId);
+        }
+      }
       return {
         id: slot.id,
         label: slot.label,
