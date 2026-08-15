@@ -1,0 +1,58 @@
+name: iOS App Store GM ship
+
+# Archive + upload on GitHub-hosted macos-26 (Tahoe GM + Xcode 26.6).
+# The owned Mac runner is macOS 27 beta; App Store review rejects those
+# binaries as INVALID_BINARY even when TestFlight accepts them.
+# Manual only — ships both Usage Client Monitor and Usage Local Monitor.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-appstore-gm-usage
+  cancel-in-progress: false
+
+jobs:
+  ship:
+    name: GM archive + TestFlight upload
+    if: github.event.repository.fork == false
+    runs-on: macos-26
+    timeout-minutes: 150
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      IOS_TF_MIN_INTERVAL_SEC: "0"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Assert Tahoe GM + Xcode 26
+        run: |
+          xcodebuild -version
+          ver=$(xcodebuild -version | awk 'NR==1{print $2}')
+          case "$ver" in
+            26.*) echo "Xcode $ver" ;;
+            *)
+              echo "::error::Expected Xcode 26.x, got '$ver'."
+              exit 1
+              ;;
+          esac
+          echo "macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+
+      - name: Import signing + ASC key
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          IOS_DIST_P12_BASE64: ${{ secrets.IOS_DIST_P12_BASE64 }}
+          IOS_DIST_P12_PASSWORD: ${{ secrets.IOS_DIST_P12_PASSWORD }}
+        run: bash "$GITHUB_WORKSPACE/scripts/ios-appstore-gm-prepare.sh"
+
+      - name: Ship Usage Client Monitor from GM host
+        run: bash "$GITHUB_WORKSPACE/scripts/ios-ship-testflight.sh" --force-ship
+
+      - name: Ship Usage Local Monitor from GM host
+        run: bash "$GITHUB_WORKSPACE/scripts/ios-ship-testflight-local.sh" --force-ship
