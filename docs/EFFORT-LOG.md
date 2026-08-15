@@ -1,3 +1,5 @@
+- **2026-08-15 — GROK — COMPLETED — Resubmitted Client+Local from Tahoe GM.**  #1219 merged.  Builds `202608150703` / `202608150708`.  Reviews `c0cacf28` / `da7d7fb2` WAITING_FOR_REVIEW (held 10+ min).  Rollout: `docs/rollouts/2026-08-15-invalid-binary-gm-resubmit.md`.
+
 - **2026-08-15 — GROK — IN PROGRESS — Fix App Store INVALID_BINARY + resubmit Client+Local (branch `grok/asc-invalid-binary-gm`).**  Both 1.0.0 still INVALID_BINARY.  This Mac is macOS 27 beta; regular ios-ship already skips beta hosts.  Vendor fleet script + GitHub-hosted macos-26 GM workflow.  Rollout: `docs/rollouts/2026-08-15-invalid-binary-gm-host.md`.
 
 - **2026-08-15 — GROK — IN PR — Point UM AGENTS.md at Mac background-jobs master list (branch `grok/mac-process-list`).**  Binding paragraph + existing table row.  Canonical `~/apps/MAC-LOCAL-PROCESSES.md`.
