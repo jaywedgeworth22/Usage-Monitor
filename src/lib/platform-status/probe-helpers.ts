@@ -45,11 +45,15 @@ export interface ProbeResponse {
 export async function requestJson(
   url: string,
   init?: RequestInit,
-  options?: { security?: "trusted" | "untrusted"; timeoutMs?: number }
+  options?: {
+    security?: "trusted" | "untrusted";
+    timeoutMs?: number;
+    maxResponseBytes?: number;
+  }
 ): Promise<ProbeResponse> {
   return fetchJson(url, init, {
     timeoutMs: options?.timeoutMs ?? PROBE_TIMEOUT_MS,
-    maxResponseBytes: PROBE_MAX_RESPONSE_BYTES,
+    maxResponseBytes: options?.maxResponseBytes ?? PROBE_MAX_RESPONSE_BYTES,
     security: options?.security ?? "trusted",
   });
 }

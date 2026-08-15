@@ -393,8 +393,10 @@ struct FleetOperationsSection: View {
             }
 
             if let r2 = operations.r2Fleet, r2.configured {
-                ForEach(r2.accounts) { account in
-                    r2Row(account)
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    ForEach(r2.accounts) { account in
+                        r2Row(account)
+                    }
                 }
             }
         }
@@ -406,7 +408,7 @@ struct FleetOperationsSection: View {
     private func r2Row(_ account: OperationsHealth.R2Fleet.Account) -> some View {
         let health = R2AccountHealth.evaluate(account)
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-            HStack(spacing: Theme.Spacing.sm) {
+            HStack(alignment: .center, spacing: Theme.Spacing.sm) {
                 Text(account.label ?? account.id)
                     .font(Theme.Typography.body)
                     .foregroundStyle(
@@ -425,10 +427,11 @@ struct FleetOperationsSection: View {
                                 status: PlatformFormat.usageBarStatus(pct),
                                 height: 6
                             )
-                            .frame(width: 112)
+                            .frame(maxWidth: .infinity)
                             .accessibilityLabel("Free-tier storage used")
                         }
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                 }
                 StatusBadge(health.title, status: health.semantic)
             }
@@ -519,26 +522,29 @@ struct PlatformCardRow: View {
             }
 
             if platform.configured, !platform.metrics.isEmpty {
-                ForEach(platform.metrics) { entry in
-                    HStack(alignment: .top, spacing: Theme.Spacing.sm) {
-                        Text(entry.label)
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Colors.tertiaryText)
-                        Spacer(minLength: Theme.Spacing.sm)
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(entry.hint.map { "\(entry.value) \($0)" } ?? entry.value)
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                    ForEach(platform.metrics) { entry in
+                        HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+                            Text(entry.label)
                                 .font(Theme.Typography.caption)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                                .multilineTextAlignment(.trailing)
-                            if let pct = entry.usagePct {
-                                BudgetMeter(
-                                    fraction: pct / 100,
-                                    status: PlatformFormat.usageBarStatus(pct),
-                                    height: 6
-                                )
-                                .frame(width: 112)
-                                .accessibilityLabel("Free-tier storage used")
+                                .foregroundStyle(Theme.Colors.tertiaryText)
+                            Spacer(minLength: Theme.Spacing.sm)
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text(entry.hint.map { "\(entry.value) \($0)" } ?? entry.value)
+                                    .font(Theme.Typography.caption)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                    .multilineTextAlignment(.trailing)
+                                if let pct = entry.usagePct {
+                                    BudgetMeter(
+                                        fraction: pct / 100,
+                                        status: PlatformFormat.usageBarStatus(pct),
+                                        height: 6
+                                    )
+                                    .frame(maxWidth: .infinity)
+                                    .accessibilityLabel("Free-tier storage used")
+                                }
                             }
+                            .fixedSize(horizontal: true, vertical: false)
                         }
                     }
                 }
