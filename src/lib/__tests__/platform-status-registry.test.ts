@@ -154,4 +154,13 @@ describe("platform-status payload bounds", () => {
     const [bounded] = boundMetrics([{ label: "A", value: "B" }]);
     expect("hint" in bounded).toBe(false);
   });
+
+  it("keeps a finite usagePct for the fill bar and drops a non-number", () => {
+    const [kept] = boundMetrics([{ label: "R2", value: "1.0 GB / 10 GB Free Tier", usagePct: 41 }]);
+    expect(kept.usagePct).toBe(41);
+    const [dropped] = boundMetrics([
+      { label: "R2", value: "Unavailable", usagePct: Number.NaN },
+    ]);
+    expect("usagePct" in dropped).toBe(false);
+  });
 });

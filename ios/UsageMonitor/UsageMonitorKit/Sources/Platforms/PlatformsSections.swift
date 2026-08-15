@@ -19,6 +19,18 @@ enum PlatformFormat {
         return String(format: unit >= 3 ? "%.1f %@" : "%.0f %@", amount, units[unit])
     }
 
+    /// Like `bytes` but drops a trailing `.0` so 10 GiB reads "10 GB".
+    static func bytesCompact(_ value: Int64?) -> String {
+        bytes(value).replacingOccurrences(of: ".0 ", with: " ")
+    }
+
+    /// Color the R2 fill bar by closeness to the 10 GB cap (70% is the guard).
+    static func usageBarStatus(_ pct: Double) -> Theme.SemanticStatus {
+        if pct >= 70 { return .danger }
+        if pct >= 50 { return .warning }
+        return .ok
+    }
+
     static func percent(_ value: Double?) -> String {
         guard let value else { return "—" }
         return String(format: "%.0f%%", value)
@@ -403,9 +415,20 @@ struct FleetOperationsSection: View {
                     )
                 Spacer(minLength: Theme.Spacing.sm)
                 if health.showsUsage {
-                    Text(PlatformFormat.percent(account.storage?.mtdPct))
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(r2UsageLabel(account))
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                        if let pct = account.storage?.mtdPct {
+                            BudgetMeter(
+                                fraction: pct / 100,
+                                status: PlatformFormat.usageBarStatus(pct),
+                                height: 6
+                            )
+                            .frame(width: 112)
+                            .accessibilityLabel("Free-tier storage used")
+                        }
+                    }
                 }
                 StatusBadge(health.title, status: health.semantic)
             }
@@ -417,6 +440,13 @@ struct FleetOperationsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private func r2UsageLabel(_ account: OperationsHealth.R2Fleet.Account) -> String {
+        let used = account.storage?.actual.map { PlatformFormat.bytes(Int64($0.rounded())) } ?? "—"
+        let limit = account.storage?.limit.map { PlatformFormat.bytesCompact(Int64($0.rounded())) }
+            ?? "10 GB"
+        return "\(used) / \(limit) Free Tier"
     }
 
     @ViewBuilder
@@ -490,14 +520,26 @@ struct PlatformCardRow: View {
 
             if platform.configured, !platform.metrics.isEmpty {
                 ForEach(platform.metrics) { entry in
-                    HStack(spacing: Theme.Spacing.sm) {
+                    HStack(alignment: .top, spacing: Theme.Spacing.sm) {
                         Text(entry.label)
                             .font(Theme.Typography.caption)
                             .foregroundStyle(Theme.Colors.tertiaryText)
                         Spacer(minLength: Theme.Spacing.sm)
-                        Text(entry.hint.map { "\(entry.value) \($0)" } ?? entry.value)
-                            .font(Theme.Typography.caption)
-                            .foregroundStyle(Theme.Colors.secondaryText)
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text(entry.hint.map { "\(entry.value) \($0)" } ?? entry.value)
+                                .font(Theme.Typography.caption)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .multilineTextAlignment(.trailing)
+                            if let pct = entry.usagePct {
+                                BudgetMeter(
+                                    fraction: pct / 100,
+                                    status: PlatformFormat.usageBarStatus(pct),
+                                    height: 6
+                                )
+                                .frame(width: 112)
+                                .accessibilityLabel("Free-tier storage used")
+                            }
+                        }
                     }
                 }
             }

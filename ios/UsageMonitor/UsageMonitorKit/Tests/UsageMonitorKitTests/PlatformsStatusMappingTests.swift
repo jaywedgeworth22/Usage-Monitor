@@ -216,6 +216,13 @@ final class PlatformsStatusMappingTests: XCTestCase {
         XCTAssertEqual(R2AccountHealth.evaluate(account(status: nil, mtdPct: 41)), .ok)
     }
 
+    func testUsageBarStatusMatchesFreeTierGuard() {
+        XCTAssertEqual(PlatformFormat.usageBarStatus(20), .ok)
+        XCTAssertEqual(PlatformFormat.usageBarStatus(50), .warning)
+        XCTAssertEqual(PlatformFormat.usageBarStatus(70), .danger)
+        XCTAssertEqual(PlatformFormat.bytesCompact(10 * 1024 * 1024 * 1024), "10 GB")
+    }
+
     func testStatusMatchingIsCaseAndWhitespaceInsensitive() {
         XCTAssertEqual(R2AccountHealth.evaluate(account(status: " OK ")), .ok)
         XCTAssertEqual(R2AccountHealth.evaluate(account(status: " Error ", mtdPct: 0)), .unavailable)

@@ -145,13 +145,16 @@ public struct PlatformStatusPayload: Codable, Hashable, Sendable {
         public var label: String
         public var value: String
         public var hint: String?
+        /// Optional 0–100 fill for a usage bar.  Clients never print this as %.
+        public var usagePct: Double?
 
         public var id: String { label }
 
-        public init(label: String, value: String, hint: String? = nil) {
+        public init(label: String, value: String, hint: String? = nil, usagePct: Double? = nil) {
             self.label = label
             self.value = value
             self.hint = hint
+            self.usagePct = usagePct
         }
 
         public init(from decoder: Decoder) throws {
@@ -159,6 +162,7 @@ public struct PlatformStatusPayload: Codable, Hashable, Sendable {
             label = (try? container.decode(String.self, forKey: .label)) ?? ""
             value = (try? container.decode(String.self, forKey: .value)) ?? ""
             hint = try? container.decodeIfPresent(String.self, forKey: .hint)
+            usagePct = try? container.decodeIfPresent(Double.self, forKey: .usagePct)
         }
     }
 

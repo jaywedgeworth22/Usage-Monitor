@@ -58,6 +58,11 @@ export interface PlatformMetric {
   value: string;
   /** Optional short qualifier, e.g. "free tier" or "last 24h". */
   hint?: string;
+  /**
+   * Optional 0–100 fill for a usage bar.  Present only when the value is a
+   * quota (R2 storage).  Clients color the bar; they do not print this as %.
+   */
+  usagePct?: number;
 }
 
 /** One platform's card as rendered by web and iOS. */
@@ -154,6 +159,9 @@ export function boundMetrics(metrics: PlatformMetric[]): PlatformMetric[] {
     label: boundString(metric.label),
     value: boundString(metric.value),
     ...(metric.hint ? { hint: boundString(metric.hint) } : {}),
+    ...(typeof metric.usagePct === "number" && Number.isFinite(metric.usagePct)
+      ? { usagePct: metric.usagePct }
+      : {}),
   }));
 }
 

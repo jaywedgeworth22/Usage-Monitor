@@ -16,6 +16,7 @@ import {
   REQUIRED_ENV_LEAD_IN,
   REQUIRED_ENV_SEPARATOR,
   startVisiblePolling,
+  usageBarTone,
   withSentenceGaps,
   type VisibilityTarget,
 } from "@/components/PlatformsPageClient";
@@ -76,6 +77,17 @@ describe("withSentenceGaps — finding 1, HTML sentence gap", () => {
 
   it("never emits a bare double space, which HTML would collapse", () => {
     expect(withSentenceGaps("Backups ran.  Restore was verified.")).not.toContain("  ");
+  });
+});
+
+describe("usageBarTone — R2 fill color by closeness to 10 GB", () => {
+  it("is green under 50%, amber from 50, red at the 70% guard", () => {
+    expect(usageBarTone(20)).toBe("ok");
+    expect(usageBarTone(49.9)).toBe("ok");
+    expect(usageBarTone(50)).toBe("watch");
+    expect(usageBarTone(69.9)).toBe("watch");
+    expect(usageBarTone(70)).toBe("over");
+    expect(usageBarTone(100)).toBe("over");
   });
 });
 
