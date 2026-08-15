@@ -71,6 +71,36 @@ npm exec -- wrangler secret put RECEIPT_FALLBACK_ADDRESS --config workers/receip
 npm exec -- wrangler secret put CLOUDFLARE_ACCOUNT_ID --config workers/receipt-lifecycle-auditor/wrangler.jsonc
 npm exec -- wrangler secret put RECEIPT_LIFECYCLE_AUDIT_TOKEN --config workers/receipt-lifecycle-auditor/wrangler.jsonc
 npm run receipt-inbox:deploy
+```
+
+## Git repository (Workers Builds)
+
+Do **not** make a separate GitHub repo.  Source is already in
+`jaywedgeworth22/Usage-Monitor` (`workers/receipt-inbox` plus
+`workers/receipt-lifecycle-auditor`).  Both workers import
+`workers/receipt-lifecycle.mjs` and take `postal-mime` / `wrangler` from the
+repo-root `package.json`, so the Cloudflare root directory must stay empty
+(the repo root), not `workers/receipt-inbox`.
+
+`usage-monitor-receipt-inbox` is already connected to `main`.  Its Workers
+Builds deploy command is
+`npx wrangler deploy --config workers/receipt-inbox/wrangler.jsonc`.  That
+dashboard path deploys the inbox only.  It does **not** run the auditor-first
+ordering or the 180-day lifecycle gate.
+
+The auditor Worker stays CLI-deployed (`npm run receipt-inbox:deploy-auditor`).
+When the auditor or the shared lifecycle module changes, deploy from the repo
+root with `npm run receipt-inbox:deploy` so the auditor lands first and
+`verify-lifecycle` re-checks the live R2 rule.
+
+If you also connect the auditor in **Settings → Build → Connect Git**, use
+the same repo / `main` / empty-root / empty-build-command shape, and this
+deploy command:
+`npx wrangler deploy --config workers/receipt-lifecycle-auditor/wrangler.jsonc`.
+Leave **Builds for non-production branches** unchecked.  Prefer the npm
+script when both workers change.
+
+```bash
 # Wrangler resolves this positional value as a Cloudflare zone, so use the apex zone here.
 # Example short address (also keep any existing high-entropy rule):
 npm exec -- wrangler email routing rules create jays.services --name usage-monitor-receipts \
