@@ -12,6 +12,7 @@ public enum AppTab: String, CaseIterable, Hashable, Sendable, Identifiable {
     case providers
     case alerts
     case serverStatus
+    case computers
     case platforms
     case projects
     case settings
@@ -24,6 +25,7 @@ public enum AppTab: String, CaseIterable, Hashable, Sendable, Identifiable {
         case .providers: return "Providers"
         case .alerts: return "Alerts"
         case .serverStatus: return "Server"
+        case .computers: return "Computers"
         case .platforms: return "Platforms"
         case .projects: return "Projects"
         case .settings: return "Settings"
@@ -36,6 +38,7 @@ public enum AppTab: String, CaseIterable, Hashable, Sendable, Identifiable {
         case .providers: return "square.stack.3d.up.fill"
         case .alerts: return "bell.fill"
         case .serverStatus: return "waveform.path.ecg"
+        case .computers: return "laptopcomputer"
         case .platforms: return "server.rack"
         case .projects: return "folder.fill"
         case .settings: return "gearshape.fill"
@@ -49,6 +52,7 @@ public enum AppTab: String, CaseIterable, Hashable, Sendable, Identifiable {
         case .providers: return "Per-provider usage and budgets."
         case .alerts: return "Threshold alerts and notifications."
         case .serverStatus: return "Live server health and backups."
+        case .computers: return "Mac hardware, load, and process flags."
         case .platforms: return "Status across every platform."
         case .projects: return "Project budgets and burn."
         case .settings: return "Connection, appearance, security."
@@ -69,6 +73,7 @@ public struct AppFeatures {
     public var providers: () -> AnyView
     public var alerts: () -> AnyView
     public var serverStatus: () -> AnyView
+    public var computers: () -> AnyView
     public var platforms: () -> AnyView
     public var projects: () -> AnyView
     public var settings: () -> AnyView
@@ -78,6 +83,7 @@ public struct AppFeatures {
         providers: @escaping () -> AnyView,
         alerts: @escaping () -> AnyView,
         serverStatus: @escaping () -> AnyView,
+        computers: @escaping () -> AnyView,
         platforms: @escaping () -> AnyView,
         projects: @escaping () -> AnyView,
         settings: @escaping () -> AnyView
@@ -86,6 +92,7 @@ public struct AppFeatures {
         self.providers = providers
         self.alerts = alerts
         self.serverStatus = serverStatus
+        self.computers = computers
         self.platforms = platforms
         self.projects = projects
         self.settings = settings
@@ -97,6 +104,7 @@ public struct AppFeatures {
         case .providers: return providers()
         case .alerts: return alerts()
         case .serverStatus: return serverStatus()
+        case .computers: return computers()
         case .platforms: return platforms()
         case .projects: return projects()
         case .settings: return settings()

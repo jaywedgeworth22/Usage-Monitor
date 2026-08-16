@@ -6,6 +6,7 @@ import Alerts
 import Platforms
 import ProjectBudgets
 import ServerStatus
+import Computers
 import Settings
 import AppLock
 import Networking
@@ -139,6 +140,7 @@ private extension AppFeatures {
         providers: { AnyView(ProvidersRootView()) },
         alerts: { AnyView(AlertsRootView()) },
         serverStatus: { AnyView(ServerStatusRootView()) },
+        computers: { AnyView(ComputersRootView()) },
         platforms: { AnyView(PlatformsRootView()) },
         projects: { AnyView(ProjectBudgetsRootView()) },
         settings: { AnyView(SettingsRootView()) }
