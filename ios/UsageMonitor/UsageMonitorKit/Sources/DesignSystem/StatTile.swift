@@ -36,13 +36,14 @@ public struct StatTile: View {
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.secondaryText)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
 
             Text(value)
                 .font(Theme.Typography.statValue)
                 .monospacedDigit()
                 .foregroundStyle(Theme.Colors.primaryText)
-                .minimumScaleFactor(0.7)
+                .minimumScaleFactor(0.6)
                 .lineLimit(1)
 
             if let secondary {
@@ -50,9 +51,10 @@ public struct StatTile: View {
                     .font(Theme.Typography.caption)
                     .foregroundStyle(status == .neutral ? Theme.Colors.tertiaryText : status.tint)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .dsCard(padding: Theme.Spacing.md)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(label): \(value)")

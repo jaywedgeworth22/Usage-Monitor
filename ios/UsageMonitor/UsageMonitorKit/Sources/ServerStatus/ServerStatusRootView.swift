@@ -6,10 +6,10 @@ import Networking
 
 /// The **Server Status** feature root (owned by the ServerStatus lane).
 ///
-/// The live health/readiness panel that used to be a Settings section, now a
-/// first-class tab. Hits only the **public** probes (`/api/health`,
-/// `/api/ready`) so it renders before any token is entered — "my token is
-/// wrong" stays distinguishable from "the server is down".
+/// Public health/readiness first (`/api/health`, `/api/ready`) so a missing
+/// token is distinguishable from a down host.  Host Usage (Hetzner + Coolify +
+/// fleet backups) follows as its own grouped sections on this tab — not buried
+/// in Settings.
 ///
 /// Contract: keeps `public struct ServerStatusRootView: View` + `public
 /// init()`, owns its own `NavigationStack` + title, and reads everything
@@ -17,14 +17,17 @@ import Networking
 public struct ServerStatusRootView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var status: ServerStatusStore
+    @State private var hostUsage: HostUsageStore
 
     public init() {
         _status = State(initialValue: ServerStatusStore())
+        _hostUsage = State(initialValue: HostUsageStore())
     }
 
     /// Preview/test seam — inject a stubbed status store.
     init(status: ServerStatusStore) {
         _status = State(initialValue: status)
+        _hostUsage = State(initialValue: HostUsageStore())
     }
 
     public var body: some View {
@@ -33,14 +36,27 @@ public struct ServerStatusRootView: View {
                 ServerStatusSection(store: status) {
                     await status.refresh(using: env.apiClient)
                 }
+                HostUsageSection(
+                    store: hostUsage,
+                    hasCredential: env.hasToken
+                ) {
+                    await hostUsage.refresh(using: env.apiClient)
+                }
             }
             .navigationTitle(AppTab.serverStatus.title)
             .navigationBarTitleDisplayMode(.inline)
-            .task {
+            .task(id: env.accessIdentityRevision) {
                 await status.loadIfNeeded(using: env.apiClient)
+                hostUsage.reset()
+                if env.hasToken {
+                    await hostUsage.loadIfNeeded(using: env.apiClient)
+                }
             }
             .refreshable {
                 await status.refresh(using: env.apiClient)
+                if env.hasToken {
+                    await hostUsage.refresh(using: env.apiClient)
+                }
             }
         }
     }

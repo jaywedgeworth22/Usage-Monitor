@@ -515,10 +515,79 @@ describe("fetchFleetBackupStatus", () => {
     const st = payload.apps.find((a) => a.id === "socratic-trade");
     const live = st!.locations.find((l) => l.id === "peer-litestream");
     expect(live?.present).toBe(true);
-    expect(live?.ok).toBe(false);
+    expect(live?.ok).toBe(true);
     expect(live?.latestAgeSeconds).toBe(0);
     expect(live?.reason).toBe("peer_litestream_tiers_degraded");
     const weekly = st!.locations.find((l) => l.id === "r2-historic");
     expect(weekly?.ok).toBe(true);
+  });
+
+  it("keeps ST B2 Litestream visible when peer health returns 503", async () => {
+    vi.stubEnv("BACKBLAZE_APPLICATION_KEY_ID", "keyid");
+    vi.stubEnv("BACKBLAZE_APPLICATION_KEY", "secret");
+    vi.stubEnv("FLEET_ST_HEALTH_URL", "https://example.test/st/api/health");
+    vi.stubEnv("FLEET_CT_HEALTH_URL", "");
+
+    const now = Date.now();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("b2_authorize_account")) {
+          return new Response(
+            JSON.stringify({
+              accountId: "acct",
+              apiUrl: "https://api003.backblazeb2.com",
+              authorizationToken: "tok",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        }
+        if (url.includes("b2_list_buckets")) {
+          return new Response(
+            JSON.stringify({
+              buckets: [
+                { bucketId: "b-um", bucketName: "jays-usage-monitor-eu" },
+                { bucketId: "b-st", bucketName: "jays-socratic-trade-eu" },
+                { bucketId: "b-ct", bucketName: "jays-congress-trade-eu" },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        }
+        if (url.includes("b2_list_file_names")) {
+          const body = JSON.parse(String(init?.body ?? "{}")) as { prefix?: string };
+          const files =
+            body.prefix === "hetzner/" || body.prefix?.includes("trading-live")
+              ? [
+                  {
+                    action: "upload",
+                    contentLength: 500,
+                    uploadTimestamp: now - 60_000,
+                    fileName: `${body.prefix}ltx`,
+                  },
+                ]
+              : [];
+          return new Response(JSON.stringify({ files, nextFileName: null }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (url.includes("example.test/st/api/health")) {
+          return new Response("unavailable", { status: 503 });
+        }
+        return new Response("not found", { status: 404 });
+      })
+    );
+
+    const payload = await fetchFleetBackupStatus();
+    const st = payload.apps.find((a) => a.id === "socratic-trade");
+    const live = st!.locations.find((l) => l.id === "peer-litestream");
+    expect(live?.ok).toBeNull();
+    expect(live?.reason).toBe("peer_health_http_503");
+    const ltx = st!.locations.find((l) => l.id === "b2-litestream");
+    expect(ltx?.present).toBe(true);
+    expect(ltx?.ok).toBe(true);
+    expect(st?.ok).toBe(true);
   });
 });

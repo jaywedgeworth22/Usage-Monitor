@@ -23,13 +23,14 @@ public struct RefreshableScrollView<Content: View>: View {
     }
 
     public var body: some View {
-        ScrollView {
+        ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: spacing) {
                 content
             }
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.vertical, Theme.Spacing.lg)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .containerRelativeFrame(.horizontal, alignment: .leading)
         }
         .background(Theme.Colors.background)
         .refreshable { await onRefresh() }

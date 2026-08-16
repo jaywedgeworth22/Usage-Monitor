@@ -34,7 +34,7 @@ import Observation
 
 /// Owns the Money screen's two reads and keeps their failure modes separate.
 ///
-/// Follows `Settings/HostUsageStore` for the bearer half (injectable probe, the
+/// Follows `ServerStatus/HostUsageStore` for the bearer half (injectable probe, the
 /// client passed per call, a failed *refresh* keeping the previously loaded
 /// rows) and `Dashboard/IntelligenceStore` for the session-only half (a 401 is
 /// a capability gap that sets ``providersRequireSession``, never an error

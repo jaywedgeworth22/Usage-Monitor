@@ -31,6 +31,8 @@ public struct PlatformsRootView: View {
             content
                 .navigationTitle(AppTab.platforms.title)
                 .navigationBarTitleDisplayMode(.inline)
+                // Dense ops cards overflow at the largest accessibility sizes.
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         }
         // One task owns this screen's entire load lifetime, keyed on the access
         // identity.  A host switch or credential change rebuilds the API client
@@ -141,7 +143,6 @@ public struct PlatformsRootView: View {
             if let metrics = store.hostState.value {
                 FleetHostSection(metrics: metrics)
                 FleetAppsSection(metrics: metrics)
-                FleetBackupsSection(metrics: metrics)
             } else if let error = store.hostState.error {
                 inlineFailure("Host Metrics", error: error)
             }
@@ -166,8 +167,9 @@ public struct PlatformsRootView: View {
         let attention = store.attentionCount
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Text(attention == 0 ? "All Systems Normal" : "\(attention) Need Attention")
-                .font(Theme.Typography.title)
+                .font(Theme.Typography.sectionHeader)
                 .foregroundStyle(Theme.Colors.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
             if let summary = store.platformState.value?.summary {
                 Text(summaryLine(summary))
                     .font(Theme.Typography.caption)

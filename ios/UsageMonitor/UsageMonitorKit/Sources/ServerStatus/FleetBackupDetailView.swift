@@ -3,8 +3,8 @@ import DesignSystem
 import Models
 
 /// Full per-app, per-location off-site backup status for the shared Hetzner host.
-/// Opened from Host Usage so operators can confirm B2 dumps + Litestream for
-/// Usage Monitor, Socratic.Trade, and Congress.Trade without leaving Settings.
+/// Opened from the Server tab so operators can confirm B2 dumps + Litestream
+/// for Usage Monitor, Socratic.Trade, and Congress.Trade.
 struct FleetBackupDetailView: View {
     let fleet: ServerMetrics.FleetBackups
 
@@ -138,10 +138,21 @@ struct FleetBackupDetailView: View {
     }
 
     private func humanReason(_ reason: String) -> String {
-        reason
-            .replacingOccurrences(of: "_", with: " ")
-            .replacingOccurrences(of: "b2 ", with: "B2 ")
-            .replacingOccurrences(of: "r2 ", with: "R2 ")
-            .replacingOccurrences(of: "ltx ", with: "LTX ")
+        switch reason {
+        case let value where value.hasPrefix("peer_health_http_"):
+            return "peer was down (health \(value.dropFirst("peer_health_http_".count)))"
+        case "peer_health_unreachable":
+            return "peer health unreachable"
+        case "peer_litestream_age_missing":
+            return "peer omitted replica age"
+        case "peer_litestream_tiers_degraded":
+            return "deep compaction is wedged"
+        default:
+            return reason
+                .replacingOccurrences(of: "_", with: " ")
+                .replacingOccurrences(of: "b2 ", with: "B2 ")
+                .replacingOccurrences(of: "r2 ", with: "R2 ")
+                .replacingOccurrences(of: "ltx ", with: "LTX ")
+        }
     }
 }

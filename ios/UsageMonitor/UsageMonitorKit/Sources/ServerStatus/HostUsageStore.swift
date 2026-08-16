@@ -4,8 +4,8 @@ import Models
 import Networking
 import AppCore
 
-/// Owns the Settings host-usage panel. Requires a read token or dashboard
-/// session (`GET /api/server-metrics`).
+/// Owns the Server-tab host-usage panel. Requires a read token
+/// (`GET /api/server-metrics`).
 @MainActor
 @Observable
 final class HostUsageStore {

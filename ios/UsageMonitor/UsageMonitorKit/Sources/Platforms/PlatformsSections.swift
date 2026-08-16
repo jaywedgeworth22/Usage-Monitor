@@ -72,22 +72,15 @@ struct FleetHostSection: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             SectionHeader("Host", subtitle: hostSubtitle)
 
-            HStack(spacing: Theme.Spacing.md) {
-                StatTile(
-                    label: "CPU Now",
-                    value: PlatformFormat.percent(metrics.hostUsage?.cpuPct),
-                    secondary: metrics.prevention?.summary?.cpuPeakPct
-                        .map { "Peak \(PlatformFormat.percent($0))" },
-                    systemImage: "cpu",
-                    status: cpuStatus
-                )
-                StatTile(
-                    label: "Disk Used",
-                    value: metrics.appDisk?.usedPct.map { "\($0)%" } ?? "—",
-                    secondary: "\(PlatformFormat.bytes(metrics.appDisk?.freeBytes)) free",
-                    systemImage: "internaldrive",
-                    status: diskStatus
-                )
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Spacing.md) {
+                    cpuTile
+                    diskTile
+                }
+                VStack(spacing: Theme.Spacing.md) {
+                    cpuTile
+                    diskTile
+                }
             }
 
             if let indicators = metrics.prevention?.indicators, !indicators.isEmpty {
@@ -107,8 +100,29 @@ struct FleetHostSection: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .dsCard()
+    }
+
+    private var cpuTile: some View {
+        StatTile(
+            label: "CPU Now",
+            value: PlatformFormat.percent(metrics.hostUsage?.cpuPct),
+            secondary: metrics.prevention?.summary?.cpuPeakPct
+                .map { "Peak \(PlatformFormat.percent($0))" },
+            systemImage: "cpu",
+            status: cpuStatus
+        )
+    }
+
+    private var diskTile: some View {
+        StatTile(
+            label: "Disk Used",
+            value: metrics.appDisk?.usedPct.map { "\($0)%" } ?? "—",
+            secondary: "\(PlatformFormat.bytes(metrics.appDisk?.freeBytes)) free",
+            systemImage: "internaldrive",
+            status: diskStatus
+        )
     }
 
     private var hostSubtitle: String? {
@@ -211,16 +225,18 @@ struct FleetAppsSection: View {
 
             ForEach(metrics.resources) { resource in
                 let status = FleetAppStatus.parse(resource.status)
-                HStack(spacing: Theme.Spacing.sm) {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
                         Text(resource.fleetLabel ?? resource.name)
                             .font(Theme.Typography.body)
                             .foregroundStyle(Theme.Colors.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(resource.status)
                             .font(Theme.Typography.caption)
                             .foregroundStyle(Theme.Colors.secondaryText)
+                            .lineLimit(2)
                     }
-                    Spacer(minLength: Theme.Spacing.sm)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     StatusBadge(status.title, status: status.semantic)
                 }
             }
@@ -277,9 +293,14 @@ struct FleetBackupsSection: View {
     }
 
     private func locationTitle(_ location: ServerMetrics.FleetBackups.Location) -> String {
-        if location.present == false { return "Not Configured" }
         if location.ok == true { return "OK" }
-        if location.ok == false { return "Lagging" }
+        if location.ok == false {
+            return location.present == true ? "Lagging" : "Missing"
+        }
+        if location.reason == "not_configured" || location.reason == "b2_unconfigured" {
+            return "Not Configured"
+        }
+        if location.present == false { return "Unknown" }
         return "Unknown"
     }
 
