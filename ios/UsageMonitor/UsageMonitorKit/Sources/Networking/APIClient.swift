@@ -111,6 +111,12 @@ public actor APIClient {
         try await get("/api/operations", authorization: .read, timeout: Self.operationsTimeout)
     }
 
+    /// `GET /api/health/mac` — latest Mac heartbeat (CPU, memory, disk,
+    /// process flags).  Bearer read token or dashboard session.
+    public func macHealth() async throws -> MacHealthResponse {
+        try await get("/api/health/mac", authorization: .read)
+    }
+
     /// Validate the currently stored bearer token without accepting a dashboard
     /// cookie as a substitute. Settings uses a disposable client for candidate
     /// tokens, so a stale cookie cannot make an invalid replacement look valid.

@@ -98,6 +98,8 @@ targets:
       - package: UsageMonitorKit
         product: ServerStatus
       - package: UsageMonitorKit
+        product: Computers
+      - package: UsageMonitorKit
         product: Settings
       - package: UsageMonitorKit
         product: AppLock

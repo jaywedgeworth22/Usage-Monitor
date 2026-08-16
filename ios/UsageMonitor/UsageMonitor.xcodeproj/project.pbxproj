@@ -8,13 +8,14 @@
 
 /* Begin PBXBuildFile section */
 		015574DB5733115F9AD66A42 /* LocalAdapters in Frameworks */ = {isa = PBXBuildFile; productRef = 6E9A2E2D92F2F0E964E1CD4E /* LocalAdapters */; };
-		0DAE1542F635F3A7312AFC3F /* AppLock in Frameworks */ = {isa = PBXBuildFile; productRef = 4A50A30B1EBA9441B1967DC6 /* AppLock */; };
+		0DAE1542F635F3A7312AFC3F /* Settings in Frameworks */ = {isa = PBXBuildFile; productRef = EEF104AFE3B635560BB73E94 /* Settings */; };
 		1BC7DDFCC842993EF462F71D /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 56712F7BC822DA0DB33B2F89 /* DesignSystem */; };
 		276F317A99A928209250BE5E /* UsageMonitorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B30FDC3F50A61E4D10BC24B /* UsageMonitorApp.swift */; };
 		29A5ED6DA3DD8518200726E2 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 792B1B2FC84FE1924C7CD1A6 /* WidgetPresentation.swift */; };
 		2D970CB0E24D8B1C86CBE1E5 /* WidgetShared in Frameworks */ = {isa = PBXBuildFile; productRef = 3CBA66112816FD1903144B30 /* WidgetShared */; };
-		2ED5762F45A25A7F881F248C /* PushScaffold in Frameworks */ = {isa = PBXBuildFile; productRef = 590BA6623B548785E8D8773F /* PushScaffold */; };
+		2ED5762F45A25A7F881F248C /* OfflineCache in Frameworks */ = {isa = PBXBuildFile; productRef = DCDD9B886592E046087C8AB8 /* OfflineCache */; };
 		2F405C0C02E1C475403A48C0 /* ProjectBudgets in Frameworks */ = {isa = PBXBuildFile; productRef = AC0DB39F15745ACE550BB82F /* ProjectBudgets */; };
+		3D80B447502C0FE0D284AAB6 /* PushScaffold in Frameworks */ = {isa = PBXBuildFile; productRef = 590BA6623B548785E8D8773F /* PushScaffold */; };
 		3DB6F0FB952A4C7466662619 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01455828D3A2004E9EE6FCA6 /* Assets.xcassets */; };
 		3F00B7EA559035693708214F /* OfflineCacheSnapshotSink.swift in Sources */ = {isa = PBXBuildFile; fileRef = C81B7D14B31665FDA6183BF8 /* OfflineCacheSnapshotSink.swift */; };
 		42818448D29A8B5C06D4732C /* Networking in Frameworks */ = {isa = PBXBuildFile; productRef = DD0E3F28FEE2BA45E1360BC1 /* Networking */; };
@@ -28,14 +29,14 @@
 		653C8DD8CA2750953F698C58 /* WidgetShared in Frameworks */ = {isa = PBXBuildFile; productRef = 574A28A99BCD3C462CA17A0D /* WidgetShared */; };
 		6B2191AA76ABBB7C0B9E4EC9 /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = C022422D070736B642E57F94 /* LocalStore */; };
 		6CB37F405426D5B08943A367 /* Alerts in Frameworks */ = {isa = PBXBuildFile; productRef = BCBC6C1579802E15115FA523 /* Alerts */; };
-		84C98816E8C661773E58A4FE /* OfflineCache in Frameworks */ = {isa = PBXBuildFile; productRef = DCDD9B886592E046087C8AB8 /* OfflineCache */; };
+		84C98816E8C661773E58A4FE /* AppLock in Frameworks */ = {isa = PBXBuildFile; productRef = 4A50A30B1EBA9441B1967DC6 /* AppLock */; };
 		8F40DA5814B26236048AE760 /* Platforms in Frameworks */ = {isa = PBXBuildFile; productRef = 0772155CEF61EADBA51DAC23 /* Platforms */; };
 		98CCE4B03A6799D8B4584385 /* ScreenshotDemoSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E62F2FB6F8366000FC474EBD /* ScreenshotDemoSupport.swift */; };
 		9FC1AA41DEEF222CA0DD91F6 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 37C47BD409744EC363A5D9C3 /* DesignSystem */; };
 		A25988FF08C31D2498209FB2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DA93AC5DCCD01FBB2A560D25 /* Assets.xcassets */; };
 		A33EA13C79DE4913AEC1B6D2 /* BudgetWidgetIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 345CB985D932922EA66F6D73 /* BudgetWidgetIntent.swift */; };
 		A976B24560232E9756646779 /* LocalSecrets in Frameworks */ = {isa = PBXBuildFile; productRef = 0368BE726DC57AFA46C92F87 /* LocalSecrets */; };
-		B0D9919838E639EB7D80FEEA /* Settings in Frameworks */ = {isa = PBXBuildFile; productRef = EEF104AFE3B635560BB73E94 /* Settings */; };
+		B0D9919838E639EB7D80FEEA /* Computers in Frameworks */ = {isa = PBXBuildFile; productRef = 8A796F6A95CE0AFCC45F9CAA /* Computers */; };
 		B82FFD609432C0928F46DA8F /* AccountChangeNotifyingTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB1864248318F2267ECF38E2 /* AccountChangeNotifyingTokenStore.swift */; };
 		C155B87B338BD9E084925657 /* AppLock in Frameworks */ = {isa = PBXBuildFile; productRef = BAF14D074525FC55D08ED25C /* AppLock */; };
 		C3186C23E4A15ACE7390C70A /* UsageMonitorWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F1AEB8CDA324975C39D57883 /* UsageMonitorWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -146,10 +147,11 @@
 				2F405C0C02E1C475403A48C0 /* ProjectBudgets in Frameworks */,
 				8F40DA5814B26236048AE760 /* Platforms in Frameworks */,
 				D59524D4370F4A67319835B6 /* ServerStatus in Frameworks */,
-				B0D9919838E639EB7D80FEEA /* Settings in Frameworks */,
-				0DAE1542F635F3A7312AFC3F /* AppLock in Frameworks */,
-				84C98816E8C661773E58A4FE /* OfflineCache in Frameworks */,
-				2ED5762F45A25A7F881F248C /* PushScaffold in Frameworks */,
+				B0D9919838E639EB7D80FEEA /* Computers in Frameworks */,
+				0DAE1542F635F3A7312AFC3F /* Settings in Frameworks */,
+				84C98816E8C661773E58A4FE /* AppLock in Frameworks */,
+				2ED5762F45A25A7F881F248C /* OfflineCache in Frameworks */,
+				3D80B447502C0FE0D284AAB6 /* PushScaffold in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -350,6 +352,7 @@
 				AC0DB39F15745ACE550BB82F /* ProjectBudgets */,
 				0772155CEF61EADBA51DAC23 /* Platforms */,
 				79E6B0A358710B3AED46C63A /* ServerStatus */,
+				8A796F6A95CE0AFCC45F9CAA /* Computers */,
 				EEF104AFE3B635560BB73E94 /* Settings */,
 				4A50A30B1EBA9441B1967DC6 /* AppLock */,
 				DCDD9B886592E046087C8AB8 /* OfflineCache */,
@@ -1006,6 +1009,10 @@
 		87FAB76F5E354143A475532D /* LocalBudget */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalBudget;
+		};
+		8A796F6A95CE0AFCC45F9CAA /* Computers */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Computers;
 		};
 		9E541251A702EE58CB8F3BF3 /* AppCore */ = {
 			isa = XCSwiftPackageProductDependency;

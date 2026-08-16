@@ -20,7 +20,7 @@ public final class TabPreferences {
     public static let maxPinned = 4
 
     /// Owner-decided default pins: Overview, Providers, Alerts, Server.
-    /// Platforms, Projects, and Settings start under More.
+    /// Computers, Platforms, Projects, and Settings start under More.
     public static let defaultPinned: [AppTab] = [.dashboard, .providers, .alerts, .serverStatus]
 
     /// Versioned like the web console's `console.mobileTabs.v1`.
