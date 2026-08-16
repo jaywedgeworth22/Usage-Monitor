@@ -44,12 +44,13 @@ deliberate rollback.
    stored in GitHub; the deploy model is pull-based.
 3. **Backups replicate to Backblaze B2** (bucket `jays-usage-monitor-eu`,
    endpoint `https://s3.eu-central-003.backblazeb2.com`). Litestream continuously
-   replicates `/data/prod.db` there. **Cloudflare R2 is historic freeze only**
-   (do not delete until B2 restore is proven). **Hetzner/Coolify Garage is
+   replicates `/data/prod.db` there. **Cloudflare R2 is weekly archive only**
+   (`weekly/` on `usage-monitor-prod-v3`).  Historic Litestream LTX on that
+   bucket was deleted 2026-08-16. **Hetzner/Coolify Garage is
    retired** (PR #869). Layered backup story: same-disk pre-migration snapshots
    (retention 1) → deploy-time offline snapshots → Litestream/B2 DR with
-   external verification. R2 free-tier monitoring still watches historic R2;
-   the 70% kill switch only stops litestream when the endpoint is R2, not B2.
+   external verification. R2 free-tier monitoring still watches the weekly
+   bucket; the 70% kill switch only stops litestream when the endpoint is R2, not B2.
    See `docs/litestream.md`.
 4. **Deploys are automatic and gated.** The
    `usage-monitor-auto-deploy.timer` polls GitHub once per minute and deploys
@@ -62,8 +63,8 @@ deliberate rollback.
    `/etc/usage-monitor/auto-deploy.paused` freezes deployments while present.
 5. **Rollback never restores an old database over new writes.** Automatic
    rollback changes code/image only. A full host rollback requires quiescing
-   the writer and restoring the latest verified **B2** lineage (or historic R2
-   during cutover) before transferring writer authority — never just re-point
+   the writer and restoring the latest verified **B2** lineage (or the weekly
+   R2 archive if B2 is gone) before transferring writer authority — never just re-point
    DNS at a stale host.
 
 ## Verify a deployment
