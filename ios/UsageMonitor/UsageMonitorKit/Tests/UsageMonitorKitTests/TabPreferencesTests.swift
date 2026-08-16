@@ -85,6 +85,7 @@ final class TabPreferencesTests: XCTestCase {
         // the new tab must be reachable that way too.
         XCTAssertEqual(AppTab(rawValue: "serverStatus"), .serverStatus)
         XCTAssertEqual(AppTab.serverStatus.title, "Server")
+        XCTAssertTrue(AppTab.serverStatus.summary.contains("Host usage"))
     }
 
     func testDeepLinkVocabularyIncludesComputers() {

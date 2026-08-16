@@ -12,8 +12,9 @@ import Networking
 ///   2. Full dashboard-session access with native management inventory.
 ///   3. Appearance, security, notifications, and app information.
 ///
-/// Live server status moved to its own tab (`ServerStatusRootView` in the
-/// ServerStatus lane).
+/// Live server status and host usage live on the Server tab
+/// (`ServerStatusRootView`).  Settings keeps connection, appearance, and a
+/// jump-link to that tab.
 ///
 /// Contract: keeps `public struct SettingsRootView: View` + `public init()`,
 /// owns its own `NavigationStack` + title, and reads everything through
@@ -21,24 +22,17 @@ import Networking
 public struct SettingsRootView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var model: SettingsViewModel
-    @State private var hostUsage: HostUsageStore
     @State private var access: ManagementAccessStore
 
     public init() {
         _model = State(initialValue: SettingsViewModel())
-        _hostUsage = State(initialValue: HostUsageStore())
         _access = State(initialValue: ManagementAccessStore())
     }
 
     /// Preview/test seam — inject a stubbed view-model.
     init(model: SettingsViewModel) {
         _model = State(initialValue: model)
-        _hostUsage = State(initialValue: HostUsageStore())
         _access = State(initialValue: ManagementAccessStore())
-    }
-
-    private var hasHostCredential: Bool {
-        env.hasToken || access.capabilities.sessionManagement.isActive
     }
 
     public var body: some View {
@@ -48,12 +42,7 @@ public struct SettingsRootView: View {
                 ConnectionSection(model: model)
                 FullAccessSection(store: access)
                 TokenConnectionSection(model: model)
-                HostUsageSection(
-                    store: hostUsage,
-                    hasCredential: hasHostCredential
-                ) {
-                    await hostUsage.refresh(using: env.apiClient)
-                }
+                HostUsageLinkSection()
                 NotificationsSection()
                 AppearanceSection(settings: env.settings)
                 SecuritySection(settings: env.settings)
@@ -68,23 +57,31 @@ public struct SettingsRootView: View {
             }
             .task(id: env.accessIdentityRevision) {
                 access.resetForIdentityChange()
-                hostUsage.reset()
                 await access.loadIfNeeded(using: env.apiClient)
-                if hasHostCredential {
-                    await hostUsage.loadIfNeeded(using: env.apiClient)
-                }
-            }
-            .task(id: hasHostCredential) {
-                if hasHostCredential {
-                    await hostUsage.loadIfNeeded(using: env.apiClient)
-                }
             }
             .refreshable {
                 await access.refresh(using: env.apiClient)
-                if hasHostCredential {
-                    await hostUsage.refresh(using: env.apiClient)
-                }
             }
+        }
+    }
+}
+
+/// Settings stays the place to *connect*.  Host CPU, risk, and fleet backups
+/// live on the Server tab so they have a full screen instead of a buried card.
+private struct HostUsageLinkSection: View {
+    @Environment(AppEnvironment.self) private var env
+
+    var body: some View {
+        Section {
+            Button {
+                env.selectTab?(.serverStatus)
+            } label: {
+                Label("Open Host Usage", systemImage: "server.rack")
+            }
+        } header: {
+            Text("Host")
+        } footer: {
+            Text("CPU, disk, fleet apps, and backups live on the Server tab.")
         }
     }
 }

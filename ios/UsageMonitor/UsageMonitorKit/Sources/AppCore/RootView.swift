@@ -51,7 +51,7 @@ public enum AppTab: String, CaseIterable, Hashable, Sendable, Identifiable {
         case .dashboard: return "Budgets and spend at a glance."
         case .providers: return "Per-provider usage and budgets."
         case .alerts: return "Threshold alerts and notifications."
-        case .serverStatus: return "Live server health and backups."
+        case .serverStatus: return "Host usage, fleet apps, and backups."
         case .computers: return "Mac hardware, load, and process flags."
         case .platforms: return "Status across every platform."
         case .projects: return "Project budgets and burn."

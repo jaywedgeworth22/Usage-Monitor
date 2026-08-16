@@ -792,13 +792,16 @@ async function loadFresh(now: Date): Promise<FleetBackupStatusPayload> {
           FLEET_LITESTREAM_MAX_AGE_SECONDS,
           false
         );
+        // Continuous sync (L0) is the Live row.  A wedged higher compaction
+        // tier is a warning on that same row, not "the replica is down".
         const present =
           peer.litestreamAgeSeconds != null || peer.litestreamTiersDegraded;
-        const ok = peer.litestreamTiersDegraded
-          ? false
-          : peer.litestreamAgeSeconds != null
+        const ok =
+          peer.litestreamAgeSeconds != null
             ? ageOk
-            : null;
+            : peer.litestreamTiersDegraded
+              ? false
+              : null;
         locations.push({
           id: "peer-litestream",
           label: "Live Litestream",

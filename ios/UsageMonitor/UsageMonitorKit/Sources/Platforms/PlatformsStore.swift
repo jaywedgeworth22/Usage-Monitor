@@ -12,7 +12,7 @@ import Observation
 /// incident needs whichever ones still answer.  One dead endpoint must never
 /// blank the other two.
 ///
-/// Follows `Settings/HostUsageStore` exactly: probes are injectable for tests,
+/// Follows `ServerStatus/HostUsageStore` exactly: probes are injectable for tests,
 /// the client is passed per call (so switching hosts just passes a new client),
 /// and a refresh failure keeps the previously loaded value rather than
 /// replacing good data with an error.
