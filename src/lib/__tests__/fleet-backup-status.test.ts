@@ -172,7 +172,8 @@ describe("fetchFleetBackupStatus", () => {
     expect(stPeer?.latestAgeSeconds).toBe(42);
     expect(stPeer?.ok).toBe(true);
     const stLtx = st!.locations.find((l) => l.id === "b2-litestream");
-    expect(stLtx).toBeUndefined();
+    expect(stLtx?.present).toBe(true);
+    expect(stLtx?.ok).toBe(true);
     // Pre-ship peers: missing r2Weekly stays null and does not degrade the app.
     const stR2 = st!.locations.find((l) => l.id === "r2-historic");
     expect(stR2?.ok).toBeNull();
@@ -419,5 +420,105 @@ describe("fetchFleetBackupStatus", () => {
       expect(r2?.reason).toBe("peer_r2_weekly_missing");
       expect(app?.ok).toBe(true);
     }
+  });
+
+  it("uses the continuous tier age when the peer omits top-level litestreamAgeSeconds", async () => {
+    vi.stubEnv("BACKBLAZE_APPLICATION_KEY_ID", "");
+    vi.stubEnv("BACKBLAZE_APPLICATION_KEY", "");
+    vi.stubEnv("FLEET_ST_HEALTH_URL", "https://example.test/st/api/health");
+    vi.stubEnv("FLEET_CT_HEALTH_URL", "");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("example.test/st/api/health")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              checks: {
+                storage: {
+                  litestreamAgeSeconds: null,
+                  litestreamLastSyncAt: null,
+                  litestreamTiers: [
+                    {
+                      tier: "0",
+                      label: "Continuous Sync",
+                      ageSeconds: 3,
+                      degraded: false,
+                    },
+                  ],
+                  r2Weekly: { ok: true, ageSeconds: 1800, reason: null },
+                },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        }
+        throw new Error(`unexpected fetch ${String(input)}`);
+      })
+    );
+
+    const payload = await fetchFleetBackupStatus();
+    const st = payload.apps.find((a) => a.id === "socratic-trade");
+    const live = st!.locations.find((l) => l.id === "peer-litestream");
+    expect(live?.present).toBe(true);
+    expect(live?.ok).toBe(true);
+    expect(live?.latestAgeSeconds).toBe(3);
+    expect(live?.reason).toBeNull();
+  });
+
+  it("marks Live Litestream failed when a peer compaction tier is wedged", async () => {
+    vi.stubEnv("BACKBLAZE_APPLICATION_KEY_ID", "");
+    vi.stubEnv("BACKBLAZE_APPLICATION_KEY", "");
+    vi.stubEnv("FLEET_ST_HEALTH_URL", "https://example.test/st/api/health");
+    vi.stubEnv("FLEET_CT_HEALTH_URL", "");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("example.test/st/api/health")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              checks: {
+                storageDegraded: true,
+                storage: {
+                  litestreamAgeSeconds: null,
+                  litestreamTiersDegraded: true,
+                  litestreamTiers: [
+                    {
+                      tier: "0",
+                      label: "Continuous Sync",
+                      ageSeconds: 0,
+                      degraded: false,
+                    },
+                    {
+                      tier: "2",
+                      label: "Deep Compaction",
+                      state: "empty",
+                      degraded: true,
+                      reason: "backlog-past-threshold",
+                    },
+                  ],
+                  r2Weekly: { ok: true, ageSeconds: 1800, reason: null },
+                },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          );
+        }
+        throw new Error(`unexpected fetch ${String(input)}`);
+      })
+    );
+
+    const payload = await fetchFleetBackupStatus();
+    const st = payload.apps.find((a) => a.id === "socratic-trade");
+    const live = st!.locations.find((l) => l.id === "peer-litestream");
+    expect(live?.present).toBe(true);
+    expect(live?.ok).toBe(false);
+    expect(live?.latestAgeSeconds).toBe(0);
+    expect(live?.reason).toBe("peer_litestream_tiers_degraded");
+    const weekly = st!.locations.find((l) => l.id === "r2-historic");
+    expect(weekly?.ok).toBe(true);
   });
 });
