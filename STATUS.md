@@ -1,3 +1,11 @@
+## Current (2026-08-16 GROK — ASC EULA + beta review)
+
+Owner-authorized ASC writes.  Usage Client and Usage Local now have custom
+EULAs and filled beta App Review contacts (Jay Wedgeworth, no demo
+account).  Store versions were already `1.0.0`.  What's New is blocked on
+these first / REJECTED versions.  Receipt:
+`docs/rollouts/2026-08-16-asc-eula.md`.
+
 ## Current (2026-08-14 GROK — four Cloudflare provider rows)
 
 Live Provider table had **zero** cloudflare rows.  Boot now seeds four builtin
