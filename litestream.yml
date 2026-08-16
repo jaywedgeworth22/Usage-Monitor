@@ -15,9 +15,9 @@
 #     R2 accepts any region for SigV4.
 #
 # Production target (2026-08-07): Backblaze B2 bucket jays-usage-monitor-eu
-# (S3-compatible EU). Cloudflare R2 remains a historic freeze — do not delete
-# until B2 restore has been proven for a full week. Litestream 0.5 only supports
-# ONE active replica per DB, so R2 is not dual-written; it is read-only archive.
+# (S3-compatible EU). Cloudflare R2 is weekly archive only (prefix weekly/).
+# Historic LTX on usage-monitor-prod-v3 was deleted 2026-08-16. Litestream 0.5
+# only supports ONE active replica per DB, so R2 is not dual-written.
 #
 # Backup philosophy for THIS app (usage monitor, not a trading ledger):
 #   Disaster recovery only — survive disk death / host loss. Same-disk

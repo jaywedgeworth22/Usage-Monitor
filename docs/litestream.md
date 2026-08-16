@@ -6,10 +6,12 @@ legacy Oracle compose path) replicates to **Backblaze B2** (bucket
 `jays-usage-monitor-eu`, S3 endpoint `https://s3.eu-central-003.backblazeb2.com`,
 object prefix `api-usage-monitor/prod.db` in `litestream.yml`).
 
-**Cloudflare R2 is historic freeze only** (bucket `usage-monitor-prod-v3` and any
-older R2 lineages). Leave R2 objects in place until B2 restore has been proven
-for a full week, then owner may delete R2. Litestream 0.5 supports **one active
-replica** — do not dual-write R2 and B2 from the same host.
+**Cloudflare R2 is weekly archive only** (bucket `usage-monitor-prod-v3`
+prefix `weekly/`).  Frequent replica is Backblaze B2.  Historic Litestream LTX
+on that bucket was deleted 2026-08-16 after B2 + a verified weekly existed.
+Litestream 0.5 supports **one active replica** — do not dual-write R2 and B2
+from the same host.  The receipts bucket (`usage-monitor-receipts` / `evidence/`)
+is a separate product store, not a database replica.
 
 **Hetzner/Coolify Garage is retired** as a replica (PR #869). Do not point
 production `LITESTREAM_S3_*` at Garage.

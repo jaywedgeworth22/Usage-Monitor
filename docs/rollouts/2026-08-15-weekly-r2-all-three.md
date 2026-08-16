@@ -2,9 +2,9 @@
 
 ## Summary
 
-Owner design: each live app keeps **frequent Backblaze B2** (Litestream) and a
-**weekly R2 archive** as second-vendor DR.  Jay Old is not a backup target
-(`10042` / R2 not enabled; UM #1216).
+Owner design: each live app keeps **frequent Backblaze B2** (Litestream).
+**Cloudflare R2 is weekly archive only** — not a live replica, not leftover
+LTX.  Jay Old is not a backup target (`10042` / R2 not enabled; UM #1216).
 
 This unit made that design true in production, not just on the Platforms card.
 
