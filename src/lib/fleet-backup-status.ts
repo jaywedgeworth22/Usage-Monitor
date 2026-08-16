@@ -93,7 +93,9 @@ function fleetAppSpecs(): FleetAppSpec[] {
       self: false,
       b2Bucket: "jays-socratic-trade-eu",
       dumpPrefix: "hetzner/",
-      litestreamPrefix: null,
+      // Live replica is trading-live/app.db (see ST litestream.coolify.yml).
+      // Listed independently so a down ST process cannot hide a fresh B2 LTX.
+      litestreamPrefix: "trading-live/",
       peerHealthUrl:
         process.env.FLEET_ST_HEALTH_URL?.trim() ||
         "https://socratictrade.com/api/health",
@@ -388,7 +390,43 @@ interface PeerR2WeeklyStatus {
 interface PeerStorageHealth {
   litestreamAgeSeconds: number | null;
   litestreamReason: string | null;
+  /** True when the peer reports a compaction-tier wedge even if L0 is fresh. */
+  litestreamTiersDegraded: boolean;
   r2Weekly: PeerR2WeeklyStatus;
+}
+
+function continuousTierAgeSeconds(
+  storage: Record<string, unknown>
+): number | null {
+  const tiers = Array.isArray(storage.litestreamTiers)
+    ? storage.litestreamTiers
+    : [];
+  for (const raw of tiers) {
+    if (!isRecord(raw)) continue;
+    const isContinuous =
+      raw.tier === "0" ||
+      raw.tier === 0 ||
+      raw.label === "Continuous Sync";
+    if (!isContinuous) continue;
+    const age = raw.ageSeconds;
+    if (typeof age === "number" && Number.isFinite(age) && age >= 0) return age;
+    const at = readText(raw.newestActivityAt);
+    if (at) {
+      const ms = Date.parse(at);
+      if (Number.isFinite(ms)) return Math.max(0, (Date.now() - ms) / 1000);
+    }
+  }
+  return null;
+}
+
+function peerLitestreamTiersDegraded(
+  storage: Record<string, unknown>
+): boolean {
+  if (storage.litestreamTiersDegraded === true) return true;
+  const tiers = Array.isArray(storage.litestreamTiers)
+    ? storage.litestreamTiers
+    : [];
+  return tiers.some((raw) => isRecord(raw) && raw.degraded === true);
 }
 
 function missingPeerR2Weekly(reason: string): PeerR2WeeklyStatus {
@@ -444,6 +482,7 @@ async function fetchPeerStorageHealth(
       return {
         litestreamAgeSeconds: null,
         litestreamReason: reason,
+        litestreamTiersDegraded: false,
         r2Weekly: missingPeerR2Weekly(reason),
       };
     }
@@ -452,6 +491,7 @@ async function fetchPeerStorageHealth(
       return {
         litestreamAgeSeconds: null,
         litestreamReason: "peer_health_invalid",
+        litestreamTiersDegraded: false,
         r2Weekly: missingPeerR2Weekly("peer_health_invalid"),
       };
     }
@@ -461,6 +501,7 @@ async function fetchPeerStorageHealth(
       return {
         litestreamAgeSeconds: null,
         litestreamReason: "peer_storage_missing",
+        litestreamTiersDegraded: false,
         r2Weekly: missingPeerR2Weekly("peer_storage_missing"),
       };
     }
@@ -479,19 +520,29 @@ async function fetchPeerStorageHealth(
         }
       }
       if (litestreamAgeSeconds == null) {
+        litestreamAgeSeconds = continuousTierAgeSeconds(storage);
+      }
+      if (litestreamAgeSeconds == null) {
         litestreamReason = "peer_litestream_age_missing";
       }
+    }
+
+    const litestreamTiersDegraded = peerLitestreamTiersDegraded(storage);
+    if (litestreamTiersDegraded) {
+      litestreamReason = "peer_litestream_tiers_degraded";
     }
 
     return {
       litestreamAgeSeconds,
       litestreamReason,
+      litestreamTiersDegraded,
       r2Weekly: parsePeerR2Weekly(storage),
     };
   } catch {
     return {
       litestreamAgeSeconds: null,
       litestreamReason: "peer_health_unreachable",
+      litestreamTiersDegraded: false,
       r2Weekly: missingPeerR2Weekly("peer_health_unreachable"),
     };
   }
@@ -735,17 +786,24 @@ async function loadFresh(now: Date): Promise<FleetBackupStatusPayload> {
       let peerR2Weekly: PeerR2WeeklyStatus | null = null;
       if (spec.peerHealthUrl) {
         const peer = await fetchPeerStorageHealth(spec.peerHealthUrl);
-        const ok = locationOk(
+        const ageOk = locationOk(
           peer.litestreamAgeSeconds != null,
           peer.litestreamAgeSeconds,
           FLEET_LITESTREAM_MAX_AGE_SECONDS,
           false
         );
+        const present =
+          peer.litestreamAgeSeconds != null || peer.litestreamTiersDegraded;
+        const ok = peer.litestreamTiersDegraded
+          ? false
+          : peer.litestreamAgeSeconds != null
+            ? ageOk
+            : null;
         locations.push({
           id: "peer-litestream",
           label: "Live Litestream",
-          ok: peer.litestreamAgeSeconds != null ? ok : null,
-          present: peer.litestreamAgeSeconds != null,
+          ok,
+          present,
           latestAgeSeconds: peer.litestreamAgeSeconds,
           bytes: null,
           fileCount: null,

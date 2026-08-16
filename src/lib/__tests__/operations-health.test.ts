@@ -146,6 +146,39 @@ describe("operations health", () => {
     expect(result.marketOpen).toBe(false);
   });
 
+  it("reads L0 age from tiers and degrades when compaction tiers are wedged", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      Response.json(
+        healthBody({
+          dependencies: {},
+          storageDegraded: false,
+          storage: {
+            dbSizeBytes: 1,
+            walSizeBytes: 1,
+            freeBytes: 1,
+            totalBytes: 1,
+            litestreamStatus: "replicating",
+            litestreamAgeSeconds: null,
+            litestreamTiersDegraded: true,
+            litestreamTiers: [
+              {
+                tier: "0",
+                label: "Continuous Sync",
+                ageSeconds: 2,
+                degraded: false,
+              },
+              { tier: "2", label: "Deep Compaction", degraded: true },
+            ],
+          },
+        })
+      )
+    );
+    const result = await fetchSocraticInfrastructureSummary();
+    expect(result.litestreamAgeSeconds).toBe(2);
+    expect(result.storageDegraded).toBe(true);
+    expect(result.state).toBe("degraded");
+  });
+
   it("preserves last-good Socratic data as explicitly stale after an outage", async () => {
     const fetchMock = vi.spyOn(global, "fetch").mockResolvedValueOnce(Response.json(healthBody({ dependencies: {} })));
     const fresh = await fetchSocraticInfrastructureSummary();

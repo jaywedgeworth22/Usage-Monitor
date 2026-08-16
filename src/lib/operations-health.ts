@@ -129,6 +129,27 @@ function finiteNonNegative(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
+/** ST now reports L0 age on the continuous tier, not storage.litestreamAgeSeconds. */
+function continuousLitestreamTierAgeSeconds(
+  storage: UnknownRecord | undefined
+): number | null {
+  const tiers = Array.isArray(storage?.litestreamTiers)
+    ? storage.litestreamTiers
+    : [];
+  for (const raw of tiers) {
+    const row = asRecord(raw);
+    if (!row) continue;
+    const isContinuous =
+      row.tier === "0" || row.tier === 0 || row.label === "Continuous Sync";
+    if (!isContinuous) continue;
+    const age = finiteNonNegative(row.ageSeconds);
+    if (age != null) return age;
+    const at = canonicalTimestamp(row.newestActivityAt);
+    if (at) return Math.max(0, (Date.now() - Date.parse(at)) / 1000);
+  }
+  return null;
+}
+
 function boundedInteger(value: unknown, max = Number.MAX_SAFE_INTEGER): number | null {
   return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= max
     ? (value as number)
@@ -374,7 +395,9 @@ export async function fetchSocraticInfrastructureSummary(): Promise<SocraticInfr
       processUptimeSeconds !== null && processUptimeSeconds < RECENT_RESTART_SECONDS;
     const tradingLivenessDegraded = checks.tradingLivenessDegraded === true;
     const dataProvidersDegraded = checks.dataProvidersDegraded === true;
-    const storageDegraded = checks.storageDegraded === true;
+    const storageDegraded =
+      checks.storageDegraded === true ||
+      storage?.litestreamTiersDegraded === true;
     const schedulerStale = checks.schedulerStale === true;
     const openrouterCreditsOk =
       openrouter == null ? null : openrouter.ok === true ? true : openrouter.ok === false ? false : null;
@@ -430,7 +453,9 @@ export async function fetchSocraticInfrastructureSummary(): Promise<SocraticInfr
       freeBytes: finiteNonNegative(storage?.freeBytes),
       totalBytes: finiteNonNegative(storage?.totalBytes),
       litestreamState,
-      litestreamAgeSeconds: finiteNonNegative(storage?.litestreamAgeSeconds),
+      litestreamAgeSeconds:
+        finiteNonNegative(storage?.litestreamAgeSeconds) ??
+        continuousLitestreamTierAgeSeconds(storage),
       storageDegraded,
       adminUrl: "https://admin.socratictrade.com/admin/server",
     };
