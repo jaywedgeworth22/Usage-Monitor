@@ -17,6 +17,10 @@ and receipt: `docs/EFFORT-LOG.md`,
 `docs/rollouts/2026-08-20-cross-app-coordination-followups.md`.
 
 ## Prior (2026-08-16 GROK — ASC EULA + beta review)
+# Current Handoff
+## 2026-08-17 GROK — Effort-board hygiene
+In Progress rebuilt to leftover real work. Verified-merged rows moved to Completed. Landing this mirror so GitHub effort issues close.
+## Current (2026-08-16 GROK — ASC EULA + beta review)
 
 Owner-authorized ASC writes.  Usage Client and Usage Local now have custom
 EULAs and filled beta App Review contacts (Jay Wedgeworth, no demo
