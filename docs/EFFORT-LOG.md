@@ -80,6 +80,10 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 - **[Usage-Monitor][GROK] Local Invalid Binary fix (App Groups profiles + PrivacyInfo + re-ship) — OPEN 2026-08-11.** Portal profiles regenerated (groups fixed); PrivacyInfo shipped; TF VALID. **App Store review still Invalid Binary** — host is macOS 27 beta (`BuildMachineOSBuild=26A5353q`); owner must rebuild on stable macOS/Xcode Cloud. Rollout note in repo. (PR #1090 closed unmerged; investigation docs #1091 merged.)
 <!-- board-hygiene 2026-08-12 GROK: PR #1094 rebased onto current main; 21 merged GROK lanes moved to Completed with first lines preserved; later Monet/Claude/AG rows kept. -->
 - **2026-08-17 — GROK — IN PROGRESS — Effort-board hygiene + this-session control board.** Zero open PRs on 2026-08-17. #1206/#1204/#1198/#1180/#1165/#1185/#1218 already merged. First lines of those rows preserved under Completed. Invalid Binary stays Planned (owner: rebuild on stable macOS). Historical-archive heading renamed so #953 is not re-opened as In Progress.
+- **2026-08-17 — GROK — IN PROGRESS — Effort-board hygiene + this-session control board.** Mirror PR #1233 still open (verify failed on `npm audit` high / prisma deepmerge-ts; main CI is green). Rebase + rerun.
+
+## Deployed
+- **2026-08-17 — GROK — SHIPPED TestFlight — UM Client + Local 1.0.1 via Xcode.app on this Mac.** Owner: use normal Xcode here. Client `1.0.1 (202608172057)` upload succeeded 16:08Z and again 18:56Z. Local upload succeeded 19:01Z. `DEVELOPER_DIR=/Applications/Xcode.app` (26.6). ASC list API was 500 at start; ship used `--version 1.0.1`. App Store review attach still needs a VALID processing state.
 
 ## Deployed
 - **2026-08-14 — GROK — DEPLOYED — Add all four Cloudflare accounts as UM providers.**  #1185 + oneshot #1187 live as `d674904`.  Four ON rows: `cloudflare-usage-jays` …d1b7, `-socratic` …2e79, `-congress` …1ae9, `-jay-old` …8c73.  Seed logged `created=4`; later ticks do not force `isActive`.  UJS token is distinct `CLOUDFLARE_JAY_*` (restored in Infisical; was overwritten with fleet).  ST token restored too.  Fleet remains fallback for CT/Old.

@@ -18,6 +18,9 @@ and receipt: `docs/EFFORT-LOG.md`,
 
 ## Prior (2026-08-16 GROK — ASC EULA + beta review)
 # Current Handoff
+
+## 2026-08-17 GROK — UM Client+Local 1.0.1 TestFlight via Xcode.app
+Client and Local uploads succeeded (ContentDelivery UPLOAD SUCCEEDED). Marketing 1.0.1. See docs/rollouts/2026-08-17-um-xcode-testflight-101.md.
 ## 2026-08-17 GROK — Effort-board hygiene
 In Progress rebuilt to leftover real work. Verified-merged rows moved to Completed. Landing this mirror so GitHub effort issues close.
 ## Current (2026-08-16 GROK — ASC EULA + beta review)
