@@ -23,7 +23,7 @@ describe("provider integration catalog", () => {
     const listed = new Set<string>(
       PROVIDER_INTEGRATION_PROFILES.map((profile) => profile.name)
     );
-    for (const name of ["tradier", "intrinio", "alpaca", "robinhood", "vercel", "firecrawl"]) {
+    for (const name of ["tradier", "intrinio", "alpaca", "robinhood", "vercel", "firecrawl", "deno"]) {
       expect(listed.has(name), name).toBe(false);
       expect(getProviderIntegrationProfile(name, "builtin").name).toBe(name);
     }
@@ -93,6 +93,17 @@ describe("provider integration catalog", () => {
     expect(anthropic.shares.join(" ")).toMatch(
       /standard Messages API key is not sent/i
     );
+  });
+
+  it("says Deno Deploy is retired and Coolify is the Congress.Trade host", () => {
+    const deno = getProviderIntegrationProfile("deno", "builtin");
+
+    expect(deno.summary).toMatch(/retired/i);
+    expect(deno.summary).toMatch(/Coolify/i);
+    expect(deno.summary).toMatch(/Congress\.Trade/i);
+    expect(deno.billing.summary).toMatch(/not a live production host/i);
+    expect(deno.limitations.join(" ")).toMatch(/do not host on Deno Deploy/i);
+    expect(deno.canAdd.join(" ")).not.toMatch(/when Deno Deploy publishes/i);
   });
 
   it("documents Firecrawl history as private, non-money metadata", () => {

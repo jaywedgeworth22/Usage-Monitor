@@ -102,7 +102,7 @@ describe("Anthropic provider definition", () => {
 
 describe("built-in provider retirement", () => {
   it("keeps historical definitions while hiding dormant and retired providers from new connections", () => {
-    for (const name of ["tradier", "intrinio", "alpaca", "robinhood", "vercel"]) {
+    for (const name of ["tradier", "intrinio", "alpaca", "robinhood", "vercel", "deno"]) {
       expect(BUILT_IN_PROVIDERS.some((provider) => provider.name === name)).toBe(true);
       expect(ADDABLE_BUILT_IN_PROVIDERS.some((provider) => provider.name === name)).toBe(false);
       expect(builtInProviderLifecycle(name)).toBe("retired");
@@ -112,5 +112,17 @@ describe("built-in provider retirement", () => {
     expect(builtInProviderLifecycle("openai")).toBe("active");
     expect(isDecommissionedProviderName("  VeRcEl  ")).toBe(true);
     expect(isDecommissionedProviderName("openai")).toBe(false);
+  });
+
+  it("says Deno Deploy is a retired dead host and Coolify is the Congress.Trade host", () => {
+    const deno = BUILT_IN_PROVIDERS.find((provider) => provider.name === "deno");
+
+    expect(deno?.lifecycle).toBe("retired");
+    expect(deno?.helpNote).toMatch(/retired/i);
+    expect(deno?.helpNote).toMatch(/dead/i);
+    expect(deno?.helpNote).toMatch(/Coolify/i);
+    expect(deno?.helpNote).toMatch(/Congress\.Trade/i);
+    expect(deno?.helpNote).not.toMatch(/are tracked via Deno Deploy API/i);
+    expect(deno?.needsConfig?.fields[0]?.placeholder).not.toBe("congress-trade");
   });
 });
