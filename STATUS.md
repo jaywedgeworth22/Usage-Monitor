@@ -1,4 +1,11 @@
-## Current (2026-08-20 CURSOR — cross-app coordination follow-ups)
+## Current (2026-08-20 CURSOR — GitHub About + production docs)
+
+Docs/metadata only.  Public GitHub About homepage was empty and the description
+said "30+ API providers".  Align README, AGENTS, package metadata, and current
+runbooks with live production at `usage.jays.services` on Hetzner NBG1 / Coolify.  
+Cloudflare is the TLS proxy, not the host.  No invented provider counts.
+
+## Prior (2026-08-20 CURSOR — cross-app coordination follow-ups)
 
 Branch `cursor/cross-app-coordination-followups`.  Usage-Monitor slice of
 Socratic.Trade audit #2802 §7: vendor-era shared-package pin check (UM local,

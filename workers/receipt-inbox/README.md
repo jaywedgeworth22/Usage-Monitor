@@ -33,7 +33,8 @@ Required public intake Worker secrets:
 - `RECEIPT_INBOX_READ_TOKEN` — 32+ character bearer token for the sanitized
   summary endpoint.
 - `RECEIPT_INBOX_EVIDENCE_TOKEN` — separate 32+ character operator token for
-  downloading an unreviewed `.eml`; never configure this token in Render.
+  downloading an unreviewed `.eml`; never configure this token in the Usage
+  Monitor app env (Hetzner/Coolify or the retired Render rollback host).
 - `RECEIPT_INBOX_ADDRESS` — any configured identity on
   `receipts.jays.services` (short or high-entropy), used for readiness/health.
   Intake accepts **any** local-part on that domain; apex and other domains are
@@ -51,7 +52,8 @@ Required private lifecycle-auditor Worker secrets:
   account-scoped **Workers R2 Storage Read** permission. Cloudflare does not
   offer configuration-only R2 lifecycle scope: this permission can read/list
   R2 objects across the account. It is therefore bound only to the no-route,
-  `workers_dev=false` auditor and never to the public intake Worker or Render.
+  `workers_dev=false` auditor and never to the public intake Worker or the
+  Usage Monitor app env.
 
 Provision/deploy, then onboard only the dedicated receipt subdomain in
 Cloudflare Email Routing (not the apex). Prefer a catch-all (or short

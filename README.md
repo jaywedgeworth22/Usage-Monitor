@@ -1,6 +1,18 @@
 # Usage Monitor
 
-Tracks API usage and cost across providers via **poller snapshots**, **pushed telemetry**, and **Claude Code OTLP metrics**, with **per-project cost attribution** and **recurring-subscription tracking**. Deployed at `usage.jays.services`.
+Tracks API usage and cost across providers via **poller snapshots**, **pushed telemetry**, and **Claude Code OTLP metrics**, with **per-project cost attribution** and **recurring-subscription tracking**.
+
+**Production:** [usage.jays.services](https://usage.jays.services) on Hetzner NBG1 Coolify (`fleet-hetzner-nbg1`, `167.233.254.55`).  Cloudflare proxies public TLS for that hostname; it is not the application host.  Oracle Cloud and Render are retired (historical scripts in `deploy/oracle/`; Render rollback notes in `deploy/render/RETIRED-rollback.md`).
+
+## GitHub About
+
+Keep the public repository About aligned with production.  Do not add provider counts or vendor lists.
+
+| Field | Value |
+|--------|--------|
+| Homepage | `https://usage.jays.services` |
+| Description | Tracks API usage and cost via poller snapshots, pushed telemetry, and OTLP metrics. Production: usage.jays.services |
+| Topics | none |
 
 ## Key endpoints
 
@@ -53,14 +65,16 @@ build. CI uses the same pinned Node version from `.node-version`.
 ## Tech stack
 
 - **Next.js** (App Router) — web framework
-- **Prisma** (SQLite) — ORM + database (dedicated `/data` block volume on the production VM)
-- **Hetzner NBG1 / Coolify** (`167.233.254.55`, `fleet-hetzner-nbg1`) — production (see `DEPLOY.md`, `/Users/jay/apps/COOLIFY.md`); Oracle A1 scripts under `deploy/oracle/` are legacy; Render is retired/suspended as a rollback host only
+- **Prisma** (SQLite) — ORM + database (`/data/prod.db` on the production block volume)
+- **Hetzner NBG1 / Coolify** — production host (see `DEPLOY.md`)
+- **Cloudflare** — public HTTPS proxy for `usage.jays.services`; also hosts the optional receipt-inbox Worker
+- **Backblaze B2** — Litestream replica; Cloudflare R2 is weekly archive only
 - **Sentry** — error monitoring (Sentry Health card)
 
 ## Docs
 
 - **[AGENTS.md](AGENTS.md)** — agent-facing guide (schema, auth, ingest flows, env vars)
-- **[DEPLOY.md](DEPLOY.md)** — deployment guide (Hetzner/Coolify production IP `167.233.254.55`; Render runbook retired to `deploy/render/RETIRED-rollback.md`)
+- **[DEPLOY.md](DEPLOY.md)** — Hetzner/Coolify production runbook (`167.233.254.55`); Render notes retired to `deploy/render/RETIRED-rollback.md`
 - **[docs/litestream.md](docs/litestream.md)** — backup and restore runbook
 - **[docs/release-maintenance.md](docs/release-maintenance.md)** — why one-time
   data repairs/seeds remain explicit and what safe marker automation requires
