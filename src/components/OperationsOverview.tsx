@@ -4,6 +4,7 @@ import { ChevronDown, Cloud, Inbox, RefreshCw, Server } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { FleetBackupStatusPayload } from "@/lib/fleet-backup-status";
 import type {
+  CongressInfrastructureSummary,
   CoolifyFleetSummary,
   OperationsHealthSummary,
   OperationalState,
@@ -28,6 +29,11 @@ export function markOperationsStale(previous: OperationsHealthSummary): Operatio
     },
     socraticInfrastructure: {
       ...previous.socraticInfrastructure,
+      state: "stale",
+      error: "dashboard_refresh_failed",
+    },
+    congressInfrastructure: {
+      ...previous.congressInfrastructure,
       state: "stale",
       error: "dashboard_refresh_failed",
     },
@@ -482,6 +488,58 @@ export function SocraticInfrastructureCard({ data }: { data: SocraticInfrastruct
                   : " · OpenRouter credits low"}
             </p>
             <a href={data.adminUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex min-h-11 items-center font-medium text-blue-600 hover:underline dark:text-blue-300">Open full Socratic admin panel</a>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function CongressInfrastructureCard({ data }: { data: CongressInfrastructureSummary }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <section aria-labelledby="congress-infrastructure-heading" className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+      <div className="flex items-start justify-between gap-4 px-5 py-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="rounded-lg bg-sky-50 p-2 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300" aria-hidden="true"><Server className="h-4 w-4" /></span>
+          <div className="min-w-0">
+            <h3 id="congress-infrastructure-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">Congress.Trade Liveness</h3>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Database {data.database}
+              {data.schemaOk === true ? " · schema ok" : data.schemaOk === false ? " · schema missing" : ""}
+              {data.pipelineStatus ? ` · pipeline ${data.pipelineStatus}` : ""}
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {data.failedChecks.length} required check issue{data.failedChecks.length === 1 ? "" : "s"}
+              {" · last-resort lanes excluded"}
+            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Last checked <time suppressHydrationWarning dateTime={data.fetchedAt} title={data.fetchedAt}>{relativeTime(data.fetchedAt)}</time>{data.releaseSha ? ` · ${data.releaseSha.slice(0, 8)}` : ""}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <StatePill state={data.state} />
+          <DisclosureButton expanded={expanded} onClick={() => setExpanded((value) => !value)} controls="congress-infrastructure-detail">Details</DisclosureButton>
+        </div>
+      </div>
+      {expanded && (
+        <div id="congress-infrastructure-detail" className="grid gap-3 border-t border-gray-100 px-5 py-4 text-xs sm:grid-cols-2 dark:border-gray-700">
+          <div>
+            <p className="font-medium text-gray-800 dark:text-gray-200">Liveness</p>
+            <p className="mt-1 text-gray-500 dark:text-gray-400">
+              {data.ok === true ? "Process answered ok" : data.ok === false ? "Readiness failed" : "Unreachable"}
+            </p>
+            <p className="mt-1 text-gray-500 dark:text-gray-400">
+              Pipeline {data.pipelineStatus ?? "unknown"} (does not paint this card)
+            </p>
+          </div>
+          <div>
+            <p className="font-medium text-gray-800 dark:text-gray-200">Required checks</p>
+            <p className="mt-1 text-gray-500 dark:text-gray-400">
+              {data.failedChecks.length > 0 ? data.failedChecks.join(", ") : "none failed"}
+            </p>
+            <a href={data.adminUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex min-h-11 items-center font-medium text-blue-600 hover:underline dark:text-blue-300">Open Congress.Trade health</a>
           </div>
         </div>
       )}
@@ -1005,6 +1063,7 @@ export default function OperationsOverview() {
           <FleetBackupsCard data={data.fleetBackups} />
           <ReceiptInboxCard data={data.receiptInbox} />
           <SocraticInfrastructureCard data={data.socraticInfrastructure} />
+          <CongressInfrastructureCard data={data.congressInfrastructure} />
           <CoolifyFleetCard data={data.coolifyFleet} />
         </div>
       ) : !requestError ? (

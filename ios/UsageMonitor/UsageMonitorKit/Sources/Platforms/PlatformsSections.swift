@@ -399,9 +399,17 @@ struct FleetOperationsSection: View {
 
             if let peer = operations.socraticInfrastructure {
                 row(
-                    title: "Peer App Health",
+                    title: "Socratic.Trade",
                     detail: peer.releaseSha.map { String($0.prefix(8)) } ?? "—",
                     state: peer.state
+                )
+            }
+
+            if let congress = operations.congressInfrastructure {
+                row(
+                    title: "Congress.Trade",
+                    detail: congress.releaseSha.map { String($0.prefix(8)) } ?? "—",
+                    state: congress.state
                 )
             }
 

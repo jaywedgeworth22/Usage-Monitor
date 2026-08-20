@@ -1,4 +1,15 @@
-## Current (2026-08-16 GROK — ASC EULA + beta review)
+## Current (2026-08-20 CURSOR — cross-app coordination follow-ups)
+
+Branch `cursor/cross-app-coordination-followups`.  Usage-Monitor slice of
+Socratic.Trade audit #2802 §7: vendor-era shared-package pin check (UM local,
+ST public npm pin, CT vendor provenance; fail if ST or CT is unreadable or
+if CT reintroduces an npm dep) and a bounded `congress.trade/api/health`
+liveness probe next to ST.  Last-resort / retired CT lanes do not paint
+degraded.  Pin-check is intentionally not a required merge check.  Pointer
+and receipt: `docs/EFFORT-LOG.md`,
+`docs/rollouts/2026-08-20-cross-app-coordination-followups.md`.
+
+## Prior (2026-08-16 GROK — ASC EULA + beta review)
 
 Owner-authorized ASC writes.  Usage Client and Usage Local now have custom
 EULAs and filled beta App Review contacts (Jay Wedgeworth, no demo

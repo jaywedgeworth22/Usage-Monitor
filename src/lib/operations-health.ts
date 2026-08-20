@@ -2,12 +2,26 @@ import type { FleetBackupStatusPayload } from "@/lib/fleet-backup-status";
 import type { R2FleetSummary } from "@/lib/r2-usage";
 
 const SOCRATIC_HEALTH_URL = "https://socratictrade.com/api/health";
+const CONGRESS_HEALTH_URL = "https://congress.trade/api/health";
 const RECEIPT_INBOX_SUMMARY_URL = "https://receipt-inbox.jays.services/v1/receipts/summary";
 const MAX_HEALTH_RESPONSE_BYTES = 64 * 1024;
 const MAX_RECEIPT_RESPONSE_BYTES = 128 * 1024;
 const MAX_RECEIPT_ITEMS = 10;
 const REQUEST_TIMEOUT_MS = 8_000;
 const OPERATIONS_CACHE_TTL_MS = 30_000;
+
+/**
+ * CT pipeline check ids that must not paint Peer App Health.  Same rule as
+ * ST FilingAPI: retired / last-resort lanes are not required for liveness.
+ * CT GET /api/health is a liveness probe (readiness.ok); pipeline degraded
+ * on senate-relay, executive polling, latency/Massive, or Deno must not
+ * flip the card.
+ */
+const CONGRESS_LAST_RESORT_CHECK_IDS = new Set([
+  "senate_relay",
+  "latency_probes",
+  "polling_executive",
+]);
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -101,9 +115,23 @@ export interface CoolifyFleetSummary {
   error?: string;
 }
 
+export interface CongressInfrastructureSummary {
+  state: OperationalState;
+  fetchedAt: string;
+  ok: boolean | null;
+  database: "ok" | "degraded" | "unknown";
+  schemaOk: boolean | null;
+  pipelineStatus: string | null;
+  releaseSha: string | null;
+  failedChecks: string[];
+  adminUrl: string;
+  error?: string;
+}
+
 export interface OperationsHealthSummary {
   receiptInbox: ReceiptInboxSummary;
   socraticInfrastructure: SocraticInfrastructureSummary;
+  congressInfrastructure: CongressInfrastructureSummary;
   coolifyFleet: CoolifyFleetSummary;
   r2Fleet: R2FleetSummary | null;
   /** Per-app / per-location off-site backup status (B2 dumps, Litestream, local). */
@@ -115,6 +143,7 @@ const RECENT_RESTART_SECONDS = 600;
 
 let lastReceiptSuccess: ReceiptInboxSummary | undefined;
 let lastSocraticSuccess: SocraticInfrastructureSummary | undefined;
+let lastCongressSuccess: CongressInfrastructureSummary | undefined;
 let lastCoolifySuccess: CoolifyFleetSummary | undefined;
 let operationsCache: { expiresAt: number; value: OperationsHealthSummary } | undefined;
 let operationsInFlight: Promise<OperationsHealthSummary> | undefined;
@@ -305,6 +334,30 @@ export async function fetchReceiptInboxSummary(): Promise<ReceiptInboxSummary> {
   }
 }
 
+export function isCongressLastResortCheck(id: string): boolean {
+  const n = id.toLowerCase();
+  if (CONGRESS_LAST_RESORT_CHECK_IDS.has(n)) return true;
+  if (n.includes("massive")) return true;
+  if (n.includes("deno")) return true;
+  if (n.includes("filingapi")) return true;
+  return false;
+}
+
+export function congressFailedChecks(pipeline: unknown): string[] {
+  const record = asRecord(pipeline);
+  const checks = Array.isArray(record?.checks) ? record.checks : [];
+  const failed: string[] = [];
+  for (const raw of checks) {
+    const row = asRecord(raw);
+    const id = typeof row?.id === "string" ? row.id : "";
+    if (!id || !/^[a-z0-9._:-]{1,80}$/i.test(id)) continue;
+    if (isCongressLastResortCheck(id)) continue;
+    const status = typeof row?.status === "string" ? row.status.toLowerCase() : "";
+    if (status === "stalled" || status === "degraded") failed.push(id);
+  }
+  return failed.slice(0, 20);
+}
+
 function dependencyFailures(value: unknown): string[] {
   const dependencies = asRecord(value);
   if (!dependencies) return [];
@@ -467,6 +520,79 @@ export async function fetchSocraticInfrastructureSummary(): Promise<SocraticInfr
       return { ...lastSocraticSuccess, state: "stale", error: message };
     }
     return unreachableSocratic(fetchedAt, message);
+  }
+}
+
+function unreachableCongress(fetchedAt: string, error?: string): CongressInfrastructureSummary {
+  return {
+    state: "unreachable",
+    fetchedAt,
+    ok: null,
+    database: "unknown",
+    schemaOk: null,
+    pipelineStatus: null,
+    releaseSha: null,
+    failedChecks: [],
+    adminUrl: "https://congress.trade/api/health",
+    ...(error ? { error } : {}),
+  };
+}
+
+/**
+ * Bounded liveness probe of Congress.Trade GET /api/health.
+ * Process answering with ok:true is healthy.  Pipeline degraded on
+ * retired / last-resort lanes (senate-relay, executive polling, Massive
+ * latency, Deno, FilingAPI) must not paint the card.
+ */
+export async function fetchCongressInfrastructureSummary(): Promise<CongressInfrastructureSummary> {
+  const fetchedAt = new Date().toISOString();
+  try {
+    const response = await fetch(CONGRESS_HEALTH_URL, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const body = asRecord(await readBoundedJson(response, MAX_HEALTH_RESPONSE_BYTES).catch(() => null));
+    if (!body || typeof body.ok !== "boolean") {
+      throw new Error(response.ok ? "invalid_response" : `HTTP ${response.status}`);
+    }
+    const pipeline = asRecord(body.pipeline);
+    const build = asRecord(body.build);
+    const pipelineStatus =
+      typeof body.status === "string"
+        ? body.status
+        : typeof pipeline?.status === "string"
+          ? pipeline.status
+          : null;
+    const failedChecks = congressFailedChecks(pipeline ?? body.pipeline);
+    const database = body.db === true ? "ok" : body.db === false ? "degraded" : "unknown";
+    const schemaOk = typeof body.schema === "boolean" ? body.schema : null;
+    const releaseSha =
+      typeof build?.sha === "string" && /^[0-9a-f]{7,64}$/i.test(build.sha)
+        ? build.sha.toLowerCase()
+        : null;
+    // Liveness: readiness.ok is the process-up signal.  Do not paint
+    // degraded from pipeline.status (last-resort / retired lanes live there).
+    const result: CongressInfrastructureSummary = {
+      state: body.ok === true ? "healthy" : "degraded",
+      fetchedAt,
+      ok: body.ok,
+      database,
+      schemaOk,
+      pipelineStatus,
+      releaseSha,
+      failedChecks,
+      adminUrl: "https://congress.trade/api/health",
+    };
+    lastCongressSuccess = result;
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unreachable";
+    if (lastCongressSuccess) {
+      return { ...lastCongressSuccess, state: "stale", error: message };
+    }
+    return unreachableCongress(fetchedAt, message);
   }
 }
 
@@ -689,10 +815,17 @@ export async function fetchOperationsHealth(): Promise<OperationsHealthSummary> 
     operationsInFlight = (async () => {
       const { fetchR2FleetSummary } = await import("@/lib/r2-usage");
       const { fetchFleetBackupStatus } = await import("@/lib/fleet-backup-status");
-      const [receiptInbox, socraticInfrastructure, coolifyFleet, r2Fleet, fleetBackups] =
-        await Promise.all([
+      const [
+        receiptInbox,
+        socraticInfrastructure,
+        congressInfrastructure,
+        coolifyFleet,
+        r2Fleet,
+        fleetBackups,
+      ] = await Promise.all([
           fetchReceiptInboxSummary(),
           fetchSocraticInfrastructureSummary(),
+          fetchCongressInfrastructureSummary(),
           fetchCoolifyFleetSummary(),
           fetchR2FleetSummary().catch((error) => {
             console.error("[operations] R2 fleet summary failed:", error);
@@ -706,6 +839,7 @@ export async function fetchOperationsHealth(): Promise<OperationsHealthSummary> 
       const value: OperationsHealthSummary = {
         receiptInbox,
         socraticInfrastructure,
+        congressInfrastructure,
         coolifyFleet,
         r2Fleet,
         fleetBackups,
@@ -727,6 +861,7 @@ export async function fetchOperationsHealth(): Promise<OperationsHealthSummary> 
 export function resetOperationsHealthCacheForTests(): void {
   lastReceiptSuccess = undefined;
   lastSocraticSuccess = undefined;
+  lastCongressSuccess = undefined;
   lastCoolifySuccess = undefined;
   operationsCache = undefined;
   operationsInFlight = undefined;

@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
+  CongressInfrastructureCard,
   CoolifyFleetCard,
   FleetBackupsCard,
   markOperationsStale,
@@ -70,6 +71,26 @@ describe("OperationsOverview cards", () => {
     expect(html).toContain("uptime unknown");
     expect(html).not.toContain("0 GB");
     expect(html).not.toContain("0%");
+  });
+
+  it("shows Congress.Trade liveness without fabricating pipeline as degraded", () => {
+    const html = renderToStaticMarkup(createElement(CongressInfrastructureCard, {
+      data: {
+        state: "healthy",
+        fetchedAt: "2026-08-20T03:00:00.000Z",
+        ok: true,
+        database: "ok",
+        schemaOk: true,
+        pipelineStatus: "degraded",
+        releaseSha: "abcdef123456",
+        failedChecks: [],
+        adminUrl: "https://congress.trade/api/health",
+      },
+    }));
+    expect(html).toContain("Congress.Trade Liveness");
+    expect(html).toContain("Healthy");
+    expect(html).toContain("pipeline degraded");
+    expect(html).toContain("last-resort lanes excluded");
   });
 
   it("surfaces recent restart and Coolify fleet app rows", () => {
@@ -202,6 +223,17 @@ describe("OperationsOverview cards", () => {
         storageDegraded: false,
         adminUrl: "https://admin.socratictrade.com/admin/server",
       },
+      congressInfrastructure: {
+        state: "healthy",
+        fetchedAt: "2026-07-18T10:00:00.000Z",
+        ok: true,
+        database: "ok",
+        schemaOk: true,
+        pipelineStatus: "ok",
+        releaseSha: "abcdef12",
+        failedChecks: [],
+        adminUrl: "https://congress.trade/api/health",
+      },
       coolifyFleet: {
         configured: true,
         state: "healthy",
@@ -253,6 +285,7 @@ describe("OperationsOverview cards", () => {
     });
     expect(stale.receiptInbox.state).toBe("stale");
     expect(stale.socraticInfrastructure.state).toBe("stale");
+    expect(stale.congressInfrastructure.state).toBe("stale");
     expect(stale.coolifyFleet.state).toBe("stale");
     expect(stale.receiptInbox.error).toBe("dashboard_refresh_failed");
     expect(stale.r2Fleet?.configured).toBe(false);
