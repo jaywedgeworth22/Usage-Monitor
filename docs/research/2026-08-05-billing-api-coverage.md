@@ -160,7 +160,7 @@ Mostly **metadata / inventory / partial** — plan labels without invoice APIs, 
 | Pinecone | Console billing; control-plane inventory only in our adapter | Plan estimate + console |
 | Sentry | Org stats / subscription often console or partner | Stats ≠ invoice |
 | Coolify | Self-hosted / host bill, not Coolify SaaS invoice | Host cost (Hetzner/Oracle) |
-| Deno Deploy | Limited | Partial |
+| Deno Deploy | Retired (dead host) | Historical only — Congress.Trade now hosts on Coolify |
 
 ### Market data (FMP, Tiingo, Finnhub, AV, FRED, Massive, …)
 
@@ -240,7 +240,7 @@ For **Claude Max, ChatGPT Plus/Pro, SuperGrok, Cursor, Apple-billed anything**:
 | **True poll $ on phone** | n/a | OpenRouter, OpenAI Admin, DeepSeek balance, Anthropic Admin, Hetzner estimate |
 | **Everything else** | Per-adapter poll or blind | Subscription / key shell until ported |
 
-Retired brokers (Tradier, Alpaca, Robinhood) and dormant Firecrawl stay in both catalogs for **historical** tracking even when auto-poll is off.
+Retired brokers (Tradier, Alpaca, Robinhood), retired Deno Deploy (dead host; Congress.Trade now runs on Coolify), and dormant Firecrawl stay in both catalogs for **historical** tracking even when auto-poll is off.
 
 ---
 

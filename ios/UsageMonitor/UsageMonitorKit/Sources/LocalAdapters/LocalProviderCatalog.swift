@@ -360,7 +360,7 @@ public enum LocalProviderCatalog {
             category: "Hosting",
             mode: .keyPlusSubscription,
             adapterKind: "deno",
-            help: "Limited poll on server; track plan fee on phone if paid.",
+            help: "Retired.  Jay no longer hosts apps on Deno Deploy.  Congress.Trade now runs on Coolify.  Keep this row only for historical cost.",
             suggestedSubscriptionName: "Deno Deploy",
             abilities: [.optionalKey, .recurringFee, .serverOnly]
         ),
