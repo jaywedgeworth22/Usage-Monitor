@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-// @ts-expect-error - plain ESM operator helper, intentionally dependency-free (single-line so the directive covers the specifier)
 import { comparePins, ctHasNpmDep, gitRef, lockResolvedSha, normVersion, packageSpec, parseProvenance, PKG } from "../../../scripts/check-shared-package-pin.mjs";
 
 describe("shared-package pin check (vendor-era triangle, UM local)", () => {

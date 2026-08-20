@@ -56,7 +56,12 @@ npx tsc --noEmit
 npx vitest run src/lib/__tests__/shared-package-pin-check.test.ts \
   src/lib/__tests__/operations-health.test.ts \
   src/components/__tests__/OperationsOverview.test.ts
+# tsc clean; 27 passed (3 files)
 ```
+
+`npm run lint` / full `npm test` / `npm run build` were not required for this
+slice; focused typecheck + the files touched above are green.  iOS Swift was
+not compiled here (cloud Linux; no xcodebuild).
 
 ## Next Steps & Blockers
 

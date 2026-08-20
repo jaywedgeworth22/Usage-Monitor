@@ -338,7 +338,9 @@ describe("operations health", () => {
     it("keeps the receipt inbox visibly unconfigured and makes no receipt request", async () => {
     delete process.env.COOLIFY_SERVER_STATS;
     delete process.env.COOLIFY_API_TOKEN;
-    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue(Response.json(healthBody()));
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async () =>
+      Response.json(healthBody())
+    );
     const result = await fetchOperationsHealth();
     expect(result.receiptInbox.state).toBe("unconfigured");
     expect(result.receiptInbox.configured).toBe(false);
@@ -365,7 +367,9 @@ describe("operations health", () => {
   it("single-flights and briefly caches dashboard refreshes across tabs", async () => {
     delete process.env.COOLIFY_SERVER_STATS;
     delete process.env.COOLIFY_API_TOKEN;
-    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue(Response.json(healthBody({ dependencies: {} })));
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async () =>
+      Response.json(healthBody({ dependencies: {} }))
+    );
     const [first, second] = await Promise.all([fetchOperationsHealth(), fetchOperationsHealth()]);
     expect(first).toBe(second);
     const callsAfterPair = fetchMock.mock.calls.length;
