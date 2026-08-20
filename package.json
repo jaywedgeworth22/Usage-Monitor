@@ -84,6 +84,7 @@
     "postcss": "^8.5.18",
     "sharp": "0.35.3",
     "undici": "^7.29.0",
-    "js-yaml": "4.3.1"
+    "js-yaml": "4.3.1",
+    "deepmerge-ts": "^8.0.0"
   }
 }
