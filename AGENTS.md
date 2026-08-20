@@ -305,9 +305,10 @@ polls once per minute only while visible and lazy-mounts operational details.
 
 ## Env vars
 
-`DATABASE_URL`, `ENCRYPTION_KEY`, `CRON_SECRET`, and `USAGE_INGEST_TOKEN` are provisioned on the
-production host in `/etc/usage-monitor/usage-monitor.env` (mode 0600; `render.yaml` documents the same
-set for the retired rollback host). `BILLING_RECEIPT_INGEST_TOKEN` (must differ from
+Production runtime config lives in the Infisical `usage-monitor` project (env `prod`, path `/`)
+and is synced to tmpfs at `/run/usage-monitor/usage-monitor.env` (mode 0600).  The on-disk
+`/etc/usage-monitor/usage-monitor.env` file is the pre-migration fallback only;
+`render.yaml` documents the same variable set for the retired Render rollback host.  `BILLING_RECEIPT_INGEST_TOKEN` (must differ from
 `USAGE_INGEST_TOKEN`) and `BILLING_RECEIPT_HMAC_KEY` (32+ characters) are used by the private-safe
 receipt importer, alongside the stable 32+ character `BILLING_RECEIPT_IDENTITY_KEY`. The identity
 key must not rotate with the signing key because it derives durable receipt IDs. Receipt
@@ -334,7 +335,8 @@ Online Backup API snapshots are retained beside the production DB (default `3`,
 valid `1`-`10`). `start-with-litestream.sh` creates and integrity-checks one
 before every `migrate-safe.mjs` run against an existing DB; failure stops
 startup before schema changes. This same-disk layer is immediate migration
-rollback protection, while Litestream/R2 remains the off-disk PITR layer.
+rollback protection, while Litestream/B2 remains the off-disk replica
+(disaster recovery, not second-scale PITR).  Cloudflare R2 is weekly archive only.
 
 Optional adapter-resilience tuning (both default sanely; see `.env.example`):
 `ADAPTER_HTTP_TIMEOUT_MS` (per-request timeout for `fetchJson` in

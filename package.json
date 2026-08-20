@@ -1,5 +1,6 @@
 {
   "name": "api-usage-monitor",
+  "description": "Tracks API usage and cost via poller snapshots, pushed telemetry, and OTLP metrics. Production: usage.jays.services",
   "homepage": "https://usage.jays.services",
   "version": "0.1.0",
   "license": "Apache-2.0",

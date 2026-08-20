@@ -65,12 +65,14 @@ Local pre-migration snapshots on `/data` still exist.
   to run even when replication is never enabled — the binary just sits unused.
 - `litestream.yml` — the replica config: `/data/prod.db`, single S3-type replica
   populated entirely from `LITESTREAM_S3_*` env vars. **Disaster recovery only**
-  for this app: `snapshot.interval: 24h`, `snapshot.retention: 6h`,
-  `sync-interval: 2h`. Not multi-day continuous PITR — R2 is host/disk death
-  recovery, not “rewind to 3h42m ago.” Multi-level LTX under longer retention
+  for this app: `snapshot.interval: 24h`, `snapshot.retention: 24h`,
+  `sync-interval: 1h` (see `litestream.yml`). Not multi-day continuous PITR —
+  Backblaze B2 is the live host/disk-death replica, not “rewind to 3h42m ago.”
+  Cloudflare R2 is weekly archive only.  Historic multi-level LTX on R2
   re-breached the 10 GiB free tier (2026-08-04 / 2026-08-06); maintenance
-  tip-prunes non-tip LTX at 50% storage before the 70% kill. Off-site backup
-  health is observability only on `/api/ready` (does not gate product readiness).
+  tip-prunes non-tip LTX at 50% storage before the 70% kill when the endpoint
+  is R2. Off-site backup health is observability only on `/api/ready` (does
+  not gate product readiness).
 - `scripts/start-with-litestream.sh` — the container entrypoint. If all four
   required `LITESTREAM_S3_*` vars are set and `bin/litestream` exists: restores
   first if `/data/prod.db` doesn't exist yet (fresh disk or disaster recovery).
@@ -86,7 +88,7 @@ Local pre-migration snapshots on `/data` still exist.
 - `scripts/backup-sqlite-before-migrate.mjs` — transaction-consistent SQLite
   Online Backup API snapshot plus `PRAGMA integrity_check`, private file modes,
   atomic promotion, and bounded same-disk retention. It is the immediate schema
-  rollback layer; Litestream remains the off-disk PITR layer.
+  rollback layer; Litestream/B2 remains the off-disk disaster-recovery replica.
 - `scripts/litestream-restore.sh` — manual disaster-recovery restore to a
   scratch path, run inside the production app container (see below).
 - `scripts/replica-status-heartbeat.sh` + `run-app-with-replica-heartbeat.sh` —
