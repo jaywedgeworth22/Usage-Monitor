@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  congressFailedChecks,
+  fetchCongressInfrastructureSummary,
   fetchCoolifyFleetSummary,
   fetchOperationsHealth,
   fetchReceiptInboxSummary,
   fetchSocraticInfrastructureSummary,
+  isCongressLastResortCheck,
   resetOperationsHealthCacheForTests,
 } from "../operations-health";
 
@@ -123,6 +126,75 @@ describe("operations health", () => {
     expect(result.state).toBe("healthy");
     expect(result.failedDependencies).toEqual([]);
     expect(result.marketOpen).toBe(false);
+  });
+
+  it("treats congress.trade /api/health as liveness and ignores last-resort pipeline checks", async () => {
+    expect(isCongressLastResortCheck("senate_relay")).toBe(true);
+    expect(isCongressLastResortCheck("latency_probes")).toBe(true);
+    expect(isCongressLastResortCheck("polling_executive")).toBe(true);
+    expect(isCongressLastResortCheck("massive-history")).toBe(true);
+    expect(isCongressLastResortCheck("ingestion_backlog")).toBe(false);
+    expect(
+      congressFailedChecks({
+        checks: [
+          { id: "senate_relay", status: "degraded" },
+          { id: "latency_probes", status: "stalled" },
+          { id: "polling_executive", status: "stalled" },
+          { id: "ingestion_backlog", status: "degraded" },
+        ],
+      })
+    ).toEqual(["ingestion_backlog"]);
+
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      Response.json({
+        ok: true,
+        db: true,
+        schema: true,
+        status: "degraded",
+        pipeline: {
+          status: "degraded",
+          checks: [
+            { id: "senate_relay", status: "degraded" },
+            { id: "latency_probes", status: "stalled" },
+            { id: "ingestion_backlog", status: "ok" },
+          ],
+        },
+        build: { sha: "abcdef1234567890", shortSha: "abcdef123456" },
+      })
+    );
+    const result = await fetchCongressInfrastructureSummary();
+    expect(result.state).toBe("healthy");
+    expect(result.ok).toBe(true);
+    expect(result.database).toBe("ok");
+    expect(result.failedChecks).toEqual([]);
+    expect(result.releaseSha).toBe("abcdef1234567890");
+    expect(result.pipelineStatus).toBe("degraded");
+  });
+
+  it("paints Congress.Trade degraded only when readiness.ok is false", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ ok: false, db: false, schema: false, status: "down", missing: ["filings"] }),
+        { status: 503, headers: { "content-type": "application/json" } }
+      )
+    );
+    const result = await fetchCongressInfrastructureSummary();
+    expect(result.state).toBe("degraded");
+    expect(result.ok).toBe(false);
+    expect(result.database).toBe("degraded");
+  });
+
+  it("preserves last-good Congress data as stale after an outage", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValueOnce(
+      Response.json({ ok: true, db: true, schema: true, status: "ok", build: { sha: "abc1234" } })
+    );
+    const fresh = await fetchCongressInfrastructureSummary();
+    expect(fresh.state).toBe("healthy");
+    fetchMock.mockRejectedValueOnce(new Error("ct down"));
+    const stale = await fetchCongressInfrastructureSummary();
+    expect(stale.state).toBe("stale");
+    expect(stale.releaseSha).toBe(fresh.releaseSha);
+    expect(stale.error).toBe("ct down");
   });
 
   it("does not hard-degrade Peer App Health on overnight VIX misses", async () => {
@@ -266,7 +338,9 @@ describe("operations health", () => {
     it("keeps the receipt inbox visibly unconfigured and makes no receipt request", async () => {
     delete process.env.COOLIFY_SERVER_STATS;
     delete process.env.COOLIFY_API_TOKEN;
-    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue(Response.json(healthBody()));
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async () =>
+      Response.json(healthBody())
+    );
     const result = await fetchOperationsHealth();
     expect(result.receiptInbox.state).toBe("unconfigured");
     expect(result.receiptInbox.configured).toBe(false);
@@ -279,22 +353,30 @@ describe("operations health", () => {
       "socratic-trade",
       "congress-trade",
     ]);
-    // ST peer health + Socratic infrastructure share one public health URL in this fixture.
-    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(1);
+    // ST + CT peer health URLs plus any backup probe that reuses them.
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(
       fetchMock.mock.calls.some((c) => String(c[0]).includes("socratictrade.com/api/health"))
     ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some((c) => String(c[0]).includes("congress.trade/api/health"))
+    ).toBe(true);
+    expect(result.congressInfrastructure.state).toBe("healthy");
   });
 
   it("single-flights and briefly caches dashboard refreshes across tabs", async () => {
     delete process.env.COOLIFY_SERVER_STATS;
     delete process.env.COOLIFY_API_TOKEN;
-    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue(Response.json(healthBody({ dependencies: {} })));
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async () =>
+      Response.json(healthBody({ dependencies: {} }))
+    );
     const [first, second] = await Promise.all([fetchOperationsHealth(), fetchOperationsHealth()]);
-    const third = await fetchOperationsHealth();
     expect(first).toBe(second);
+    const callsAfterPair = fetchMock.mock.calls.length;
+    expect(callsAfterPair).toBeGreaterThanOrEqual(2);
+    const third = await fetchOperationsHealth();
     expect(third).toBe(first);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.length).toBe(callsAfterPair);
   });
 
   it("parses bounded receipt metadata and never returns private content fields", async () => {

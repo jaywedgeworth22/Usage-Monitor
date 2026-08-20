@@ -427,6 +427,10 @@ final class PlatformsDecodingTests: XCTestCase {
                 "recentRestart": false, "database": "ok", "schedulerStale": false,
                 "storageDegraded": false, "litestreamState": "ok", "litestreamAgeSeconds": 25
               },
+              "congressInfrastructure": {
+                "state": "healthy", "releaseSha": "abcdef123456", "recentRestart": false,
+                "database": "ok"
+              },
               "coolifyFleet": {
                 "configured": true, "state": "healthy",
                 "applications": [
@@ -457,6 +461,8 @@ final class PlatformsDecodingTests: XCTestCase {
         XCTAssertEqual(health.receiptInbox?.state, .receiving)
         XCTAssertEqual(health.receiptInbox?.needsReviewCount, 2)
         XCTAssertEqual(health.socraticInfrastructure?.state, .healthy)
+        XCTAssertEqual(health.congressInfrastructure?.state, .healthy)
+        XCTAssertEqual(health.congressInfrastructure?.releaseSha, "abcdef123456")
         XCTAssertEqual(health.coolifyFleet?.appsUnknown, 1)
 
         // The R2 account shape must match r2-usage.ts exactly or the section

@@ -14,6 +14,7 @@ import Foundation
 public struct OperationsHealth: Codable, Hashable, Sendable {
     public var receiptInbox: ReceiptInbox?
     public var socraticInfrastructure: PeerInfrastructure?
+    public var congressInfrastructure: PeerInfrastructure?
     public var coolifyFleet: CoolifyFleet?
     public var r2Fleet: R2Fleet?
     public var fetchedAt: String?
@@ -21,12 +22,14 @@ public struct OperationsHealth: Codable, Hashable, Sendable {
     public init(
         receiptInbox: ReceiptInbox? = nil,
         socraticInfrastructure: PeerInfrastructure? = nil,
+        congressInfrastructure: PeerInfrastructure? = nil,
         coolifyFleet: CoolifyFleet? = nil,
         r2Fleet: R2Fleet? = nil,
         fetchedAt: String? = nil
     ) {
         self.receiptInbox = receiptInbox
         self.socraticInfrastructure = socraticInfrastructure
+        self.congressInfrastructure = congressInfrastructure
         self.coolifyFleet = coolifyFleet
         self.r2Fleet = r2Fleet
         self.fetchedAt = fetchedAt
@@ -101,7 +104,7 @@ public struct OperationsHealth: Codable, Hashable, Sendable {
         }
     }
 
-    /// A sibling fleet app's public health (today: Socratic.Trade).
+    /// A sibling fleet app's public health (Socratic.Trade or Congress.Trade).
     public struct PeerInfrastructure: Codable, Hashable, Sendable {
         public var state: State
         public var releaseSha: String?
