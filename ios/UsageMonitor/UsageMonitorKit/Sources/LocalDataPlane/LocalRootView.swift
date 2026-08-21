@@ -80,6 +80,7 @@ public struct LocalRootView: View {
                 .tabItem { Label(Tab.settings.title, systemImage: Tab.settings.systemImage) }
                 .tag(Tab.settings)
         }
+        .tabBarScrollClearance()
         .tint(Theme.Colors.accent)
         .task { await model.bootstrap() }
         .sheet(isPresented: $showAddProvider) {

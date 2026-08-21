@@ -195,6 +195,7 @@ public struct RootView: View {
             ForEach(AppTab.allCases) { tab in
                 if visited.contains(tab) {
                     features.view(for: tab)
+                        .tabBarScrollClearance()
                         .opacity(tab == selected ? 1 : 0)
                         .allowsHitTesting(tab == selected)
                         .accessibilityHidden(tab != selected)

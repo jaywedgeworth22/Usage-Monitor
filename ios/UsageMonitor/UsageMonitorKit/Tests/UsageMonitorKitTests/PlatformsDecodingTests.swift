@@ -448,7 +448,11 @@ final class PlatformsDecodingTests: XCTestCase {
                     "storage": { "actual": 429496729, "limit": 10737418240, "mtdPct": 4.0,
                                  "projected": 500000000, "projectedPct": 4.7,
                                  "onTrackToExceed": false },
-                    "overallOnTrackToExceed70Pct": false }
+                    "overallOnTrackToExceed70Pct": false,
+                    "metricsSource": "cloudflare_graphql" },
+                  { "id": "old", "label": "Jay (Old)", "configured": true, "status": "ok",
+                    "storage": null, "overallOnTrackToExceed70Pct": false,
+                    "metricsSource": "r2_not_enabled" }
                 ],
                 "fetchedAt": "2026-08-11T20:00:00.000Z"
               },
@@ -472,6 +476,10 @@ final class PlatformsDecodingTests: XCTestCase {
         XCTAssertEqual(account.label, "Usage Monitor")
         XCTAssertEqual(account.storage?.mtdPct ?? 0, 4.0, accuracy: 0.001)
         XCTAssertFalse(account.overallOnTrackToExceed70Pct)
+        XCTAssertEqual(account.metricsSource, "cloudflare_graphql")
+        let old = try XCTUnwrap(health.r2Fleet?.accounts.first { $0.id == "old" })
+        XCTAssertEqual(old.metricsSource, "r2_not_enabled")
+        XCTAssertNil(old.storage)
     }
 
     /// The Coolify resource helper must recognise the live "running but health

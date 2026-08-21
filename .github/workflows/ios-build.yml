@@ -74,10 +74,17 @@ jobs:
         run: |
           # Per-run DerivedData: the shared Mac runner otherwise locks
           # UsageMonitor-*/XCBuildData/build.db when two PRs compile at once.
-          xcodebuild build \
-            -project ios/UsageMonitor/UsageMonitor.xcodeproj \
-            -scheme UsageMonitor \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath "${RUNNER_TEMP}/um-ios-${GITHUB_RUN_ID}" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO
+          # actool can flake when CoreSimulator drops the iPad-3x device;
+          # retry once after a short pause.
+          build() {
+            xcodebuild build \
+              -project ios/UsageMonitor/UsageMonitor.xcodeproj \
+              -scheme UsageMonitor \
+              -destination 'generic/platform=iOS' \
+              -derivedDataPath "${RUNNER_TEMP}/um-ios-${GITHUB_RUN_ID}" \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              ENABLE_PREVIEWS=NO \
+              COMPILER_INDEX_STORE_ENABLE=NO
+          }
+          build || { sleep 20; build; }

@@ -105,16 +105,18 @@ final class PlatformsStatusMappingTests: XCTestCase {
         status: String? = "ok",
         mtdPct: Double? = 12,
         onTrack: Bool = false,
-        error: String? = nil
+        error: String? = nil,
+        metricsSource: String? = nil
     ) -> OperationsHealth.R2Fleet.Account {
         OperationsHealth.R2Fleet.Account(
             id: id,
-            label: "Usage Monitor",
+            label: id == "old" ? "Jay (Old)" : "Usage Monitor",
             configured: configured,
             status: status,
             storage: mtdPct.map { OperationsHealth.R2Fleet.MetricStatus(mtdPct: $0) },
             overallOnTrackToExceed70Pct: onTrack,
-            error: error
+            error: error,
+            metricsSource: metricsSource
         )
     }
 
@@ -202,6 +204,30 @@ final class PlatformsStatusMappingTests: XCTestCase {
     /// No usage figure at all is not a green light — there is nothing to show.
     func testMissingStorageMetricIsUnavailable() {
         XCTAssertEqual(R2AccountHealth.evaluate(account(mtdPct: nil)), .unavailable)
+    }
+
+    /// Jay Old ships `r2_not_enabled` so leftover GraphQL storage is ignored.
+    func testR2NotEnabledIsNeutralAndHidesUsage() {
+        let health = R2AccountHealth.evaluate(
+            account(id: "old", mtdPct: nil, metricsSource: "r2_not_enabled")
+        )
+        XCTAssertEqual(health, .notEnabled)
+        XCTAssertEqual(health.semantic, .neutral)
+        XCTAssertEqual(health.title, "R2 Not Enabled")
+        XCTAssertFalse(health.showsUsage)
+        XCTAssertEqual(
+            health.detail(for: account(id: "old", mtdPct: nil, metricsSource: "r2_not_enabled")),
+            "R2 is not enabled on this account.  GraphQL leftovers are ignored."
+        )
+    }
+
+    /// Older payloads omit `metricsSource` — Jay Old with no storage is still
+    /// a leftover account, not a failed live read.
+    func testJayOldWithoutMetricsSourceIsNotUnavailable() {
+        XCTAssertEqual(
+            R2AccountHealth.evaluate(account(id: "old", mtdPct: nil)),
+            .notEnabled
+        )
     }
 
     /// A status this build has never seen fails closed rather than assuming

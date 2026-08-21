@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Form/List last-footer clearance for the floating glass tab bar.
+/// Bottom scroll clearance for the floating glass tab bar.
 ///
-/// The Client shell draws a custom capsule bar via `safeAreaBar` /
-/// `safeAreaInset`.  On iOS 26, `Form` still parks the last section footer
-/// inside the soft scroll-edge fade, so the About blurb is only readable
-/// during rubber-band overscroll and vanishes when the scroll settles.
-/// Apply this to tab-root Forms so that last footer stays above the bar.
+/// The Client shell draws a custom capsule bar.  On iOS 26, Form / List /
+/// ScrollView still park the last rows and section footers inside the soft
+/// scroll-edge fade, so the end of every tab is only readable during
+/// rubber-band overscroll.  Apply this once at the tab shell (and on the
+/// Local system `TabView`) so every scrolling surface inherits it.
 public struct TabBarScrollClearanceModifier: ViewModifier {
     public init() {}
 
@@ -23,7 +23,7 @@ public struct TabBarScrollClearanceModifier: ViewModifier {
 }
 
 public extension View {
-    /// Keep the last Form/List footer readable above the glass tab bar.
+    /// Keep the last rows and footers readable above the glass tab bar.
     func tabBarScrollClearance() -> some View {
         modifier(TabBarScrollClearanceModifier())
     }

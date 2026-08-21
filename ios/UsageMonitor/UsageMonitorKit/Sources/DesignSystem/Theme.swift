@@ -96,11 +96,11 @@ public extension Theme {
         public static let xxl: CGFloat = 28
         public static let xxxl: CGFloat = 40
 
-        /// Extra scroll-content room below the last Form/List footer so it can
-        /// rest above the floating glass tab bar.  The shell already reserves
-        /// the bar's height; this is only the last-line breathing room the
-        /// iOS 26 scroll-edge fade used to hide.
-        public static let tabBarClearance: CGFloat = 28
+        /// Height of the floating glass tab bar (icon + label + chrome).
+        /// Applied as extra scroll-content margin because NavigationStack
+        /// Form/List/ScrollView still park their last rows in the bar's
+        /// fade even when the shell uses `safeAreaBar`.
+        public static let tabBarClearance: CGFloat = 72
     }
 }
 

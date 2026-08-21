@@ -43,7 +43,6 @@ public struct ServerStatusRootView: View {
                     await hostUsage.refresh(using: env.apiClient)
                 }
             }
-            .tabBarScrollClearance()
             .navigationTitle(AppTab.serverStatus.title)
             .navigationBarTitleDisplayMode(.inline)
             .task(id: env.accessIdentityRevision) {
