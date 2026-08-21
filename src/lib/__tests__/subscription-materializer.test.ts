@@ -34,6 +34,8 @@ interface FakeSub {
   nextRenewalAt: Date;
   lastChargedPeriodStart: Date | null;
   externalBillingManaged?: boolean;
+  externalBillingSource?: string | null;
+  externalBillingId?: string | null;
   provider: { name: string };
 }
 
@@ -1483,10 +1485,27 @@ describe("materializeDueSubscriptions + project attribution (integration)", () =
       new Date("2026-07-15T00:00:00Z")
     );
     expect(plan!.inputs[0].confidence).toBe("actual");
-    expect(plan!.inputs[0].metadata).toMatchObject({
-      modeled: false,
-      chargeBasis: "external_billing",
+    expect(plan!.inputs[0].metadata).toEqual({
+      subscriptionId: "sub-1",
+      subscriptionName: "Test plan",
+      interval: "monthly",
+      intervalCount: 1,
+      currency: "USD",
     });
+  });
+
+  it("stamps linked-but-unmanaged Cloudflare-legacy charges as actual cash", () => {
+    const plan = planSubscriptionCharges(
+      fakeSubscription({
+        externalBillingManaged: false,
+        externalBillingSource: "cloudflare-subscriptions",
+        externalBillingId: "workers-paid",
+      }),
+      new Date("2026-07-15T00:00:00Z")
+    );
+    expect(plan!.inputs[0].confidence).toBe("actual");
+    expect(plan!.inputs[0].metadata).not.toHaveProperty("modeled");
+    expect(plan!.inputs[0].metadata).not.toHaveProperty("chargeBasis");
   });
 
   it("does not reset the cycle for a PUT that leaves an already-active row active", async () => {

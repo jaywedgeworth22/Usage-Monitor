@@ -21,6 +21,12 @@ receipts were not available.
 - **Unusual Whales** — $50/week API trial started 2026-07-30 and ended
   2026-08-06.  Not a live subscription.
 - **UptimeRobot** — paid plan expired 2026-08-19; account is free.
+- **Namecheap** — order `#211025634` on 2026-08-13, **$1.18** (Gmail
+  receipt).  Ingested 2026-08-21 as `manual-billing-adjustment` and a
+  Namecheap Provider row was added so it appears in budget-status.
+- **Google AI Ultra / Google One** — Play order `SOP.3385-2372-6310-60006`
+  on 2026-08-11, **$105.79** (family `thewedgeworths` account, $99.99 +
+  tax).  Household, not a fleet API provider.  Not booked here.
 - Receipt-inbox historical forwards on 2026-08-07 were blocked `555`.
 
 ## What this change does
@@ -39,5 +45,6 @@ receipts were not available.
 
 Confirm `/api/subscriptions` shows Massive / FMP / Anthropic / Kimi as
 `considering`.  August MTD subscription cash for those four should be $0.
-Add `RECEIPT_INBOX_EVIDENCE_TOKEN` to Infisical if inbox download/ignore
-should work from the dashboard.
+Book Namecheap `$1.18` from the dashboard Record Expense form if ingest
+is still token-mismatched.  Add `RECEIPT_INBOX_EVIDENCE_TOKEN` to
+Infisical if inbox download/ignore should work from the dashboard.

@@ -34,6 +34,19 @@ import {
 // unbounded backfill in one pass.
 const MAX_PERIODS_PER_RUN = 240;
 
+function isReceiptBackedSubscriptionCharge(
+  subscription: Pick<
+    SubscriptionChargePlanInput,
+    "externalBillingManaged" | "externalBillingSource" | "externalBillingId"
+  >
+): boolean {
+  if (subscription.externalBillingManaged === true) return true;
+  return Boolean(
+    subscription.externalBillingSource?.trim() &&
+      subscription.externalBillingId?.trim()
+  );
+}
+
 export interface MaterializeSubscriptionsResult {
   examined: number;
   charged: number;
@@ -66,6 +79,9 @@ interface SubscriptionChargePlanInput {
   lastChargedPeriodStart: Date | null;
   /** Provider-linked rows are receipt-backed.  Catalog/seeded rows are modeled. */
   externalBillingManaged?: boolean;
+  /** Linked-but-unmanaged (Cloudflare legacy handoff) is also receipt-backed. */
+  externalBillingSource?: string | null;
+  externalBillingId?: string | null;
   provider: { name: string; refreshIntervalMin?: number };
 }
 
@@ -127,7 +143,7 @@ export function planSubscriptionCharges(
     const periodEnd = nextRenewalAt;
 
     if (!lastCharged || periodStart.getTime() > lastCharged.getTime()) {
-      const providerLinked = subscription.externalBillingManaged === true;
+      const providerLinked = isReceiptBackedSubscriptionCharge(subscription);
       inputs.push({
         idempotencyKey: subscriptionChargeIdempotencyKey(
           subscription.id,
@@ -142,8 +158,10 @@ export function planSubscriptionCharges(
         metricType: "subscription",
         unit: "usd",
         costUsd: subscription.costUsd,
-        // Only an authoritative provider period is cash.  Seeded / owner-typed
-        // rows stay estimated so the dashboard cannot call them paid.
+        // Only an authoritative provider period (or an already-linked
+        // Cloudflare legacy row waiting for handoff) is cash.  Seeded /
+        // owner-typed catalog rows stay estimated so the dashboard cannot
+        // call them paid.
         confidence: providerLinked ? "actual" : "estimated",
         occurredAt: periodStart,
         windowStart: periodStart,
@@ -154,8 +172,11 @@ export function planSubscriptionCharges(
           interval,
           intervalCount,
           currency: subscription.currency,
-          modeled: !providerLinked,
-          chargeBasis: providerLinked ? "external_billing" : "modeled",
+          // Extra keys stay off receipt-backed rows: Cloudflare handoff
+          // proof requires the exact 5-key metadata set.
+          ...(providerLinked
+            ? {}
+            : { modeled: true, chargeBasis: "modeled" }),
         },
       });
       lastCharged = periodStart;
