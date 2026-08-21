@@ -75,7 +75,11 @@ export async function pauseGmailUnverifiedSeedSubscriptions(): Promise<{
       const result = await prisma.$transaction(async (tx) => {
         const retractedCharges = await retractSubscriptionChargesInTransaction(
           tx,
-          row.id
+          row.id,
+          // Pre-#1307 seed rows were stamped `actual`.  This repair must
+          // still delete those invented charges.  Pause / delete keep
+          // receipt-backed Cloudflare rows.
+          { includeReceiptBacked: true }
         );
         await tx.subscription.update({
           where: { id: row.id },
