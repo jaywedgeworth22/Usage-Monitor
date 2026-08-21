@@ -17,6 +17,8 @@ let computeProjectBudgetStatus: typeof import("../budget-status").computeProject
 let computeBudgetStatus: typeof import("../budget-status").computeBudgetStatus;
 let quarantineLegacyMistralSpendLimitSnapshots: typeof import("../mistral-snapshot-quarantine").quarantineLegacyMistralSpendLimitSnapshots;
 let putSubscription: typeof import("@/app/api/subscriptions/[id]/route").PUT;
+let deleteSubscription: typeof import("@/app/api/subscriptions/[id]/route").DELETE;
+let retractSubscriptionCharges: typeof import("../subscription-materializer").retractSubscriptionCharges;
 let geminiBillingConfigFingerprint: typeof import("../gemini-key-status").geminiBillingConfigFingerprint;
 
 const NOW = new Date("2026-07-15T12:00:00.000Z");
@@ -75,15 +77,19 @@ beforeAll(async () => {
   setupPrismaSqliteTestDb(dbPath);
 
   ({ prisma } = await import("@/lib/prisma"));
-  ({ planSubscriptionCharges, materializeDueSubscriptions } = await import(
-    "../subscription-materializer"
-  ));
+  ({
+    planSubscriptionCharges,
+    materializeDueSubscriptions,
+    retractSubscriptionCharges,
+  } = await import("../subscription-materializer"));
   ({ computeProjectBudgetStatus, computeBudgetStatus } = await import("../budget-status"));
   ({ quarantineLegacyMistralSpendLimitSnapshots } = await import(
     "../mistral-snapshot-quarantine"
   ));
   ({ geminiBillingConfigFingerprint } = await import("../gemini-key-status"));
-  ({ PUT: putSubscription } = await import("@/app/api/subscriptions/[id]/route"));
+  ({ PUT: putSubscription, DELETE: deleteSubscription } = await import(
+    "@/app/api/subscriptions/[id]/route"
+  ));
 }, 60_000);
 
 beforeEach(() => {
@@ -1567,6 +1573,76 @@ describe("materializeDueSubscriptions + project attribution (integration)", () =
     expect(
       await prisma.externalUsageEvent.count({
         where: { sourceApp: "subscription" },
+      })
+    ).toBe(0);
+  });
+
+  it("keeps receipt-backed Cloudflare charges when retracting a paused or deleted row", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "cloudflare-handoff",
+        displayName: "Cloudflare Handoff",
+        type: "builtin",
+        refreshIntervalMin: 60,
+      },
+    });
+    const linked = await createSubscription(provider.id, {
+      name: "Workers Paid",
+      costUsd: 5,
+      externalBillingManaged: false,
+      externalBillingSource: "cloudflare-subscriptions",
+      externalBillingId: "workers-paid",
+    });
+    const modeled = await createSubscription(provider.id, {
+      name: "Catalog Ghost",
+      costUsd: 29,
+    });
+    await materializeDueSubscriptions(NOW);
+    const before = await prisma.externalUsageEvent.findMany({
+      where: { sourceApp: "subscription" },
+      select: { id: true, confidence: true, metadata: true, service: true },
+    });
+    expect(before).toHaveLength(2);
+    const linkedEvent = before.find((event) => event.service === "Workers Paid");
+    const modeledEvent = before.find((event) => event.service === "Catalog Ghost");
+    expect(linkedEvent?.confidence).toBe("actual");
+    expect(linkedEvent?.metadata).not.toMatchObject({ modeled: true });
+    expect(modeledEvent?.confidence).toBe("estimated");
+
+    const retracted = await retractSubscriptionCharges(linked.id);
+    expect(retracted.deleted).toBe(0);
+    expect(
+      await prisma.externalUsageEvent.count({
+        where: { id: linkedEvent!.id },
+      })
+    ).toBe(1);
+
+    const req = new Request(`http://test/api/subscriptions/${linked.id}`, {
+      method: "DELETE",
+    });
+    const res = await deleteSubscription(req, {
+      params: Promise.resolve({ id: linked.id }),
+    });
+    expect(res.status).toBe(200);
+    expect(await prisma.subscription.findUnique({ where: { id: linked.id } })).toBeNull();
+    expect(
+      await prisma.externalUsageEvent.count({
+        where: { id: linkedEvent!.id },
+      })
+    ).toBe(1);
+
+    const modeledReq = new Request(`http://test/api/subscriptions/${modeled.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "paused" }),
+    });
+    const modeledRes = await putSubscription(modeledReq, {
+      params: Promise.resolve({ id: modeled.id }),
+    });
+    expect(modeledRes.status).toBe(200);
+    expect(
+      await prisma.externalUsageEvent.count({
+        where: { id: modeledEvent!.id },
       })
     ).toBe(0);
   });

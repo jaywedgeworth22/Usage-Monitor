@@ -465,6 +465,37 @@ function metadataString(
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function metadataFlag(
+  metadata: Prisma.JsonValue | null | undefined,
+  key: string
+): boolean {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return false;
+  }
+  return (metadata as Record<string, unknown>)[key] === true;
+}
+
+/** Catalog / seed charges.  Receipt-backed Cloudflare-legacy rows stay cash. */
+function isModeledSubscriptionCharge(
+  metadata: Prisma.JsonValue | null | undefined,
+  confidence: string
+): boolean {
+  return (
+    confidence === "estimated" ||
+    metadataFlag(metadata, "modeled") ||
+    metadataString(metadata, "chargeBasis") === "modeled"
+  );
+}
+
+export interface RetractSubscriptionChargesOptions {
+  /**
+   * One-time ghost repair may delete invented pre-#1307 `actual` seed
+   * charges.  Pause / delete must not: those paths keep receipt-backed
+   * 5-key Cloudflare handoff rows.
+   */
+  includeReceiptBacked?: boolean;
+}
+
 /**
  * Remove modeled materializer rows (and matching owner void adjustments) for
  * one subscription.  Pause / cancel / considering must not leave invented
@@ -472,20 +503,35 @@ function metadataString(
  */
 export async function retractSubscriptionChargesInTransaction(
   tx: Prisma.TransactionClient,
-  subscriptionId: string
+  subscriptionId: string,
+  options: RetractSubscriptionChargesOptions = {}
 ): Promise<{ deleted: number }> {
+  const includeReceiptBacked = options.includeReceiptBacked === true;
   const candidates = await tx.externalUsageEvent.findMany({
     where: {
       sourceApp: { in: [SUBSCRIPTION_SOURCE_APP, MANUAL_ADJUSTMENT_SOURCE_APP] },
     },
-    select: { id: true, sourceApp: true, metadata: true },
+    select: { id: true, sourceApp: true, confidence: true, metadata: true },
   });
   const ids = candidates
     .filter((event) => {
       if (event.sourceApp === SUBSCRIPTION_SOURCE_APP) {
-        return metadataString(event.metadata, "subscriptionId") === subscriptionId;
+        if (metadataString(event.metadata, "subscriptionId") !== subscriptionId) {
+          return false;
+        }
+        return (
+          includeReceiptBacked ||
+          isModeledSubscriptionCharge(event.metadata, event.confidence)
+        );
       }
-      return metadataString(event.metadata, "voidsSubscriptionId") === subscriptionId;
+      if (metadataString(event.metadata, "voidsSubscriptionId") !== subscriptionId) {
+        return false;
+      }
+      return (
+        includeReceiptBacked ||
+        isModeledSubscriptionCharge(event.metadata, event.confidence) ||
+        metadataFlag(event.metadata, "estimate")
+      );
     })
     .map((event) => event.id);
   if (ids.length === 0) return { deleted: 0 };
@@ -496,9 +542,10 @@ export async function retractSubscriptionChargesInTransaction(
 }
 
 export async function retractSubscriptionCharges(
-  subscriptionId: string
+  subscriptionId: string,
+  options: RetractSubscriptionChargesOptions = {}
 ): Promise<{ deleted: number }> {
   return prisma.$transaction((tx) =>
-    retractSubscriptionChargesInTransaction(tx, subscriptionId)
+    retractSubscriptionChargesInTransaction(tx, subscriptionId, options)
   );
 }
