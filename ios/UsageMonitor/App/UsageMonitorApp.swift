@@ -104,6 +104,7 @@ struct UsageMonitorApp: App {
                 Task { await activateCurrentAccountScope() }
             }
             .frame(minWidth: 420, minHeight: 640)
+            .appUpdatePrompt()
         }
         .defaultSize(width: 480, height: 860)
         .onChange(of: scenePhase) { _, phase in
