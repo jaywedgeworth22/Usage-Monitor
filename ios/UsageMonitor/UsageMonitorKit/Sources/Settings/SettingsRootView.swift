@@ -48,6 +48,7 @@ public struct SettingsRootView: View {
                 SecuritySection(settings: env.settings)
                 AboutSection(host: model.resolvedHostDisplay)
             }
+            .tabBarScrollClearance()
             .navigationTitle(AppTab.settings.title)
             // Inline (centered compact) title — avoid large left-aligned title at rest.
             .navigationBarTitleDisplayMode(.inline)
@@ -159,7 +160,7 @@ private struct AboutSection: View {
         } header: {
             Text("About")
         } footer: {
-            Text("\(AppInfo.displayName) shows your AI provider budgets at a glance. Data stays on your device and the monitor you point it at.")
+            Text(AppInfo.aboutFooter)
         }
     }
 }

@@ -201,7 +201,7 @@ public struct RootView: View {
                 }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .glassTabBarSafeArea {
             GlassTabBar(
                 pinned: preferences.pinned,
                 selection: selected,
@@ -350,6 +350,22 @@ struct GlassTabBar: View {
 }
 
 private extension View {
+    /// iOS 26 treats a custom bar as a real chrome edge so Form/List can
+    /// inset the last footer above it.  `safeAreaInset` alone left that
+    /// footer in the scroll-edge fade — visible only while overscrolling.
+    @ViewBuilder
+    func glassTabBarSafeArea<Bar: View>(@ViewBuilder bar: () -> Bar) -> some View {
+        if #available(iOS 26.0, *) {
+            self.safeAreaBar(edge: .bottom, spacing: 0) {
+                bar()
+            }
+        } else {
+            self.safeAreaInset(edge: .bottom, spacing: 0) {
+                bar()
+            }
+        }
+    }
+
     /// Liquid Glass when the OS provides it; ultra-thin material + hairline
     /// stroke + soft shadow as the visually-equivalent fallback.
     @ViewBuilder

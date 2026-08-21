@@ -103,6 +103,17 @@ final class SettingsFeatureTests: XCTestCase {
         XCTAssertFalse(vm.isHostValid, "A URL with no host is rejected.")
     }
 
+    func testAboutFooterKeepsTwoSpacesAndNamesTheApp() {
+        let footer = AppInfo.aboutFooter
+        XCTAssertTrue(
+            footer.contains(".  "),
+            "About footer must use two spaces after the first sentence."
+        )
+        XCTAssertTrue(footer.contains(AppInfo.displayName))
+        XCTAssertTrue(footer.contains("Data stays on your device"))
+        XCTAssertFalse(footer.contains("glance. Data"))
+    }
+
     func testApplyHostChangePersistsAndReconfigures() {
         let env = makeEnv(token: "tok")
         let vm = SettingsViewModel()
