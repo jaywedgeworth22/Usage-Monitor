@@ -71,6 +71,12 @@ enum AppInfo {
             ?? (Bundle.main.infoDictionary?["CFBundleName"] as? String)
             ?? "App"
     }
+
+    /// Last Settings footer.  Two spaces after the first sentence so the
+    /// line stays owner-copy-legal and testable without a running UI.
+    static var aboutFooter: String {
+        "\(displayName) shows your AI provider budgets at a glance.  Data stays on your device and the monitor you point it at."
+    }
 }
 
 // UptimeFormat / DiskFormat live in DesignSystem (shared with ServerStatus).

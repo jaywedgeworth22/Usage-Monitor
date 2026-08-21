@@ -159,7 +159,7 @@ private struct AboutSection: View {
         } header: {
             Text("About")
         } footer: {
-            Text("\(AppInfo.displayName) shows your AI provider budgets at a glance. Data stays on your device and the monitor you point it at.")
+            Text(AppInfo.aboutFooter)
         }
     }
 }

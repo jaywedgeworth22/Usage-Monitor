@@ -95,6 +95,12 @@ public extension Theme {
         public static let xl: CGFloat = 20
         public static let xxl: CGFloat = 28
         public static let xxxl: CGFloat = 40
+
+        /// Height of the floating glass tab bar (icon + label + chrome).
+        /// Applied as extra scroll-content margin because NavigationStack
+        /// Form/List/ScrollView still park their last rows in the bar's
+        /// fade even when the shell uses `safeAreaBar`.
+        public static let tabBarClearance: CGFloat = 72
     }
 }
 

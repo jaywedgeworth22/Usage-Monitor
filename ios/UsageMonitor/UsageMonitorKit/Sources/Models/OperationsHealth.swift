@@ -316,6 +316,9 @@ public struct OperationsHealth: Codable, Hashable, Sendable {
             public var storage: MetricStatus?
             public var overallOnTrackToExceed70Pct: Bool
             public var error: String?
+            /// Mirror of `R2FleetAccountSnapshot.metricsSource` — Jay Old
+            /// ships `r2_not_enabled` so leftover GraphQL storage is ignored.
+            public var metricsSource: String?
 
             public init(
                 id: String,
@@ -324,7 +327,8 @@ public struct OperationsHealth: Codable, Hashable, Sendable {
                 status: String? = nil,
                 storage: MetricStatus? = nil,
                 overallOnTrackToExceed70Pct: Bool = false,
-                error: String? = nil
+                error: String? = nil,
+                metricsSource: String? = nil
             ) {
                 self.id = id
                 self.label = label
@@ -333,6 +337,7 @@ public struct OperationsHealth: Codable, Hashable, Sendable {
                 self.storage = storage
                 self.overallOnTrackToExceed70Pct = overallOnTrackToExceed70Pct
                 self.error = error
+                self.metricsSource = metricsSource
             }
 
             public init(from decoder: Decoder) throws {
@@ -346,6 +351,7 @@ public struct OperationsHealth: Codable, Hashable, Sendable {
                     (try? container.decode(Bool.self, forKey: .overallOnTrackToExceed70Pct))
                     ?? false
                 error = try? container.decodeIfPresent(String.self, forKey: .error)
+                metricsSource = try? container.decodeIfPresent(String.self, forKey: .metricsSource)
             }
         }
     }

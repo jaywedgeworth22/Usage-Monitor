@@ -330,6 +330,8 @@ struct FleetBackupsSection: View {
 enum R2AccountHealth: Equatable, Sendable {
     /// No credentials for this account — nothing to read.
     case unconfigured
+    /// Cloudflare account exists, but R2 is not turned on (Jay Old leftovers).
+    case notEnabled
     /// Configured, but the usage read failed; the numbers cannot be trusted.
     case unavailable
     /// Read succeeded and the account is on track to exceed the free tier.
@@ -342,8 +344,17 @@ enum R2AccountHealth: Equatable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         let error = (account.error ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = (account.metricsSource ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
 
         if !account.configured || status == "unconfigured" { return .unconfigured }
+        if source == "r2_not_enabled" { return .notEnabled }
+        // Jay Old without the metricsSource field still has no live R2 —
+        // do not paint leftover-null storage as a failed read.
+        if account.id == "old", account.storage?.mtdPct == nil, error.isEmpty {
+            return .notEnabled
+        }
         if status == "error" || !error.isEmpty { return .unavailable }
         // Fail closed on a status this build has never seen rather than
         // assuming it means "fine".
@@ -359,13 +370,14 @@ enum R2AccountHealth: Equatable, Sendable {
     var showsUsage: Bool {
         switch self {
         case .watch, .ok: return true
-        case .unconfigured, .unavailable: return false
+        case .unconfigured, .notEnabled, .unavailable: return false
         }
     }
 
     var title: String {
         switch self {
         case .unconfigured: return "Not Configured"
+        case .notEnabled: return "R2 Not Enabled"
         case .unavailable: return "Unavailable"
         case .watch: return "Watch"
         case .ok: return "OK"
@@ -374,7 +386,7 @@ enum R2AccountHealth: Equatable, Sendable {
 
     var semantic: Theme.SemanticStatus {
         switch self {
-        case .unconfigured: return .neutral
+        case .unconfigured, .notEnabled: return .neutral
         case .unavailable, .watch: return .warning
         case .ok: return .ok
         }
@@ -382,9 +394,15 @@ enum R2AccountHealth: Equatable, Sendable {
 
     /// The reason line under the row, when there is one worth showing.
     func detail(for account: OperationsHealth.R2Fleet.Account) -> String? {
-        guard self == .unavailable else { return nil }
-        let error = (account.error ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return error.isEmpty ? "Metrics unavailable" : error
+        switch self {
+        case .notEnabled:
+            return "R2 is not enabled on this account.  GraphQL leftovers are ignored."
+        case .unavailable:
+            let error = (account.error ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return error.isEmpty ? "Metrics unavailable" : error
+        case .unconfigured, .watch, .ok:
+            return nil
+        }
     }
 }
 
@@ -441,7 +459,7 @@ struct FleetOperationsSection: View {
                 Text(account.label ?? account.id)
                     .font(Theme.Typography.body)
                     .foregroundStyle(
-                        health == .unconfigured
+                        health == .unconfigured || health == .notEnabled
                             ? Theme.Colors.secondaryText : Theme.Colors.primaryText
                     )
                 Spacer(minLength: Theme.Spacing.sm)
