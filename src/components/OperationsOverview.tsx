@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, Cloud, Inbox, RefreshCw, Server } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { FleetBackupStatusPayload } from "@/lib/fleet-backup-status";
 import type {
   CongressInfrastructureSummary,
@@ -120,21 +120,88 @@ function DisclosureButton({ expanded, onClick, controls, children }: {
   );
 }
 
+function truncateReceiptId(id: string): string {
+  return `${id.slice(0, 8)}…${id.slice(-4)}`;
+}
+
 export function ReceiptInboxCard({ data }: { data: ReceiptInboxSummary }) {
   const [expanded, setExpanded] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formNotice, setFormNotice] = useState<string | null>(null);
   const count = `${data.countIsLowerBound ? "at least " : ""}${data.needsReviewCount}`;
+
+  async function ignoreReceipt(id: string) {
+    setBusyId(id);
+    setFormError(null);
+    try {
+      const response = await fetch(`/api/receipt-inbox/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "ignored" }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Could not ignore this receipt");
+      }
+      setFormNotice("Receipt marked ignored.");
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Could not ignore this receipt");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function recordExpense(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError(null);
+    setFormNotice(null);
+    const form = new FormData(event.currentTarget);
+    const amount = Number(form.get("amountUsd"));
+    const occurred = String(form.get("occurredOn") ?? "");
+    const occurredAt = occurred
+      ? new Date(`${occurred}T12:00:00.000Z`).toISOString()
+      : new Date().toISOString();
+    const payload = {
+      provider: String(form.get("provider") ?? "").trim(),
+      amountUsd: amount,
+      occurredAt,
+      kind: String(form.get("kind") ?? "one_time"),
+      label: String(form.get("label") ?? "").trim(),
+      notes: String(form.get("notes") ?? "").trim() || undefined,
+      receiptInboxId: String(form.get("receiptInboxId") ?? "").trim() || undefined,
+      confidence: "actual",
+    };
+    try {
+      const response = await fetch("/api/owner-expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(body?.error ?? "Could not record this expense");
+      }
+      setFormNotice("Expense recorded on the ledger.");
+      event.currentTarget.reset();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Could not record this expense");
+    }
+  }
+
   return (
     <section aria-labelledby="receipt-inbox-heading" className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
       <div className="flex items-start justify-between gap-4 px-5 py-4">
         <div className="flex min-w-0 items-start gap-3">
           <span className="rounded-lg bg-blue-50 p-2 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300" aria-hidden="true"><Inbox className="h-4 w-4" /></span>
           <div className="min-w-0">
-            <h3 id="receipt-inbox-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">Receipt inbox</h3>
+            <h3 id="receipt-inbox-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">Receipt Inbox</h3>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {data.configured ? <>{count} need review · last receipt <time suppressHydrationWarning dateTime={data.latestReceivedAt ?? undefined}>{relativeTime(data.latestReceivedAt)}</time></> : "Forwarded receipts are not connected yet"}
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Evidence only — review before any cost is recorded. If a receipt{" "}
+              Review a forwarded receipt, then record the expense if it is real cash
+              that is not already on the ledger.  If it{" "}
               <strong className="font-medium text-gray-600 dark:text-gray-300">matches existing cash</strong>{" "}
               (subscription or prepaid already in the system), keep it as evidence and do{" "}
               <strong className="font-medium text-gray-600 dark:text-gray-300">not double-count</strong> spend.
@@ -143,24 +210,94 @@ export function ReceiptInboxCard({ data }: { data: ReceiptInboxSummary }) {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <StatePill state={data.state} />
-          {data.configured && data.items.length > 0 && (
-            <DisclosureButton expanded={expanded} onClick={() => setExpanded((value) => !value)} controls="receipt-inbox-detail">Recent</DisclosureButton>
-          )}
+          <DisclosureButton expanded={expanded} onClick={() => setExpanded((value) => !value)} controls="receipt-inbox-detail">Review</DisclosureButton>
         </div>
       </div>
       {expanded && (
         <div id="receipt-inbox-detail" className="border-t border-gray-100 px-5 py-3 dark:border-gray-700">
-          <ul className="divide-y divide-gray-100 dark:divide-gray-700">
-            {data.items.map((item) => (
-              <li key={item.id} className="flex items-center justify-between gap-4 py-2 text-xs">
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-gray-800 dark:text-gray-200">{item.senderDomain}</p>
-                  <p className="text-gray-500 dark:text-gray-400">{item.supportedAttachmentCount} supported of {item.attachmentCount} attachment{item.attachmentCount === 1 ? "" : "s"}</p>
-                </div>
-                <time suppressHydrationWarning dateTime={item.receivedAt} title={item.receivedAt} className="shrink-0 text-gray-500 dark:text-gray-400">{relativeTime(item.receivedAt)}</time>
-              </li>
-            ))}
-          </ul>
+          {data.items.length > 0 ? (
+            <ul className="divide-y divide-gray-100 dark:divide-gray-700">
+              {data.items.map((item) => (
+                <li key={item.id} className="flex flex-col gap-2 py-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-gray-800 dark:text-gray-200">{item.senderDomain}</p>
+                    <p className="text-gray-500 dark:text-gray-400">
+                      {truncateReceiptId(item.id)} · {item.quarantineReason.replaceAll("_", " ")} · {item.supportedAttachmentCount} supported of {item.attachmentCount} attachment{item.attachmentCount === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <time suppressHydrationWarning dateTime={item.receivedAt} title={item.receivedAt} className="text-gray-500 dark:text-gray-400">{relativeTime(item.receivedAt)}</time>
+                    {data.evidenceActionsConfigured && (
+                      <>
+                        <a
+                          className="rounded border border-gray-300 px-2 py-1 font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200"
+                          href={`/api/receipt-inbox/${item.id}/evidence`}
+                        >
+                          Download
+                        </a>
+                        <button
+                          type="button"
+                          className="rounded border border-gray-300 px-2 py-1 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200"
+                          disabled={busyId === item.id}
+                          onClick={() => void ignoreReceipt(item.id)}
+                        >
+                          Ignore
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-gray-500 dark:text-gray-400">No inbox items waiting.  You can still record an expense from a Gmail or iCloud receipt.</p>
+          )}
+          <form className="mt-4 grid gap-2 sm:grid-cols-2" onSubmit={(event) => void recordExpense(event)}>
+            <label className="text-xs text-gray-600 dark:text-gray-300">
+              Provider
+              <input required name="provider" className="mt-1 w-full rounded border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-900" placeholder="anthropic" />
+            </label>
+            <label className="text-xs text-gray-600 dark:text-gray-300">
+              Amount USD
+              <input required name="amountUsd" type="number" step="0.01" className="mt-1 w-full rounded border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-900" />
+            </label>
+            <label className="text-xs text-gray-600 dark:text-gray-300">
+              Date
+              <input name="occurredOn" type="date" className="mt-1 w-full rounded border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-900" />
+            </label>
+            <label className="text-xs text-gray-600 dark:text-gray-300">
+              Kind
+              <select name="kind" className="mt-1 w-full rounded border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-900" defaultValue="subscription">
+                <option value="subscription">subscription</option>
+                <option value="prepaid">prepaid</option>
+                <option value="one_time">one-time</option>
+              </select>
+            </label>
+            <label className="text-xs text-gray-600 dark:text-gray-300 sm:col-span-2">
+              Label
+              <input required name="label" className="mt-1 w-full rounded border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-900" placeholder="Claude Pro July receipt" />
+            </label>
+            <label className="text-xs text-gray-600 dark:text-gray-300 sm:col-span-2">
+              Inbox Id
+              <input name="receiptInboxId" className="mt-1 w-full rounded border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-900" placeholder="optional 64-hex inbox id" />
+            </label>
+            <label className="text-xs text-gray-600 dark:text-gray-300 sm:col-span-2">
+              Notes
+              <input name="notes" className="mt-1 w-full rounded border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-900" placeholder="optional" />
+            </label>
+            <div className="sm:col-span-2">
+              <button type="submit" className="rounded bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white dark:bg-gray-100 dark:text-gray-900">
+                Record Expense
+              </button>
+            </div>
+          </form>
+          {formNotice && <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">{formNotice}</p>}
+          {formError && <p className="mt-2 text-xs text-red-700 dark:text-red-300">{formError}</p>}
+          {!data.evidenceActionsConfigured && (
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              Download and ignore need RECEIPT_INBOX_EVIDENCE_TOKEN on the server.  Recording an expense works from the form above.
+            </p>
+          )}
         </div>
       )}
     </section>

@@ -61,6 +61,7 @@ function dependencies(
       externalBillingQuarantined: 0,
       truncated: false,
     })),
+    pauseSeededGhosts: vi.fn(async () => ({ paused: 0, retracted: 0 })),
     adoptSubscriptions: vi.fn(async () => subscriptionAdoption),
     materializeSubscriptions: vi.fn(async () => subscriptions),
     rollForwardRenewals: vi.fn(async () => providerRenewals),
