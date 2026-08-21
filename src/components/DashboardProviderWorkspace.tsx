@@ -262,6 +262,28 @@ function providerProjectionLabel(provider: WorkspaceProvider): string {
     : `${formatCurrency(provider.projectedEomUsd)} projected`;
 }
 
+function providerSpendSourceLabel(provider: WorkspaceProvider): string | null {
+  const subscription = provider.subscriptionMonthToDateUsd ?? 0;
+  const usage = provider.observedVariableUsageUsd ?? 0;
+  if (subscription === 0 && usage === 0) return null;
+  const parts: string[] = [];
+  if (subscription !== 0) {
+    parts.push(`${formatCurrency(subscription)} subscription`);
+  }
+  if (usage !== 0) {
+    parts.push(`${formatCurrency(usage)} usage`);
+  }
+  return parts.join(" · ");
+}
+
+function shouldShowCatalogEstimate(provider: WorkspaceProvider): boolean {
+  const estimate = provider.estimatedApiEquivalentUsd ?? 0;
+  if (estimate <= 0) return false;
+  const spent = Math.abs(provider.spentUsd ?? 0);
+  // LiteLLM catalog noise (thousands vs tens of real dollars) is not cash.
+  return estimate <= Math.max(spent * 5, 50);
+}
+
 function latestDate(values: Array<string | null | undefined>): string | null {
   let latest: string | null = null;
   let latestTime = 0;
@@ -1323,14 +1345,19 @@ export default function DashboardProviderWorkspace({
                                 <span className="block text-xs text-gray-500 dark:text-gray-400">
                                   {providerProjectionLabel(provider)}
                                 </span>
+                                {providerSpendSourceLabel(provider) && (
+                                  <span className="block text-xs text-gray-500 dark:text-gray-400">
+                                    {providerSpendSourceLabel(provider)}
+                                  </span>
+                                )}
                                 {(provider.receiptCashPaidUsd ?? 0) > 0 && (
                                   <span className="block text-xs text-emerald-700 dark:text-emerald-300">
                                     {formatCurrency(provider.receiptCashPaidUsd ?? 0)} receipt cash
                                   </span>
                                 )}
-                                {(provider.estimatedApiEquivalentUsd ?? 0) > 0 && (
+                                {shouldShowCatalogEstimate(provider) && (
                                   <span className="block text-xs text-amber-700 dark:text-amber-300">
-                                    {formatCurrency(provider.estimatedApiEquivalentUsd ?? 0)} Claude estimate excluded
+                                    {formatCurrency(provider.estimatedApiEquivalentUsd ?? 0)} catalog estimate excluded from cash
                                   </span>
                                 )}
                                 {provider.costCoverageCaveat && (

@@ -32,6 +32,7 @@ import {
   type SubscriptionInterval,
 } from "@/lib/subscriptions";
 import { findExternalAdoptionGuardKeyForCharge } from "@/lib/external-billing-subscription-adoption";
+import { retractSubscriptionChargesInTransaction } from "@/lib/subscription-materializer";
 
 function sameCalendarDay(a: Date, b: Date): boolean {
   return a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
@@ -91,6 +92,10 @@ export async function PUT(
   const isRawActivating =
     update.status === "active" && existing.status !== "active";
   const isActivating = isRawActivating || isExpiredRepurchase;
+  const isLeavingActive =
+    existing.status === "active" &&
+    update.status !== undefined &&
+    update.status !== "active";
   const isResume = isActivating && update.activationMode === "resume";
   const isRepurchase = isActivating && update.activationMode !== "resume";
   const externalBillingLinkSupplied =
@@ -334,6 +339,11 @@ export async function PUT(
   if (update.status !== undefined) {
     data.status = update.status;
   }
+  if (isLeavingActive) {
+    // Modeled current-period charges must not stay in MTD after the owner
+    // says the row is not an active paid term.
+    data.lastChargedPeriodStart = null;
+  }
   if (update.canceledAt !== undefined) {
     data.canceledAt = update.canceledAt;
   } else if (update.status !== undefined) {
@@ -491,7 +501,11 @@ export async function PUT(
           },
           tx
         );
-      return tx.subscription.update({ where: { id }, data });
+      const subscription = await tx.subscription.update({ where: { id }, data });
+      if (isLeavingActive) {
+        await retractSubscriptionChargesInTransaction(tx, id);
+      }
+      return subscription;
     });
     return NextResponse.json(subscription);
   } catch (error) {
@@ -523,7 +537,10 @@ export async function DELETE(
 
   const { id } = await params;
   try {
-    await prisma.subscription.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      await retractSubscriptionChargesInTransaction(tx, id);
+      await tx.subscription.delete({ where: { id } });
+    });
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Failed to delete subscription:", error);

@@ -17,6 +17,7 @@ describe("OperationsOverview cards", () => {
       data: {
         configured: false,
         state: "unconfigured",
+        evidenceActionsConfigured: false,
         needsReviewCount: 0,
         countIsLowerBound: false,
         latestReceivedAt: null,
@@ -24,9 +25,9 @@ describe("OperationsOverview cards", () => {
         items: [],
       },
     }));
-    expect(html).toContain("Receipt inbox");
+    expect(html).toContain("Receipt Inbox");
     expect(html).toContain("Not configured");
-    expect(html).toContain("review before any cost is recorded");
+    expect(html).toContain("record the expense if it is real cash");
     expect(html).toContain("matches existing cash");
     expect(html).toContain("not double-count");
     expect(html).not.toContain("$0");
@@ -187,6 +188,7 @@ describe("OperationsOverview cards", () => {
       receiptInbox: {
         configured: true,
         state: "receiving",
+        evidenceActionsConfigured: false,
         needsReviewCount: 1,
         countIsLowerBound: false,
         latestReceivedAt: "2026-07-18T09:00:00.000Z",

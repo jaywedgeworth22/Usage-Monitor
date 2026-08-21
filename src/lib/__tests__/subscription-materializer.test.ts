@@ -33,6 +33,9 @@ interface FakeSub {
   currentPeriodStart: Date;
   nextRenewalAt: Date;
   lastChargedPeriodStart: Date | null;
+  externalBillingManaged?: boolean;
+  externalBillingSource?: string | null;
+  externalBillingId?: string | null;
   provider: { name: string };
 }
 
@@ -105,6 +108,11 @@ describe("planSubscriptionCharges", () => {
     expect(plan!.inputs[0].metricType).toBe("subscription");
     expect(plan!.inputs[0].projectId).toBe("proj-1");
     expect(plan!.inputs[0].costUsd).toBe(20);
+    expect(plan!.inputs[0].confidence).toBe("estimated");
+    expect(plan!.inputs[0].metadata).toMatchObject({
+      modeled: true,
+      chargeBasis: "modeled",
+    });
     expect(plan!.currentPeriodStart.toISOString()).toBe("2026-07-01T00:00:00.000Z");
     expect(plan!.nextRenewalAt.toISOString()).toBe("2026-08-01T00:00:00.000Z");
   });
@@ -1471,6 +1479,35 @@ describe("materializeDueSubscriptions + project attribution (integration)", () =
     expect(result.eventsWritten).toBe(0);
   });
 
+  it("stamps provider-linked charges as actual cash", () => {
+    const plan = planSubscriptionCharges(
+      fakeSubscription({ externalBillingManaged: true }),
+      new Date("2026-07-15T00:00:00Z")
+    );
+    expect(plan!.inputs[0].confidence).toBe("actual");
+    expect(plan!.inputs[0].metadata).toEqual({
+      subscriptionId: "sub-1",
+      subscriptionName: "Test plan",
+      interval: "monthly",
+      intervalCount: 1,
+      currency: "USD",
+    });
+  });
+
+  it("stamps linked-but-unmanaged Cloudflare-legacy charges as actual cash", () => {
+    const plan = planSubscriptionCharges(
+      fakeSubscription({
+        externalBillingManaged: false,
+        externalBillingSource: "cloudflare-subscriptions",
+        externalBillingId: "workers-paid",
+      }),
+      new Date("2026-07-15T00:00:00Z")
+    );
+    expect(plan!.inputs[0].confidence).toBe("actual");
+    expect(plan!.inputs[0].metadata).not.toHaveProperty("modeled");
+    expect(plan!.inputs[0].metadata).not.toHaveProperty("chargeBasis");
+  });
+
   it("does not reset the cycle for a PUT that leaves an already-active row active", async () => {
     // "Do NOT change behavior for a row that was already active" — a PUT
     // that re-sends status: "active" on an already-active row must not
@@ -1496,6 +1533,42 @@ describe("materializeDueSubscriptions + project attribution (integration)", () =
     const updated = await res.json();
     expect(updated.currentPeriodStart).toBe("2026-07-01T00:00:00.000Z");
     expect(updated.lastChargedPeriodStart).toBe("2026-07-01T00:00:00.000Z");
+  });
+
+  it("retracts modeled charges when a PUT leaves active", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "massive-retract",
+        displayName: "Massive Retract",
+        type: "builtin",
+        refreshIntervalMin: 60,
+      },
+    });
+    const subscription = await createSubscription(provider.id, { costUsd: 29 });
+    await materializeDueSubscriptions(NOW);
+    expect(
+      await prisma.externalUsageEvent.count({
+        where: { sourceApp: "subscription" },
+      })
+    ).toBe(1);
+
+    const req = new Request(`http://test/api/subscriptions/${subscription.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "considering" }),
+    });
+    const res = await putSubscription(req, {
+      params: Promise.resolve({ id: subscription.id }),
+    });
+    expect(res.status).toBe(200);
+    const updated = await res.json();
+    expect(updated.status).toBe("considering");
+    expect(updated.lastChargedPeriodStart).toBeNull();
+    expect(
+      await prisma.externalUsageEvent.count({
+        where: { sourceApp: "subscription" },
+      })
+    ).toBe(0);
   });
 
   it("pauses external-managed rows with ambiguous mid-period windows (Wave K / E13)", async () => {

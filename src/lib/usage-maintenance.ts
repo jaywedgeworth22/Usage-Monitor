@@ -37,6 +37,7 @@ import {
   type BudgetControlsResult,
 } from "@/lib/budget-controls";
 import { runR2UsageCheck, type R2UsageAssessment } from "@/lib/r2-usage";
+import { pauseGmailUnverifiedSeedSubscriptions } from "@/lib/gmail-ledger-ghosts";
 
 export interface UsageMaintenanceResult {
   subscriptionAdoption: SubscriptionAdoptionMaintenanceResult;
@@ -78,6 +79,7 @@ export interface AlertMaintenanceResult extends AlertDeliveryResult {
 
 export interface UsageMaintenanceDependencies {
   quarantineMistralSnapshots?: typeof quarantineLegacyMistralSpendLimitSnapshots;
+  pauseSeededGhosts?: typeof pauseGmailUnverifiedSeedSubscriptions;
   adoptSubscriptions?: typeof adoptExternalBillingSubscriptions;
   materializeSubscriptions?: typeof materializeDueSubscriptions;
   rollForwardRenewals?: typeof rollForwardProviderRenewals;
@@ -183,6 +185,14 @@ export async function runUsageMaintenance(
                   : "Unknown subscription adoption failure",
             },
           };
+        }
+        const ghostRepair = await (
+          dependencies.pauseSeededGhosts ?? pauseGmailUnverifiedSeedSubscriptions
+        )();
+        if (ghostRepair.paused > 0) {
+          console.warn(
+            `[gmail-ledger-ghosts] paused=${ghostRepair.paused} retracted=${ghostRepair.retracted}`
+          );
         }
         const subscriptions = await (
           dependencies.materializeSubscriptions ?? materializeDueSubscriptions

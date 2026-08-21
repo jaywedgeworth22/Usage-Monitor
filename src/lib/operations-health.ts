@@ -1,5 +1,6 @@
 import type { FleetBackupStatusPayload } from "@/lib/fleet-backup-status";
 import type { R2FleetSummary } from "@/lib/r2-usage";
+import { receiptInboxEvidenceConfigured } from "@/lib/receipt-inbox-admin";
 
 const SOCRATIC_HEALTH_URL = "https://socratictrade.com/api/health";
 const CONGRESS_HEALTH_URL = "https://congress.trade/api/health";
@@ -49,6 +50,7 @@ export interface ReceiptInboxItemSummary {
 export interface ReceiptInboxSummary {
   configured: boolean;
   state: OperationalState;
+  evidenceActionsConfigured: boolean;
   needsReviewCount: number;
   countIsLowerBound: boolean;
   latestReceivedAt: string | null;
@@ -279,6 +281,7 @@ export async function fetchReceiptInboxSummary(): Promise<ReceiptInboxSummary> {
     return {
       configured: hasPartialConfiguration,
       state: hasPartialConfiguration ? "unavailable" : "unconfigured",
+      evidenceActionsConfigured: receiptInboxEvidenceConfigured(),
       needsReviewCount: 0,
       countIsLowerBound: false,
       latestReceivedAt: null,
@@ -308,6 +311,7 @@ export async function fetchReceiptInboxSummary(): Promise<ReceiptInboxSummary> {
     const result: ReceiptInboxSummary = {
       configured: true,
       state: "receiving",
+      evidenceActionsConfigured: receiptInboxEvidenceConfigured(),
       needsReviewCount,
       countIsLowerBound: body.countIsLowerBound === true,
       latestReceivedAt: canonicalTimestamp(body.latestReceivedAt),
@@ -324,6 +328,7 @@ export async function fetchReceiptInboxSummary(): Promise<ReceiptInboxSummary> {
     return {
       configured: true,
       state: "unavailable",
+      evidenceActionsConfigured: receiptInboxEvidenceConfigured(),
       needsReviewCount: 0,
       countIsLowerBound: false,
       latestReceivedAt: null,
