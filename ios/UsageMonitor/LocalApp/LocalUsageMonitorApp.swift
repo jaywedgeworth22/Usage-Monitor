@@ -19,6 +19,7 @@ struct LocalUsageMonitorApp: App {
             // installs opened with a zero-sized or unresponsive chrome when
             // the scene had no preferred size.
             .frame(minWidth: 420, minHeight: 640)
+            .appUpdatePrompt()
         }
         .defaultSize(width: 480, height: 860)
     }

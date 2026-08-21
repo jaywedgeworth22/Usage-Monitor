@@ -31,6 +31,7 @@
 		6CB37F405426D5B08943A367 /* Alerts in Frameworks */ = {isa = PBXBuildFile; productRef = BCBC6C1579802E15115FA523 /* Alerts */; };
 		84C98816E8C661773E58A4FE /* AppLock in Frameworks */ = {isa = PBXBuildFile; productRef = 4A50A30B1EBA9441B1967DC6 /* AppLock */; };
 		8F40DA5814B26236048AE760 /* Platforms in Frameworks */ = {isa = PBXBuildFile; productRef = 0772155CEF61EADBA51DAC23 /* Platforms */; };
+		93C8B9B6F84D706A5B9504C4 /* AppUpdatePrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7445650B16A6EDC5905BFD04 /* AppUpdatePrompt.swift */; };
 		98CCE4B03A6799D8B4584385 /* ScreenshotDemoSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E62F2FB6F8366000FC474EBD /* ScreenshotDemoSupport.swift */; };
 		9FC1AA41DEEF222CA0DD91F6 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 37C47BD409744EC363A5D9C3 /* DesignSystem */; };
 		A25988FF08C31D2498209FB2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DA93AC5DCCD01FBB2A560D25 /* Assets.xcassets */; };
@@ -49,6 +50,7 @@
 		E813273A1FAAB7D3E13847EC /* UsageMonitorWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A4F16263E10D7A4C46F8FC1 /* UsageMonitorWidgetBundle.swift */; };
 		EAAD082FEEBCF157A5348BC7 /* LocalUsageMonitorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90D22095A081B9D89B4CED0E /* LocalUsageMonitorApp.swift */; };
 		EBABF435393E7ED02EE5DF08 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 685168BCC902543D51E9E6BA /* PrivacyInfo.xcprivacy */; };
+		F1082B640C6F53056C21589F /* AppUpdatePrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EB1FDD22E0727C2B30590AB /* AppUpdatePrompt.swift */; };
 		F3DA80422F5F65435C87288A /* Providers in Frameworks */ = {isa = PBXBuildFile; productRef = AF921547F127906DB1C7629D /* Providers */; };
 		FBADF6807BDA77B31864857E /* LocalDataPlane in Frameworks */ = {isa = PBXBuildFile; productRef = 3D1EA8338E0268795F805F14 /* LocalDataPlane */; };
 		FEE74AA132592406B60358C3 /* AppSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8C3B26815D2E6893A2F0BD4 /* AppSmokeTests.swift */; };
@@ -95,8 +97,10 @@
 		2B30FDC3F50A61E4D10BC24B /* UsageMonitorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageMonitorApp.swift; sourceTree = "<group>"; };
 		345CB985D932922EA66F6D73 /* BudgetWidgetIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetWidgetIntent.swift; sourceTree = "<group>"; };
 		37A37C7541E4CEA8D9236FFF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		5EB1FDD22E0727C2B30590AB /* AppUpdatePrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdatePrompt.swift; sourceTree = "<group>"; };
 		685168BCC902543D51E9E6BA /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		6CF0AEBB3717E9EAC8485618 /* LocalUsageMonitor.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LocalUsageMonitor.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7445650B16A6EDC5905BFD04 /* AppUpdatePrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdatePrompt.swift; sourceTree = "<group>"; };
 		764AB0422F0A2B31B88D25D2 /* UsageMonitorWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = UsageMonitorWidget.entitlements; sourceTree = "<group>"; };
 		792B1B2FC84FE1924C7CD1A6 /* WidgetPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPresentation.swift; sourceTree = "<group>"; };
 		8A4F16263E10D7A4C46F8FC1 /* UsageMonitorWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageMonitorWidgetBundle.swift; sourceTree = "<group>"; };
@@ -254,6 +258,7 @@
 			children = (
 				A243768254FD0CD557A942D6 /* Resources */,
 				EB1864248318F2267ECF38E2 /* AccountChangeNotifyingTokenStore.swift */,
+				7445650B16A6EDC5905BFD04 /* AppUpdatePrompt.swift */,
 				DA93AC5DCCD01FBB2A560D25 /* Assets.xcassets */,
 				C81B7D14B31665FDA6183BF8 /* OfflineCacheSnapshotSink.swift */,
 				E62F2FB6F8366000FC474EBD /* ScreenshotDemoSupport.swift */,
@@ -266,6 +271,7 @@
 			isa = PBXGroup;
 			children = (
 				F780E74C41025A29AD0FAAB4 /* Resources */,
+				5EB1FDD22E0727C2B30590AB /* AppUpdatePrompt.swift */,
 				01455828D3A2004E9EE6FCA6 /* Assets.xcassets */,
 				90D22095A081B9D89B4CED0E /* LocalUsageMonitorApp.swift */,
 			);
@@ -516,6 +522,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F1082B640C6F53056C21589F /* AppUpdatePrompt.swift in Sources */,
 				EAAD082FEEBCF157A5348BC7 /* LocalUsageMonitorApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -534,6 +541,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B82FFD609432C0928F46DA8F /* AccountChangeNotifyingTokenStore.swift in Sources */,
+				93C8B9B6F84D706A5B9504C4 /* AppUpdatePrompt.swift in Sources */,
 				3F00B7EA559035693708214F /* OfflineCacheSnapshotSink.swift in Sources */,
 				98CCE4B03A6799D8B4584385 /* ScreenshotDemoSupport.swift in Sources */,
 				276F317A99A928209250BE5E /* UsageMonitorApp.swift in Sources */,
