@@ -11,7 +11,10 @@
 // Copilot CLI: ~/.copilot/session-state/*/events.jsonl session.shutdown
 //   data.modelMetrics[model].usage (ccusage Copilot data source).  Totals are
 //   cumulative across resume/shutdown; emit the delta since the previous
-//   metrics snapshot so re-ingest cannot double-count.
+//   metrics snapshot so re-ingest cannot double-count.  inputTokens is
+//   inclusive of cacheReadTokens AND cacheWriteTokens (tokenuse; ccusage#1174
+//   23399 ≈ 10069+13324).  Codex-style splitInclusiveCache only subtracts
+//   cacheRead, which would price cache writes as full input.
 //
 // Tokens are posted as billingMode=estimated. Grok costUsdTicks (1e-10 USD)
 // are posted as estimated cost events. Neither is cash.
@@ -306,6 +309,15 @@ function copilotUsageFromMetricsRow(row) {
   };
 }
 
+/** Copilot inputTokens includes cache reads and cache writes.  Peel writes
+ *  first so splitInclusiveCache's Codex-style read subtract sees the rest. */
+function splitCopilotInclusiveCache(raw) {
+  return splitInclusiveCache({
+    ...raw,
+    input: finiteCount(raw.input) - finiteCount(raw.cacheCreation),
+  });
+}
+
 function tokenBreakdownDelta(current, previous) {
   return {
     input: Math.max(0, current.input - previous.input),
@@ -347,7 +359,7 @@ export function parseCopilotEventsJsonl(text, { sessionKey, fallbackOccurredAt }
       if (!model) continue;
       const raw = copilotUsageFromMetricsRow(row);
       if (!raw) continue;
-      const current = splitInclusiveCache(raw);
+      const current = splitCopilotInclusiveCache(raw);
       const previous = lastByModel.get(model) ?? {
         input: 0,
         output: 0,
