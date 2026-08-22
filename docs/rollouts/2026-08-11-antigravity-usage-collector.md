@@ -115,7 +115,7 @@ Two corrections to the original design:
 **Done 2026-08-12** — recorded here as the reproducible procedure.
 
 1. **Infisical** — in the `usage-monitor` project
-   (`86e35e51-91bc-4dfd-a045-4484726b9c40`), env `prod`, set **two** secrets
+   (`<UM_INFISICAL_PROJECT_ID>`), env `prod`, set **two** secrets
    from one freshly generated random token:
    - `USAGE_INGEST_PRODUCER_TOKENS` = `antigravity-cli:<token>` (append
      comma-separated if other `producerId:token` pairs already exist)
@@ -134,7 +134,7 @@ Two corrections to the original design:
 3. **Local Mac** — `infisical login` once (interactive, caches a session;
    this is why the plist can call `infisical run` without embedding a client
    secret). Confirm `agy` is on `PATH` and authenticated.
-4. Dry-run: `infisical run --projectId 86e35e51-91bc-4dfd-a045-4484726b9c40 \
+4. Dry-run: `infisical run --projectId <UM_INFISICAL_PROJECT_ID> \
    --env prod -- node scripts/antigravity-usage-collector.mjs --dry-run --debug`
 5. Once the parsed output looks right, install the launchd job (see the
    `.plist.example` header for exact steps) and drop `--dry-run`.

@@ -2,7 +2,7 @@
 
 Tracks API usage and cost across providers via **poller snapshots**, **pushed telemetry**, and **Claude Code OTLP metrics**, with **per-project cost attribution** and **recurring-subscription tracking**.
 
-**Production:** [usage.jays.services](https://usage.jays.services) on Hetzner NBG1 Coolify (`fleet-hetzner-nbg1`, `167.233.254.55`).  Cloudflare proxies public TLS for that hostname; it is not the application host.  Oracle Cloud and Render are retired (historical scripts in `deploy/oracle/`; Render rollback notes in `deploy/render/RETIRED-rollback.md`).
+**Production:** [usage.jays.services](https://usage.jays.services) on Coolify (see private `jaywedgeworth22/fleet-ops:ATTACK-MAP.md`).  Cloudflare proxies public TLS for that hostname; it is not the application host.  Oracle Cloud and Render are retired (historical scripts in `deploy/oracle/`; Render rollback notes in `deploy/render/RETIRED-rollback.md`).
 
 ## GitHub About
 
@@ -74,7 +74,7 @@ build. CI uses the same pinned Node version from `.node-version`.
 ## Docs
 
 - **[AGENTS.md](AGENTS.md)** — agent-facing guide (schema, auth, ingest flows, env vars)
-- **[DEPLOY.md](DEPLOY.md)** — Hetzner/Coolify production runbook (`167.233.254.55`); Render notes retired to `deploy/render/RETIRED-rollback.md`
+- **[DEPLOY.md](DEPLOY.md)** — Production runbook (see private `fleet-ops:ATTACK-MAP.md`); Render notes retired to `deploy/render/RETIRED-rollback.md`
 - **[docs/litestream.md](docs/litestream.md)** — backup and restore runbook
 - **[docs/release-maintenance.md](docs/release-maintenance.md)** — why one-time
   data repairs/seeds remain explicit and what safe marker automation requires

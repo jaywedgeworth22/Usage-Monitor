@@ -27,7 +27,7 @@ Docs/metadata only.  No application or deploy-path code.
 
 Taken from `DEPLOY.md`, `litestream.yml`, and the live health/ready responses:
 
-- Host: Hetzner NBG1 Coolify (`fleet-hetzner-nbg1`, `167.233.254.55`)
+- Host: Hetzner NBG1 Coolify (`fleet-hetzner-nbg1`, `<PROD_ORIGIN_IP>`)
 - Public hostname: `usage.jays.services`
 - Cloudflare: public TLS proxy for that hostname; optional receipt-inbox Worker
 - Database: Prisma + SQLite on `/data`

@@ -60,8 +60,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    INFISICAL_ENV=prod \
-    INFISICAL_UM_PROJECT_ID=86e35e51-91bc-4dfd-a045-4484726b9c40
+    INFISICAL_ENV=prod
 
 # Startup migrations intentionally use the pinned Prisma CLI from devDependencies,
 # so retain the verified build dependency tree instead of pruning it here.

@@ -119,9 +119,9 @@ function fleetAppSpecs(): FleetAppSpec[] {
 
 /** Coolify UUID → fleet app for correlating host resources with backups. */
 export const FLEET_COOLIFY_APP_UUIDS: Record<string, FleetAppId> = {
-  yagelvqux9e8l1kztif7bf2o: "usage-monitor",
-  d83b1aykr03uwr32yhgzaiay: "socratic-trade",
-  c11c5hdhuczureb6w2pg20p0: "congress-trade",
+  ...(process.env.COOLIFY_USAGE_MONITOR_UUID ? { [process.env.COOLIFY_USAGE_MONITOR_UUID]: "usage-monitor" as const } : {}),
+  ...(process.env.COOLIFY_SOCRATIC_UUID ? { [process.env.COOLIFY_SOCRATIC_UUID]: "socratic-trade" as const } : {}),
+  ...(process.env.COOLIFY_CONGRESS_UUID ? { [process.env.COOLIFY_CONGRESS_UUID]: "congress-trade" as const } : {}),
 };
 
 interface CacheEntry {

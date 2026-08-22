@@ -81,7 +81,7 @@ the cloud sandbox that wrote this.
      "known gap" writeup.
 
 4. **Add the Infisical secret.** Project `usage-monitor`
-   (`86e35e51-91bc-4dfd-a045-4484726b9c40`), env `prod`, key
+   (`<UM_INFISICAL_PROJECT_ID>`), env `prod`, key
    `USAGE_INGEST_PRODUCER_TOKENS`, value `antigravity-cli:<token>`. First
    check whether that key already has other `producerId:token` pairs
    (comma-separated) — if so, append rather than overwrite.
@@ -106,7 +106,7 @@ the cloud sandbox that wrote this.
 
 6. **Send for real and verify:**
    ```bash
-   infisical run --projectId 86e35e51-91bc-4dfd-a045-4484726b9c40 --env prod -- \
+   infisical run --projectId <UM_INFISICAL_PROJECT_ID> --env prod -- \
      node scripts/antigravity-usage-collector.mjs
    ```
    Check the printed ack (`persisted` should be > 0, `rejected` should be
@@ -155,7 +155,7 @@ confirm it compiles and passes.**
 What's still worth checking, because the wording bug only fired because
 the underlying flag really is engaged in production right now:
 
-1. SSH to the Hetzner host (`root@167.233.254.55`, `~/.ssh/hetzner` per
+1. SSH to the Hetzner host (`root@<PROD_ORIGIN_IP>`, `~/.ssh/hetzner` per
    `AGENTS.md`) and check:
    ```bash
    ls -la /data/r2-disabled-70pct.flag  # present?
