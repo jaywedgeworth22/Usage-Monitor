@@ -189,7 +189,7 @@ export async function importWorkspacePayload(
 
   if (mode === "replace") {
     throw new Error(
-      "Replace import is not offered on the server workspace. Use merge, which never overwrites credentials."
+      "Replace import is not offered on the server workspace. Use merge, which never overwrites existing rows."
     );
   }
 
@@ -252,6 +252,12 @@ export async function importWorkspacePayload(
   const existingProviders = await prisma.provider.findMany({
     select: { id: true, name: true, displayName: true },
   });
+  // Merge is add-missing only. An iOS Local export uses this same format and
+  // omits null plan fields; upserting onto a live server would wipe budgets
+  // and could attach extra local subscriptions/snapshots to existing rows.
+  const preexistingProviderIds = new Set(
+    existingProviders.map((row) => row.id)
+  );
   for (const row of existingProviders) {
     providerIdMap.set(row.id, row.id);
     providerIdMap.set(`${row.name.toLowerCase()}::${row.displayName.toLowerCase()}`, row.id);
@@ -314,22 +320,20 @@ export async function importWorkspacePayload(
     const providerId = incomingProviderId
       ? providerIdMap.get(incomingProviderId)
       : undefined;
-    if (!providerId) {
+    if (!providerId || preexistingProviderIds.has(providerId)) {
       skipped += 1;
       continue;
     }
-    await prisma.providerPlan.upsert({
+    const existingPlan = await prisma.providerPlan.findUnique({
       where: { providerId },
-      create: {
+    });
+    if (existingPlan) {
+      skipped += 1;
+      continue;
+    }
+    await prisma.providerPlan.create({
+      data: {
         providerId,
-        billingMode: asString(row.billingMode) ?? "manual",
-        fixedMonthlyCostUsd: asNumber(row.fixedMonthlyCostUsd),
-        monthlyBudgetUsd: asNumber(row.monthlyBudgetUsd),
-        monthlyRequestLimit: asNumber(row.monthlyRequestLimit),
-        billingInterval: asString(row.billingInterval),
-        notes: asString(row.notes),
-      },
-      update: {
         billingMode: asString(row.billingMode) ?? "manual",
         fixedMonthlyCostUsd: asNumber(row.fixedMonthlyCostUsd),
         monthlyBudgetUsd: asNumber(row.monthlyBudgetUsd),
@@ -356,7 +360,7 @@ export async function importWorkspacePayload(
       : undefined;
     const name = asString(row.name);
     const costUsd = asNumber(row.costUsd);
-    if (!providerId || !name || costUsd == null) {
+    if (!providerId || preexistingProviderIds.has(providerId) || !name || costUsd == null) {
       skipped += 1;
       continue;
     }
@@ -407,7 +411,7 @@ export async function importWorkspacePayload(
       ? providerIdMap.get(incomingProviderId)
       : undefined;
     const fetchedAt = asString(row.fetchedAt);
-    if (!providerId || !fetchedAt) {
+    if (!providerId || preexistingProviderIds.has(providerId) || !fetchedAt) {
       skipped += 1;
       continue;
     }
@@ -451,7 +455,12 @@ export async function importWorkspacePayload(
       ? projectIdMap.get(incomingProjectId)
       : undefined;
     const percentage = asNumber(row.percentage);
-    if (!providerId || !projectId || percentage == null) {
+    if (
+      !providerId ||
+      preexistingProviderIds.has(providerId) ||
+      !projectId ||
+      percentage == null
+    ) {
       skipped += 1;
       continue;
     }
