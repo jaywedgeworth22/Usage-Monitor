@@ -2,7 +2,9 @@
 // Local collector for OpenAI Codex CLI session JSONL.
 //
 // Reads ${CODEX_HOME:-~/.codex}/sessions and archived_sessions (same layout
-// as ccusage). Pushes estimated token events to Usage Monitor ingest.
+// as ccusage).  Archive flatten-moves the rollout filename; sessionKey is
+// remapped to the live sessions/YYYY/MM/DD path so a 15-min re-ingest cannot
+// double-count.  Pushes estimated token events to Usage Monitor ingest.
 // Not a billing API. Not cash.
 //
 // Usage:
@@ -24,10 +26,10 @@ import {
   postUsageBatches,
 } from "./lib/session-token-collectors.mjs";
 import {
+  codexSessionKeyFor,
   expandHome,
   parseCollectorArgs,
   readIfFresh,
-  sessionKeyFor,
   walkFiles,
 } from "./lib/run-session-token-collector.mjs";
 
@@ -59,7 +61,7 @@ export async function collectCodexEvents({
       const text = await readIfFresh(file);
       if (!text) continue;
       const parsed = parseCodexJsonl(text, {
-        sessionKey: sessionKeyFor(codexHome, file),
+        sessionKey: codexSessionKeyFor(codexHome, file),
       });
       events.push(...filterEventsSince(parsed, since));
     }
