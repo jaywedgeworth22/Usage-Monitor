@@ -273,13 +273,24 @@ the owner's goal split — the OTLP route above is the "usage metrics land here"
 `workers/receipt-inbox/` is an optional Cloudflare Email Routing Worker that
 stores complete forwarded MIME messages in a private R2 bucket as unreviewed
 evidence and uses a Durable Object for atomic daily intake limits plus review
-status. It exposes only a bounded, read-only metadata summary. It never holds
+status. The sanitized summary now includes a bounded subject, amount, service,
+and kind so the Operations Receipt Inbox card is actually usable. It still never
+returns raw MIME, card numbers, or mailbox local-parts. It never holds
 `BILLING_RECEIPT_INGEST_TOKEN`, `BILLING_RECEIPT_IDENTITY_KEY`, or
-`BILLING_RECEIPT_HMAC_KEY`, so email intake cannot create cost events. Configure
+`BILLING_RECEIPT_HMAC_KEY`, so email intake cannot create HMAC cash events.
+Owner-recorded ledger rows go through `POST /api/owner-expenses` (dashboard
+session or `OWNER_EXPENSE_TOKEN`). Intake may POST there after Grok (DeepSeek
+backup) classifies a receipt when those Worker secrets are set. Configure
 the dashboard with a distinct `RECEIPT_INBOX_READ_TOKEN`; the summary URL is
 fixed to `https://receipt-inbox.jays.services`; absent configuration is a visible Not configured
 state. Reviewed exact prepaid-funding receipts still enter money history only
-through the private HMAC importer described above.
+through the private HMAC importer described above. Upcoming dues for the owner
+are on the unlisted Apple Calendar feed `GET /api/bills.ics?token=`
+(`BILLS_CALENDAR_TOKEN`, 32+). Title format is `$price - Service - usage|subscription|prepaid|dev-expense`.
+Usage invoices that arrive after the usage window are filed on the date received,
+with the due date in the event details. FMP and Massive were cancelled via a
+temporary card and must not get a next due date. Domain renewals are
+`dev-expense` even when the domain is only loosely related to the apps.
 
 The Durable Object is SQLite-backed (`new_sqlite_classes`). Receipt intake uses
 a recoverable `pending -> R2 put -> committed` protocol: pending rows are never

@@ -4,7 +4,7 @@ import { bustBudgetStatusCache } from "@/lib/budget-status";
 
 export const OWNER_EXPENSE_SOURCE_APP = "owner-recorded-expense";
 
-export const OWNER_EXPENSE_KINDS = ["subscription", "prepaid", "one_time"] as const;
+export const OWNER_EXPENSE_KINDS = ["subscription", "prepaid", "usage", "one_time"] as const;
 export type OwnerExpenseKind = (typeof OWNER_EXPENSE_KINDS)[number];
 
 export interface OwnerExpenseInput {
@@ -16,6 +16,10 @@ export interface OwnerExpenseInput {
   notes?: string;
   confidence: "actual" | "estimated";
   receiptInboxId?: string;
+  dueDate?: string;
+  nextDueDate?: string;
+  cancelledNoRenew?: boolean;
+  calendarSort?: "subscription" | "prepaid" | "usage" | "dev-expense";
 }
 
 export interface RecordedOwnerExpense {
@@ -53,7 +57,7 @@ export function parseOwnerExpenseInput(body: unknown): OwnerExpenseInput {
   }
   const kind = typeof record.kind === "string" ? record.kind.trim() : "";
   if (!isOwnerExpenseKind(kind)) {
-    throw new Error('kind must be "subscription", "prepaid", or "one_time"');
+    throw new Error('kind must be "subscription", "prepaid", "usage", or "one_time"');
   }
   const label = typeof record.label === "string" ? record.label.trim() : "";
   if (!label || label.length > 160) {
@@ -85,6 +89,9 @@ export function parseOwnerExpenseInput(body: unknown): OwnerExpenseInput {
   if (receiptInboxId && !RECEIPT_ID_PATTERN.test(receiptInboxId)) {
     throw new Error("receiptInboxId must be a 64-hex inbox id");
   }
+  const dueDate = isoDay(record.dueDate);
+  const nextDueDate = isoDay(record.nextDueDate);
+  const calendarSort = parseCalendarSort(record.calendarSort);
   return {
     provider,
     amountUsd,
@@ -94,7 +101,30 @@ export function parseOwnerExpenseInput(body: unknown): OwnerExpenseInput {
     notes,
     confidence,
     receiptInboxId,
+    dueDate: dueDate ?? undefined,
+    nextDueDate: nextDueDate ?? undefined,
+    cancelledNoRenew: record.cancelledNoRenew === true,
+    calendarSort,
   };
+}
+
+function isoDay(value: unknown): string | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  return value;
+}
+
+function parseCalendarSort(
+  value: unknown
+): OwnerExpenseInput["calendarSort"] {
+  if (
+    value === "subscription"
+    || value === "prepaid"
+    || value === "usage"
+    || value === "dev-expense"
+  ) {
+    return value;
+  }
+  return undefined;
 }
 
 export function ownerExpenseIdempotencyKey(input: OwnerExpenseInput): string {
@@ -137,6 +167,10 @@ export async function recordOwnerExpense(
         kind: input.kind,
         ...(input.notes ? { notes: input.notes } : {}),
         ...(input.receiptInboxId ? { receiptInboxId: input.receiptInboxId } : {}),
+        ...(input.dueDate ? { dueDate: input.dueDate } : {}),
+        ...(input.nextDueDate ? { nextDueDate: input.nextDueDate } : {}),
+        ...(input.cancelledNoRenew ? { cancelledNoRenew: true } : {}),
+        ...(input.calendarSort ? { calendarSort: input.calendarSort } : {}),
       },
     },
   ]);

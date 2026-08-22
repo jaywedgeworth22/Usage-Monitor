@@ -3,6 +3,12 @@ import {
   RECEIPT_RETENTION_DAYS,
   validateReceiptLifecycleRules,
 } from "../../receipt-lifecycle.mjs";
+import {
+  boundedSubject,
+  calendarTitle,
+  classifyReceipt,
+  llmSystemPrompt,
+} from "./classify.mjs";
 
 const MAX_MESSAGE_BYTES = 10 * 1024 * 1024;
 const MAX_DAILY_MESSAGES = 100;
@@ -10,7 +16,7 @@ const MAX_DAILY_BYTES = 100 * 1024 * 1024;
 const MAX_ATTACHMENT_COUNT = 5;
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const MAX_SUPPORTED_ATTACHMENT_BYTES = 6 * 1024 * 1024;
-const MAX_SUMMARY_ITEMS = 20;
+const MAX_SUMMARY_ITEMS = 50;
 const RETENTION_MS = RECEIPT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const PENDING_RETENTION_MS = 24 * 60 * 60 * 1000;
 const MAX_EXPIRY_CLEANUP_ITEMS = 100;
@@ -201,7 +207,7 @@ async function indexRequest(env, path, init) {
   return response;
 }
 
-export async function handleEmail(message, env) {
+export async function handleEmail(message, env, ctx) {
   // Accept any *@receipts.jays.services recipient (short or high-entropy).
   // RECEIPT_INBOX_ADDRESS remains a configured identity on that domain used
   // for readiness/health; it is no longer the sole accepted To: address.
@@ -291,6 +297,12 @@ export async function handleEmail(message, env) {
           ? "no_supported_evidence"
           : "awaiting_review";
   const receivedAt = new Date().toISOString();
+  const review = classifyReceipt({
+    subject: parsed.subject,
+    text: typeof parsed.text === "string" ? parsed.text : "",
+    senderDomain: senderDomain(message.from),
+    receivedAt,
+  });
   const metadata = {
     id,
     groupId,
@@ -303,6 +315,23 @@ export async function handleEmail(message, env) {
     bodyEvidence,
     parseState,
     quarantineReason,
+    subject: boundedSubject(parsed.subject),
+    amountUsd: review.amountUsd,
+    service: review.service,
+    kind: review.kind,
+    calendarSort: review.calendarSort,
+    expenseDate: review.expenseDate,
+    dueDate: review.dueDate,
+    cancelledNoRenew: review.cancelledNoRenew,
+    classificationSource: "rules",
+    classificationAction: review.action,
+    label: review.label,
+    notes: review.notes,
+    calendarTitle: calendarTitle({
+      amountUsd: review.amountUsd,
+      service: review.service,
+      sort: review.calendarSort,
+    }),
   };
   const reservation = await indexRequest(env, "/reserve", {
     method: "POST",
@@ -318,6 +347,13 @@ export async function handleEmail(message, env) {
     throw new Error("Receipt index returned an invalid reservation ID");
   }
   await storeAndCommitEvidence(env, targetId, raw);
+  const filing = (async () => {
+    const refined = await refineWithLlm(env, metadata, parsed.text || "");
+    await fileClassifiedReceipt(env, refined);
+  })();
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(filing);
+  else await filing.catch(() => {});
+  return { id: targetId };
 }
 
 export async function storeAndCommitEvidence(env, id, raw) {
@@ -325,6 +361,132 @@ export async function storeAndCommitEvidence(env, id, raw) {
     httpMetadata: { contentType: "message/rfc822" },
   });
   await indexRequest(env, `/commit/${id}`, { method: "POST" });
+}
+
+async function refineWithLlm(env, metadata, text) {
+  const grokKey = typeof env.XAI_API_KEY === "string" ? env.XAI_API_KEY.trim() : "";
+  const openrouterKey = typeof env.OPENROUTER_RECEIPT_KEY === "string"
+    ? env.OPENROUTER_RECEIPT_KEY.trim()
+    : "";
+  const user = JSON.stringify({
+    subject: metadata.subject,
+    senderDomain: metadata.senderDomain,
+    text: String(text || "").slice(0, 4000),
+    receivedAt: metadata.receivedAt,
+  });
+  const tryModel = async (url, token, model) => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        messages: [
+          { role: "system", content: llmSystemPrompt() },
+          { role: "user", content: user },
+        ],
+      }),
+    });
+    if (!response.ok) throw new Error(`llm_http_${response.status}`);
+    const body = await response.json();
+    const content = body?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") throw new Error("llm_empty");
+    const jsonStart = content.indexOf("{");
+    const jsonEnd = content.lastIndexOf("}");
+    if (jsonStart < 0 || jsonEnd <= jsonStart) throw new Error("llm_json");
+    return JSON.parse(content.slice(jsonStart, jsonEnd + 1));
+  };
+  try {
+    if (grokKey) {
+      const parsed = await tryModel(
+        "https://api.x.ai/v1/chat/completions",
+        grokKey,
+        env.XAI_RECEIPT_MODEL || "grok-4-1-fast",
+      );
+      return applyLlmReview(metadata, parsed, "grok");
+    }
+  } catch {
+    // Fall through to DeepSeek.
+  }
+  if (!openrouterKey) return metadata;
+  try {
+    const parsed = await tryModel(
+      "https://openrouter.ai/api/v1/chat/completions",
+      openrouterKey,
+      env.DEEPSEEK_RECEIPT_MODEL || "deepseek/deepseek-chat",
+    );
+    return applyLlmReview(metadata, parsed, "deepseek");
+  } catch {
+    return metadata;
+  }
+}
+
+function applyLlmReview(metadata, parsed, source) {
+  if (!parsed || typeof parsed !== "object") return metadata;
+  const next = { ...metadata, classificationSource: source };
+  if (parsed.action === "file" || parsed.action === "ignore") next.classificationAction = parsed.action;
+  if (typeof parsed.service === "string" && parsed.service.trim()) {
+    next.service = parsed.service.trim().slice(0, 80);
+  }
+  if (["subscription", "prepaid", "usage", "one_time"].includes(parsed.kind)) next.kind = parsed.kind;
+  if (["subscription", "prepaid", "usage", "dev-expense"].includes(parsed.calendarSort)) {
+    next.calendarSort = parsed.calendarSort;
+  }
+  if (typeof parsed.amountUsd === "number" && Number.isFinite(parsed.amountUsd)) {
+    next.amountUsd = parsed.amountUsd;
+  }
+  if (typeof parsed.expenseDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(parsed.expenseDate)) {
+    next.expenseDate = parsed.expenseDate;
+  }
+  if (parsed.dueDate == null || (typeof parsed.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(parsed.dueDate))) {
+    next.dueDate = parsed.dueDate || null;
+  }
+  if (typeof parsed.cancelledNoRenew === "boolean") next.cancelledNoRenew = parsed.cancelledNoRenew;
+  if (typeof parsed.label === "string" && parsed.label.trim()) next.label = parsed.label.trim().slice(0, 160);
+  if (typeof parsed.notes === "string") next.notes = parsed.notes.slice(0, 500);
+  next.calendarTitle = calendarTitle({
+    amountUsd: next.amountUsd,
+    service: next.service,
+    sort: next.calendarSort,
+  });
+  return next;
+}
+
+async function fileClassifiedReceipt(env, metadata) {
+  if (!metadata || metadata.classificationAction !== "file") return;
+  if (typeof metadata.amountUsd !== "number" || !Number.isFinite(metadata.amountUsd)) return;
+  const token = typeof env.OWNER_EXPENSE_TOKEN === "string" ? env.OWNER_EXPENSE_TOKEN.trim() : "";
+  const base = typeof env.OWNER_EXPENSE_INGEST_URL === "string" ? env.OWNER_EXPENSE_INGEST_URL.trim() : "";
+  if (!token || token.length < 32 || !base) return;
+  const occurredAt = new Date(`${metadata.expenseDate || metadata.receivedAt.slice(0, 10)}T12:00:00.000Z`);
+  if (Number.isNaN(occurredAt.getTime())) return;
+  const kind = ["subscription", "prepaid", "usage", "one_time"].includes(metadata.kind)
+    ? metadata.kind
+    : "one_time";
+  await fetch(`${base.replace(/\/$/, "")}/api/owner-expenses`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "x-owner-expense-token": token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      provider: String(metadata.service || "unknown").slice(0, 80),
+      amountUsd: metadata.amountUsd,
+      occurredAt: occurredAt.toISOString(),
+      kind,
+      label: String(metadata.label || metadata.subject || "Receipt").slice(0, 160),
+      notes: String(metadata.notes || "").slice(0, 500),
+      receiptInboxId: metadata.id,
+      dueDate: metadata.dueDate || undefined,
+      cancelledNoRenew: metadata.cancelledNoRenew === true,
+      calendarSort: metadata.calendarSort || undefined,
+      confidence: "actual",
+    }),
+  });
 }
 
 async function hasValidConfiguration(env) {
@@ -679,6 +841,14 @@ export class ReceiptInboxIndex {
         parseState: item.parseState,
         status: item.status,
         quarantineReason: item.quarantineReason,
+        subject: item.subject || "",
+        service: item.service || "",
+        kind: item.kind || "",
+        calendarSort: item.calendarSort || "",
+        amountUsd: item.amountUsd ?? null,
+        expenseDate: item.expenseDate || null,
+        dueDate: item.dueDate || null,
+        classificationAction: item.classificationAction || null,
         }));
       return json({
         configured: true,

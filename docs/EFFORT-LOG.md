@@ -1,3 +1,5 @@
+- **2026-08-22 — GROK — IN PROGRESS — Receipt inbox subjects, April expenses, Apple Calendar ICS, Grok classify (branch `grok/receipt-bills`, worktree `~/apps/usage-grok-receipt-bills`).**  Dashboard shows bounded receipt subject/amount.  Owner-expense `usage` kind plus due dates.  Unlisted `/api/bills.ics`.  Worker rules+Grok/DeepSeek can POST expenses.  FMP/Massive no next due.  Domain renewals are dev expense.
+
 # Cross-app coordination pointer (2026-08-17 audit)
 
 Socratic.Trade audit #2802 (`docs/audits/2026-08-17-cross-app-coordination.md` in that repo) listed portfolio follow-ups.  This repo lands the Usage-Monitor slice of §7: a vendor-era shared-package pin check (UM/ST npm pins + CT vendor provenance) and a bounded `https://congress.trade/api/health` liveness probe next to Socratic.Trade.  Do not paint Peer App Health degraded on retired or last-resort lanes.  The pin-check workflow is intentionally not a required merge check until ST+CT+UM are a matched pair.  Receipt: `docs/rollouts/2026-08-20-cross-app-coordination-followups.md`.

@@ -201,7 +201,8 @@ export function ReceiptInboxCard({ data }: { data: ReceiptInboxSummary }) {
             </p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Review a forwarded receipt, then record the expense if it is real cash
-              that is not already on the ledger.  If it{" "}
+              that is not already on the ledger.  Upcoming dues also land on the
+              Bills calendar at <code>/api/bills.ics</code>.  If it{" "}
               <strong className="font-medium text-gray-600 dark:text-gray-300">matches existing cash</strong>{" "}
               (subscription or prepaid already in the system), keep it as evidence and do{" "}
               <strong className="font-medium text-gray-600 dark:text-gray-300">not double-count</strong> spend.
@@ -220,9 +221,17 @@ export function ReceiptInboxCard({ data }: { data: ReceiptInboxSummary }) {
               {data.items.map((item) => (
                 <li key={item.id} className="flex flex-col gap-2 py-2 text-xs sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <p className="truncate font-medium text-gray-800 dark:text-gray-200">{item.senderDomain}</p>
+                    <p className="truncate font-medium text-gray-800 dark:text-gray-200">
+                      {item.subject || item.senderDomain}
+                    </p>
                     <p className="text-gray-500 dark:text-gray-400">
-                      {truncateReceiptId(item.id)} · {item.quarantineReason.replaceAll("_", " ")} · {item.supportedAttachmentCount} supported of {item.attachmentCount} attachment{item.attachmentCount === 1 ? "" : "s"}
+                      {item.amountUsd != null ? `$${item.amountUsd.toFixed(2)}` : "amount unknown"}
+                      {item.kind ? ` · ${item.kind}` : ""}
+                      {item.service ? ` · ${item.service}` : ""}
+                      {" · "}
+                      {truncateReceiptId(item.id)}
+                      {" · "}
+                      {item.quarantineReason.replaceAll("_", " ")}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -269,8 +278,9 @@ export function ReceiptInboxCard({ data }: { data: ReceiptInboxSummary }) {
               Kind
               <select name="kind" className="mt-1 w-full rounded border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-900" defaultValue="subscription">
                 <option value="subscription">subscription</option>
+                <option value="usage">usage</option>
                 <option value="prepaid">prepaid</option>
-                <option value="one_time">one-time</option>
+                <option value="one_time">one-time / dev expense</option>
               </select>
             </label>
             <label className="text-xs text-gray-600 dark:text-gray-300 sm:col-span-2">

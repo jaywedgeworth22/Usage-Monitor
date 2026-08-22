@@ -397,14 +397,18 @@ describe("operations health", () => {
         supportedAttachmentCount: 1,
         bodyEvidence: true,
         quarantineReason: "awaiting_review",
-        subject: "private receipt",
+        subject: "Your receipt from OpenRouter $28.24",
         sender: "person@example.com",
+        amountUsd: 28.24,
+        service: "OpenRouter",
+        kind: "usage",
       }],
     }));
     const result = await fetchReceiptInboxSummary();
     expect(result.state).toBe("receiving");
     expect(result.items).toHaveLength(1);
-    expect(JSON.stringify(result)).not.toContain("private receipt");
+    expect(result.items[0].subject).toBe("Your receipt from OpenRouter $28.24");
+    expect(result.items[0].amountUsd).toBe(28.24);
     expect(JSON.stringify(result)).not.toContain("person@example.com");
   });
 });
