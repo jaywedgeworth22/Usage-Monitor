@@ -37,6 +37,13 @@ const projectId =
   process.env.INFISICAL_UM_PROJECT_ID ||
   process.env.INFISICAL_APP_PROJECT_ID;
 
+if (!projectId) {
+  console.error(
+    "[infisical] Missing project id: set INFISICAL_UM_PROJECT_ID (or INFISICAL_PROJECT_ID)."
+  );
+  process.exit(2);
+}
+
 const clientId =
   process.env.INFISICAL_CLIENT_ID ||
   process.env.INFISICAL_UM_CLIENT_ID ||

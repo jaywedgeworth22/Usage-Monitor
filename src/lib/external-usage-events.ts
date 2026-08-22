@@ -742,7 +742,7 @@ async function loadAnalyticsTokenRows(
         AND "occurredAt" <= ${until}
         AND "metricType" = 'usage'
         AND "unit" = 'token'
-        AND "sourceApp" IN ('grok-build', 'openai-codex', 'antigravity-cli')
+        AND "sourceApp" IN ('grok-build', 'openai-codex', 'antigravity-cli', 'github-copilot')
       GROUP BY "sourceApp", "provider", "service", "keyRef", "label"
     `;
     if (!Array.isArray(rows)) return [];

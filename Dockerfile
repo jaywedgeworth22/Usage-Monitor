@@ -57,10 +57,14 @@ RUN apt-get update \
   && infisical --version
 
 WORKDIR /app
+# INFISICAL_UM_PROJECT_ID is a project address, not a secret. Coolify does
+# not store it (#1211). Baking it is what lets start-with-infisical.sh find
+# the store when only CLIENT_ID/SECRET are in the container env.
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    INFISICAL_ENV=prod
+    INFISICAL_ENV=prod \
+    INFISICAL_UM_PROJECT_ID=86e35e51-91bc-4dfd-a045-4484726b9c40
 
 # Startup migrations intentionally use the pinned Prisma CLI from devDependencies,
 # so retain the verified build dependency tree instead of pruning it here.

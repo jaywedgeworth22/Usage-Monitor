@@ -77,6 +77,10 @@ If you want this number on the dashboard later: keep it as a **derived estimate 
 
 Landed in `grok/api-equivalent-cost`: Codex JSONL collector, Grok Build
 `updates.jsonl` collector, dashboard API-Equivalent Cost card, xAI 4.5/4.6
-runtime prices.  Cursor still has no local token ledger.  Gemini CLI tmp
-sessions on this Mac are empty of tokens.  LaunchAgents are templated;
-bootstrap after merge.
+runtime prices.  Follow-up `grok/api-equivalent-more`: Copilot CLI
+`session.shutdown` `modelMetrics` collector.  Cursor
+`~/.cursor/ai-tracking/ai-code-tracking.db` is still line hashes, not tokens.
+Gemini CLI tmp sessions on this Mac have no token fields.  ccusage also
+covers OpenCode/Amp/Kimi/Qwen/etc.; those homes are absent here so they
+are not faked.  LaunchAgents (Codex/Grok/Copilot) bootstrap after the
+Infisical project-id bake is live.

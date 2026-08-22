@@ -2,10 +2,12 @@
 import { UsageTelemetryV2BatchSchema } from "@jaywedgeworth22/congress-trading-shared";
 import {
   CODEX_PRODUCER_ID,
+  COPILOT_PRODUCER_ID,
   GROK_COST_USD_TICKS,
   GROK_PRODUCER_ID,
   chunkEvents,
   parseCodexJsonl,
+  parseCopilotEventsJsonl,
   parseGrokUpdatesJsonl,
   splitInclusiveCache,
 } from "./lib/session-token-collectors.mjs";
@@ -206,6 +208,79 @@ const skipIncomplete = parseGrokUpdatesJsonl(
 );
 assert(skipIncomplete.length === 0, "in-progress grok turns ignored");
 
+const copilotFirst = {
+  type: "session.shutdown",
+  id: "shut-1",
+  timestamp: "2026-08-01T12:00:00.000Z",
+  data: {
+    modelMetrics: {
+      "deepseek-v4-pro": {
+        usage: {
+          inputTokens: 1000,
+          outputTokens: 100,
+          cacheReadTokens: 200,
+          cacheWriteTokens: 50,
+          reasoningTokens: 40,
+        },
+      },
+    },
+  },
+};
+const copilotReplay = {
+  ...copilotFirst,
+  id: "shut-2",
+  timestamp: "2026-08-01T12:05:00.000Z",
+};
+const copilotNext = {
+  type: "session.shutdown",
+  id: "shut-3",
+  timestamp: "2026-08-01T12:10:00.000Z",
+  data: {
+    modelMetrics: {
+      "deepseek-v4-pro": {
+        inputTokens: 2500,
+        outputTokens: 180,
+        cacheReadTokens: 400,
+        cacheWriteTokens: 50,
+      },
+    },
+  },
+};
+const copilotEvents = parseCopilotEventsJsonl(
+  [JSON.stringify(copilotFirst), JSON.stringify(copilotReplay), JSON.stringify(copilotNext)].join(
+    "\n"
+  ),
+  { sessionKey: "session-state/abc/events.jsonl" }
+);
+assert(copilotEvents.length === 7, `copilot event count ${copilotEvents.length}`);
+assert(
+  copilotEvents.every((e) => e.producerKeyRef === "deepseek-v4-pro"),
+  "copilot model"
+);
+assert(
+  copilotEvents.filter((e) => e.label === "token:input").reduce((sum, e) => sum + e.quantity, 0) ===
+    800 + 1300,
+  "copilot shutdown deltas, not cumulative double-count"
+);
+assert(
+  copilotEvents.find((e) => e.label === "token:cacheRead")?.quantity === 200,
+  "copilot first cache read"
+);
+assert(
+  copilotEvents.every((e) => e.billingMode === "estimated" && e.provider === "github-copilot"),
+  "copilot never cash"
+);
+assert(
+  parseCopilotEventsJsonl(
+    JSON.stringify({
+      type: "assistant.message",
+      data: { outputTokens: 12, model: "gpt-5.4" },
+    }),
+    { sessionKey: "x" }
+  ).length === 0,
+  "copilot per-message output is not ingested (would double-count shutdown totals)"
+);
+
 const batch = {
   schemaVersion: 2,
   producerId: CODEX_PRODUCER_ID,
@@ -225,6 +300,18 @@ const grokParsed = UsageTelemetryV2BatchSchema.safeParse(grokBatch);
 assert(
   grokParsed.success,
   `grok batch schema ${grokParsed.success ? "" : JSON.stringify(grokParsed.error)}`
+);
+
+const copilotBatch = {
+  schemaVersion: 2,
+  producerId: COPILOT_PRODUCER_ID,
+  producerInstanceId: "test-host",
+  events: copilotEvents,
+};
+const copilotParsed = UsageTelemetryV2BatchSchema.safeParse(copilotBatch);
+assert(
+  copilotParsed.success,
+  `copilot batch schema ${copilotParsed.success ? "" : JSON.stringify(copilotParsed.error)}`
 );
 
 const chunks = chunkEvents(new Array(250).fill(codexEvents[0]));

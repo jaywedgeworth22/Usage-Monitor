@@ -24,7 +24,7 @@ describe("subscription analytics discriminators", () => {
     ).toBe(false);
   });
 
-  it("treats Codex and Grok Build session ingest as analytics, not cash", () => {
+  it("treats Codex, Grok Build, and Copilot CLI session ingest as analytics, not cash", () => {
     expect(
       isSubscriptionAnalyticsTelemetry({ sourceApp: "openai-codex", service: "codex-cli" })
     ).toBe(true);
@@ -32,10 +32,19 @@ describe("subscription analytics discriminators", () => {
       isSubscriptionAnalyticsTelemetry({ sourceApp: "grok-build", service: "grok-cli" })
     ).toBe(true);
     expect(
+      isSubscriptionAnalyticsTelemetry({
+        sourceApp: "github-copilot",
+        service: "copilot-cli",
+      })
+    ).toBe(true);
+    expect(
       isSubscriptionAnalyticsTelemetry({ sourceApp: "openai", service: "responses" })
     ).toBe(false);
     expect(
       isSubscriptionAnalyticsTelemetry({ sourceApp: "xai", service: "chat" })
+    ).toBe(false);
+    expect(
+      isSubscriptionAnalyticsTelemetry({ sourceApp: "github", service: "copilot" })
     ).toBe(false);
   });
 

@@ -102,6 +102,13 @@ describe("buildApiEquivalentCost", () => {
           tokenType: "input",
           quantity: 1_000_000,
         },
+        {
+          provider: "github-copilot",
+          sourceApp: "github-copilot",
+          model: "gpt-4o",
+          tokenType: "output",
+          quantity: 1_000_000,
+        },
       ],
       [
         {
@@ -112,13 +119,16 @@ describe("buildApiEquivalentCost", () => {
         },
       ]
     );
-    expect(report.providers).toHaveLength(2);
+    expect(report.providers).toHaveLength(3);
     const claude = report.providers.find((p) => p.sourceApp === "claude-code");
     const codex = report.providers.find((p) => p.sourceApp === "openai-codex");
+    const copilot = report.providers.find((p) => p.sourceApp === "github-copilot");
     expect(claude?.totals.reportedCostUsd).toBeCloseTo(3, 6);
     expect(claude?.totals.derivedCostUsd).toBeCloseTo(3, 6);
     expect(codex?.totals.reportedCostUsd).toBe(0);
     expect(codex?.estimateUsd).toBeGreaterThan(0);
+    expect(copilot?.totals.reportedCostUsd).toBe(0);
+    expect(copilot?.estimateUsd).toBeGreaterThan(0);
     expect(report.totals.estimateUsd).toBeGreaterThan(3);
   });
 });
