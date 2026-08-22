@@ -281,8 +281,9 @@ returns raw MIME, card numbers, or mailbox local-parts. It never holds
 `BILLING_RECEIPT_INGEST_TOKEN`, `BILLING_RECEIPT_IDENTITY_KEY`, or
 `BILLING_RECEIPT_HMAC_KEY`, so email intake cannot create HMAC cash events.
 Owner-recorded ledger rows go through `POST /api/owner-expenses` (dashboard
-session or `OWNER_EXPENSE_TOKEN`). Intake may POST there after Grok (DeepSeek
-backup) classifies a receipt when those Worker secrets are set. Configure
+session or `OWNER_EXPENSE_TOKEN`). Intake classifies for the Operations review
+card and does not POST cash — the MX accepts any local-part on
+`receipts.jays.services`, and Ignore does not retract a ledger row. Configure
 the dashboard with a distinct `RECEIPT_INBOX_READ_TOKEN`; the summary URL is
 fixed to `https://receipt-inbox.jays.services`; absent configuration is a visible Not configured
 state. Reviewed exact prepaid-funding receipts still enter money history only

@@ -11,8 +11,10 @@ receipts were not on the ledger or on a calendar.
 - Inbox summary includes a bounded subject, amount, service, and kind.  Raw
   MIME, cards, and mailbox local-parts stay off the dashboard.
 - `POST /api/owner-expenses` accepts `usage` plus optional `dueDate`,
-  `nextDueDate`, `cancelledNoRenew`, and `calendarSort`.  Worker intake can POST
-  here with `OWNER_EXPENSE_TOKEN` after Grok (DeepSeek backup) classifies.
+  `nextDueDate`, `cancelledNoRenew`, and `calendarSort`.  Dashboard session or
+  `OWNER_EXPENSE_TOKEN` only — Worker intake classifies for review and does
+  not POST cash.  The MX is public (`*@receipts.jays.services`) and Ignore
+  does not retract a ledger row.
 - Unlisted Apple Calendar feed: `GET /api/bills.ics?token=` with
   `BILLS_CALENDAR_TOKEN`.  Event titles are `$price - Service - sort`.
 - Domain renewals file as `dev-expense`.  FMP/Massive file a historical paid
@@ -27,8 +29,8 @@ npm test -- src/lib/__tests__/owner-expense.test.ts src/lib/__tests__/bills-cale
 
 ## Follow-ups
 
-- Set `BILLS_CALENDAR_TOKEN` and `OWNER_EXPENSE_TOKEN` in Infisical prod.
-- Worker secrets: `XAI_API_KEY` (or `OPENROUTER_RECEIPT_KEY`),
-  `OWNER_EXPENSE_TOKEN`, `OWNER_EXPENSE_INGEST_URL=https://usage.jays.services`.
+- Set `BILLS_CALENDAR_TOKEN` in Infisical prod.  `OWNER_EXPENSE_TOKEN` is only
+  for the owner script / dashboard machine token, not the Email Worker.
 - File the local April JSON with `scripts/file-owner-receipt-expenses.mjs` after
-  deploy.  Amounts stay out of git.
+  deploy.  Amounts stay out of git.  Do not also expect intake to file those
+  receipts automatically.
