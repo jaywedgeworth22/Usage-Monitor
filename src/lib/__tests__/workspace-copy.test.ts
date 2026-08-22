@@ -120,5 +120,118 @@ describe("workspace copy", () => {
     const again = await importWorkspacePayload(payload, "merge");
     expect(again.projects).toBe(0);
     expect(again.providers).toBe(0);
+    expect(again.plans).toBe(0);
+  });
+
+  it("does not clobber live plans or attach local extras onto existing providers", async () => {
+    const liveCiphertext = encrypt("sk-live-must-stay");
+    const provider = await prisma.provider.create({
+      data: {
+        id: "prov-live",
+        name: "openai",
+        displayName: "OpenAI org",
+        type: "builtin",
+        isActive: true,
+        apiKey: liveCiphertext,
+      },
+    });
+    await prisma.providerPlan.create({
+      data: {
+        providerId: provider.id,
+        billingMode: "actual",
+        monthlyBudgetUsd: 250,
+        notes: "production budget",
+      },
+    });
+    await prisma.usageSnapshot.create({
+      data: {
+        id: "snap-live",
+        providerId: provider.id,
+        fetchedAt: new Date("2026-08-22T09:00:00.000Z"),
+        totalCost: 42,
+      },
+    });
+    await prisma.subscription.create({
+      data: {
+        id: "sub-live",
+        providerId: provider.id,
+        name: "ChatGPT Plus",
+        costUsd: 20,
+        interval: "monthly",
+        status: "active",
+        startDate: new Date("2026-08-01T00:00:00.000Z"),
+        currentPeriodStart: new Date("2026-08-01T00:00:00.000Z"),
+        nextRenewalAt: new Date("2026-09-01T00:00:00.000Z"),
+      },
+    });
+
+    // iOS Local export of the same format omits null plan fields (stripNils)
+    // and may carry phone-local snapshot/subscription ids.
+    const iosLocalExport = {
+      format: "usage-monitor-local-export",
+      formatVersion: 1,
+      projects: [],
+      providers: [
+        {
+          id: "prov-live",
+          name: "openai",
+          displayName: "OpenAI org",
+          type: "builtin",
+        },
+      ],
+      plans: [
+        {
+          providerId: "prov-live",
+          billingMode: "manual",
+        },
+      ],
+      subscriptions: [
+        {
+          id: "sub-phone",
+          providerId: "prov-live",
+          name: "Local test seat",
+          costUsd: 200,
+          interval: "monthly",
+          status: "active",
+          currentPeriodStart: "2026-08-22T00:00:00.000Z",
+          nextRenewalAt: "2026-09-22T00:00:00.000Z",
+        },
+      ],
+      charges: [],
+      snapshots: [
+        {
+          id: "snap-phone",
+          providerId: "prov-live",
+          fetchedAt: "2026-08-22T10:00:00.000Z",
+          totalCost: 0,
+        },
+      ],
+      allocations: [],
+    };
+
+    const result = await importWorkspacePayload(iosLocalExport, "merge");
+    expect(result.plans).toBe(0);
+    expect(result.subscriptions).toBe(0);
+    expect(result.snapshots).toBe(0);
+
+    const plan = await prisma.providerPlan.findUnique({
+      where: { providerId: provider.id },
+    });
+    expect(plan).toMatchObject({
+      billingMode: "actual",
+      monthlyBudgetUsd: 250,
+      notes: "production budget",
+    });
+    expect(await prisma.provider.findUnique({ where: { id: provider.id } })).toMatchObject({
+      isActive: true,
+      apiKey: liveCiphertext,
+    });
+    expect(await prisma.subscription.count({ where: { providerId: provider.id } })).toBe(1);
+    expect(await prisma.usageSnapshot.count({ where: { providerId: provider.id } })).toBe(1);
+    const latest = await prisma.usageSnapshot.findFirst({
+      where: { providerId: provider.id },
+      orderBy: { fetchedAt: "desc" },
+    });
+    expect(latest).toMatchObject({ id: "snap-live", totalCost: 42 });
   });
 });
