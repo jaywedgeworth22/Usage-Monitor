@@ -72,3 +72,28 @@ export function expandHome(path) {
 export function sessionKeyFor(root, filePath) {
   return relative(root, filePath).replaceAll("\\", "/");
 }
+
+const ARCHIVED_SESSIONS_PREFIX = "archived_sessions/";
+
+/**
+ * Codex `archive` / `/archive` rename()s a rollout into
+ * `archived_sessions/<filename>` (flattened; openai/codex archive_thread.rs).
+ * eventId hashes sessionKey, so a raw relative path would persist the same
+ * last_token_usage rows again on the next 15-min tick.  Reconstruct the live
+ * `sessions/YYYY/MM/DD/<filename>` key from the ISO date in the filename
+ * (same local timestamp Codex used for the date folder).
+ */
+export function codexSessionKeyFor(codexHome, filePath) {
+  const rel = sessionKeyFor(codexHome, filePath);
+  if (!rel.startsWith(ARCHIVED_SESSIONS_PREFIX)) return rel;
+  const rest = rel.slice(ARCHIVED_SESSIONS_PREFIX.length);
+  const fileName = rest.split("/").pop() || rest;
+  const isoDate = fileName.match(/^rollout-(\d{4}-\d{2}-\d{2})T/);
+  if (isoDate) {
+    return `sessions/${isoDate[1].replaceAll("-", "/")}/${fileName}`;
+  }
+  if (rest.includes("/")) {
+    return `sessions/${rest}`;
+  }
+  return `sessions/${fileName}`;
+}

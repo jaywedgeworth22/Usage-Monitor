@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { join } from "node:path";
 import { UsageTelemetryV2BatchSchema } from "@jaywedgeworth22/congress-trading-shared";
 import {
   CODEX_PRODUCER_ID,
@@ -11,6 +12,10 @@ import {
   parseGrokUpdatesJsonl,
   splitInclusiveCache,
 } from "./lib/session-token-collectors.mjs";
+import {
+  codexSessionKeyFor,
+  sessionKeyFor,
+} from "./lib/run-session-token-collector.mjs";
 
 function assert(cond, message) {
   if (!cond) {
@@ -150,6 +155,46 @@ assert(
   replayEvents.filter((e) => e.label === "token:input").reduce((sum, e) => sum + e.quantity, 0) ===
     800 + 1300,
   "codex replay does not double last_token_usage"
+);
+
+const codexHome = "/Users/jay/.codex";
+const rolloutName =
+  "rollout-2026-08-22T13-02-51-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl";
+const liveRollout = join(codexHome, "sessions", "2026", "08", "22", rolloutName);
+const flatArchive = join(codexHome, "archived_sessions", rolloutName);
+const nestedArchive = join(codexHome, "archived_sessions", "2026", "08", "22", rolloutName);
+assert(
+  sessionKeyFor(codexHome, liveRollout) !== sessionKeyFor(codexHome, flatArchive),
+  "raw relative keys change after Codex flatten-archive"
+);
+assert(
+  codexSessionKeyFor(codexHome, liveRollout) === `sessions/2026/08/22/${rolloutName}`,
+  "live Codex sessionKey"
+);
+assert(
+  codexSessionKeyFor(codexHome, flatArchive) === codexSessionKeyFor(codexHome, liveRollout),
+  "flattened archive remaps to the live sessions/YYYY/MM/DD key"
+);
+assert(
+  codexSessionKeyFor(codexHome, nestedArchive) === codexSessionKeyFor(codexHome, liveRollout),
+  "nested archive remaps to the same live key"
+);
+const liveParsed = parseCodexJsonl(codexFixture, {
+  sessionKey: codexSessionKeyFor(codexHome, liveRollout),
+});
+const rawArchiveParsed = parseCodexJsonl(codexFixture, {
+  sessionKey: sessionKeyFor(codexHome, flatArchive),
+});
+const remappedArchiveParsed = parseCodexJsonl(codexFixture, {
+  sessionKey: codexSessionKeyFor(codexHome, flatArchive),
+});
+assert(
+  liveParsed[0].eventId !== rawArchiveParsed[0].eventId,
+  "path-based sessionKey would persist archive as new events"
+);
+assert(
+  liveParsed[0].eventId === remappedArchiveParsed[0].eventId,
+  "normalized archive key is idempotent with the live ingest"
 );
 
 const grokFixture = JSON.stringify({
