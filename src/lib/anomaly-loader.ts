@@ -8,7 +8,7 @@ import {
   resolveAnomalyConfig,
 } from "@/lib/anomaly-detection";
 import { loadMtdDailyVariableUsageByProviderId } from "@/lib/daily-usage-series";
-import { isClaudeCodeAnalyticsTelemetry } from "@/lib/external-usage-events";
+import { isSubscriptionAnalyticsTelemetry } from "@/lib/external-usage-events";
 import { resolveProviderIdentity } from "@/lib/provider-identity";
 import { isReceiptCashEvent } from "@/lib/receipt-cash";
 
@@ -128,7 +128,7 @@ async function loadPriorWindowDailyCost(input: {
 
   for (const row of rows) {
     if (!(row.totalCostUsd > 0)) continue;
-    if (isClaudeCodeAnalyticsTelemetry(row)) continue;
+    if (isSubscriptionAnalyticsTelemetry(row)) continue;
     if (
       isReceiptCashEvent({
         sourceApp: row.sourceApp,
@@ -409,7 +409,7 @@ export async function loadSpendAnomaliesByProjectId(
     if (!row.projectId || !projectIds.has(row.projectId)) continue;
     if (row.costUsd == null || !(row.costUsd > 0)) continue;
     if (row.metricType === SUBSCRIPTION_METRIC_TYPE) continue;
-    if (isClaudeCodeAnalyticsTelemetry(row)) continue;
+    if (isSubscriptionAnalyticsTelemetry(row)) continue;
     if (
       isReceiptCashEvent({
         sourceApp: row.sourceApp,

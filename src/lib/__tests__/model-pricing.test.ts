@@ -31,6 +31,22 @@ describe("resolvePricingKey", () => {
     expect(resolvePricingKey("")).toBeNull();
   });
 
+  it("prices Grok Build model ids against xAI list rates without rewriting LiteLLM", () => {
+    expect(resolvePricingKey("grok-4.6-build")).toBe("grok-4.6-build");
+    expect(resolvePricingKey("xai/grok-4.5-build")).toBe("xai/grok-4.5-build");
+    const grok46 = getModelPricing("grok-4.6-build");
+    expect(grok46?.pricing.input_cost_per_token).toBeCloseTo(2e-6, 12);
+    expect(grok46?.pricing.output_cost_per_token).toBeCloseTo(6e-6, 12);
+    expect(grok46?.pricing.cache_read_input_token_cost).toBeCloseTo(5e-7, 12);
+    const derived = deriveTokenCostUsd(grok46!.pricing, {
+      input: 1_000_000,
+      output: 1_000_000,
+      cacheRead: 1_000_000,
+    });
+    expect(derived.complete).toBe(true);
+    expect(derived.costUsd).toBeCloseTo(8.5, 6);
+  });
+
   it("prices current Gemini 3.7 Flash without rewriting the LiteLLM snapshot", () => {
     expect(resolvePricingKey("gemini-3.7-flash")).toBe("gemini-3.7-flash");
     expect(resolvePricingKey("google/gemini-3.7-flash")).toBe("gemini-3.7-flash");

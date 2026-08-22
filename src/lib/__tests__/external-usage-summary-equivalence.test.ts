@@ -23,7 +23,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 import {
   STATUS_METRIC_TYPES,
   classifyCostCoverage,
-  isClaudeCodeAnalyticsTelemetry,
+  isSubscriptionAnalyticsTelemetry,
   summarizeExternalUsageEvents,
   type ExternalUsageEventSummaryGroup,
 } from "../external-usage-events";
@@ -449,7 +449,7 @@ function referenceOldSummarize(
       event.occurredAt >= rawSince && !STATUS_METRIC_TYPES.has(event.metricType)
   );
   for (const event of page) {
-    const isClaudeCodeAnalytics = isClaudeCodeAnalyticsTelemetry(event);
+    const isClaudeCodeAnalytics = isSubscriptionAnalyticsTelemetry(event);
     const isReceiptCash = isReceiptCashEvent(event as FixtureEvent);
     mergeSummaryGroup(groups, {
       sourceApp: event.sourceApp,
@@ -497,7 +497,7 @@ function referenceOldSummarize(
       : [];
 
   for (const entry of rollups) {
-    const isClaudeCodeAnalytics = isClaudeCodeAnalyticsTelemetry(entry);
+    const isClaudeCodeAnalytics = isSubscriptionAnalyticsTelemetry(entry);
     const isReceiptCash = isReceiptCashEvent(entry as never);
     const hasCoverageCounts =
       entry.pricedEventCount != null ||

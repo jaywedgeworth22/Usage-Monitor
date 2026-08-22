@@ -53,23 +53,67 @@ const CATALOG = (snapshot as PricingSnapshot).pricing;
 
 /** Live OpenRouter Gemini 3.7 rates (2026-08-14).  The LiteLLM snapshot dump
  *  is not rewritten; these keys are what ingest derivation actually looks up. */
+const GEMINI_37_FLASH: ModelPricingEntry = {
+  input_cost_per_token: 3.75e-7,
+  output_cost_per_token: 1.875e-6,
+  cache_read_input_token_cost: 3.75e-8,
+  cache_creation_input_token_cost: 2.08333333333333e-8,
+  litellm_provider: "gemini",
+  mode: "chat",
+};
+
+const GEMINI_37_FLASH_BATCH: ModelPricingEntry = {
+  input_cost_per_token: 1.875e-7,
+  output_cost_per_token: 9.375e-7,
+  cache_read_input_token_cost: 1.875e-8,
+  cache_creation_input_token_cost: 2.08333333333333e-8,
+  litellm_provider: "gemini",
+  mode: "chat",
+};
+
+/** xAI public list prices (docs.x.ai/developers/pricing, 2026-08-21).  The
+ *  July LiteLLM snapshot has no grok-4.5/4.6 keys; Grok Build reports
+ *  `grok-4.6-build`.  Cache-write uses the input rate (xAI does not list a
+ *  separate write price).  Long-context (>=200k) doubles. */
+const GROK_46: ModelPricingEntry = {
+  input_cost_per_token: 2e-6,
+  output_cost_per_token: 6e-6,
+  cache_read_input_token_cost: 5e-7,
+  cache_creation_input_token_cost: 2e-6,
+  input_cost_per_token_above_200k_tokens: 4e-6,
+  output_cost_per_token_above_200k_tokens: 12e-6,
+  cache_read_input_token_cost_above_200k_tokens: 1e-6,
+  cache_creation_input_token_cost_above_200k_tokens: 4e-6,
+  litellm_provider: "xai",
+  mode: "chat",
+  max_input_tokens: 500_000,
+};
+
+const GROK_45: ModelPricingEntry = {
+  input_cost_per_token: 2e-6,
+  output_cost_per_token: 6e-6,
+  cache_read_input_token_cost: 3e-7,
+  cache_creation_input_token_cost: 2e-6,
+  input_cost_per_token_above_200k_tokens: 4e-6,
+  output_cost_per_token_above_200k_tokens: 12e-6,
+  cache_read_input_token_cost_above_200k_tokens: 6e-7,
+  cache_creation_input_token_cost_above_200k_tokens: 4e-6,
+  litellm_provider: "xai",
+  mode: "chat",
+  max_input_tokens: 500_000,
+};
+
 const RUNTIME_PRICING_OVERRIDES: Record<string, ModelPricingEntry> = {
-  "gemini-3.7-flash": {
-    input_cost_per_token: 3.75e-7,
-    output_cost_per_token: 1.875e-6,
-    cache_read_input_token_cost: 3.75e-8,
-    cache_creation_input_token_cost: 2.08333333333333e-8,
-    litellm_provider: "gemini",
-    mode: "chat",
-  },
-  "gemini-3.7-flash:batch": {
-    input_cost_per_token: 1.875e-7,
-    output_cost_per_token: 9.375e-7,
-    cache_read_input_token_cost: 1.875e-8,
-    cache_creation_input_token_cost: 2.08333333333333e-8,
-    litellm_provider: "gemini",
-    mode: "chat",
-  },
+  "gemini-3.7-flash": GEMINI_37_FLASH,
+  "gemini-3.7-flash:batch": GEMINI_37_FLASH_BATCH,
+  "grok-4.6": GROK_46,
+  "grok-4.6-build": GROK_46,
+  "xai/grok-4.6": GROK_46,
+  "xai/grok-4.6-build": GROK_46,
+  "grok-4.5": GROK_45,
+  "grok-4.5-build": GROK_45,
+  "xai/grok-4.5": GROK_45,
+  "xai/grok-4.5-build": GROK_45,
 };
 
 function catalogEntry(key: string): ModelPricingEntry | undefined {
@@ -148,6 +192,13 @@ function resolvePricingKeyUncached(model: string): string | null {
 
   const lower = trimmed.toLowerCase();
   if (catalogEntry(lower)) return lower;
+
+  const withoutBuild = lower.replace(/-build$/, "");
+  if (withoutBuild !== lower && catalogEntry(withoutBuild)) return withoutBuild;
+  if (catalogEntry(`xai/${lower}`)) return `xai/${lower}`;
+  if (withoutBuild !== lower && catalogEntry(`xai/${withoutBuild}`)) {
+    return `xai/${withoutBuild}`;
+  }
 
   if (trimmed.includes("/")) {
     const segments = trimmed.split("/");
