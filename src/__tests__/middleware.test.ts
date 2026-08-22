@@ -116,6 +116,17 @@ describe("middleware matcher — /api/export/daily-rollups exclusion (bearer rea
   });
 });
 
+describe("middleware matcher — /api/workspace/export exclusion (bearer read-token access)", () => {
+  it("does NOT session-gate the exact export path", () => {
+    expect(isSessionGated("/api/workspace/export")).toBe(false);
+    expect(isSessionGated("/api/workspace/export/")).toBe(false);
+  });
+
+  it("still session-gates workspace import", () => {
+    expect(isSessionGated("/api/workspace/import")).toBe(true);
+  });
+});
+
 describe("middleware public install assets", () => {
   it("serves the PWA shell without a dashboard session", () => {
     for (const path of [

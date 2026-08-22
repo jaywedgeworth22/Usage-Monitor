@@ -21,6 +21,7 @@ import type {
 export type BillingMode = "actual" | "estimated" | "manual";
 type SettingsTab = "connections" | "services" | "projects" | "notifications";
 import NotificationsSettingsPanel from "@/components/NotificationsSettingsPanel";
+import WorkspaceCopyCard from "@/components/WorkspaceCopyCard";
 
 export interface ProviderPlan {
   billingMode: BillingMode;
@@ -446,6 +447,8 @@ function SettingsPageContent() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
       </div>
+
+      <WorkspaceCopyCard />
 
       <div className="sticky top-16 z-30 bg-gray-50 dark:bg-gray-900 pt-2 pb-px border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-4">
         <nav aria-label="Settings sections" className="flex overflow-x-auto min-w-0 flex-1">

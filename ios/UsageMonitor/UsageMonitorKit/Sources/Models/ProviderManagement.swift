@@ -168,7 +168,7 @@ public struct ProviderManagementItem: Codable, Hashable, Sendable, Identifiable 
 
     public var inventoryStatusLabel: String {
         if !isActive { return "Inactive" }
-        return canFetch ? "Active" : "Push / manual"
+        return canFetch ? "Active" : "Manually only"
     }
 
     public var latestSnapshotDate: Date? {

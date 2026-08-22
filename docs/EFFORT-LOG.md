@@ -1,3 +1,5 @@
+- **2026-08-22 — GROK — IN PROGRESS — Fleet projects, Manually only labels, stale refetch, local copy (branch `grok/fleet-projects-manual`, worktree `~/apps/usage-grok-fleet-projects`, board `1a5de7b6`).**  Seed ST/CT/UM/DealDex/Personal-Site/Autorotate/ContactLogo/Fleet.  Non-poll providers never look fetchable.  Old pollable snapshots refetch.  Secret-free workspace export/import for Local UM.  Research: Grok/Codex/Antigravity subscription telemetry is unofficial/local-only; xAI Management API remains API cash only.
+
 - **2026-08-22 — GROK — IN PROGRESS — Receipt inbox subjects, April expenses, Apple Calendar ICS, Grok classify (branch `grok/receipt-bills`, worktree `~/apps/usage-grok-receipt-bills`).**  Dashboard shows bounded receipt subject/amount.  Owner-expense `usage` kind plus due dates.  Unlisted `/api/bills.ics`.  Worker rules+Grok/DeepSeek can POST expenses.  FMP/Massive no next due.  Domain renewals are dev expense.
 
 # Cross-app coordination pointer (2026-08-17 audit)

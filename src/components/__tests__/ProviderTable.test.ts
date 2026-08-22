@@ -108,7 +108,7 @@ describe("ProviderTable cost coverage", () => {
     ]);
 
     expect(individualHtml).not.toContain("Fetch");
-    expect(individualHtml).toContain("Push / manual");
+    expect(individualHtml).toContain("Manually only");
     expect(organizationHtml).toContain("Fetch");
     expect(organizationHtml).toContain("Active");
   });
@@ -148,13 +148,13 @@ describe("ProviderTable cost coverage", () => {
     ]);
 
     expect(manualHtml).not.toContain("Fetch");
-    expect(manualHtml).toContain("Push / manual");
+    expect(manualHtml).toContain("Manually only");
     expect(pushHtml).not.toContain("Fetch");
-    expect(pushHtml).toContain("Push / manual");
+    expect(pushHtml).toContain("Manually only");
     expect(customHtml).toContain("Fetch");
     expect(customHtml).toContain(">Active<");
     expect(manualProviderHtml).not.toContain("Fetch");
-    expect(manualProviderHtml).toContain("Push / manual");
+    expect(manualProviderHtml).toContain("Manually only");
   });
 
   it("shows Gemini key health separately from billing availability", () => {

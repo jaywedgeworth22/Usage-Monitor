@@ -61,6 +61,7 @@ export const isPublicPath = (pathname: string) => {
   // subscriptions collection exclusion above) — without this, bearer read
   // tokens 401 at the session gate before the route's own auth runs.
   if (pathname === "/api/export/daily-rollups" || pathname === "/api/export/daily-rollups/") return true;
+  if (pathname === "/api/workspace/export" || pathname === "/api/workspace/export/") return true;
   return false;
 };
 

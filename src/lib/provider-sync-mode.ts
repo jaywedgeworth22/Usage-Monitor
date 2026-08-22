@@ -23,7 +23,7 @@ export type ProviderSyncMode = "poll" | "manual";
 /**
  * How this provider gets usage into the monitor.
  * - `poll`: adapter can refresh snapshots; age is "last sync".
- * - `manual`: never pollable — label as Manual, not stale.
+ * - `manual`: never pollable — label as Manually only, not stale.
  */
 export function resolveProviderSyncMode(input: {
   name: string;
@@ -58,7 +58,7 @@ export function formatProviderSyncLabel(input: {
 }): string {
   if (input.syncMode === "manual") {
     // Even if a legacy snapshot exists, never-pollable sources are manual.
-    return "Manual";
+    return "Manually only";
   }
   if (!input.latestFetchedAt) return "Never synced";
   return input.formatRelative(input.latestFetchedAt, input.nowMs);

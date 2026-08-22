@@ -36,10 +36,10 @@ interface PaidServicesPanelProps {
 
 const COVERAGE_LABELS: Record<BillingCoverageStatus, string> = {
   automatic: "Syncing",
-  stale: "Stale sync",
+  stale: "Old snapshot",
   tracked: "Tracked",
-  available: "Needs sync",
-  manual: "Manual",
+  available: "Waiting for first fetch",
+  manual: "Manually only",
   "not-applicable": "Not applicable",
 };
 
@@ -441,7 +441,7 @@ export default function PaidServicesPanel({
           <summary className="cursor-pointer px-4 py-4 text-sm font-semibold text-gray-800 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/40 sm:px-6">
             Provider billing coverage
             <span className="ml-2 font-normal text-gray-500 dark:text-gray-400">
-              {coverageCounts.automatic} syncing · {coverageCounts.stale} stale · {coverageCounts.tracked} tracked · {coverageCounts.available} need setup · {coverageCounts.manual} manual · {coverageCounts["not-applicable"]} not applicable
+              {coverageCounts.automatic} syncing · {coverageCounts.stale} old snapshots · {coverageCounts.tracked} tracked · {coverageCounts.available} waiting for first fetch · {coverageCounts.manual} manually only · {coverageCounts["not-applicable"]} not applicable
             </span>
           </summary>
           <div className="border-t border-gray-100 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50 sm:p-4">

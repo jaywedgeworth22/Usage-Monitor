@@ -371,6 +371,7 @@ export function useDashboardData() {
   const fetchGenerationRef = useRef(0);
   const fetchStartedAtRef = useRef(0);
   const unmountAbortRef = useRef<AbortController | null>(null);
+  const staleRefreshStartedRef = useRef(false);
 
   const fetchProviders = useCallback(async (opts?: { background?: boolean }) => {
     const background = opts?.background === true;
@@ -445,6 +446,22 @@ export function useDashboardData() {
       if (providersResult.status === "fulfilled") {
         setLastUpdatedAt(new Date().toISOString());
         lastSuccessAtRef.current = Date.now();
+        if (!staleRefreshStartedRef.current) {
+          staleRefreshStartedRef.current = true;
+          void fetch("/api/providers/refresh-stale", { method: "POST" })
+            .then(async (res) => {
+              if (!res.ok) return;
+              const body = (await res.json().catch(() => null)) as {
+                refreshed?: number;
+              } | null;
+              if ((body?.refreshed ?? 0) > 0) {
+                void fetchProviders({ background: true });
+              }
+            })
+            .catch(() => {
+              /* refresh is best-effort; the 15-minute poll still runs */
+            });
+        }
       }
     } finally {
       // Only the live generation may release the coalesce lock or touch UI.
