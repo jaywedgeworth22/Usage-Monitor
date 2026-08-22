@@ -2,7 +2,10 @@
 // Parsers for local coding-agent session logs → Usage Monitor ingest events.
 //
 // Codex: ~/.codex/sessions/**/*.jsonl event_msg/token_count last_token_usage
-//   (ccusage Codex data source).
+//   (ccusage Codex data source).  Skip token_count rows whose
+//   total_token_usage did not advance — Codex re-emits the previous
+//   last_token_usage on rate-limit-only updates (openai/codex#14489,
+//   ccusage#876).  Line-numbered eventIds would persist each replay.
 // Grok Build: ~/.grok/sessions/**/updates.jsonl sessionUpdate=turn_completed
 //   + usage.modelUsage (ccusage Grok data source).
 //
@@ -40,6 +43,18 @@ export function splitInclusiveCache({
 function finiteCount(value) {
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+const CODEX_TOTAL_KEYS = [
+  "input_tokens",
+  "output_tokens",
+  "cached_input_tokens",
+  "cache_write_input_tokens",
+];
+
+function codexTotalSignature(usage) {
+  if (!usage || typeof usage !== "object") return null;
+  return CODEX_TOTAL_KEYS.map((key) => String(finiteCount(usage[key]))).join("|");
 }
 
 function shaEventId(parts) {
@@ -140,6 +155,7 @@ export function estimatedCostEvent({
 export function parseCodexJsonl(text, { sessionKey, fallbackOccurredAt } = {}) {
   const fallbackIso = fallbackOccurredAt ?? new Date(0).toISOString();
   let lastModel = null;
+  let lastTotalSignature = null;
   const events = [];
   const lines = text.split("\n");
   for (let lineNo = 0; lineNo < lines.length; lineNo += 1) {
@@ -172,6 +188,9 @@ export function parseCodexJsonl(text, { sessionKey, fallbackOccurredAt } = {}) {
     const info = payload.info && typeof payload.info === "object" ? payload.info : {};
     const last = info.last_token_usage;
     if (!last || typeof last !== "object") continue;
+    const totalSignature = codexTotalSignature(info.total_token_usage);
+    if (totalSignature && totalSignature === lastTotalSignature) continue;
+    if (totalSignature) lastTotalSignature = totalSignature;
     const model =
       (typeof info.model === "string" && info.model.trim()) || lastModel;
     const occurredAtIso = isoTimestamp(obj.timestamp ?? payload.timestamp, fallbackIso);

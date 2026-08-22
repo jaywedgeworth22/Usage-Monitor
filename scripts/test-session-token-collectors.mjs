@@ -75,6 +75,81 @@ assert(
   "codex eventIds unique"
 );
 
+const lastUsage = {
+  input_tokens: 1000,
+  output_tokens: 100,
+  cached_input_tokens: 200,
+  cache_write_input_tokens: 50,
+  reasoning_output_tokens: 20,
+  total_tokens: 1100,
+};
+const sameTotal = {
+  input_tokens: 1000,
+  cached_input_tokens: 200,
+  output_tokens: 100,
+  cache_write_input_tokens: 50,
+  reasoning_output_tokens: 20,
+  total_tokens: 1100,
+};
+const nextTotal = {
+  input_tokens: 2500,
+  cached_input_tokens: 400,
+  output_tokens: 180,
+  cache_write_input_tokens: 50,
+  reasoning_output_tokens: 30,
+  total_tokens: 2680,
+};
+const replayFixture = [
+  JSON.stringify({
+    type: "turn_context",
+    timestamp: "2026-08-01T12:00:00.000Z",
+    payload: { model: "gpt-5.6-sol" },
+  }),
+  JSON.stringify({
+    type: "event_msg",
+    timestamp: "2026-08-01T12:00:01.000Z",
+    payload: {
+      type: "token_count",
+      info: { last_token_usage: lastUsage, total_token_usage: sameTotal },
+    },
+  }),
+  JSON.stringify({
+    type: "event_msg",
+    timestamp: "2026-08-01T12:00:02.000Z",
+    payload: {
+      type: "token_count",
+      info: { last_token_usage: lastUsage, total_token_usage: sameTotal },
+    },
+  }),
+  JSON.stringify({
+    type: "event_msg",
+    timestamp: "2026-08-01T12:00:03.000Z",
+    payload: {
+      type: "token_count",
+      info: {
+        last_token_usage: {
+          input_tokens: 1500,
+          output_tokens: 80,
+          cached_input_tokens: 200,
+          cache_write_input_tokens: 0,
+          total_tokens: 1580,
+        },
+        total_token_usage: nextTotal,
+      },
+    },
+  }),
+].join("\n");
+const replayEvents = parseCodexJsonl(replayFixture, { sessionKey: "test/replay.jsonl" });
+assert(
+  replayEvents.length === 7,
+  `codex replay skip ${replayEvents.length}`
+);
+assert(
+  replayEvents.filter((e) => e.label === "token:input").reduce((sum, e) => sum + e.quantity, 0) ===
+    800 + 1300,
+  "codex replay does not double last_token_usage"
+);
+
 const grokFixture = JSON.stringify({
   method: "session/update",
   timestamp: "2026-08-01T12:00:00.000Z",
