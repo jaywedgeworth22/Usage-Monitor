@@ -259,12 +259,45 @@ assert(
 );
 assert(
   copilotEvents.filter((e) => e.label === "token:input").reduce((sum, e) => sum + e.quantity, 0) ===
-    800 + 1300,
+    750 + 1300,
   "copilot shutdown deltas, not cumulative double-count"
 );
 assert(
   copilotEvents.find((e) => e.label === "token:cacheRead")?.quantity === 200,
   "copilot first cache read"
+);
+const copilotPublished = parseCopilotEventsJsonl(
+  JSON.stringify({
+    type: "session.shutdown",
+    timestamp: "2026-05-07T10:57:19.746Z",
+    data: {
+      modelMetrics: {
+        "claude-opus-4.7": {
+          usage: {
+            inputTokens: 23399,
+            outputTokens: 2994,
+            cacheReadTokens: 10069,
+            cacheWriteTokens: 13324,
+            reasoningTokens: 0,
+          },
+        },
+      },
+    },
+  }),
+  { sessionKey: "ccusage-1174" }
+);
+const copilotPublishedInput = copilotPublished.find((e) => e.label === "token:input")?.quantity ?? 0;
+assert(
+  copilotPublishedInput === 6,
+  `copilot inputTokens includes cache writes; expected 6 uncached, got ${copilotPublishedInput}`
+);
+assert(
+  copilotPublished.find((e) => e.label === "token:cacheRead")?.quantity === 10069,
+  "copilot published cache read"
+);
+assert(
+  copilotPublished.find((e) => e.label === "token:cacheCreation")?.quantity === 13324,
+  "copilot published cache write"
 );
 assert(
   copilotEvents.every((e) => e.billingMode === "estimated" && e.provider === "github-copilot"),
