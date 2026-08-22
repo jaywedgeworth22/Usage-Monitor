@@ -60,7 +60,7 @@ function supportsManualFetch(provider: Provider): boolean {
 
 function providerStatusLabel(provider: Provider): string {
   if (!provider.isActive) return "Inactive";
-  return supportsManualFetch(provider) ? "Active" : "Push / manual";
+  return supportsManualFetch(provider) ? "Active" : "Manually only";
 }
 
 function providerStatusStyle(provider: Provider): {

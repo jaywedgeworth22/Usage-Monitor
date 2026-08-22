@@ -45,7 +45,7 @@ describe("effectivePollDueIntervalMs", () => {
 });
 
 describe("formatProviderSyncLabel", () => {
-  it("returns Manual for never-pollable providers", () => {
+  it("returns Manually only for never-pollable providers", () => {
     expect(
       formatProviderSyncLabel({
         syncMode: "manual",
@@ -53,7 +53,7 @@ describe("formatProviderSyncLabel", () => {
         nowMs: Date.now(),
         formatRelative: () => "never",
       })
-    ).toBe("Manual");
+    ).toBe("Manually only");
   });
 
   it("returns Never synced when pollable but no fetch yet", () => {

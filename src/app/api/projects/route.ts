@@ -7,9 +7,11 @@ import { backfillProjectIdFromMetadataName } from "@/lib/project-resolver";
 import { hasValidDashboardSession, shouldEnforceDashboardSession } from "@/lib/auth";
 import { readJsonBody } from "@/lib/provider-input";
 import { parseProjectCreateInput } from "@/lib/project-input";
+import { ensureFleetProjectsSeeded } from "@/lib/ensure-fleet-projects";
 
 export async function GET(request: NextRequest) {
   try {
+    await ensureFleetProjectsSeeded();
     const status = await computeProjectBudgetStatus();
     if (request.nextUrl.searchParams.get("includeSummary") === "1") {
       return NextResponse.json({ projects: status.projects, summary: status.summary });

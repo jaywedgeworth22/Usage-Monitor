@@ -1,3 +1,13 @@
+## Current (2026-08-22 GROK — fleet projects, Manually only, workspace copy)
+
+Visiting Projects seeds ST/CT/UM/DealDex/Personal-Site/Autorotate/ContactLogo/Fleet
+(alias-safe with SocraticTrade.com).  Non-poll connectors are labeled
+**Manually only** and never "need setup."  Old pollable snapshots refetch
+instead of a stale alert.  Settings → Copy Workspace For Local Testing
+exports secret-free JSON (Local iOS Import compatible).  Research:
+`docs/research/2026-08-22-agent-subscription-telemetry.md`.  Receipt:
+`docs/rollouts/2026-08-22-fleet-projects-manual-copy.md`.
+
 ## Current (2026-08-22 GROK — receipt inbox usable + Bills calendar)
 
 Forwarded receipts now show a bounded subject/amount on Operations.  April 2026+

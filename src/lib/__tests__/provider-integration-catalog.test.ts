@@ -95,6 +95,15 @@ describe("provider integration catalog", () => {
     );
   });
 
+  it("labels ChatGPT/Codex, SuperGrok, and Antigravity subscriptions as not fetchable", () => {
+    const openai = getProviderIntegrationProfile("openai");
+    const xai = getProviderIntegrationProfile("xai");
+    const google = getProviderIntegrationProfile("google-ai");
+    expect(openai.cannotAdd.join(" ")).toMatch(/MANUALLY ONLY/i);
+    expect(xai.cannotAdd.join(" ")).toMatch(/SuperGrok/i);
+    expect(google.cannotAdd.join(" ")).toMatch(/Antigravity/i);
+  });
+
   it("says Deno Deploy is retired and Coolify is the Congress.Trade host", () => {
     const deno = getProviderIntegrationProfile("deno", "builtin");
 

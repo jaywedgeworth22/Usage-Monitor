@@ -9,10 +9,12 @@ import {
 import { ensureAgentSyncProviderSeeded } from "@/lib/ensure-agent-sync-provider";
 import { ensureCloudflareFleetProvidersSeeded } from "@/lib/ensure-cloudflare-fleet-providers";
 import { ensureRoicProviderSeeded } from "@/lib/ensure-roic-provider";
+import { ensureFleetProjectsSeeded } from "@/lib/ensure-fleet-projects";
 import {
   effectivePollDueIntervalMs,
   resolveProviderSyncMode,
 } from "@/lib/provider-sync-mode";
+import { listStalePollableProviderIds } from "@/lib/refresh-stale-providers";
 import { providerPollSnapshotExpected } from "@/lib/anthropic-credentials";
 import {
   bootstrapStGeminiCredentialToInfisical,
@@ -378,6 +380,12 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
     await withInternalUsageWriteAdmission(() =>
       ensureCloudflareFleetProvidersSeeded()
     );
+    try {
+      await withInternalUsageWriteAdmission(() => ensureFleetProjectsSeeded());
+    } catch {
+      // Poll tests mock a provider-only Prisma surface. Missing Project
+      // must not block usage snapshots.
+    }
     // The default-off, exact ST Gemini bootstrap must run before the normal
     // one-way Infisical pull so a successful create can be adopted and bound
     // in this same provider-maintenance pass.
@@ -439,6 +447,12 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
     const errors: ProviderFetchError[] = [];
     const outcomes: ProviderFetchOutcome[] = [];
     const now = Date.now();
+    let staleDueIds = new Set<string>();
+    try {
+      staleDueIds = new Set(await listStalePollableProviderIds(now, 50));
+    } catch {
+      staleDueIds = new Set();
+    }
     const providerTimeoutMs = resolveProviderTimeoutMs();
     const tickStartedAtMs = now;
     const tickBudgetMs = resolveProviderFetchTickBudgetMs();
@@ -462,7 +476,7 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
         continue;
       }
       // Never-pollable (voyage, ROIC, push/generic, …): skip quietly. They are
-      // Manual sources — not "stale" and not missing a snapshot we can fetch.
+      // Manually only — not "stale" and not missing a snapshot we can fetch.
       const syncMode = resolveProviderSyncMode(provider);
       const snapshotExpected = providerPollSnapshotExpected(provider);
       if (syncMode === "manual" || !snapshotExpected) {
@@ -486,9 +500,11 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
       // re-selected rawData blob.
       const latestPoll = latestPollByProviderId.get(provider.id);
       const latestPollFetchedAt = latestPoll?.fetchedAt.getTime();
+      const forceDueForStale = staleDueIds.has(provider.id);
       if (
         latestPollFetchedAt &&
         !latestPoll?.retryable &&
+        !forceDueForStale &&
         now - latestPollFetchedAt < intervalMs
       ) {
         skipped++;

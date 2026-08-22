@@ -62,6 +62,8 @@ but contribute zero to `persisted`; never derive it from `activeEvents.length`.
   collection route the dashboard-session middleware excludes for GET (see "Subscriptions" below);
   `POST /api/subscriptions` and both `PUT`/`DELETE /api/subscriptions/:id` stay
   session-cookie-only.
+- `GET /api/workspace/export` — dashboard session cookie OR `USAGE_READ_TOKEN`.  Secret-free Local-compatible JSON (projects, provider shells, plans, subscriptions, latest snapshots).  No API keys.  Import with `POST /api/workspace/import` (session) or Local Usage Monitor Import.
+- `POST /api/providers/refresh-stale` — dashboard session.  Re-fetches pollable providers whose usage snapshot or external billing confirmation is older than one hour.  Manual/push providers are skipped.
 - `GET /api/export/daily-rollups` — dashboard session cookie OR the same
   `isUsageReadAuthorized` scheme. Exports `ExternalUsageEventDailyRollup` rows as JSON
   (default) or CSV (`format=csv`), bounded by inclusive UTC `from`/`to` day params

@@ -161,6 +161,18 @@ const PROJECT_ALIASES: Readonly<Record<string, string>> = {
   congresstradecom: "congress-trade",
   socratictrade: "socratic-trade",
   socratictradecom: "socratic-trade",
+  usagemonitor: "usage-monitor",
+  apiusagemonitor: "usage-monitor",
+  usagemonitorapp: "usage-monitor",
+  dealdex: "dealdex",
+  personalsite: "personal-site",
+  topspin: "autorotate",
+  autorotate: "autorotate",
+  contactlogo: "contact-logo",
+  contactlogocom: "contact-logo",
+  aifleetcoordinator: "fleet",
+  fleetinfra: "fleet",
+  fleet: "fleet",
 };
 
 /**

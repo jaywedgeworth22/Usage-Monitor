@@ -238,7 +238,7 @@ struct ProviderManagementInventoryView: View {
                             if provider.canFetch {
                                 Text("Pollable connection")
                             } else {
-                                Text("Push / manual — no Fetch")
+                                Text("Manually only — no Fetch")
                             }
                             if provider.canDelete {
                                 Button(role: .destructive) {
@@ -574,7 +574,7 @@ private struct ProviderManagementDetailView: View {
 
     private func manualOnlySection(_ provider: ProviderManagementItem) -> some View {
         Section {
-            Label("Push / manual — no poll", systemImage: "hand.raised")
+            Label("Manually only — no poll", systemImage: "hand.raised")
                 .foregroundStyle(Theme.Colors.secondaryText)
         } footer: {
             Text("This connection has no working usage poll. Track spend with a subscription fee, push events, or the web Settings form — a Fetch button would only fail.")
