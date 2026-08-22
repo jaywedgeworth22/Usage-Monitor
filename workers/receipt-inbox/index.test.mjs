@@ -405,6 +405,38 @@ describe("receipt inbox email worker", () => {
     expect(senderAuthentication(new Headers({ "authentication-results": "attacker; dmarc=pass" }))).toBe("unknown");
   });
 
+  it("does not POST owner expenses from unauthenticated email intake", async () => {
+    const { env } = createEnvironment();
+    env.OWNER_EXPENSE_TOKEN = "o".repeat(32);
+    env.OWNER_EXPENSE_INGEST_URL = "https://usage.jays.services";
+    env.XAI_API_KEY = "x".repeat(32);
+    const calls = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method || "GET", body: init.body });
+      throw new Error("intake must not call the network to file ledger cash");
+    };
+    try {
+      const priced = rawReceipt("OpenAI invoice Amount paid $19.99").replace(
+        "Your receipt is attached.",
+        "Amount paid $19.99 Total $19.99",
+      );
+      await handleEmail(receiptMessage(priced), env);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(calls).toEqual([]);
+    const summary = await handleFetch(new Request("https://receipt-inbox.jays.services/v1/receipts/summary", {
+      headers: { Authorization: `Bearer ${"r".repeat(32)}` },
+    }), env).then((response) => response.json());
+    expect(summary.needsReviewCount).toBe(1);
+    expect(summary.items[0]).toMatchObject({
+      amountUsd: 19.99,
+      classificationAction: "file",
+      status: "needs_review",
+    });
+  });
+
   it("requires one exact non-conflicting 180-day evidence lifecycle rule", () => {
     const exact = {
       id: "receipt-retention",
