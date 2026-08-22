@@ -1,3 +1,12 @@
+## Current (2026-08-22 GROK — receipt inbox usable + Bills calendar)
+
+Forwarded receipts now show a bounded subject/amount on Operations.  April 2026+
+mail is classified onto the owner-expense ledger (due date unless cancelled;
+usage on date received; domain renewals are dev expense; FMP/Massive have no
+next due).  Apple Calendar subscribe URL is `GET /api/bills.ics?token=`.
+Worker can call Grok then DeepSeek and POST `/api/owner-expenses`.  Receipt:
+`docs/rollouts/2026-08-22-receipt-bills-calendar.md`.
+
 ## Current (2026-08-20 CURSOR — GitHub About + production docs)
 
 Docs/metadata only.  Public GitHub About homepage was empty and the description

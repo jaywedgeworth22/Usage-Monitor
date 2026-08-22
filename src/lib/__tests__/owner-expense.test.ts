@@ -21,6 +21,22 @@ describe("parseOwnerExpenseInput", () => {
     );
   });
 
+  it("accepts a postdated usage invoice with a due date note", () => {
+    const input = parseOwnerExpenseInput({
+      provider: "GitHub",
+      amountUsd: 200.01,
+      occurredAt: "2026-08-21T12:00:00.000Z",
+      kind: "usage",
+      label: "GitHub Actions usage July 2026",
+      notes: "Received 2026-08-21.  Period Jul 1-31 2026.",
+      dueDate: "2026-08-28",
+      calendarSort: "usage",
+    });
+    expect(input.kind).toBe("usage");
+    expect(input.dueDate).toBe("2026-08-28");
+    expect(input.calendarSort).toBe("usage");
+  });
+
   it("rejects a zero amount", () => {
     expect(() =>
       parseOwnerExpenseInput({

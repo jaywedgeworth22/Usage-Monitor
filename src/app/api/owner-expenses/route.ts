@@ -1,13 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasValidDashboardSession, shouldEnforceDashboardSession } from "@/lib/auth";
 import { readBoundedJsonBody } from "@/lib/bounded-request-body";
+import { safeEqual, tokenFromRequest } from "@/lib/ingest-auth";
 import {
   parseOwnerExpenseInput,
   recordOwnerExpense,
 } from "@/lib/owner-expense";
 
+function hasOwnerExpenseToken(request: NextRequest): boolean {
+  const expected = process.env.OWNER_EXPENSE_TOKEN?.trim() ?? "";
+  if (!expected || expected.length < 32) return false;
+  const actual = tokenFromRequest(request, "x-owner-expense-token");
+  return Boolean(actual) && safeEqual(actual, expected);
+}
+
 export async function POST(request: NextRequest) {
-  if (shouldEnforceDashboardSession() && !hasValidDashboardSession(request)) {
+  const sessionOk = hasValidDashboardSession(request);
+  if (shouldEnforceDashboardSession() && !sessionOk && !hasOwnerExpenseToken(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

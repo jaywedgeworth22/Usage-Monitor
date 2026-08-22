@@ -132,6 +132,16 @@ binding never has a missing target.
 
 Both `/health` and the sanitized summary endpoint require the summary-read
 token, so unauthenticated probes cannot generate R2/Durable Object reads.
+The summary now includes a bounded subject, amount, service, and kind so the
+dashboard can show what arrived.  It still never returns raw MIME, card
+numbers, or mailbox local-parts.
+
+When `XAI_API_KEY` is set, intake refines that classification with Grok
+(`grok-4-1-fast` by default) and falls back to OpenRouter DeepSeek when
+`OPENROUTER_RECEIPT_KEY` is set.  If `OWNER_EXPENSE_TOKEN` and
+`OWNER_EXPENSE_INGEST_URL` are set, the Worker POSTs a matching owner
+expense to Usage Monitor.  Email intake still cannot use the HMAC cash
+importer.
 
 After fallback forwarding, intake is recoverable across R2/index partial
 failures: the index first creates

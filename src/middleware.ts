@@ -51,6 +51,8 @@ export const isPublicPath = (pathname: string) => {
     // the same class as server-metrics, exposed to the iOS client via the same
     // dual-auth preamble. See src/app/api/operations/route.ts.
     "/api/operations",
+    // Unlisted Apple Calendar subscribe URL; the route checks BILLS_CALENDAR_TOKEN.
+    "/api/bills.ics",
   ];
   if (publicPaths.includes(pathname)) return true;
   if (publicPaths.some((p) => pathname.startsWith(p + "/"))) return true;

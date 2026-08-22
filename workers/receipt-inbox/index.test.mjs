@@ -258,8 +258,8 @@ describe("receipt inbox email worker", () => {
       senderAuthentication: "unknown",
       supportedAttachmentCount: 1,
       status: "needs_review",
+      subject: "Private account receipt 1234",
     });
-    expect(JSON.stringify(body)).not.toContain("receipt 1234");
     expect(JSON.stringify(body)).not.toContain("private-account-receipt.pdf");
     expect(JSON.stringify(body)).not.toContain("billing@openai.com");
   });

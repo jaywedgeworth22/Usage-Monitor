@@ -7,7 +7,7 @@ const CONGRESS_HEALTH_URL = "https://congress.trade/api/health";
 const RECEIPT_INBOX_SUMMARY_URL = "https://receipt-inbox.jays.services/v1/receipts/summary";
 const MAX_HEALTH_RESPONSE_BYTES = 64 * 1024;
 const MAX_RECEIPT_RESPONSE_BYTES = 128 * 1024;
-const MAX_RECEIPT_ITEMS = 10;
+const MAX_RECEIPT_ITEMS = 40;
 const REQUEST_TIMEOUT_MS = 8_000;
 const OPERATIONS_CACHE_TTL_MS = 30_000;
 
@@ -45,6 +45,13 @@ export interface ReceiptInboxItemSummary {
   supportedAttachmentCount: number;
   bodyEvidence: boolean;
   quarantineReason: string;
+  subject?: string;
+  service?: string;
+  kind?: string;
+  calendarSort?: string;
+  amountUsd?: number;
+  expenseDate?: string;
+  dueDate?: string;
 }
 
 export interface ReceiptInboxSummary {
@@ -255,7 +262,7 @@ function parseReceiptItem(value: unknown): ReceiptInboxItemSummary | null {
   ) {
     return null;
   }
-  return {
+  const parsed: ReceiptInboxItemSummary = {
     id,
     receivedAt,
     senderDomain: domain,
@@ -269,6 +276,45 @@ function parseReceiptItem(value: unknown): ReceiptInboxItemSummary | null {
         ? item.quarantineReason
         : "awaiting_review",
   };
+  const subject = sanitizeReceiptText(item?.subject, 180);
+  const service = sanitizeReceiptText(item?.service, 80);
+  const kind = sanitizeReceiptEnum(item?.kind, ["subscription", "prepaid", "usage", "one_time"]);
+  const calendarSort = sanitizeReceiptEnum(
+    item?.calendarSort,
+    ["subscription", "prepaid", "usage", "dev-expense"],
+  );
+  const amountUsd = finiteAmount(item?.amountUsd);
+  const expenseDate = receiptIsoDay(item?.expenseDate);
+  const dueDate = receiptIsoDay(item?.dueDate);
+  if (subject) parsed.subject = subject;
+  if (service) parsed.service = service;
+  if (kind) parsed.kind = kind;
+  if (calendarSort) parsed.calendarSort = calendarSort;
+  if (amountUsd != null) parsed.amountUsd = amountUsd;
+  if (expenseDate) parsed.expenseDate = expenseDate;
+  if (dueDate) parsed.dueDate = dueDate;
+  return parsed;
+}
+
+function sanitizeReceiptText(value: unknown, max: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const cleaned = value.replace(/\b\S+@\S+\b/g, "").replace(/\s+/g, " ").trim();
+  if (!cleaned || cleaned.length > max) return cleaned ? cleaned.slice(0, max) : undefined;
+  return cleaned;
+}
+
+function sanitizeReceiptEnum(value: unknown, allowed: string[]): string | undefined {
+  return typeof value === "string" && allowed.includes(value) ? value : undefined;
+}
+
+function finiteAmount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 5000
+    ? value
+    : undefined;
+}
+
+function receiptIsoDay(value: unknown): string | undefined {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
 }
 
 export async function fetchReceiptInboxSummary(): Promise<ReceiptInboxSummary> {
