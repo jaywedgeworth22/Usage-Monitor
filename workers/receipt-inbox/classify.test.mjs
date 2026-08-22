@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  addUtcMonth,
   boundedSubject,
   calendarTitle,
   classifyReceipt,
   extractAmountUsd,
+  enrichClassification,
+  mergeLlmClassification,
 } from "./src/classify.mjs";
 
 describe("boundedSubject", () => {
@@ -78,4 +81,86 @@ describe("classifyReceipt", () => {
     expect(result.dueDate).toBe("2026-08-28");
     expect(result.notes).toMatch(/date received/i);
   });
+
+  it("schedules next due for an active subscription", () => {
+    const result = classifyReceipt({
+      subject: "Your Claude Pro receipt",
+      text: "Claude Pro monthly subscription Amount paid $20.00 renews",
+      senderDomain: "anthropic.com",
+      receivedAt: "2026-08-01T12:00:00.000Z",
+    });
+    expect(result.kind).toBe("subscription");
+    expect(result.nextDueDate).toBe(addUtcMonth(result.expenseDate));
+  });
 });
+
+describe("mergeLlmClassification", () => {
+  it("clears next due when the model marks cancelledNoRenew", () => {
+    const base = classifyReceipt({
+      subject: "Your Claude Pro receipt",
+      text: "Claude Pro monthly subscription Amount paid $20.00 renews",
+      senderDomain: "anthropic.com",
+      receivedAt: "2026-08-01T12:00:00.000Z",
+    });
+    const merged = mergeLlmClassification(base, { cancelledNoRenew: true, nextDueDate: "2026-09-01" });
+    expect(merged.nextDueDate).toBeNull();
+    expect(merged.cancelledNoRenew).toBe(true);
+  });
+});
+
+describe("enrichClassification", () => {
+  it("uses Grok then DeepSeek and never requires a ledger POST", async () => {
+    const base = classifyReceipt({
+      subject: "OpenAI invoice Amount paid $19.99",
+      text: "Amount paid $19.99",
+      senderDomain: "openai.com",
+      receivedAt: "2026-08-22T00:00:00.000Z",
+    });
+    const urls = [];
+    const fetchImpl = async (url) => {
+      urls.push(String(url));
+      if (String(url).includes("api.x.ai")) {
+        return new Response("upstream failed", { status: 500 });
+      }
+      return Response.json({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              action: "file",
+              service: "OpenAI",
+              kind: "subscription",
+              calendarSort: "subscription",
+              amountUsd: 19.99,
+              expenseDate: "2026-08-22",
+              nextDueDate: "2026-09-22",
+              cancelledNoRenew: false,
+              label: "OpenAI ChatGPT Plus",
+              notes: "LLM backup",
+            }),
+          },
+        }],
+      });
+    };
+    const result = await enrichClassification(base, {
+      XAI_API_KEY: "x".repeat(32),
+      DEEPSEEK_API_KEY: "d".repeat(32),
+    }, fetchImpl);
+    expect(urls[0]).toContain("api.x.ai");
+    expect(urls[1]).toContain("api.deepseek.com");
+    expect(result.classificationSource).toBe("deepseek");
+    expect(result.review.service).toBe("OpenAI");
+    expect(result.review.nextDueDate).toBe("2026-09-22");
+  });
+
+  it("stays on rules when no LLM keys are set", async () => {
+    const base = classifyReceipt({
+      subject: "OpenAI invoice Amount paid $19.99",
+      receivedAt: "2026-08-22T00:00:00.000Z",
+    });
+    const result = await enrichClassification(base, {}, async () => {
+      throw new Error("must not call the network");
+    });
+    expect(result.classificationSource).toBe("rules");
+  });
+});
+
