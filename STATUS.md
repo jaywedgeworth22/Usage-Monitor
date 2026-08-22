@@ -1,3 +1,11 @@
+## Current (2026-08-22 GROK — API-equivalent cost for Codex + Grok Build)
+
+Dashboard **API-Equivalent Cost** card covers every subscription seat with
+model + token telemetry, not Claude-only.  Codex JSONL and Grok Build
+`turn_completed` logs ingest as estimated (never cash).  Claude Code OTLP
+unchanged.  Cursor has no local token ledger.  Receipt:
+`docs/rollouts/2026-08-22-api-equivalent-cost.md`.
+
 ## Current (2026-08-22 GROK — fleet projects, Manually only, workspace copy)
 
 Visiting Projects seeds ST/CT/UM/DealDex/Personal-Site/Autorotate/ContactLogo/Fleet

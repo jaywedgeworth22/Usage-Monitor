@@ -22,6 +22,8 @@
     "repair:anthropic-funding": "node scripts/repair-anthropic-funding.mjs",
     "add:cursor-subscription": "node scripts/add-cursor-subscription.mjs",
     "antigravity:collect": "node scripts/antigravity-usage-collector.mjs",
+    "codex:collect": "node scripts/codex-usage-collector.mjs",
+    "grok:collect": "node scripts/grok-usage-collector.mjs",
     "import:receipt-screenshots": "node scripts/add-user-billing-receipts.mjs",
     "import:billing-receipts": "node scripts/import-private-billing-receipts.mjs",
     "receipt-inbox:verify-lifecycle": "node scripts/verify-receipt-inbox-lifecycle.mjs",
@@ -44,8 +46,9 @@
     "test:oracle-deploy": "node scripts/test-oracle-deploy-config.mjs",
     "test:apple-projects": "bash scripts/verify-apple-projects.sh",
     "test:antigravity-collector": "node scripts/test-antigravity-collector.mjs",
+    "test:session-token-collectors": "node scripts/test-session-token-collectors.mjs",
     "test:cf-token-map": "bash scripts/test-cf-token-map.sh",
-    "verify": "npm run lint && npm run typecheck && npm test && npm run test:receipt-inbox-worker && npm run test:migrate-safe && npm run test:sqlite-backup && npm run test:r2-archive && npm run test:startup-config && npm run test:oracle-deploy && npm run test:apple-projects && npm run test:antigravity-collector && npm run test:cf-token-map && npm run build"
+    "verify": "npm run lint && npm run typecheck && npm test && npm run test:receipt-inbox-worker && npm run test:migrate-safe && npm run test:sqlite-backup && npm run test:r2-archive && npm run test:startup-config && npm run test:oracle-deploy && npm run test:apple-projects && npm run test:antigravity-collector && npm run test:session-token-collectors && npm run test:cf-token-map && npm run build"
   },
   "dependencies": {
     "@jaywedgeworth22/congress-trading-shared": "github:jaywedgeworth22/congress-trading-shared#v2.5.2",

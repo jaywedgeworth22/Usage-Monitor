@@ -73,8 +73,10 @@ If you want this number on the dashboard later: keep it as a **derived estimate 
 - Show **Needs sync** / **Waiting for first fetch** for a connector that cannot poll.
 - Call SuperGrok remaining-credits an xAI Management API snapshot.
 
-## Follow-ups (not in this PR)
+## Follow-ups (this PR, 2026-08-22 GROK)
 
-- Optional Mac collector for Codex session JSONL (mirror the Antigravity job). Always-on vs on-demand must be listed on `MAC-LOCAL-PROCESSES.md` if we add a LaunchAgent.
-- Optional Grok Build credits collector using the user’s CLI OAuth on the Mac only (never store the refresh token in UM SQLite as a “fetchable” provider).
-- API-equivalent rollup from existing `ExternalUsageEvent` token fields × LiteLLM prices, labeled estimated.
+Landed in `grok/api-equivalent-cost`: Codex JSONL collector, Grok Build
+`updates.jsonl` collector, dashboard API-Equivalent Cost card, xAI 4.5/4.6
+runtime prices.  Cursor still has no local token ledger.  Gemini CLI tmp
+sessions on this Mac are empty of tokens.  LaunchAgents are templated;
+bootstrap after merge.

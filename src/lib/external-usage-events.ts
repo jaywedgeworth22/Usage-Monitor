@@ -16,6 +16,14 @@ import {
 import { SUBSCRIPTION_SOURCE_APP } from "@/lib/subscription-charge-identity";
 import { ingestCostDerivationEnabled } from "@/lib/pricing/derive-ingest-cost";
 import {
+  deriveTokenCostUsd,
+  getModelPricing,
+} from "@/lib/pricing/model-pricing";
+import {
+  isSubscriptionAnalyticsTelemetry,
+  shouldDeriveAnalyticsTokenEstimate,
+} from "@/lib/subscription-analytics";
+import {
   MTD_SCAN_MEMO_TTL_MS,
   clearMtdScanMemo,
   getMtdScanMemo,
@@ -23,6 +31,13 @@ import {
   setMtdScanMemo,
   setUsageEventsSummaryMemo,
 } from "@/lib/mtd-scan-memo";
+
+export {
+  isClaudeCodeAnalyticsTelemetry,
+  isSubscriptionAnalyticsTelemetry,
+  shouldDeriveAnalyticsTokenEstimate,
+  SUBSCRIPTION_ANALYTICS_SOURCE_APPS,
+} from "@/lib/subscription-analytics";
 
 export const STATUS_METRIC_TYPES = new Set(["quota_sync", "credit_balance"]);
 
@@ -166,22 +181,6 @@ export function classifyCostCoverage(counts: {
       : "complete";
   }
   return unclassifiedCostEventCount > 0 ? "legacy_unknown" : "unknown";
-}
-
-/**
- * Claude Code's OTLP cost metric is an estimated API-equivalent value. For
- * Claude Pro/Max sessions it is not a charge and must never enter cash spend,
- * budgets, or alerts. Keep the discriminator exact so unrelated Anthropic
- * telemetry and API usage events retain their normal billing semantics.
- */
-export function isClaudeCodeAnalyticsTelemetry(input: {
-  sourceApp: string;
-  service: string | null | undefined;
-}): boolean {
-  return (
-    input.sourceApp.trim().toLowerCase() === "claude-code" &&
-    input.service?.trim().toLowerCase() === "claude-code"
-  );
 }
 
 // One month-to-date cost total per (provider, sourceApp, projectId) triple,
@@ -691,6 +690,122 @@ export interface ExternalUsageEventSummary {
  * receipt-cash and status-metric shapes are excluded by construction — no
  * receipt-candidate where-clause replication needed here.
  */
+const TOKEN_TYPE_LABEL_PREFIX = "token:";
+
+function tokenTypeFromUsageLabel(label: string | null | undefined): string {
+  if (!label) return "unknown";
+  return label.startsWith(TOKEN_TYPE_LABEL_PREFIX)
+    ? label.slice(TOKEN_TYPE_LABEL_PREFIX.length)
+    : "unknown";
+}
+
+interface AnalyticsTokenRow {
+  sourceApp: string;
+  provider: string;
+  service: string | null;
+  keyRef: string | null;
+  label: string | null;
+  quantity: number;
+}
+
+/**
+ * Catalog-priced API-equivalent for subscription seats that post tokens
+ * without a vendor costUsd (Codex JSONL). Claude is excluded: its OTLP
+ * cost.usage already fills estimatedApiEquivalentUsd. Fail-closed when the
+ * Prisma client in tests has no $queryRaw.
+ */
+async function loadAnalyticsTokenRows(
+  since: Date,
+  until: Date
+): Promise<AnalyticsTokenRow[]> {
+  if (typeof prisma.$queryRaw !== "function") return [];
+  try {
+    const rows = await prisma.$queryRaw<
+      Array<{
+        sourceApp: string;
+        provider: string;
+        service: string | null;
+        keyRef: string | null;
+        label: string | null;
+        quantity: unknown;
+      }>
+    >`
+      SELECT
+        "sourceApp",
+        "provider",
+        "service",
+        "keyRef",
+        "label",
+        COALESCE(SUM("quantity"), 0) AS "quantity"
+      FROM "ExternalUsageEvent"
+      WHERE "occurredAt" >= ${since}
+        AND "occurredAt" <= ${until}
+        AND "metricType" = 'usage'
+        AND "unit" = 'token'
+        AND "sourceApp" IN ('grok-build', 'openai-codex', 'antigravity-cli')
+      GROUP BY "sourceApp", "provider", "service", "keyRef", "label"
+    `;
+    if (!Array.isArray(rows)) return [];
+    return rows
+      .filter((row) => typeof row?.sourceApp === "string" && typeof row.provider === "string")
+      .map((row) => ({
+        sourceApp: row.sourceApp,
+        provider: row.provider,
+        service: row.service,
+        keyRef: row.keyRef,
+        label: row.label,
+        quantity: Number(row.quantity ?? 0),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function deriveAnalyticsTokenUsdByProvider(
+  rows: AnalyticsTokenRow[]
+): Map<string, number> {
+  const byModel = new Map<
+    string,
+    { input: number; output: number; cacheRead: number; cacheCreation: number; unknown: number }
+  >();
+  for (const row of rows) {
+    if (!shouldDeriveAnalyticsTokenEstimate(row)) continue;
+    if (!Number.isFinite(row.quantity) || row.quantity <= 0) continue;
+    const model = row.keyRef?.trim() || "";
+    const key = `${canonicalProviderKey(row.provider)}|${model}`;
+    const bucket =
+      byModel.get(key) ??
+      { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, unknown: 0 };
+    const tokenType = tokenTypeFromUsageLabel(row.label);
+    if (
+      tokenType === "input" ||
+      tokenType === "output" ||
+      tokenType === "cacheRead" ||
+      tokenType === "cacheCreation"
+    ) {
+      bucket[tokenType] += row.quantity;
+    } else {
+      bucket.unknown += row.quantity;
+    }
+    byModel.set(key, bucket);
+  }
+
+  const byProvider = new Map<string, number>();
+  for (const [key, tokens] of byModel) {
+    const provider = key.slice(0, key.indexOf("|"));
+    const model = key.slice(key.indexOf("|") + 1);
+    const resolved = model ? getModelPricing(model) : null;
+    if (!resolved) continue;
+    const derived = deriveTokenCostUsd(resolved.pricing, tokens);
+    let usd = derived.costUsd;
+    if (tokens.unknown > 0) {
+      usd += deriveTokenCostUsd(resolved.pricing, { input: tokens.unknown }).costUsd;
+    }
+    byProvider.set(provider, (byProvider.get(provider) ?? 0) + usd);
+  }
+  return byProvider;
+}
+
 async function sumDerivedCostEstimates(
   rawSince: Date
 ): Promise<{ totalUsd: number; eventCount: number }> {
@@ -883,7 +998,7 @@ async function summarizeExternalUsageEventsUnserialized(
     // engine ever returns null.
     if (!row._max.occurredAt) continue;
     rawEventCount += row._count._all;
-    const isClaudeCodeAnalytics = isClaudeCodeAnalyticsTelemetry({
+    const isAnalytics = isSubscriptionAnalyticsTelemetry({
       sourceApp: row.sourceApp,
       service: row.service,
     });
@@ -896,14 +1011,14 @@ async function summarizeExternalUsageEventsUnserialized(
       metricType: row.metricType,
       unit: row.unit,
       eventCount: row._count._all,
-      pricedEventCount: isClaudeCodeAnalytics ? 0 : row._count.costUsd,
-      unpricedEventCount: isClaudeCodeAnalytics
+      pricedEventCount: isAnalytics ? 0 : row._count.costUsd,
+      unpricedEventCount: isAnalytics
         ? 0
         : row._count._all - row._count.costUsd,
       unclassifiedCostEventCount: 0,
-      totalCostUsd: isClaudeCodeAnalytics ? 0 : row._sum.costUsd ?? 0,
+      totalCostUsd: isAnalytics ? 0 : row._sum.costUsd ?? 0,
       receiptCashPaidUsd: 0,
-      estimatedApiEquivalentUsd: isClaudeCodeAnalytics
+      estimatedApiEquivalentUsd: isAnalytics
         ? row._sum.costUsd ?? 0
         : 0,
       totalRequests: row._sum.requests ?? 0,
@@ -917,7 +1032,7 @@ async function summarizeExternalUsageEventsUnserialized(
   // Receipt candidates are rare (only exact receipt-shaped rows); folding
   // them per-row preserves the old fold's validated-receipt semantics.
   for (const candidate of receiptCandidates) {
-    const isClaudeCodeAnalytics = isClaudeCodeAnalyticsTelemetry(candidate);
+    const isAnalytics = isSubscriptionAnalyticsTelemetry(candidate);
     const isReceiptCash = isReceiptCashEvent(candidate);
     addSummaryContribution(groups, {
       sourceApp: candidate.sourceApp,
@@ -929,18 +1044,18 @@ async function summarizeExternalUsageEventsUnserialized(
       unit: candidate.unit,
       eventCount: 1,
       pricedEventCount:
-        isClaudeCodeAnalytics || isReceiptCash || candidate.costUsd == null
+        isAnalytics || isReceiptCash || candidate.costUsd == null
           ? 0
           : 1,
       unpricedEventCount:
-        isClaudeCodeAnalytics || isReceiptCash || candidate.costUsd != null
+        isAnalytics || isReceiptCash || candidate.costUsd != null
           ? 0
           : 1,
       unclassifiedCostEventCount: 0,
       totalCostUsd:
-        isClaudeCodeAnalytics || isReceiptCash ? 0 : candidate.costUsd ?? 0,
+        isAnalytics || isReceiptCash ? 0 : candidate.costUsd ?? 0,
       receiptCashPaidUsd: isReceiptCash ? candidate.costUsd ?? 0 : 0,
-      estimatedApiEquivalentUsd: isClaudeCodeAnalytics
+      estimatedApiEquivalentUsd: isAnalytics
         ? candidate.costUsd ?? 0
         : 0,
       totalRequests: candidate.requests ?? 0,
@@ -952,13 +1067,13 @@ async function summarizeExternalUsageEventsUnserialized(
   }
 
   for (const rollup of rollups) {
-    const isClaudeCodeAnalytics = isClaudeCodeAnalyticsTelemetry(rollup);
+    const isAnalytics = isSubscriptionAnalyticsTelemetry(rollup);
     const isReceiptCash = isReceiptCashEvent(rollup);
     const hasCoverageCounts =
       rollup.pricedEventCount != null ||
       rollup.unpricedEventCount != null ||
       rollup.unclassifiedCostEventCount != null;
-    const costCounts = isClaudeCodeAnalytics || isReceiptCash
+    const costCounts = isAnalytics || isReceiptCash
       ? {
           pricedEventCount: 0,
           unpricedEventCount: 0,
@@ -982,9 +1097,9 @@ async function summarizeExternalUsageEventsUnserialized(
       eventCount: rollup.eventCount,
       ...costCounts,
       totalCostUsd:
-        isClaudeCodeAnalytics || isReceiptCash ? 0 : rollup.totalCostUsd,
+        isAnalytics || isReceiptCash ? 0 : rollup.totalCostUsd,
       receiptCashPaidUsd: isReceiptCash ? rollup.totalCostUsd : 0,
-      estimatedApiEquivalentUsd: isClaudeCodeAnalytics
+      estimatedApiEquivalentUsd: isAnalytics
         ? rollup.totalCostUsd
         : 0,
       totalRequests: rollup.totalRequests,
@@ -993,6 +1108,27 @@ async function summarizeExternalUsageEventsUnserialized(
       limitWindow: rollup.limitWindow,
       latestAt: rollup.latestOccurredAt.toISOString(),
     });
+  }
+
+  const tokenRows = await loadAnalyticsTokenRows(rawSince, upperBound);
+  const derivedByProvider = deriveAnalyticsTokenUsdByProvider(tokenRows);
+  const providersWithReportedEstimate = new Set<string>();
+  for (const group of groups.values()) {
+    if (group.estimatedApiEquivalentUsd > 0) {
+      providersWithReportedEstimate.add(canonicalProviderKey(group.provider));
+    }
+  }
+  const appliedDerived = new Set<string>();
+  for (const group of groups.values()) {
+    if (!shouldDeriveAnalyticsTokenEstimate(group)) continue;
+    const providerKey = canonicalProviderKey(group.provider);
+    if (providersWithReportedEstimate.has(providerKey)) continue;
+    if (appliedDerived.has(providerKey)) continue;
+    const extra = derivedByProvider.get(providerKey);
+    if (extra && extra > 0) {
+      group.estimatedApiEquivalentUsd += extra;
+      appliedDerived.add(providerKey);
+    }
   }
 
   const summaries = Array.from(groups.values())
@@ -1444,7 +1580,7 @@ async function loadMonthToDateExternalCostMaterialUnserialized(
   ) => {
     const key = normalizedProviderName(provider);
     const bucket = byProvider.get(key) ?? emptyProviderPushedCost();
-    if (isClaudeCodeAnalyticsTelemetry({ sourceApp, service })) {
+    if (isSubscriptionAnalyticsTelemetry({ sourceApp, service })) {
       bucket.estimatedApiEquivalentUsd += cost;
       byProvider.set(key, bucket);
       return;
@@ -1476,9 +1612,9 @@ async function loadMonthToDateExternalCostMaterialUnserialized(
       unclassifiedCostEventCount: number;
     }
   ) => {
-    // Attribution deliberately excludes Claude analytics telemetry (estimate
-    // only on provider view) and receipt-cash rows (handled separately).
-    if (isClaudeCodeAnalyticsTelemetry({ sourceApp, service })) return;
+    // Attribution deliberately excludes subscription analytics telemetry
+    // (estimate only on provider view) and receipt-cash rows.
+    if (isSubscriptionAnalyticsTelemetry({ sourceApp, service })) return;
     const key = `${normalizedProviderName(provider)}|${sourceApp.toLowerCase()}|${projectId ?? ""}|${metricType}`;
     const existing = attributionMap.get(key);
     if (existing) {
@@ -1572,6 +1708,16 @@ async function loadMonthToDateExternalCostMaterialUnserialized(
       rollup.totalCostUsd,
       counts
     );
+  }
+
+  const tokenRows = await loadAnalyticsTokenRows(rawSince, now);
+  const derivedByProvider = deriveAnalyticsTokenUsdByProvider(tokenRows);
+  for (const [providerKey, extra] of derivedByProvider) {
+    if (!(extra > 0)) continue;
+    const bucket = byProvider.get(providerKey) ?? emptyProviderPushedCost();
+    if (bucket.estimatedApiEquivalentUsd > 0) continue;
+    bucket.estimatedApiEquivalentUsd += extra;
+    byProvider.set(providerKey, bucket);
   }
 
   return {

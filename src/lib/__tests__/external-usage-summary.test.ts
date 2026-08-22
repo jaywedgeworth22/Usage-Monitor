@@ -819,7 +819,6 @@ describe("summarizeExternalUsageEvents derived cost estimates", () => {
       new Date("2026-06-01T00:00:00.000Z"),
       new Date("2026-07-01T00:00:00.000Z")
     );
-    expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
     expect(summary.derivedCostEstimateUsd).toBe(0);
     expect(summary.derivedCostEstimateEventCount).toBe(0);
   });
@@ -830,7 +829,6 @@ describe("summarizeExternalUsageEvents derived cost estimates", () => {
       new Date("2026-06-01T00:00:00.000Z"),
       new Date("2026-07-01T00:00:00.000Z")
     );
-    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
     expect(summary.derivedCostEstimateUsd).toBe(12.5);
     expect(summary.derivedCostEstimateEventCount).toBe(7);
     // Derived estimates never leak into the producer-reported cost pool.

@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { ChevronRight } from "lucide-react";
 import PaidServicesPanel from "@/components/PaidServicesPanel";
 import ExternalTelemetryPanel, { type ExternalUsageSummary } from "@/components/ExternalTelemetryPanel";
-import ClaudeCostCheckCard from "@/components/ClaudeCostCheckCard";
+import ApiEquivalentCostCard from "@/components/ApiEquivalentCostCard";
 import LlmBurnCard from "@/components/LlmBurnCard";
 import ProjectsPanel, { type ProjectBudgetStatus } from "@/components/ProjectsPanel";
 import SentryHealthCard from "@/components/SentryHealthCard";
@@ -95,7 +95,7 @@ export default function DashboardPortfolioSection({
 
               <LlmBurnCard />
 
-              <ClaudeCostCheckCard />
+              <ApiEquivalentCostCard />
 
               {(projects.length > 0 || (projectSummary?.unassignedSpentUsd ?? 0) > 0) && (
                 <ProjectsPanel projects={projects} summary={projectSummary} />

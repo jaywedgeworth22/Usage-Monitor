@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildClaudeCostCheck } from "../claude-cost-check";
+import { buildApiEquivalentCost, buildClaudeCostCheck } from "../claude-cost-check";
 
 describe("buildClaudeCostCheck", () => {
   it("derives cost from tokens and compares against the reported estimate", () => {
@@ -81,5 +81,44 @@ describe("buildClaudeCostCheck", () => {
       []
     );
     expect(report.models[0].model).toBe("claude-sonnet-4-5");
+  });
+});
+
+describe("buildApiEquivalentCost", () => {
+  it("groups seats and uses catalog estimate when the producer posted no dollars", () => {
+    const report = buildApiEquivalentCost(
+      [
+        {
+          provider: "openai",
+          sourceApp: "openai-codex",
+          model: "gpt-5.6-sol",
+          tokenType: "input",
+          quantity: 1_000_000,
+        },
+        {
+          provider: "anthropic",
+          sourceApp: "claude-code",
+          model: "claude-sonnet-4-5",
+          tokenType: "input",
+          quantity: 1_000_000,
+        },
+      ],
+      [
+        {
+          provider: "anthropic",
+          sourceApp: "claude-code",
+          model: "claude-sonnet-4-5",
+          costUsd: 3,
+        },
+      ]
+    );
+    expect(report.providers).toHaveLength(2);
+    const claude = report.providers.find((p) => p.sourceApp === "claude-code");
+    const codex = report.providers.find((p) => p.sourceApp === "openai-codex");
+    expect(claude?.totals.reportedCostUsd).toBeCloseTo(3, 6);
+    expect(claude?.totals.derivedCostUsd).toBeCloseTo(3, 6);
+    expect(codex?.totals.reportedCostUsd).toBe(0);
+    expect(codex?.estimateUsd).toBeGreaterThan(0);
+    expect(report.totals.estimateUsd).toBeGreaterThan(3);
   });
 });

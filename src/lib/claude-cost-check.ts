@@ -21,11 +21,15 @@ export interface ClaudeTokenEventRow {
   /** claude-code token type: input | output | cacheRead | cacheCreation | unknown */
   tokenType: string;
   quantity: number;
+  provider?: string;
+  sourceApp?: string;
 }
 
 export interface ClaudeCostEventRow {
   model: string | null;
   costUsd: number;
+  provider?: string;
+  sourceApp?: string;
 }
 
 export interface ModelCostCheck {
@@ -145,6 +149,11 @@ export function buildClaudeCostCheck(
       Math.max(b.derivedCostUsd, b.reportedCostUsd) - Math.max(a.derivedCostUsd, a.reportedCostUsd)
   );
 
+  return finishClaudeCostCheck(models);
+}
+
+function finishClaudeCostCheck(models: ModelCostCheck[]): ClaudeCostCheckReport {
+
   const derivedCostUsd = models.reduce((sum, m) => sum + m.derivedCostUsd, 0);
   const reportedCostUsd = models.reduce((sum, m) => sum + m.reportedCostUsd, 0);
   const deltaUsd = derivedCostUsd - reportedCostUsd;
@@ -168,6 +177,92 @@ export function buildClaudeCostCheck(
           m.pricingKey === null &&
           m.tokens.input + m.tokens.output + m.tokens.cacheRead + m.tokens.cacheCreation > 0
       ).length,
+    },
+  };
+}
+
+export interface ApiEquivalentProviderReport extends ClaudeCostCheckReport {
+  provider: string;
+  sourceApp: string;
+  estimateUsd: number;
+}
+
+export interface ApiEquivalentCostReport {
+  pricing: ClaudeCostCheckReport["pricing"];
+  providers: ApiEquivalentProviderReport[];
+  totals: ClaudeCostCheckReport["totals"] & { estimateUsd: number };
+}
+
+function providerBucketKey(provider: string, sourceApp: string): string {
+  return `${provider.trim().toLowerCase() || "(unknown)"}|${sourceApp.trim().toLowerCase() || "(unknown)"}`;
+}
+
+/** Per-provider token x catalog vs reported estimate. Same money-safety as
+ * buildClaudeCostCheck: analytics only, never cash. */
+export function buildApiEquivalentCost(
+  tokenEvents: ClaudeTokenEventRow[],
+  costEvents: ClaudeCostEventRow[]
+): ApiEquivalentCostReport {
+  const tokenBuckets = new Map<string, ClaudeTokenEventRow[]>();
+  const costBuckets = new Map<string, ClaudeCostEventRow[]>();
+  const labels = new Map<string, { provider: string; sourceApp: string }>();
+
+  const remember = (provider: string | undefined, sourceApp: string | undefined) => {
+    const p = provider?.trim() || "(unknown)";
+    const s = sourceApp?.trim() || "(unknown)";
+    const key = providerBucketKey(p, s);
+    labels.set(key, { provider: p, sourceApp: s });
+    return key;
+  };
+
+  for (const event of tokenEvents) {
+    const key = remember(event.provider, event.sourceApp);
+    const list = tokenBuckets.get(key) ?? [];
+    list.push(event);
+    tokenBuckets.set(key, list);
+  }
+  for (const event of costEvents) {
+    const key = remember(event.provider, event.sourceApp);
+    const list = costBuckets.get(key) ?? [];
+    list.push(event);
+    costBuckets.set(key, list);
+  }
+
+  const providers: ApiEquivalentProviderReport[] = [];
+  for (const [key, identity] of labels) {
+    const report = buildClaudeCostCheck(
+      tokenBuckets.get(key) ?? [],
+      costBuckets.get(key) ?? []
+    );
+    const estimateUsd = Math.max(report.totals.derivedCostUsd, report.totals.reportedCostUsd);
+    providers.push({
+      provider: identity.provider,
+      sourceApp: identity.sourceApp,
+      ...report,
+      estimateUsd,
+    });
+  }
+
+  providers.sort((a, b) => b.estimateUsd - a.estimateUsd);
+
+  const derivedCostUsd = providers.reduce((sum, p) => sum + p.totals.derivedCostUsd, 0);
+  const reportedCostUsd = providers.reduce((sum, p) => sum + p.totals.reportedCostUsd, 0);
+  const estimateUsd = providers.reduce((sum, p) => sum + p.estimateUsd, 0);
+  const deltaUsd = derivedCostUsd - reportedCostUsd;
+  const basis = Math.max(reportedCostUsd, derivedCostUsd);
+
+  return {
+    pricing:
+      providers[0]?.pricing ??
+      finishClaudeCostCheck([]).pricing,
+    providers,
+    totals: {
+      derivedCostUsd,
+      reportedCostUsd,
+      estimateUsd,
+      deltaUsd,
+      deltaPct: basis > 1e-9 ? deltaUsd / basis : null,
+      unpricedModelCount: providers.reduce((sum, p) => sum + p.totals.unpricedModelCount, 0),
     },
   };
 }
