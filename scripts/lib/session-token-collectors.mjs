@@ -8,6 +8,10 @@
 //   ccusage#876).  Line-numbered eventIds would persist each replay.
 // Grok Build: ~/.grok/sessions/**/updates.jsonl sessionUpdate=turn_completed
 //   + usage.modelUsage (ccusage Grok data source).
+// Copilot CLI: ~/.copilot/session-state/*/events.jsonl session.shutdown
+//   data.modelMetrics[model].usage (ccusage Copilot data source).  Totals are
+//   cumulative across resume/shutdown; emit the delta since the previous
+//   metrics snapshot so re-ingest cannot double-count.
 //
 // Tokens are posted as billingMode=estimated. Grok costUsdTicks (1e-10 USD)
 // are posted as estimated cost events. Neither is cash.
@@ -20,6 +24,7 @@ export const MAX_EVENTS_PER_BATCH = 100;
 
 export const CODEX_PRODUCER_ID = "openai-codex";
 export const GROK_PRODUCER_ID = "grok-build";
+export const COPILOT_PRODUCER_ID = "github-copilot";
 
 const TOKEN_TYPES = ["input", "output", "cacheRead", "cacheCreation"];
 
@@ -283,6 +288,87 @@ export function parseGrokUpdatesJsonl(text, { sessionKey, fallbackOccurredAt } =
         extraId: `L${lineNo}:${model ?? "_"}:cost`,
       });
       if (costEvent) events.push(costEvent);
+    }
+  }
+  return events;
+}
+
+function copilotUsageFromMetricsRow(row) {
+  if (!row || typeof row !== "object") return null;
+  const usage =
+    row.usage && typeof row.usage === "object" ? row.usage : row;
+  if (!usage || typeof usage !== "object") return null;
+  return {
+    input: usage.inputTokens,
+    output: usage.outputTokens,
+    cacheRead: usage.cacheReadTokens,
+    cacheCreation: usage.cacheWriteTokens,
+  };
+}
+
+function tokenBreakdownDelta(current, previous) {
+  return {
+    input: Math.max(0, current.input - previous.input),
+    output: Math.max(0, current.output - previous.output),
+    cacheRead: Math.max(0, current.cacheRead - previous.cacheRead),
+    cacheCreation: Math.max(0, current.cacheCreation - previous.cacheCreation),
+  };
+}
+
+function breakdownHasTokens(breakdown) {
+  return Boolean(
+    breakdown.input || breakdown.output || breakdown.cacheRead || breakdown.cacheCreation
+  );
+}
+
+export function parseCopilotEventsJsonl(text, { sessionKey, fallbackOccurredAt } = {}) {
+  const fallbackIso = fallbackOccurredAt ?? new Date(0).toISOString();
+  const lastByModel = new Map();
+  const events = [];
+  const lines = text.split("\n");
+  for (let lineNo = 0; lineNo < lines.length; lineNo += 1) {
+    const line = lines[lineNo].trim();
+    if (!line.startsWith("{")) continue;
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (obj.type !== "session.shutdown") continue;
+    const data = obj.data && typeof obj.data === "object" ? obj.data : {};
+    const metrics = data.modelMetrics;
+    if (!metrics || typeof metrics !== "object") continue;
+    const occurredAtIso = isoTimestamp(obj.timestamp, fallbackIso);
+    const shutdownId =
+      (typeof obj.id === "string" && obj.id.trim()) || `L${lineNo}`;
+    for (const [modelName, row] of Object.entries(metrics)) {
+      const model = typeof modelName === "string" ? modelName.trim() : "";
+      if (!model) continue;
+      const raw = copilotUsageFromMetricsRow(row);
+      if (!raw) continue;
+      const current = splitInclusiveCache(raw);
+      const previous = lastByModel.get(model) ?? {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+      };
+      const breakdown = tokenBreakdownDelta(current, previous);
+      lastByModel.set(model, current);
+      if (!breakdownHasTokens(breakdown)) continue;
+      events.push(
+        ...tokenEventsFromBreakdown({
+          producerId: COPILOT_PRODUCER_ID,
+          provider: "github-copilot",
+          service: "copilot-cli",
+          sessionKey: sessionKey ?? "copilot",
+          occurredAtIso,
+          model,
+          breakdown,
+          extraId: `${shutdownId}:${model}`,
+        })
+      );
     }
   }
   return events;

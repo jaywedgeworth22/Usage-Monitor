@@ -105,6 +105,8 @@ function seatLabel(sourceApp: string): string {
       return "Codex CLI";
     case "antigravity-cli":
       return "Antigravity";
+    case "github-copilot":
+      return "Copilot CLI";
     default:
       return sourceApp;
   }
@@ -273,8 +275,9 @@ export default function ApiEquivalentCostCard() {
       <div className="px-6 py-3">
         <p className="text-[10px] text-gray-500 dark:text-gray-400">
           Estimates use the bundled LiteLLM catalog plus xAI list prices refreshed {snapshotDate}.
-          {SENTENCE_GAP}Claude Code still cross-checks OTLP vs tokens.{SENTENCE_GAP}Codex and Grok
-          Build come from local session logs.{SENTENCE_GAP}Cursor has no local token ledger.
+          {SENTENCE_GAP}Claude Code still cross-checks OTLP vs tokens.{SENTENCE_GAP}Codex, Grok
+          Build, and Copilot CLI come from local session logs.{SENTENCE_GAP}Cursor and Gemini CLI
+          have no local token ledger on this Mac.
           {data.totals.unpricedModelCount > 0
             ? `${SENTENCE_GAP}${data.totals.unpricedModelCount} unpriced model${data.totals.unpricedModelCount === 1 ? "" : "s"} under-count derivation.`
             : ""}

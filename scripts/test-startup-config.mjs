@@ -82,6 +82,23 @@ try {
         "silent-skip path in the fetch script cannot ship a replication-less image"
     );
   }
+  // Coolify no longer stores INFISICAL_UM_PROJECT_ID (#1211). #1315 removed
+  // the script fallback and rolled back every later deploy (Infisical 404
+  // projectId=undefined). The UUID is a project address, not a secret.
+  if (
+    !/INFISICAL_UM_PROJECT_ID=86e35e51-91bc-4dfd-a045-4484726b9c40/.test(dockerfileSource)
+  ) {
+    throw new Error(
+      "Dockerfile must bake INFISICAL_UM_PROJECT_ID so Infisical inject works when " +
+        "Coolify only has CLIENT_ID/SECRET"
+    );
+  }
+  const infisicalStart = readFileSync(join(repoRoot, "scripts", "start-with-infisical.sh"), "utf8");
+  if (!/86e35e51-91bc-4dfd-a045-4484726b9c40/.test(infisicalStart)) {
+    throw new Error(
+      "start-with-infisical.sh must keep the UM Infisical project UUID fallback"
+    );
+  }
   const backupIndex = startupSource.indexOf(
     'node "${REPO_ROOT}/scripts/backup-sqlite-before-migrate.mjs"'
   );

@@ -1,10 +1,20 @@
-## Current (2026-08-22 GROK — API-equivalent cost for Codex + Grok Build)
+## Current (2026-08-22 GROK — Copilot CLI API-equivalent + Infisical bake)
+
+#1316 is merged but Coolify rolled it back: #1315 removed the UM Infisical
+project UUID fallback and Infisical 404'd `projectId=undefined`.  This lane
+bakes the project address again (not a secret) and adds Copilot CLI
+`session.shutdown` modelMetrics as estimated API-equivalent.  Cursor and
+Gemini CLI still have no local token ledger.  Receipt:
+`docs/rollouts/2026-08-22-api-equivalent-copilot-infisical.md`.
+
+## Prior (2026-08-22 GROK — API-equivalent cost for Codex + Grok Build)
 
 Dashboard **API-Equivalent Cost** card covers every subscription seat with
 model + token telemetry, not Claude-only.  Codex JSONL and Grok Build
 `turn_completed` logs ingest as estimated (never cash).  Claude Code OTLP
 unchanged.  Cursor has no local token ledger.  Receipt:
-`docs/rollouts/2026-08-22-api-equivalent-cost.md`.
+`docs/rollouts/2026-08-22-api-equivalent-cost.md`.  Not live until the
+Infisical bake in this lane deploys.
 
 ## Current (2026-08-22 GROK — fleet projects, Manually only, workspace copy)
 
