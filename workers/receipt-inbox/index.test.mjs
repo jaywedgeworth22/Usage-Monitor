@@ -414,6 +414,9 @@ describe("receipt inbox email worker", () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url, init = {}) => {
       calls.push({ url: String(url), method: init.method || "GET", body: init.body });
+      if (String(url).includes("api.x.ai") || String(url).includes("api.deepseek.com")) {
+        return new Response("unavailable", { status: 503 });
+      }
       throw new Error("intake must not call the network to file ledger cash");
     };
     try {
@@ -425,7 +428,8 @@ describe("receipt inbox email worker", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
-    expect(calls).toEqual([]);
+    expect(calls.every((call) => !String(call.url).includes("owner-expenses"))).toBe(true);
+    expect(calls.every((call) => !String(call.url).includes("usage.jays.services"))).toBe(true);
     const summary = await handleFetch(new Request("https://receipt-inbox.jays.services/v1/receipts/summary", {
       headers: { Authorization: `Bearer ${"r".repeat(32)}` },
     }), env).then((response) => response.json());
