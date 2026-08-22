@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
 
@@ -55,14 +55,8 @@ export async function walkFiles(root, { suffix, name } = {}) {
   return out;
 }
 
-export async function readIfFresh(path, since) {
+export async function readIfFresh(path) {
   try {
-    const info = await stat(path);
-    if (since && info.mtimeMs + 86_400_000 < since.getTime()) {
-      // File last written more than a day before the window likely has no
-      // in-window turns; skip. Overlap of 1d covers sessions that stay open.
-      return null;
-    }
     return await readFile(path, "utf8");
   } catch {
     return null;

@@ -56,7 +56,7 @@ export async function collectCodexEvents({
   for (const root of roots) {
     const files = await walkFiles(root, { suffix: ".jsonl" });
     for (const file of files) {
-      const text = await readIfFresh(file, since);
+      const text = await readIfFresh(file);
       if (!text) continue;
       const parsed = parseCodexJsonl(text, {
         sessionKey: sessionKeyFor(codexHome, file),

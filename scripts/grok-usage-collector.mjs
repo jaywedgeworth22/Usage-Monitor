@@ -55,7 +55,7 @@ export async function collectGrokEvents({
   const files = await walkFiles(root, { name: "updates.jsonl" });
   const events = [];
   for (const file of files) {
-    const text = await readIfFresh(file, since);
+    const text = await readIfFresh(file);
     if (!text) continue;
     const parsed = parseGrokUpdatesJsonl(text, {
       sessionKey: sessionKeyFor(grokHome, file),
