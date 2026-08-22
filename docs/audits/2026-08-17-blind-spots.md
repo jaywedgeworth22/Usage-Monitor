@@ -361,7 +361,7 @@ UX polish is a sibling audit.  These are structural a11y debts that affect money
 
 #### VL-04 — Coolify + Infisical + Cloudflare + B2 + Workers + Next 16 + Node 24
 **Severity:** P2
-**Evidence:** `package.json:7-8` engines `>=24.14.0 <25`; Next `16.3.1`; production Coolify uuid in `DEPLOY.md:3-8`; Infisical project `86e35e51-91bc-4dfd-a045-4484726b9c40`; receipt inbox is a Cloudflare Worker + R2 + Durable Object.
+**Evidence:** `package.json:7-8` engines `>=24.14.0 <25`; Next `16.3.1`; production Coolify uuid in `DEPLOY.md:3-8`; Infisical project `<UM_INFISICAL_PROJECT_ID>`; receipt inbox is a Cloudflare Worker + R2 + Durable Object.
 **Second-order risk:** Any one vendor price-hike or outage has a known workaround for *some* layers (B2 vs R2 weekly, Pushover vs Resend) and none for others (Coolify writer, Infisical bootstrap, CF Email Routing).  Escape hatches are runbook knowledge, not a product export.
 **Improvement:** One “export my monitor state” bundle (rollups + provider list + subscriptions, no secrets) for a migration drill.
 
@@ -451,7 +451,7 @@ Backup-replica health is a sibling (backend) topic.  This is “does this app te
 
 #### LG-01 — Bus factor is one person plus a board that lies
 **Severity:** P1
-**Evidence:** Single dashboard password; Infisical machine identity; SSH `root@167.233.254.55`; Apple team `CC8UTF7ATG`; effort-board issues as the only “issue tracker.”  No succession runbook in-repo beyond fleet docs that live on the owner’s Mac (`/Users/jay/apps/AGENT-SYNC.md`).
+**Evidence:** Single dashboard password; Infisical machine identity; SSH `root@<PROD_ORIGIN_IP>`; Apple team `CC8UTF7ATG`; effort-board issues as the only “issue tracker.”  No succession runbook in-repo beyond fleet docs that live on the owner’s Mac (`/Users/jay/apps/AGENT-SYNC.md`).
 **Second-order risk:** Incapacity or lost laptop is a production outage *and* a knowledge outage.  Agents can operate the repo; they cannot rotate Apple / Infisical / Hetzner without the owner.  #953’s leftover “ACTIVE INCIDENT” title shows how incident state decays.
 **Improvement:** A one-page `docs/SUCCESSION.md` (hosts, vault, Apple team, “do not resume Render,” probe URLs) with no secret values.  Close or retitle historical P0 issues.
 

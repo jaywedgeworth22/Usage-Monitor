@@ -1,10 +1,7 @@
 # Deployment Guide
 
-**Production (2026-08-07+):** Hetzner **cx43 NBG1** host running Coolify + the
-fleet, public IP **`167.233.254.55`** (hostname `fleet-hetzner-nbg1`, Tailscale
-`100.69.77.26`). App Coolify uuid **`yagelvqux9e8l1kztif7bf2o`**. SSH:
-`root@167.233.254.55` with `~/.ssh/hetzner` or this Mac’s `id_ed25519` (see
-`~/.ssh/config` Host `coolify` / `host.jays.services` / `fleet-hetzner-nbg1`).
+**Production (2026-08-07+):** Production fleet box running Coolify (see private `jaywedgeworth22/fleet-ops:ATTACK-MAP.md`).
+SSH: `ssh coolify` (see `~/.ssh/config` Host `coolify` / `host.jays.services`).
 Public edge: Cloudflare → `usage.jays.services`.
 
 Fleet ops sheet: `/Users/jay/apps/COOLIFY.md` and Socratic

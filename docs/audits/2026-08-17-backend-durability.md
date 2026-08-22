@@ -37,7 +37,7 @@ This audit covers API/backend request paths, SQLite + Litestream + B2 + weekly R
 
 ## How the system is supposed to work
 
-Usage Monitor is a **sole SQLite writer** on Coolify/Hetzner NBG1 (`167.233.254.55`, app uuid `yagelvqux9e8l1kztif7bf2o`, volume `/data`).  Three durability layers:
+Usage Monitor is a **sole SQLite writer** on Coolify/Hetzner NBG1 (`<PROD_ORIGIN_IP>`, app uuid `<UM_COOLIFY_APP_UUID>`, volume `/data`).  Three durability layers:
 
 1. **Live file** `/data/prod.db` — WAL, Prisma `connection_limit=1`, process-global ingest admission.
 2. **Continuous replica** — Litestream 0.5.13 → Backblaze B2 (`api-usage-monitor/prod.db`), `sync-interval: 1h`, snapshot interval/retention `24h`.  One replica only.
@@ -68,7 +68,7 @@ Write APIs (`POST /api/ingest/usage`, `POST /api/otlp/v1/metrics`) take a reject
 
 **Evidence:** `docs/runbooks/sqlite-data-loss-incident.md:3` addresses “the Oracle A1 production VM”.  Step 1 pauses `usage-monitor-app-1` (line 28).  Step 2 writes `/etc/usage-monitor/auto-deploy.paused` and stops `usage-monitor-auto-deploy.timer` (lines 38–39).  Later restore text still points at R2 `usage-monitor-prod-v3` as the continuous replica.
 
-**Current truth:** Production is Coolify UUID `yagelvqux9e8l1kztif7bf2o-…` on Hetzner.  Continuous replica is **B2**.  R2 is weekly gzip only (#1223).  There is no in-repo Coolify equivalent of `auto-deploy.paused`.
+**Current truth:** Production is Coolify UUID `<UM_COOLIFY_APP_UUID>-…` on Hetzner.  Continuous replica is **B2**.  R2 is weekly gzip only (#1223).  There is no in-repo Coolify equivalent of `auto-deploy.paused`.
 
 **Failure mode:** An unlinked-inode incident is minutes-critical.  Following the runbook pauses the wrong container name, fails to freeze Coolify auto-deploy, and can restore from the wrong vendor (weekly archive, not the 1h B2 tip).  The **pause-don’t-restart** rule itself is still correct (`runtime-health.ts` comments at the `databaseFile` check; runbook lines 9–17).
 

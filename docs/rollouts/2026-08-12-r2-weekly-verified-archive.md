@@ -79,7 +79,7 @@ download+rehash+`integrity_check` passed, `/api/ready` `r2Historic.ok=true`
 with `weeklyArchive.ok=true`.  Coolify scheduled task `r2-weekly-archive`
 (`0 4 * * 0`, wraps `infisical-run`).
 
-Infisical project IDs: UM `86e35e51-91bc-4dfd-a045-4484726b9c40`, CT
+Infisical project IDs: UM `<UM_INFISICAL_PROJECT_ID>`, CT
 `f61a79de-8d77-4f0b-9361-4b7208598290`, ST
 `39d93bb7-76f9-498c-8b50-a7def52e072f`.
 

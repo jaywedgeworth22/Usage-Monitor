@@ -28,12 +28,12 @@ export const SERVER_METRICS_MAX_STALE_MS = 10 * 60_000;
 
 const MAX_PROVIDER_RESPONSE_BYTES = 512 * 1024;
 const DEFAULT_COOLIFY_HOST = "https://host.jays.services";
-/** Coolify server UUID for the fleet Hetzner host (localhost). Overridable. */
-const DEFAULT_COOLIFY_SERVER_UUID = "jxzqcs3h6g1wiipnnblhismp";
-/** Coolify application UUID for Usage Monitor production. Overridable. */
-const DEFAULT_COOLIFY_APP_UUID = "yagelvqux9e8l1kztif7bf2o";
-/** Hetzner Cloud server id for fleet-hetzner-nbg1 (cx43). Overridable. */
-const DEFAULT_HETZNER_SERVER_ID = "159792099";
+/** Coolify server UUID for the fleet host. Overridable via COOLIFY_SERVER_UUID. */
+const DEFAULT_COOLIFY_SERVER_UUID = process.env.COOLIFY_SERVER_UUID || "";
+/** Coolify application UUID for Usage Monitor production. Overridable via COOLIFY_APP_UUID. */
+const DEFAULT_COOLIFY_APP_UUID = process.env.COOLIFY_APP_UUID || "";
+/** Hetzner Cloud server id for fleet host. Overridable via HETZNER_SERVER_ID. */
+const DEFAULT_HETZNER_SERVER_ID = process.env.HETZNER_SERVER_ID || "";
 
 export type ServerMetricsConfigurationState =
   | "configured"

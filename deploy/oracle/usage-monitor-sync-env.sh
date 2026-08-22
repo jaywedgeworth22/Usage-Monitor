@@ -8,7 +8,7 @@ umask 077
 
 BOOTSTRAP="${INFISICAL_BOOTSTRAP_ENV:-/etc/usage-monitor/infisical-bootstrap.env}"
 OUT="${USAGE_MONITOR_RUNTIME_ENV:-/etc/usage-monitor/usage-monitor.env}"
-PROJECT_ID_DEFAULT="86e35e51-91bc-4dfd-a045-4484726b9c40"
+PROJECT_ID_DEFAULT="${INFISICAL_UM_PROJECT_ID:-}"
 ENV_NAME_DEFAULT="prod"
 PATH_DEFAULT="/"
 

@@ -1,6 +1,6 @@
 # 2026-08-14 — Fleet backup restore proof [GROK]
 
-Non-destructive Litestream restore drill on `fleet-hetzner-nbg1` (`167.233.254.55`).  Each restore wrote a temp file beside the live DB, never over it, then the temp file was deleted.  Live files stayed in place.
+Non-destructive Litestream restore drill on `fleet-hetzner-nbg1` (`<PROD_ORIGIN_IP>`).  Each restore wrote a temp file beside the live DB, never over it, then the temp file was deleted.  Live files stayed in place.
 
 ## Results
 
@@ -14,7 +14,7 @@ No host systemd Litestream unit.  All three daemons run in-container.
 
 ## Usage Monitor — PASS
 
-- Container `yagelvqux9e8l1kztif7bf2o-…`, live `/data/prod.db` 280 MB, integrity `ok`.
+- Container `<UM_COOLIFY_APP_UUID>-…`, live `/data/prod.db` 280 MB, integrity `ok`.
 - Restore 2026-08-14T01:54:00Z–01:54:15Z → 278 589 440 bytes, integrity `ok`, then deleted.
 - `/api/ready` at drill time: `checks.backup.ok=true` but `gatesOverallOk` was **hard-coded `false`** while `backupLayers.local/primary/r2Historic` were all `ok`.  That is the “humans think backup failed” lie.  Fixed in this rollout: `gatesOverallOk` is now the AND of the three layer `.ok` flags and still does **not** flip top-level ready `ok`.
 

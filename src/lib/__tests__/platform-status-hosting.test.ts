@@ -107,9 +107,13 @@ describe("HOSTING_PROBES", () => {
   // -------------------------------------------------------------------------
 
   describe("hetzner", () => {
+    beforeEach(() => {
+      vi.stubEnv("HETZNER_SERVER_ID", "12345678");
+    });
+
     const server = {
       server: {
-        id: 159792099,
+        id: 12345678,
         name: "fleet-hetzner-nbg1",
         status: "running",
         backup_window: "14-18",
@@ -140,7 +144,7 @@ describe("HOSTING_PROBES", () => {
       expect(result.metrics.length).toBeLessThanOrEqual(6);
 
       const [url, init] = fetchJsonMock.mock.calls[0];
-      expect(url).toBe("https://api.hetzner.cloud/v1/servers/159792099");
+      expect(url).toBe("https://api.hetzner.cloud/v1/servers/12345678");
       expect((init?.headers as Record<string, string>).Authorization).toBe(
         "Bearer hcloud-token"
       );

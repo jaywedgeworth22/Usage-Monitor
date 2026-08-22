@@ -8,10 +8,8 @@ resume. Cloud agent-phase coordination requires regular runtime variables
 Use `scripts/codex-coordination.sh` for Slack reads/posts and GitHub access. Apple Notes is
 Mac-only; cloud completion notes must include a handoff body for local publication.
 
-Next.js + Prisma (**SQLite**, not Postgres — production on **Hetzner NBG1**
-Coolify host **`167.233.254.55`** / `fleet-hetzner-nbg1`, app uuid
-`yagelvqux9e8l1kztif7bf2o`, volume at `/data`; SSH `root@167.233.254.55` with
-`~/.ssh/hetzner`. Legacy Oracle scripts under `deploy/oracle/` are historical.) app at `usage.jays.services`. It tracks API usage/cost three ways: **poll adapters**
+Next.js + Prisma (**SQLite**, not Postgres — production on the
+production Coolify host, see private `jaywedgeworth22/fleet-ops:ATTACK-MAP.md`; SSH: `ssh coolify`. Legacy Oracle scripts under `deploy/oracle/` are historical.) app at `usage.jays.services`. It tracks API usage/cost three ways: **poll adapters**
 (`src/lib/adapters/*`, one per provider) that snapshot into `UsageSnapshot`; **pushed
 telemetry** from other apps into `ExternalUsageEvent` via `POST /api/ingest/usage`; and
 **OTLP metrics** from Claude Code (or any OTLP exporter) via `POST /api/otlp/v1/metrics`,
@@ -338,10 +336,10 @@ Optional `SENTRY_READ_TOKEN`/`SENTRY_ORG` configure the Sentry Health card above
 
 ### Infisical project and secret runner
 
-The Infisical project `usage-monitor` (ID: `86e35e51-91bc-4dfd-a045-4484726b9c40`) is configured for project-specific secrets/variables under the shared automation machine identity (`INFISICAL_AUTOMATION_CLIENT_ID` / `INFISICAL_AUTOMATION_CLIENT_SECRET`). `scripts/infisical-run.mjs` executes arbitrary commands with Infisical secrets injected into `process.env`:
+The Infisical project `usage-monitor` (see `fleet-ops:ATTACK-MAP.md` for project ID) is configured for project-specific secrets/variables under the shared automation machine identity (`INFISICAL_AUTOMATION_CLIENT_ID` / `INFISICAL_AUTOMATION_CLIENT_SECRET`). `scripts/infisical-run.mjs` executes arbitrary commands with Infisical secrets injected into `process.env`:
 - `node scripts/infisical-run.mjs --check` verifies project secret access.
 - `node scripts/infisical-run.mjs -- npm run start` runs the application with Infisical secrets.
-- `src/lib/infisical-provider-sync.ts` supports the `"um"` scope (`86e35e51-91bc-4dfd-a045-4484726b9c40`) and falls back to `INFISICAL_AUTOMATION_CLIENT_ID` / `INFISICAL_AUTOMATION_CLIENT_SECRET` when scope-specific client credentials are omitted.
+- `src/lib/infisical-provider-sync.ts` supports the `"um"` scope and falls back to `INFISICAL_AUTOMATION_CLIENT_ID` / `INFISICAL_AUTOMATION_CLIENT_SECRET` when scope-specific client credentials are omitted.
 - `bash scripts/cf-token-map.sh` (after `set -a; . ~/.secrets/global-api-keys; set +a`) prints which Cloudflare token *names* in UM Infisical can see which CF accounts.  Never prints a token value.  Use this before picking `CLOUDFLARE_*_API_TOKEN` / `R2_USAGE_API_TOKEN`.  Intended slots: fleet = all four accounts; JAY/R2_USAGE = Usage.Jays.Services; ST = Socratic.Trade; CT = Congress.Trade; OLD = Jay Old (often absent — fleet fallback).  Live 2026-08-14: fleet/CT/legacy/`R2_USAGE` share one token (all four accounts); JAY is a distinct all-accounts token; ST is scoped to SocraticTrade.com only.  Re-run the script; do not assume names stay distinct.
 
 `SQLITE_PRE_MIGRATION_BACKUP_RETENTION` controls how many verified local SQLite

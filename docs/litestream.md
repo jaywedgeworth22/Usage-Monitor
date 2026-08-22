@@ -158,7 +158,7 @@ sudo docker exec usage-monitor-app-1 /app/bin/litestream ltx -config /app/litest
 
 # The readiness heartbeat is fresh (Coolify volume or inside container):
 # host:
-cat /var/lib/docker/volumes/yagelvqux9e8l1kztif7bf2o-usage-data/_data/.litestream-replica-status.json
+cat /var/lib/docker/volumes/*usage-data*/_data/.litestream-replica-status.json
 # or inside the app container:
 #   cat /data/.litestream-replica-status.json
 curl -fsS https://usage.jays.services/api/ready | jq .checks.backup

@@ -16,8 +16,8 @@ set -euo pipefail
 umask 022
 export LC_ALL=C
 
-# Coolify application uuid for Usage Monitor (AGENTS.md / Coolify).
-readonly APP_UUID_PREFIX="${USAGE_MONITOR_COOLIFY_UUID:-yagelvqux9e8l1kztif7bf2o}"
+# Coolify application uuid for Usage Monitor (see fleet-ops for UUID).
+readonly APP_UUID_PREFIX="${USAGE_MONITOR_COOLIFY_UUID:-${APP_UUID:-usage-monitor}}"
 readonly VOLUME_NAME="${USAGE_MONITOR_DATA_VOLUME:-${APP_UUID_PREFIX}-usage-data}"
 readonly STATUS_BASENAME=".litestream-replica-status.json"
 readonly MAX_LTX_AGE_SECONDS="${LITESTREAM_REPLICA_MAX_AGE_SECONDS:-10800}"

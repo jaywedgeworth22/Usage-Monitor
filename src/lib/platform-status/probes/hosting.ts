@@ -34,8 +34,8 @@ import type { PlatformMetric, PlatformProbe, PlatformProbeResult } from "../type
 /** Defensive ceiling so a large account cannot turn a card into a loop. */
 const MAX_ROWS = 200;
 
-/** Hetzner Cloud server id for fleet-hetzner-nbg1 (cx43).  Overridable. */
-const DEFAULT_HETZNER_SERVER_ID = "159792099";
+/** Hetzner Cloud server id for fleet host.  Overridable via HETZNER_SERVER_ID. */
+const DEFAULT_HETZNER_SERVER_ID = process.env.HETZNER_SERVER_ID || "";
 /** Same default the host metrics surface uses.  Overridable via COOLIFY_HOST. */
 const DEFAULT_COOLIFY_HOST = "https://host.jays.services";
 
