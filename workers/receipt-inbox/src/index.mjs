@@ -7,6 +7,7 @@ import {
   boundedSubject,
   calendarTitle,
   classifyReceipt,
+  enrichClassification,
 } from "./classify.mjs";
 
 const MAX_MESSAGE_BYTES = 10 * 1024 * 1024;
@@ -296,12 +297,13 @@ export async function handleEmail(message, env, _ctx) {
           ? "no_supported_evidence"
           : "awaiting_review";
   const receivedAt = new Date().toISOString();
-  const review = classifyReceipt({
+  const rulesReview = classifyReceipt({
     subject: parsed.subject,
     text: typeof parsed.text === "string" ? parsed.text : "",
     senderDomain: senderDomain(message.from),
     receivedAt,
   });
+  const { review, classificationSource } = await enrichClassification(rulesReview, env);
   const metadata = {
     id,
     groupId,
@@ -321,8 +323,9 @@ export async function handleEmail(message, env, _ctx) {
     calendarSort: review.calendarSort,
     expenseDate: review.expenseDate,
     dueDate: review.dueDate,
+    nextDueDate: review.nextDueDate,
     cancelledNoRenew: review.cancelledNoRenew,
-    classificationSource: "rules",
+    classificationSource,
     classificationAction: review.action,
     label: review.label,
     notes: review.notes,
