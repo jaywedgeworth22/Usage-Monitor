@@ -35,7 +35,7 @@ const secretsPath = process.env.INFISICAL_PATH || "/";
 const projectId =
   process.env.INFISICAL_PROJECT_ID ||
   process.env.INFISICAL_UM_PROJECT_ID ||
-  "86e35e51-91bc-4dfd-a045-4484726b9c40";
+  process.env.INFISICAL_APP_PROJECT_ID;
 
 const clientId =
   process.env.INFISICAL_CLIENT_ID ||

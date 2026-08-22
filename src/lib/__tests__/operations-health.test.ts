@@ -284,18 +284,19 @@ describe("operations health", () => {
   it("lists Coolify applications and server resources when configured", async () => {
     process.env.COOLIFY_SERVER_STATS = "stats-token-with-enough-length";
     process.env.COOLIFY_HOST = "https://host.jays.services";
+    process.env.COOLIFY_SERVER_UUID = "mock-coolify-server-uuid";
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url.endsWith("/api/v1/applications")) {
         return Response.json([
           {
-            uuid: "d83b1aykr03uwr32yhgzaiay",
+            uuid: "mock-st-app-uuid",
             name: "socratic-app",
             status: "running:healthy",
             fqdn: "https://socratictrade.com",
           },
           {
-            uuid: "yagelvqux9e8l1kztif7bf2o",
+            uuid: "mock-um-app-uuid",
             name: "usage-monitor",
             status: "running:healthy",
             fqdn: "https://usage.jays.services",
@@ -303,7 +304,7 @@ describe("operations health", () => {
         ]);
       }
       if (url.endsWith("/api/v1/servers")) {
-        return Response.json([{ uuid: "jxzqcs3h6g1wiipnnblhismp", name: "fleet-hetzner" }]);
+        return Response.json([{ uuid: "mockcoolifyserveruuid", name: "fleet-hetzner" }]);
       }
       if (url.includes("/resources")) {
         return Response.json([

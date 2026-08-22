@@ -287,7 +287,7 @@ public extension ServerMetrics {
             cpus: 8,
             memoryTotalBytes: 16 * 1024 * 1024 * 1024,
             location: "nbg1",
-            ip: "167.233.254.55",
+            ip: "192.0.2.1",
             backupWindow: "14-18"
         ),
         hostUsage: .init(

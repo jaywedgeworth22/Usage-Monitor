@@ -32,7 +32,7 @@
 #   bash scripts/infisical-secrets-safe.sh sync-platforms
 #
 # Environment (all optional, sane defaults for Usage Monitor prod):
-#   INFISICAL_PROJECT_ID   default 86e35e51-91bc-4dfd-a045-4484726b9c40 (UM)
+#   INFISICAL_PROJECT_ID   (see fleet-ops:ATTACK-MAP.md)
 #   INFISICAL_ENV          default prod
 #   INFISICAL_PATH         default /
 #   SECRETS_FILE           default ~/.secrets/global-api-keys
@@ -41,7 +41,7 @@
 #
 set -euo pipefail
 
-PROJECT_ID="${INFISICAL_PROJECT_ID:-86e35e51-91bc-4dfd-a045-4484726b9c40}"
+PROJECT_ID="${INFISICAL_PROJECT_ID:-${INFISICAL_UM_PROJECT_ID:-}}"
 ENV_SLUG="${INFISICAL_ENV:-prod}"
 SECRET_PATH="${INFISICAL_PATH:-/}"
 SECRETS_FILE="${SECRETS_FILE:-$HOME/.secrets/global-api-keys}"

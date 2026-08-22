@@ -35,7 +35,7 @@
     <string>/ABSOLUTE/PATH/TO/infisical</string>
     <string>run</string>
     <string>--projectId</string>
-    <string>86e35e51-91bc-4dfd-a045-4484726b9c40</string>
+    <string>YOUR_UM_PROJECT_ID</string>
     <string>--env</string>
     <string>prod</string>
     <string>--</string>

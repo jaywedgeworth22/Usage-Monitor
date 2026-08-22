@@ -35,7 +35,7 @@ final class PlatformsDecodingTests: XCTestCase {
             "cpus": 8,
             "memoryTotalBytes": 17179869184,
             "location": "nbg1",
-            "ip": "167.233.254.55",
+            "ip": "192.0.2.1",
             "backupWindow": "14-18"
           },
           "hostUsage": {
@@ -47,7 +47,7 @@ final class PlatformsDecodingTests: XCTestCase {
           },
           "resources": [
             {
-              "uuid": "yagelvqux9e8l1kztif7bf2o",
+              "uuid": "mock-um-app-uuid",
               "name": "usage-monitor",
               "type": "application",
               "status": "running:healthy",
@@ -56,7 +56,7 @@ final class PlatformsDecodingTests: XCTestCase {
               "fleetLabel": "Usage Monitor"
             },
             {
-              "uuid": "c11c5hdhuczureb6w2pg20p0",
+              "uuid": "mock-ct-app-uuid",
               "name": "congress-trade",
               "type": "application",
               "status": "running:unknown",
@@ -65,7 +65,7 @@ final class PlatformsDecodingTests: XCTestCase {
               "fleetLabel": "Congress.Trade"
             },
             {
-              "uuid": "d83b1aykr03uwr32yhgzaiay",
+              "uuid": "mock-st-app-uuid",
               "name": "socratic-app",
               "type": "application",
               "status": "running:healthy",

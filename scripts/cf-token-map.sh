@@ -11,7 +11,7 @@
 #   bash scripts/cf-token-map.sh
 #
 # Env (all optional):
-#   INFISICAL_PROJECT_ID   default UM 86e35e51-91bc-4dfd-a045-4484726b9c40
+#   INFISICAL_PROJECT_ID   (see fleet-ops:ATTACK-MAP.md)
 #   INFISICAL_ENV          default prod
 #   INFISICAL_API_URL      Infisical host if not the public default
 #   INFISICAL_CLIENT_ID / INFISICAL_CLIENT_SECRET
@@ -23,7 +23,7 @@
 
 set -euo pipefail
 
-UM="${INFISICAL_PROJECT_ID:-86e35e51-91bc-4dfd-a045-4484726b9c40}"
+UM="${INFISICAL_PROJECT_ID:-${INFISICAL_UM_PROJECT_ID:-}}"
 ENV_SLUG="${INFISICAL_ENV:-prod}"
 INF_URL="${INFISICAL_API_URL:-${INF_URL:-}}"
 
