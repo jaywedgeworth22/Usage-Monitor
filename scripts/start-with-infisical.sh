@@ -17,7 +17,7 @@ fi
 
 if [[ "${has_bootstrap}" == "true" ]] && command -v infisical >/dev/null 2>&1; then
   export INFISICAL_ENV="${INFISICAL_ENV:-prod}"
-  export INFISICAL_UM_PROJECT_ID="${INFISICAL_UM_PROJECT_ID:-${INFISICAL_PROJECT_ID:-86e35e51-91bc-4dfd-a045-4484726b9c40}}"
+  export INFISICAL_UM_PROJECT_ID="${INFISICAL_UM_PROJECT_ID:-${INFISICAL_PROJECT_ID:-${INFISICAL_APP_PROJECT_ID:-}}}"
   echo "[start-with-infisical] injecting secrets from Infisical (env=${INFISICAL_ENV}, project=${INFISICAL_UM_PROJECT_ID})"
   exec node "${REPO_ROOT}/scripts/infisical-run.mjs" -- bash "${REPO_ROOT}/scripts/start-with-litestream.sh"
 fi

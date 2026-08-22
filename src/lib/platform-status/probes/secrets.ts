@@ -59,7 +59,7 @@ const SCOPES: readonly ScopeDefinition[] = [
     clientSecretEnv: "INFISICAL_ST_CLIENT_SECRET",
     projectIdEnv: "INFISICAL_ST_PROJECT_ID",
     pathEnv: "INFISICAL_ST_SECRET_PATH",
-    defaultProjectId: "39d93bb7-76f9-498c-8b50-a7def52e072f",
+    defaultProjectId: process.env.INFISICAL_ST_PROJECT_ID || "",
   },
   {
     label: "Congress.Trade",
@@ -67,7 +67,7 @@ const SCOPES: readonly ScopeDefinition[] = [
     clientSecretEnv: "INFISICAL_CT_CLIENT_SECRET",
     projectIdEnv: "INFISICAL_CT_PROJECT_ID",
     pathEnv: "INFISICAL_CT_SECRET_PATH",
-    defaultProjectId: "f61a79de-8d77-4f0b-9361-4b7208598290",
+    defaultProjectId: process.env.INFISICAL_CT_PROJECT_ID || "",
   },
   {
     label: "Shared",
@@ -75,7 +75,7 @@ const SCOPES: readonly ScopeDefinition[] = [
     clientSecretEnv: "INFISICAL_SHARED_CLIENT_SECRET",
     projectIdEnv: "INFISICAL_SHARED_PROJECT_ID",
     pathEnv: "INFISICAL_SHARED_SECRET_PATH",
-    defaultProjectId: "18f563a3-9c88-454c-96eb-28fc9678f3ba",
+    defaultProjectId: process.env.INFISICAL_SHARED_PROJECT_ID || "",
   },
   {
     label: "Usage-Monitor",
@@ -83,7 +83,7 @@ const SCOPES: readonly ScopeDefinition[] = [
     clientSecretEnv: "INFISICAL_UM_CLIENT_SECRET",
     projectIdEnv: "INFISICAL_UM_PROJECT_ID",
     pathEnv: "INFISICAL_UM_SECRET_PATH",
-    defaultProjectId: "86e35e51-91bc-4dfd-a045-4484726b9c40",
+    defaultProjectId: process.env.INFISICAL_UM_PROJECT_ID || "",
   },
 ] as const;
 

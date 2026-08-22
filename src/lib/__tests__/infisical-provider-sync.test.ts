@@ -20,7 +20,7 @@ type Scope = "st" | "ct" | "shared" | "st-primary" | "um";
 
 const ENCRYPTION_KEY = "57".repeat(32);
 const ST_GEMINI_PROVIDER_ID = "4a888d41-3988-4774-86d8-67d7aa14d7e2";
-const ST_INFISICAL_PROJECT_ID = "39d93bb7-76f9-498c-8b50-a7def52e072f";
+const ST_INFISICAL_PROJECT_ID = "test-project-st";
 const SOURCE_ENV: Record<
   Scope,
   {
@@ -41,7 +41,7 @@ const SOURCE_ENV: Record<
     clientSecretEnv: "INFISICAL_ST_CLIENT_SECRET",
     projectIdEnv: "INFISICAL_ST_PROJECT_ID",
     pathEnv: "INFISICAL_ST_SECRET_PATH",
-    projectId: "test-project-st",
+    projectId: ST_INFISICAL_PROJECT_ID,
     secretPath: "/st-scope",
   },
   ct: {
@@ -69,7 +69,7 @@ const SOURCE_ENV: Record<
     clientSecret: "test-bootstrap-st-primary",
     clientIdEnv: "INFISICAL_ST_PRIMARY_CLIENT_ID",
     clientSecretEnv: "INFISICAL_ST_PRIMARY_CLIENT_SECRET",
-    projectIdEnv: "INFISICAL_ST_PRIMARY_UNUSED_PROJECT_ID",
+    projectIdEnv: "INFISICAL_ST_PROJECT_ID",
     pathEnv: "INFISICAL_ST_PRIMARY_UNUSED_PATH",
     projectId: ST_INFISICAL_PROJECT_ID,
     secretPath: "/usage-monitor/st-primary/v1",
@@ -81,7 +81,7 @@ const SOURCE_ENV: Record<
     clientSecretEnv: "INFISICAL_UM_CLIENT_SECRET",
     projectIdEnv: "INFISICAL_UM_PROJECT_ID",
     pathEnv: "INFISICAL_UM_SECRET_PATH",
-    projectId: "86e35e51-91bc-4dfd-a045-4484726b9c40",
+    projectId: "test-project-um",
     secretPath: "/um-scope",
   },
 };
@@ -230,6 +230,7 @@ function configureStPrimary(): void {
   process.env.INFISICAL_ST_PRIMARY_CLIENT_ID = SOURCE_ENV["st-primary"].clientId;
   process.env.INFISICAL_ST_PRIMARY_CLIENT_SECRET =
     SOURCE_ENV["st-primary"].clientSecret;
+  process.env.INFISICAL_ST_PROJECT_ID = SOURCE_ENV["st-primary"].projectId;
 }
 
 function stPrimaryManifest(

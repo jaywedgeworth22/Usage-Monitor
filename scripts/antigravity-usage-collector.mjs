@@ -18,7 +18,7 @@
 //                                pair added to this app's USAGE_INGEST_PRODUCER_TOKENS
 //                                Infisical secret. Fetch it locally with the
 //                                Infisical CLI, e.g.:
-//                                  infisical run --projectId 86e35e51-91bc-4dfd-a045-4484726b9c40 \
+//                                  infisical run --projectId <INFISICAL_UM_PROJECT_ID> \
 //                                    --env prod -- node scripts/antigravity-usage-collector.mjs
 // Optional env:
 //   USAGE_MONITOR_INGEST_URL  - default https://usage.jays.services/api/ingest/usage

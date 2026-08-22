@@ -143,7 +143,7 @@ describe("fetchServerMetrics", () => {
                 status: "running",
                 backup_window: "14-18",
                 server_type: { name: "cx43", cores: 8, memory: 16 },
-                public_net: { ipv4: { ip: "167.233.254.55" } },
+                public_net: { ipv4: { ip: "192.0.2.1" } },
                 datacenter: { location: { name: "nbg1" } },
               },
             }),

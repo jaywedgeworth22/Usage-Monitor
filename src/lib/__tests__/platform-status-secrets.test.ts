@@ -54,7 +54,7 @@ function secretList(count: number, prefix = "SECRET") {
       secretKey: `${prefix}_${index}`,
       version: 3,
       type: "shared",
-      workspace: "86e35e51-91bc-4dfd-a045-4484726b9c40",
+      workspace: "mock-um-project-id",
       environment: "prod",
       secretPath: "/",
     })),
@@ -108,6 +108,7 @@ describe("platform-status secrets probes", () => {
   it("reports healthy with the visible secret count for each authenticated scope", async () => {
     vi.stubEnv("INFISICAL_UM_CLIENT_ID", "um-client-id");
     vi.stubEnv("INFISICAL_UM_CLIENT_SECRET", CLIENT_SECRET);
+    vi.stubEnv("INFISICAL_UM_PROJECT_ID", "mock-um-project-id");
     expect(infisical.isConfigured()).toBe(true);
 
     const requestedUrls: string[] = [];
@@ -145,7 +146,7 @@ describe("platform-status secrets probes", () => {
     expect(requestedUrls[1]).toContain("/api/v4/secrets?");
     expect(requestedUrls[1]).toContain("viewSecretValue=false");
     expect(requestedUrls[1]).toContain(
-      "projectId=86e35e51-91bc-4dfd-a045-4484726b9c40"
+      "projectId=mock-um-project-id"
     );
 
     // No credential or token material may reach the rendered card.
