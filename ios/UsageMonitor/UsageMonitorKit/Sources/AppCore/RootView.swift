@@ -356,14 +356,8 @@ private extension View {
     /// footer in the scroll-edge fade — visible only while overscrolling.
     @ViewBuilder
     func glassTabBarSafeArea<Bar: View>(@ViewBuilder bar: () -> Bar) -> some View {
-        if #available(iOS 26.0, *) {
-            self.safeAreaBar(edge: .bottom, spacing: 0) {
-                bar()
-            }
-        } else {
-            self.safeAreaInset(edge: .bottom, spacing: 0) {
-                bar()
-            }
+        self.safeAreaInset(edge: .bottom, spacing: 0) {
+            bar()
         }
     }
 
@@ -388,7 +382,7 @@ private extension View {
 /// never more than 88% of the available sheet height.  `.medium` is ~50%
 /// and clips Settings (and Dynamic Type) behind a scroll.
 enum MoreSheetLayout {
-    static let maxScreenFraction: CGFloat = 0.88
+    static let maxScreenFraction: CGFloat = 0.92
     static let rowHeight: CGFloat = 68
     static let chromeHeight: CGFloat = 200
 
@@ -428,8 +422,10 @@ struct MoreSheet: View {
                     }
                 } footer: {
                     Text("Pin up to \(TabPreferences.maxPinned) destinations to the tab bar.  Keep at least \(TabPreferences.minPinned).  Everything stays reachable here.")
+                        .padding(.bottom, Theme.Spacing.md)
                 }
             }
+            .contentMargins(.bottom, Theme.Spacing.xl, for: .scrollContent)
             .navigationTitle("More")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

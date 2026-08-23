@@ -37,21 +37,32 @@ public struct SettingsRootView: View {
 
     public var body: some View {
         NavigationStack {
-            Form {
-                // Connect order: (1) server → (2) dashboard password → (3) optional token
-                ConnectionSection(model: model)
-                FullAccessSection(store: access)
-                TokenConnectionSection(model: model)
-                HostUsageLinkSection()
-                NotificationsSection()
-                AppearanceSection(settings: env.settings)
-                SecuritySection(settings: env.settings)
-                AboutSection(host: model.resolvedHostDisplay)
+            ScrollViewReader { proxy in
+                Form {
+                    // Connect order: (1) server → (2) dashboard password → (3) optional token
+                    ConnectionSection(model: model)
+                    FullAccessSection(store: access)
+                    TokenConnectionSection(model: model)
+                    HostUsageLinkSection()
+                    NotificationsSection()
+                    AppearanceSection(settings: env.settings)
+                    SecuritySection(settings: env.settings)
+                    AboutSection(host: model.resolvedHostDisplay)
+                }
+                .tabBarScrollClearance()
+                .navigationTitle(AppTab.settings.title)
+                // Inline (centered compact) title — avoid large left-aligned title at rest.
+                .navigationBarTitleDisplayMode(.inline)
+                .scrollDismissesKeyboard(.interactively)
+                .task {
+                    if ProcessInfo.processInfo.arguments.contains("-ScreenshotScrollBottom") {
+                        try? await Task.sleep(for: .milliseconds(300))
+                        withAnimation {
+                            proxy.scrollTo("settings-bottom-row", anchor: .bottom)
+                        }
+                    }
+                }
             }
-            .navigationTitle(AppTab.settings.title)
-            // Inline (centered compact) title — avoid large left-aligned title at rest.
-            .navigationBarTitleDisplayMode(.inline)
-            .scrollDismissesKeyboard(.interactively)
             .task {
                 model.bind(to: env)
             }
@@ -156,10 +167,14 @@ private struct AboutSection: View {
                     Label("Open the monitor", systemImage: "safari")
                 }
             }
+            Text(AppInfo.aboutFooter)
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: Theme.Spacing.sm, leading: Theme.Spacing.xs, bottom: Theme.Spacing.sm, trailing: Theme.Spacing.xs))
+                .id("settings-bottom-row")
         } header: {
             Text("About")
-        } footer: {
-            Text(AppInfo.aboutFooter)
         }
     }
 }

@@ -126,94 +126,102 @@ public struct ProvidersRootView: View {
     }
 
     private var loadedList: some View {
-        List {
-            if let lastError = store.lastError {
-                Section { staleBanner(lastError) }
-                    .listRowInsets(EdgeInsets(top: 0, leading: Theme.Spacing.lg, bottom: 0, trailing: Theme.Spacing.lg))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
+        ScrollViewReader { proxy in
+            List {
+                if let lastError = store.lastError {
+                    Section { staleBanner(lastError) }
+                        .listRowInsets(EdgeInsets(top: 0, leading: Theme.Spacing.lg, bottom: 0, trailing: Theme.Spacing.lg))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
 
-            Section {
-                summaryHeader
-            }
-            .listRowInsets(EdgeInsets(top: Theme.Spacing.xs, leading: Theme.Spacing.lg, bottom: Theme.Spacing.xs, trailing: Theme.Spacing.lg))
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-
-            Section {
-                StatusFilterBar(
-                    selection: $model.filter,
-                    counts: filterCounts,
-                    onChange: { Haptics.selection() }
-                )
-                .listRowInsets(EdgeInsets())
-            }
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-
-            if results.isEmpty {
-                Section { filteredEmptyRow }
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            } else {
                 Section {
-                    ForEach(results) { provider in
-                        // Use Button + path, not NavigationLink + simultaneousGesture.
-                        // A TapGesture on NavigationLink steals the activation gesture:
-                        // the row greys ~30% of taps (haptic fires) but navigation
-                        // only wins a small fraction of the time.
-                        Button {
-                            Haptics.tap()
-                            path.append(ProviderRoute(id: provider.id))
-                        } label: {
-                            ProviderRow(
-                                title: provider.title,
-                                subtitle: provider.rowSubtitle,
-                                value: provider.rowValue,
-                                valueCaption: provider.rowValueCaption,
-                                status: provider.semanticStatus,
-                                showsChevron: true
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .contentShape(Rectangle())
-                        .contextMenu {
+                    summaryHeader
+                }
+                .listRowInsets(EdgeInsets(top: Theme.Spacing.xs, leading: Theme.Spacing.lg, bottom: Theme.Spacing.xs, trailing: Theme.Spacing.lg))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+                Section {
+                    StatusFilterBar(
+                        selection: $model.filter,
+                        counts: filterCounts,
+                        onChange: { Haptics.selection() }
+                    )
+                    .listRowInsets(EdgeInsets())
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+                if results.isEmpty {
+                    Section { filteredEmptyRow }
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                } else {
+                    Section {
+                        ForEach(results) { provider in
                             Button {
                                 Haptics.tap()
                                 path.append(ProviderRoute(id: provider.id))
                             } label: {
-                                Label("Open details", systemImage: "doc.text")
+                                ProviderRow(
+                                    title: provider.title,
+                                    subtitle: provider.rowSubtitle,
+                                    value: provider.rowValue,
+                                    valueCaption: provider.rowValueCaption,
+                                    status: provider.semanticStatus,
+                                    showsChevron: true
+                                )
                             }
-                            Button {
-                                Haptics.tap()
-                                path.append(ProviderRoute(id: provider.id))
-                            } label: {
-                                Label("Edit Budget / Plan", systemImage: "slider.horizontal.3")
-                            }
-                            if !provider.spendCoverage.isComplete {
-                                Text("Spend may omit tax & invoice fees")
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                            .id(provider.id)
+                            .contextMenu {
+                                Button {
+                                    Haptics.tap()
+                                    path.append(ProviderRoute(id: provider.id))
+                                } label: {
+                                    Label("Open details", systemImage: "doc.text")
+                                }
+                                Button {
+                                    Haptics.tap()
+                                    path.append(ProviderRoute(id: provider.id))
+                                } label: {
+                                    Label("Edit Budget / Plan", systemImage: "slider.horizontal.3")
+                                }
+                                if !provider.spendCoverage.isComplete {
+                                    Text("Spend may omit tax & invoice fees")
+                                }
                             }
                         }
+                    } header: {
+                        Text(resultsHeaderText)
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Colors.secondaryText)
                     }
-                } header: {
-                    Text(resultsHeaderText)
-                        .font(Theme.Typography.caption)
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Theme.Colors.background)
+            .tabBarScrollClearance()
+            .searchable(
+                text: $model.searchText,
+                placement: .navigationBarDrawer(displayMode: .automatic),
+                prompt: "Search providers"
+            )
+            .refreshable { await store.refresh() }
+            .animation(reduceMotion ? nil : .default, value: model.filter)
+            .animation(reduceMotion ? nil : .default, value: results.count)
+            .task(id: results.last?.id) {
+                if ProcessInfo.processInfo.arguments.contains("-ScreenshotScrollBottom"), let lastId = results.last?.id {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    withAnimation {
+                        proxy.scrollTo(lastId, anchor: .bottom)
+                    }
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(Theme.Colors.background)
-        .searchable(
-            text: $model.searchText,
-            placement: .navigationBarDrawer(displayMode: .automatic),
-            prompt: "Search providers"
-        )
-        .refreshable { await store.refresh() }
-        .animation(reduceMotion ? nil : .default, value: model.filter)
-        .animation(reduceMotion ? nil : .default, value: results.count)
     }
 
     // MARK: - Pieces

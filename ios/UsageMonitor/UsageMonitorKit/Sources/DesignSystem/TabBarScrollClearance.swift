@@ -13,10 +13,12 @@ public struct TabBarScrollClearanceModifier: ViewModifier {
     public func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
             content
+                .safeAreaPadding(.bottom, Theme.Spacing.tabBarClearance)
                 .contentMargins(.bottom, Theme.Spacing.tabBarClearance, for: .scrollContent)
                 .scrollEdgeEffectHidden(true, for: .bottom)
         } else {
             content
+                .safeAreaPadding(.bottom, Theme.Spacing.tabBarClearance)
                 .contentMargins(.bottom, Theme.Spacing.tabBarClearance, for: .scrollContent)
         }
     }
