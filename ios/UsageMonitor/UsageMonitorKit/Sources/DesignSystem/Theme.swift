@@ -100,7 +100,7 @@ public extension Theme {
         /// Applied as extra scroll-content margin because NavigationStack
         /// Form/List/ScrollView still park their last rows in the bar's
         /// fade even when the shell uses `safeAreaBar`.
-        public static let tabBarClearance: CGFloat = 72
+        public static let tabBarClearance: CGFloat = 96
     }
 }
 

@@ -28,6 +28,7 @@ public struct ComputersRootView: View {
                     await store.refresh(using: env.apiClient)
                 }
             }
+            .tabBarScrollClearance()
             .navigationTitle(AppTab.computers.title)
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {

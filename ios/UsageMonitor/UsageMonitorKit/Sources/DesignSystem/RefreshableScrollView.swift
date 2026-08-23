@@ -32,6 +32,7 @@ public struct RefreshableScrollView<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .containerRelativeFrame(.horizontal, alignment: .leading)
         }
+        .tabBarScrollClearance()
         .background(Theme.Colors.background)
         .refreshable { await onRefresh() }
     }

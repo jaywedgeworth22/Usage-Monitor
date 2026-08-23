@@ -189,6 +189,7 @@ public struct DashboardRootView: View {
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.vertical, Theme.Spacing.lg)
         }
+        .tabBarScrollClearance()
         .background(Theme.Colors.background)
         .accessibilityLabel("Loading overview")
     }
