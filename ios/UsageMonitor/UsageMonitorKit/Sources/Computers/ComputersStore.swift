@@ -10,6 +10,10 @@ import AppCore
 final class ComputersStore {
     private(set) var state: LoadState<MacHealthResponse> = .idle
 
+    /// A refresh error that occurred while Mac data was already on screen.
+    /// `state` stays `.loaded`; the root shows this as a transient banner.
+    private(set) var lastError: APIError?
+
     private let probe: @Sendable (APIClient) async throws -> MacHealthResponse
 
     init(probe: @escaping @Sendable (APIClient) async throws -> MacHealthResponse = ComputersStore.liveProbe) {
@@ -31,11 +35,13 @@ final class ComputersStore {
 
     func reset() {
         state = .idle
+        lastError = nil
     }
 
     private func fetch(using client: APIClient) async {
         do {
             state = .loaded(try await probe(client))
+            lastError = nil
         } catch let error as APIError {
             handle(error)
         } catch {
@@ -46,6 +52,8 @@ final class ComputersStore {
     private func handle(_ error: APIError) {
         if state.value == nil {
             state = .failed(error)
+        } else {
+            lastError = error
         }
     }
 

@@ -8,6 +8,7 @@ import Networking
 struct ComputersSection: View {
     let store: ComputersStore
     let onReload: @Sendable () async -> Void
+    var onOpenSettings: (() -> Void)? = nil
 
     var body: some View {
         Section {
@@ -64,9 +65,9 @@ struct ComputersSection: View {
     @ViewBuilder
     private func failure(_ error: APIError) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            Text(error.title)
+            Text(error.computersTitle)
                 .font(Theme.Typography.captionEmphasis)
-            Text(error.message)
+            Text(error.computersMessage)
                 .font(Theme.Typography.caption)
                 .foregroundStyle(Theme.Colors.secondaryText)
             Button {
@@ -77,6 +78,15 @@ struct ComputersSection: View {
             }
             .buttonStyle(.borderless)
             .tint(Theme.Colors.accent)
+
+            if let onOpenSettings, error == .missingToken || error == .unauthorized {
+                Button(action: onOpenSettings) {
+                    Label("Open Settings", systemImage: "gearshape")
+                        .font(Theme.Typography.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+                .tint(Theme.Colors.accent)
+            }
         }
     }
 

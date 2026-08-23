@@ -4,6 +4,7 @@ import DesignSystem
 import Models
 import Networking
 import OfflineCache
+import ProjectBudgets
 
 #if canImport(UIKit)
 import UIKit
@@ -110,7 +111,10 @@ public struct DashboardRootView: View {
             DashboardContentView(
                 data: data,
                 generatedAt: store.state.value?.generatedAtDate,
-                onSelectProvider: { id in env?.openProvider(id: id) }
+                onSelectProvider: { id in env?.openProvider(id: id) },
+                onManageBudgets: { env?.openSettingsForBudgetManagement() },
+                projectRollup: ProjectBudgetsRollup(projects: store.projects),
+                onOpenProjects: { env?.openProjects() }
             )
 
             PortfolioHistorySection(

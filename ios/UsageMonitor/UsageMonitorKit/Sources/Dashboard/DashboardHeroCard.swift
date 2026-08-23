@@ -8,12 +8,31 @@ import Models
 /// the first thing the user sees, so it carries the account's headline health.
 struct DashboardHeroCard: View {
     let data: DashboardViewData
+    /// When set, the card is tappable and opens provider budget management.
+    var onManageBudgets: (() -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var status: Theme.SemanticStatus { .init(data.overallStatus) }
 
     var body: some View {
+        Group {
+            if let onManageBudgets {
+                Button {
+                    Haptics.tap()
+                    onManageBudgets()
+                } label: {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens provider budget settings")
+            } else {
+                cardContent
+            }
+        }
+    }
+
+    private var cardContent: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             header
 
@@ -37,9 +56,14 @@ struct DashboardHeroCard: View {
             if data.hasIncompleteCoverage {
                 coverageCaveat
             }
+
+            if onManageBudgets != nil {
+                manageBudgetsFooter
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .dsCard()
+        .contentShape(Rectangle())
     }
 
     // MARK: - Header
@@ -131,6 +155,20 @@ struct DashboardHeroCard: View {
             .font(Theme.Typography.caption)
             .foregroundStyle(Theme.Colors.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var manageBudgetsFooter: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            Text("Manage provider budgets")
+                .font(Theme.Typography.captionEmphasis)
+                .foregroundStyle(Theme.Colors.accent)
+            Spacer(minLength: Theme.Spacing.sm)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.Colors.tertiaryText)
+        }
+        .padding(.top, Theme.Spacing.xxs)
+        .accessibilityHidden(true)
     }
 
     // MARK: - Coverage caveat

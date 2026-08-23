@@ -46,8 +46,6 @@ public struct ProjectBudgetsRootView: View {
             )
             .navigationTitle(AppTab.projects.title)
             .navigationBarTitleDisplayMode(.inline)
-            // Inline (centered compact) title — avoid large left-aligned title at rest.
-            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $detailID) { id in
                 projectDetail(id: id)
             }
