@@ -738,6 +738,7 @@ export function formatDailyPushoverMessage(
     );
 
   const body = [
+    `Usage Monitor account (UM Cloudflare free tier):`,
     `R2 Storage: ${storageGIB} GiB / 10.00 GiB (${assessment.storage.mtdPct}% MTD, ${assessment.storage.projectedPct}% proj)`,
     `Class A Ops: ${assessment.classA.actual.toLocaleString()} / 1,000,000 (${assessment.classA.mtdPct}% MTD, ${assessment.classA.projectedPct}% proj)`,
     `Class B Ops: ${assessment.classB.actual.toLocaleString()} / 10,000,000 (${assessment.classB.mtdPct}% MTD, ${assessment.classB.projectedPct}% proj)`,
@@ -1628,6 +1629,78 @@ export function graphqlStorageSamplesAreFresh(
   });
 }
 
+/**
+ * Merge per-bucket live S3 inventory into GraphQL account storage.
+ *
+ * Cloudflare bills the **whole account** (all buckets).  A live ListObjects overlay
+ * only covers litestream-primary + optional extras — after B2 cutover that list is
+ * tiny (weekly archives) while orphan buckets still count toward the free tier.
+ * Never replace the account total with a partial live sum.
+ */
+export function mergeGraphqlStorageWithLiveOverlay(
+  graphqlBuckets: R2BucketStorageSample[],
+  live: { buckets: R2BucketStorageSample[] } | null
+): {
+  storageBytes: number;
+  buckets: R2BucketStorageSample[];
+  storageIsLive: boolean;
+  metricsSource: R2MetricsSource;
+} {
+  if (!live || live.buckets.length === 0) {
+    const storageBytes = graphqlBuckets.reduce((sum, bucket) => sum + bucket.bytes, 0);
+    return {
+      storageBytes,
+      buckets: graphqlBuckets,
+      storageIsLive: false,
+      metricsSource: "cloudflare_graphql",
+    };
+  }
+
+  const merged = new Map<string, R2BucketStorageSample>();
+  for (const bucket of graphqlBuckets) {
+    merged.set(bucket.bucketName, bucket);
+  }
+  for (const liveBucket of live.buckets) {
+    merged.set(liveBucket.bucketName, liveBucket);
+  }
+  const buckets = [...merged.values()].sort((a, b) => b.bytes - a.bytes);
+  const storageBytes = buckets.reduce((sum, bucket) => sum + bucket.bytes, 0);
+  return {
+    storageBytes,
+    buckets,
+    storageIsLive: true,
+    metricsSource: "live_s3_storage+graphql_ops",
+  };
+}
+
+/** Short fleet rollup lines for the UM daily Pushover digest. */
+export function formatFleetR2DigestLines(
+  fleet: R2FleetSummary
+): string[] {
+  if (!fleet.configured) return [];
+
+  const lines = ["Fleet R2 free tiers (account-wide GraphQL):"];
+  for (const account of fleet.accounts) {
+    if (!account.configured || account.status === "unconfigured") continue;
+    if (account.metricsSource === "r2_not_enabled") {
+      lines.push(`  ${account.label}: R2 not enabled (retired account)`);
+      continue;
+    }
+    if (account.status === "error") {
+      const err = account.error?.slice(0, 100) ?? "unknown error";
+      lines.push(`  ${account.label}: error — ${err}`);
+      continue;
+    }
+    const storageGiB = (account.storage?.actual ?? 0) / (1024 * 1024 * 1024);
+    const mtdPct = account.storage?.mtdPct ?? 0;
+    const flag = account.overallOnTrackToExceed70Pct ? " ⚠️" : "";
+    lines.push(
+      `  ${account.label}: ${storageGiB.toFixed(2)} GiB (${mtdPct.toFixed(1)}% MTD)${flag}`
+    );
+  }
+  return lines;
+}
+
 
 
 /**
@@ -1859,20 +1932,16 @@ export async function fetchR2FleetSummary(
         now,
         fetchImpl
       );
-      // For UM only, prefer live S3 list for storage when credentials match
-      // this host's litestream bucket (authoritative inventory).  Overlay
-      // only — a failed list must not discard a successful GraphQL read.
       let storageBytes = metrics.storageBytes;
       let buckets = metrics.buckets;
       let source: R2MetricsSource = "cloudflare_graphql";
       if (slot.id === "um") {
         try {
           const live = await fetchLiveR2StorageViaS3(fetchImpl, now, env);
-          if (live) {
-            storageBytes = live.storageBytes;
-            buckets = live.buckets;
-            source = "live_s3_storage+graphql_ops";
-          }
+          const merged = mergeGraphqlStorageWithLiveOverlay(metrics.buckets, live);
+          storageBytes = merged.storageBytes;
+          buckets = merged.buckets;
+          source = merged.metricsSource;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           console.warn(
@@ -2025,10 +2094,14 @@ export async function runR2UsageCheck(
       let source: R2MetricsSource = "cloudflare_graphql";
 
       if (liveStorage) {
-        storageBytes = liveStorage.storageBytes;
-        buckets = liveStorage.buckets;
-        source = "live_s3_storage+graphql_ops";
-        storageIsLive = true;
+        const merged = mergeGraphqlStorageWithLiveOverlay(
+          metrics.buckets,
+          liveStorage
+        );
+        storageBytes = merged.storageBytes;
+        buckets = merged.buckets;
+        source = merged.metricsSource;
+        storageIsLive = merged.storageIsLive;
       } else if (!graphqlStorageSamplesAreFresh(metrics.buckets, now)) {
         // Stale GraphQL storage caused a delayed false 15 GiB alert after prune.
         // Refuse to kill on storage when samples are old; still enforce ops.
@@ -2233,7 +2306,18 @@ export async function runR2UsageCheck(
       assessment,
       isR2AutoDisabled()
     );
-    const res = await sendPushoverNotification(title, body, 0, fetchImpl, {
+    let digestBody = body;
+    try {
+      const fleet = await fetchR2FleetSummary(fetchImpl, now);
+      const fleetLines = formatFleetR2DigestLines(fleet);
+      if (fleetLines.length > 0) {
+        digestBody = `${body}\n\n${fleetLines.join("\n")}`;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[r2-usage] fleet digest append failed: ${message}`);
+    }
+    const res = await sendPushoverNotification(title, digestBody, 0, fetchImpl, {
       subject: "um",
     });
     if (res.ok) {

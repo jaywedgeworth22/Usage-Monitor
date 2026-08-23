@@ -26,6 +26,8 @@ import {
   R2_STORAGE_GRAPHQL_LOOKBACK_MS,
   r2FreeTierFailClosedRequired,
   graphqlStorageSamplesAreFresh,
+  mergeGraphqlStorageWithLiveOverlay,
+  formatFleetR2DigestLines,
   planLtxTipPrune,
   DEFAULT_R2_FREE_TIER_LIMITS,
   R2_DISABLED_FLAG_FILENAME,
@@ -404,6 +406,101 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(metrics.storageBytes).toBe(5 * 1024 * 1024 * 1024 + 1024 + 100);
     expect(metrics.buckets).toHaveLength(2);
     expect(metrics.buckets[0].bucketName).toBe("usage-monitor-bucket");
+  });
+
+  it("mergeGraphqlStorageWithLiveOverlay keeps orphan buckets when live list is partial", () => {
+    const graphqlBuckets = [
+      {
+        bucketName: "usage-monitor-bucket",
+        bytes: 15 * 1024 * 1024 * 1024,
+        objectCount: 100,
+        asOf: "2026-08-23T00:00:00Z",
+      },
+      {
+        bucketName: "usage-monitor-prod-v3",
+        bytes: 9 * 1024 * 1024 * 1024,
+        objectCount: 50,
+        asOf: "2026-08-23T00:00:00Z",
+      },
+    ];
+    const live = {
+      buckets: [
+        {
+          bucketName: "usage-monitor-prod-v3",
+          bytes: 300 * 1024 * 1024,
+          objectCount: 2,
+          asOf: "2026-08-23T12:00:00Z",
+        },
+      ],
+    };
+    const merged = mergeGraphqlStorageWithLiveOverlay(graphqlBuckets, live);
+    expect(merged.storageIsLive).toBe(true);
+    expect(merged.metricsSource).toBe("live_s3_storage+graphql_ops");
+    expect(merged.storageBytes).toBe(
+      15 * 1024 * 1024 * 1024 + 300 * 1024 * 1024
+    );
+    expect(merged.buckets.find((b) => b.bucketName === "usage-monitor-bucket")?.bytes).toBe(
+      15 * 1024 * 1024 * 1024
+    );
+    expect(merged.buckets.find((b) => b.bucketName === "usage-monitor-prod-v3")?.bytes).toBe(
+      300 * 1024 * 1024
+    );
+  });
+
+  it("formatFleetR2DigestLines summarizes configured fleet accounts", () => {
+    const lines = formatFleetR2DigestLines({
+      configured: true,
+      thresholdPct: 70,
+      freeTier: DEFAULT_R2_FREE_TIER_LIMITS,
+      accounts: [
+        {
+          id: "um",
+          label: "Usage Monitor",
+          accountIdSuffix: "12345678",
+          configured: true,
+          status: "ok",
+          storage: {
+            actual: 5 * 1024 * 1024 * 1024,
+            limit: 10 * 1024 * 1024 * 1024,
+            mtdPct: 50,
+            projected: 50,
+            projectedPct: 50,
+            onTrackToExceed: false,
+          },
+          classA: null,
+          classB: null,
+          overallOnTrackToExceed70Pct: false,
+          metricsSource: "cloudflare_graphql",
+          buckets: [],
+        },
+        {
+          id: "st",
+          label: "Socratic Trade",
+          accountIdSuffix: "abcdef01",
+          configured: true,
+          status: "ok",
+          storage: {
+            actual: 8 * 1024 * 1024 * 1024,
+            limit: 10 * 1024 * 1024 * 1024,
+            mtdPct: 80,
+            projected: 85,
+            projectedPct: 85,
+            onTrackToExceed: true,
+          },
+          classA: null,
+          classB: null,
+          overallOnTrackToExceed70Pct: true,
+          metricsSource: "cloudflare_graphql",
+          buckets: [],
+        },
+      ],
+      anyOnTrackToExceed: true,
+      fetchedAt: "2026-08-23T12:00:00Z",
+      localBackup: { autoDisabled: false, litestreamUsesR2: false },
+    });
+    expect(lines[0]).toContain("Fleet R2");
+    expect(lines.some((l) => l.includes("Usage Monitor") && l.includes("5.00 GiB"))).toBe(true);
+    expect(lines.some((l) => l.includes("Socratic Trade") && l.includes("⚠️"))).toBe(true);
   });
 
   it("asks GraphQL for a short latest-per-bucket storage window, not a month dump", async () => {
