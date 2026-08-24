@@ -62,6 +62,13 @@ function isoDate(value) {
   return date.toISOString().slice(0, 10);
 }
 
+export function addUtcMonth(isoDay) {
+  const date = new Date(`${isoDay}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCMonth(date.getUTCMonth() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
 function ignoreReason(subject) {
   const text = String(subject || "");
   if (/unsuccessful|couldn't process|could not process|declined|payment failed/i.test(text)) {
@@ -169,7 +176,7 @@ export function classifyReceipt({
     amountUsd,
     expenseDate,
     dueDate: due,
-    nextDueDate: cancelled || kind !== "subscription" ? null : null,
+    nextDueDate: cancelled || kind !== "subscription" ? null : addUtcMonth(expenseDate),
     cancelledNoRenew: Boolean(cancelled),
     label: cleanSubject || `${service} receipt`,
     notes: [
@@ -193,4 +200,125 @@ export function llmSystemPrompt() {
     "Ignore failed payments, App Store Connect processing mail, and forwarded copies.",
     "Never echo card numbers or email addresses.",
   ].join(" ");
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+function asIsoDay(value) {
+  return typeof value === "string" && ISO_DAY.test(value) ? value : null;
+}
+
+function asAmount(value) {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && n > 0 && n <= 5000 ? n : null;
+}
+
+export function mergeLlmClassification(base, parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+  const action = parsed.action === "ignore" || parsed.action === "file" ? parsed.action : base.action;
+  const kind = RECEIPT_KINDS.includes(parsed.kind) ? parsed.kind : base.kind;
+  const calendarSort = CALENDAR_SORTS.includes(parsed.calendarSort) ? parsed.calendarSort : base.calendarSort;
+  const cancelledNoRenew = parsed.cancelledNoRenew === true || base.cancelledNoRenew === true;
+  const expenseDate = asIsoDay(parsed.expenseDate) || base.expenseDate;
+  const dueDate = asIsoDay(parsed.dueDate) ?? base.dueDate;
+  let nextDueDate = asIsoDay(parsed.nextDueDate);
+  if (cancelledNoRenew || kind !== "subscription") nextDueDate = null;
+  else if (!nextDueDate) nextDueDate = addUtcMonth(expenseDate);
+  return {
+    ...base,
+    action,
+    reason: typeof parsed.reason === "string" ? redactSecrets(parsed.reason).slice(0, 180) : base.reason,
+    service: typeof parsed.service === "string" && parsed.service.trim()
+      ? redactSecrets(parsed.service).slice(0, 80)
+      : base.service,
+    kind,
+    calendarSort,
+    amountUsd: asAmount(parsed.amountUsd) ?? base.amountUsd,
+    expenseDate,
+    dueDate,
+    nextDueDate,
+    cancelledNoRenew,
+    label: typeof parsed.label === "string" && parsed.label.trim()
+      ? boundedSubject(parsed.label)
+      : base.label,
+    notes: typeof parsed.notes === "string" ? redactSecrets(parsed.notes).slice(0, 400) : base.notes,
+  };
+}
+
+function chatCompletionsUrl(source) {
+  if (source === "grok") return "https://api.x.ai/v1/chat/completions";
+  if (source === "deepseek") return "https://api.deepseek.com/chat/completions";
+  return null;
+}
+
+function chatModel(source) {
+  if (source === "grok") return "grok-4-fast-non-reasoning";
+  if (source === "deepseek") return "deepseek-chat";
+  return null;
+}
+
+async function requestChatJson({ source, apiKey, userText, fetchImpl, timeoutMs }) {
+  const url = chatCompletionsUrl(source);
+  const model = chatModel(source);
+  if (!url || !model || typeof apiKey !== "string" || apiKey.length < 20) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        max_tokens: 400,
+        messages: [
+          { role: "system", content: llmSystemPrompt() },
+          { role: "user", content: userText },
+        ],
+      }),
+    });
+    if (!response.ok) return null;
+    const body = await response.json();
+    const content = body?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") return null;
+    const start = content.indexOf("{");
+    const end = content.lastIndexOf("}");
+    if (start < 0 || end <= start) return null;
+    return JSON.parse(content.slice(start, end + 1));
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Rules first, then Grok, then DeepSeek.  Result is review metadata only.
+ */
+export async function enrichClassification(base, env, fetchImpl = globalThis.fetch, timeoutMs = 3500) {
+  const userText = JSON.stringify({
+    subject: base.label,
+    serviceGuess: base.service,
+    rules: base,
+  }).slice(0, 6000);
+  const attempts = [
+    { source: "grok", apiKey: env?.XAI_API_KEY },
+    { source: "deepseek", apiKey: env?.DEEPSEEK_API_KEY },
+  ];
+  for (const attempt of attempts) {
+    const parsed = await requestChatJson({
+      source: attempt.source,
+      apiKey: attempt.apiKey,
+      userText,
+      fetchImpl,
+      timeoutMs,
+    });
+    const merged = mergeLlmClassification(base, parsed);
+    if (merged) return { review: merged, classificationSource: attempt.source };
+  }
+  return { review: base, classificationSource: "rules" };
 }

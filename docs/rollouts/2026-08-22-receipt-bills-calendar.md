@@ -21,6 +21,12 @@ receipts were not on the ledger or on a calendar.
   receipt and never a next due date.  Postdated usage invoices file on the date
   received.
 
+- Worker intake classifies with rules, then Grok (`XAI_API_KEY`), then
+  DeepSeek (`DEEPSEEK_API_KEY`).  Classification stays review metadata.
+  Intake still does not POST cash.
+- Active subscriptions get a one-month `nextDueDate` unless cancelled.
+  FMP/Massive stay historical only.
+
 ## Verify
 
 ```bash
@@ -29,8 +35,9 @@ npm test -- src/lib/__tests__/owner-expense.test.ts src/lib/__tests__/bills-cale
 
 ## Follow-ups
 
-- Set `BILLS_CALENDAR_TOKEN` in Infisical prod.  `OWNER_EXPENSE_TOKEN` is only
-  for the owner script / dashboard machine token, not the Email Worker.
-- File the local April JSON with `scripts/file-owner-receipt-expenses.mjs` after
-  deploy.  Amounts stay out of git.  Do not also expect intake to file those
-  receipts automatically.
+- Bind `XAI_API_KEY` and `DEEPSEEK_API_KEY` on the receipt Email Worker
+  (Infisical / wrangler secrets).  Without them, classification stays rules-only.
+- `BILLS_CALENDAR_TOKEN` is live in prod (unlisted ICS returns 401 without the
+  token).  Keep it off GitHub.
+- File remaining local April JSON with `scripts/file-owner-receipt-expenses.mjs`
+  if any receipts are still only in `/tmp`.  Amounts stay out of git.
