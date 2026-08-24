@@ -58,6 +58,13 @@ OLLAMA_STATUS=$(check_process "ollama")
 LITESTREAM_STATUS=$(check_process "litestream")
 DOCKER_STATUS=$(check_process "Docker")
 AGENT_SYNC_STATUS=$(check_process "agent-sync")
+ANTIGRAVITY_STATUS=$(check_process "antigravity")
+CLAUDE_STATUS=$(check_process "claude")
+CURSOR_STATUS=$(check_process "Cursor")
+CODEX_STATUS=$(check_process "codex")
+GROK_STATUS=$(check_process "grok")
+DEEPSEEK_STATUS=$(check_process "dsh")
+KIMI_STATUS="stopped" # Retired per fleet protocol
 
 # Build JSON Payload
 PAYLOAD=$(cat <<EOF
@@ -73,7 +80,14 @@ PAYLOAD=$(cat <<EOF
     "ollama": "$OLLAMA_STATUS",
     "litestream": "$LITESTREAM_STATUS",
     "docker": "$DOCKER_STATUS",
-    "agent-sync": "$AGENT_SYNC_STATUS"
+    "agent-sync": "$AGENT_SYNC_STATUS",
+    "antigravity": "$ANTIGRAVITY_STATUS",
+    "claude": "$CLAUDE_STATUS",
+    "cursor": "$CURSOR_STATUS",
+    "codex": "$CODEX_STATUS",
+    "grok": "$GROK_STATUS",
+    "deepseek": "$DEEPSEEK_STATUS",
+    "kimi": "$KIMI_STATUS"
   }
 }
 EOF
