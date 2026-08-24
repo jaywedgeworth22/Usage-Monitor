@@ -2,13 +2,19 @@
 import { join } from "node:path";
 import { UsageTelemetryV2BatchSchema } from "@jaywedgeworth22/congress-trading-shared";
 import {
+  ANTIGRAVITY_PRODUCER_ID,
+  CLAUDE_PRODUCER_ID,
   CODEX_PRODUCER_ID,
   COPILOT_PRODUCER_ID,
+  DEEPSEEK_PRODUCER_ID,
   GROK_COST_USD_TICKS,
   GROK_PRODUCER_ID,
   chunkEvents,
+  parseAntigravityTranscriptJsonl,
+  parseClaudeSessionJsonl,
   parseCodexJsonl,
   parseCopilotEventsJsonl,
+  parseDeepSeekSessionJsonl,
   parseGrokUpdatesJsonl,
   splitInclusiveCache,
 } from "./lib/session-token-collectors.mjs";
@@ -395,5 +401,101 @@ assert(
 const chunks = chunkEvents(new Array(250).fill(codexEvents[0]));
 assert(chunks.length === 3, `chunk count ${chunks.length}`);
 assert(chunks[0].length === 100 && chunks[2].length === 50, "chunk sizes");
+
+
+// Antigravity Transcript Tests
+const agFixture = [
+  JSON.stringify({
+    step_index: 0,
+    source: "USER_EXPLICIT",
+    type: "USER_INPUT",
+    created_at: "2026-08-20T12:00:00.000Z",
+    content: "<USER_REQUEST>Fix the auth bug</USER_REQUEST><USER_SETTINGS_CHANGE>Model Selection from None to Gemini 3.6 Flash (High)</USER_SETTINGS_CHANGE>",
+  }),
+  JSON.stringify({
+    step_index: 1,
+    source: "MODEL",
+    type: "PLANNER_RESPONSE",
+    created_at: "2026-08-20T12:00:02.000Z",
+    content: "I will check the auth route handler now.",
+    tool_calls: [{ name: "view_file", args: { AbsolutePath: "/path/to/auth.ts" } }],
+  }),
+].join("\n");
+
+const agEvents = parseAntigravityTranscriptJsonl(agFixture, { sessionKey: "test/ag-transcript.jsonl" });
+assert(agEvents.length === 2, `ag event count ${agEvents.length}`);
+assert(agEvents[0].producerKeyRef === "gemini-3.6-flash", "ag model override parsed");
+assert(agEvents[0].label === "token:input", "ag user input token event");
+assert(agEvents[1].label === "token:output", "ag planner response token event");
+assert(agEvents[0].billingMode === "estimated" && agEvents[0].provider === "google", "ag provider & billing mode");
+
+const agBatch = {
+  schemaVersion: 2,
+  producerId: ANTIGRAVITY_PRODUCER_ID,
+  producerInstanceId: "test-host",
+  events: agEvents,
+};
+assert(UsageTelemetryV2BatchSchema.safeParse(agBatch).success, "ag batch schema valid");
+
+// Claude Code Tests
+const claudeFixture = [
+  JSON.stringify({
+    type: "assistant",
+    timestamp: "2026-08-20T14:00:00.000Z",
+    message: {
+      model: "claude-opus-5",
+      usage: {
+        input_tokens: 1500,
+        output_tokens: 450,
+        cache_read_input_tokens: 300,
+        cache_creation_input_tokens: 200,
+        speed: "fast",
+        output_tokens_details: { thinking_tokens: 120 },
+      },
+    },
+  }),
+].join("\n");
+
+const claudeEvents = parseClaudeSessionJsonl(claudeFixture, { sessionKey: "test/claude-session.jsonl" });
+assert(claudeEvents.length === 4, `claude event count ${claudeEvents.length}`);
+assert(claudeEvents[0].producerKeyRef === "claude-opus-5", "claude model parsed");
+assert(claudeEvents.find((e) => e.label === "token:input")?.quantity === 1200, "claude uncached input quantity");
+assert(claudeEvents.find((e) => e.label === "token:cacheRead")?.quantity === 300, "claude cache read quantity");
+assert(claudeEvents.find((e) => e.label === "token:cacheCreation")?.quantity === 200, "claude cache write quantity");
+assert(claudeEvents.find((e) => e.label === "token:output")?.quantity === 450, "claude output quantity");
+
+const claudeBatch = {
+  schemaVersion: 2,
+  producerId: CLAUDE_PRODUCER_ID,
+  producerInstanceId: "test-host",
+  events: claudeEvents,
+};
+assert(UsageTelemetryV2BatchSchema.safeParse(claudeBatch).success, "claude batch schema valid");
+
+// DeepSeek Tests
+const dsFixture = [
+  JSON.stringify({
+    model: "deepseek-v4-pro",
+    timestamp: "2026-08-20T16:00:00.000Z",
+    usage: {
+      prompt_tokens: 800,
+      completion_tokens: 200,
+      prompt_cache_hit_tokens: 150,
+    },
+  }),
+].join("\n");
+
+const dsEvents = parseDeepSeekSessionJsonl(dsFixture, { sessionKey: "test/ds-session.jsonl" });
+assert(dsEvents.length === 3, `deepseek event count ${dsEvents.length}`);
+assert(dsEvents[0].producerKeyRef === "deepseek-v4-pro", "deepseek model parsed");
+assert(dsEvents[0].provider === "deepseek", "deepseek provider");
+
+const dsBatch = {
+  schemaVersion: 2,
+  producerId: DEEPSEEK_PRODUCER_ID,
+  producerInstanceId: "test-host",
+  events: dsEvents,
+};
+assert(UsageTelemetryV2BatchSchema.safeParse(dsBatch).success, "deepseek batch schema valid");
 
 console.log("ok session-token-collectors");

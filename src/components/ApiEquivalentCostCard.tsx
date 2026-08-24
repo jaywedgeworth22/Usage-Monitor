@@ -98,15 +98,26 @@ function driftTone(model: ModelCostCheck): { chip: string; label: string } {
 function seatLabel(sourceApp: string): string {
   switch (sourceApp) {
     case "claude-code":
-      return "Claude Code";
+      return "Claude Code (Monet)";
     case "grok-build":
+    case "grok-cli":
       return "Grok Build";
     case "openai-codex":
+    case "codex-cli":
       return "Codex CLI";
     case "antigravity-cli":
-      return "Antigravity";
+    case "antigravity-ide":
+    case "google-antigravity":
+      return "Google Antigravity";
     case "github-copilot":
+    case "copilot-cli":
       return "Copilot CLI";
+    case "deepseek-dsh":
+    case "deepseek-harness":
+      return "DeepSeek Harness";
+    case "cursor-agent":
+    case "cursor-cloud":
+      return "Cursor Cloud";
     default:
       return sourceApp;
   }
@@ -272,12 +283,12 @@ export default function ApiEquivalentCostCard() {
           </div>
         );
       })}
-      <div className="px-6 py-3">
+      <div className="px-6 py-3 bg-gray-50/50 dark:bg-gray-900/20 border-t border-gray-100 dark:border-gray-700">
         <p className="text-[10px] text-gray-500 dark:text-gray-400">
           Estimates use the bundled LiteLLM catalog plus xAI list prices refreshed {snapshotDate}.
-          {SENTENCE_GAP}Claude Code still cross-checks OTLP vs tokens.{SENTENCE_GAP}Codex, Grok
-          Build, and Copilot CLI come from local session logs.{SENTENCE_GAP}Cursor and Gemini CLI
-          have no local token ledger on this Mac.
+          {SENTENCE_GAP}Includes Antigravity brain transcripts, Claude Code OTLP & session logs,
+          Codex CLI, Grok Build, Copilot CLI, and DeepSeek Harness.
+          {SENTENCE_GAP}Excludes end-user production app traffic (routed through OpenRouter).
           {data.totals.unpricedModelCount > 0
             ? `${SENTENCE_GAP}${data.totals.unpricedModelCount} unpriced model${data.totals.unpricedModelCount === 1 ? "" : "s"} under-count derivation.`
             : ""}

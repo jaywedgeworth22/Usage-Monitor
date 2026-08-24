@@ -28,6 +28,10 @@ export const MAX_EVENTS_PER_BATCH = 100;
 export const CODEX_PRODUCER_ID = "openai-codex";
 export const GROK_PRODUCER_ID = "grok-build";
 export const COPILOT_PRODUCER_ID = "github-copilot";
+export const ANTIGRAVITY_PRODUCER_ID = "antigravity-cli";
+export const CLAUDE_PRODUCER_ID = "claude-code";
+export const DEEPSEEK_PRODUCER_ID = "deepseek-dsh";
+export const CURSOR_PRODUCER_ID = "cursor-agent";
 
 const TOKEN_TYPES = ["input", "output", "cacheRead", "cacheCreation"];
 
@@ -331,6 +335,207 @@ function breakdownHasTokens(breakdown) {
   return Boolean(
     breakdown.input || breakdown.output || breakdown.cacheRead || breakdown.cacheCreation
   );
+}
+
+
+export function parseClaudeSessionJsonl(text, { sessionKey, fallbackOccurredAt } = {}) {
+  const fallbackIso = fallbackOccurredAt ?? new Date(0).toISOString();
+  const events = [];
+  const lines = text.split("\n");
+  for (let lineNo = 0; lineNo < lines.length; lineNo += 1) {
+    const line = lines[lineNo].trim();
+    if (!line.startsWith("{")) continue;
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const usage = obj?.message?.usage || obj?.usage;
+    if (!usage || typeof usage !== "object") continue;
+    const rawModel = (typeof obj.message?.model === "string" && obj.message.model.trim()) || "claude-3-7-sonnet";
+    const model = rawModel;
+    const occurredAtIso = isoTimestamp(obj.timestamp, fallbackIso);
+    const thinkingTokens = usage.output_tokens_details?.thinking_tokens || 0;
+    const speed = usage.speed || obj.speed || "standard";
+    const effort = obj.effort || "standard";
+
+    const breakdown = splitInclusiveCache({
+      input: usage.input_tokens,
+      output: usage.output_tokens,
+      cacheRead: usage.cache_read_input_tokens,
+      cacheCreation: usage.cache_creation_input_tokens,
+    });
+
+    events.push(
+      ...tokenEventsFromBreakdown({
+        producerId: CLAUDE_PRODUCER_ID,
+        provider: "anthropic",
+        service: "claude-code",
+        sessionKey: sessionKey ?? "claude",
+        occurredAtIso,
+        model,
+        breakdown,
+        extraId: `L${lineNo}:${model}`,
+      })
+    );
+  }
+  return events;
+}
+
+export function parseAntigravityTranscriptJsonl(text, { sessionKey, fallbackOccurredAt } = {}) {
+  const fallbackIso = fallbackOccurredAt ?? new Date(0).toISOString();
+  const events = [];
+  const lines = text.split("\n");
+  let currentModel = "gemini-3.7-flash";
+  let currentEffort = "medium";
+
+  for (let lineNo = 0; lineNo < lines.length; lineNo += 1) {
+    const line = lines[lineNo].trim();
+    if (!line.startsWith("{")) continue;
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const content = typeof obj.content === "string" ? obj.content : "";
+    if (content.includes("USER_SETTINGS_CHANGE") || content.includes("Model Selection")) {
+      const modelMatch = content.match(/Model Selection`?\s+from\s+.*?\s+to\s+([^\n<]+?)(?:\.\s+No need|\.\s+|$|<)/i);
+      if (modelMatch) {
+        const raw = modelMatch[1].trim().toLowerCase();
+        if (raw.includes("gemini 3.6 flash")) currentModel = "gemini-3.6-flash";
+        else if (raw.includes("gemini 3.7 flash")) currentModel = "gemini-3.7-flash";
+        else if (raw.includes("gemini 2.5 pro") || raw.includes("gemini pro")) currentModel = "gemini-2.5-pro";
+        else if (raw.includes("claude 3.5 sonnet")) currentModel = "claude-3-5-sonnet";
+        else if (raw.includes("claude 3.7 sonnet")) currentModel = "claude-3-7-sonnet";
+        else if (raw.includes("gpt-4o")) currentModel = "gpt-4o";
+
+        if (raw.includes("(high)")) currentEffort = "high";
+        else if (raw.includes("(low)")) currentEffort = "low";
+        else if (raw.includes("(medium)")) currentEffort = "medium";
+      }
+    }
+
+    const occurredAtIso = isoTimestamp(obj.created_at, fallbackIso);
+    const stepType = obj.type;
+
+    let inTok = 0;
+    let outTok = 0;
+
+    if (stepType === "USER_INPUT") {
+      inTok = Math.ceil(content.length / 4);
+    } else if (stepType === "PLANNER_RESPONSE") {
+      outTok = Math.ceil(content.length / 4);
+      if (Array.isArray(obj.tool_calls)) {
+        for (const tc of obj.tool_calls) {
+          outTok += Math.ceil(JSON.stringify(tc.args || {}).length / 4);
+        }
+      }
+    } else if (stepType === "GENERIC" || stepType === "SYSTEM_MESSAGE") {
+      inTok = Math.ceil(content.length / 4);
+    }
+
+    if (inTok > 0 || outTok > 0) {
+      const breakdown = {
+        input: inTok,
+        output: outTok,
+        cacheRead: 0,
+        cacheCreation: 0,
+      };
+      events.push(
+        ...tokenEventsFromBreakdown({
+          producerId: ANTIGRAVITY_PRODUCER_ID,
+          provider: "google",
+          service: "antigravity-ide",
+          sessionKey: sessionKey ?? "antigravity",
+          occurredAtIso,
+          model: currentModel,
+          breakdown,
+          extraId: `L${lineNo}:${currentModel}`,
+        })
+      );
+    }
+  }
+  return events;
+}
+
+export function parseDeepSeekSessionJsonl(text, { sessionKey, fallbackOccurredAt } = {}) {
+  const fallbackIso = fallbackOccurredAt ?? new Date(0).toISOString();
+  const events = [];
+  const lines = text.split("\n");
+  for (let lineNo = 0; lineNo < lines.length; lineNo += 1) {
+    const line = lines[lineNo].trim();
+    if (!line.startsWith("{")) continue;
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const usage = obj?.usage || obj?.metrics?.usage;
+    if (!usage || typeof usage !== "object") continue;
+    const model = (typeof obj.model === "string" && obj.model.trim()) || "deepseek-chat";
+    const occurredAtIso = isoTimestamp(obj.timestamp || obj.created_at, fallbackIso);
+    const breakdown = splitInclusiveCache({
+      input: usage.prompt_tokens || usage.input_tokens || 0,
+      output: usage.completion_tokens || usage.output_tokens || 0,
+      cacheRead: usage.prompt_cache_hit_tokens || usage.cache_read_input_tokens || 0,
+      cacheCreation: usage.prompt_cache_miss_tokens || 0,
+    });
+    events.push(
+      ...tokenEventsFromBreakdown({
+        producerId: DEEPSEEK_PRODUCER_ID,
+        provider: "deepseek",
+        service: "deepseek-harness",
+        sessionKey: sessionKey ?? "deepseek",
+        occurredAtIso,
+        model,
+        breakdown,
+        extraId: `L${lineNo}:${model}`,
+      })
+    );
+  }
+  return events;
+}
+
+export function parseCursorSessionJsonl(text, { sessionKey, fallbackOccurredAt } = {}) {
+  const fallbackIso = fallbackOccurredAt ?? new Date(0).toISOString();
+  const events = [];
+  const lines = text.split("\n");
+  for (let lineNo = 0; lineNo < lines.length; lineNo += 1) {
+    const line = lines[lineNo].trim();
+    if (!line.startsWith("{")) continue;
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const usage = obj?.usage || obj?.tokenCount;
+    if (!usage) continue;
+    const model = (typeof obj.model === "string" && obj.model.trim()) || "cursor-default";
+    const occurredAtIso = isoTimestamp(obj.timestamp, fallbackIso);
+    const breakdown = splitInclusiveCache({
+      input: typeof usage === "number" ? usage : usage.inputTokens || 0,
+      output: typeof usage === "object" ? usage.outputTokens || 0 : 0,
+      cacheRead: typeof usage === "object" ? usage.cachedTokens || 0 : 0,
+      cacheCreation: 0,
+    });
+    events.push(
+      ...tokenEventsFromBreakdown({
+        producerId: CURSOR_PRODUCER_ID,
+        provider: "cursor",
+        service: "cursor-cloud",
+        sessionKey: sessionKey ?? "cursor",
+        occurredAtIso,
+        model,
+        breakdown,
+        extraId: `L${lineNo}:${model}`,
+      })
+    );
+  }
+  return events;
 }
 
 export function parseCopilotEventsJsonl(text, { sessionKey, fallbackOccurredAt } = {}) {
