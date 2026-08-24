@@ -2467,9 +2467,61 @@ describe("alert delivery", () => {
     });
     const params = new URLSearchParams(String(callArgs[1]?.body ?? ""));
     expect(params.get("token")).toBe("test-api-token");
+    expect(params.get("url")).toBe("https://usage.jays.services/alerts");
+  });
+
+  it("delivers spend and request spikes with rich details to Pushover", async () => {
+    const provider = await prisma.provider.create({
+      data: {
+        name: "test_spike_pushover",
+        displayName: "OpenAI Platform",
+        type: "builtin",
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response("ok", { status: 200 }));
+    const config = {
+      channels: [
+        { kind: "pushover" as const, userKey: "test-user-key", apiToken: "test-api-token" },
+      ],
+      minSeverity: "warning" as const,
+      reminderHours: 24,
+    };
+
+    await prisma.providerPlan.create({
+      data: {
+        providerId: provider.id,
+        billingMode: "actual",
+        monthlyBudgetUsd: 50,
+      },
+    });
+
+    await prisma.usageSnapshot.create({
+      data: {
+        providerId: provider.id,
+        fetchedAt: new Date("2026-08-24T11:55:00.000Z"),
+        totalCost: 120,
+      },
+    });
+
+    const res = await deliverProviderAlerts({
+      now: new Date("2026-08-24T12:00:00.000Z"),
+      config,
+      fetchImpl: fetchMock,
+    });
+
+    expect(res.sent).toBeGreaterThanOrEqual(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const callArgs = fetchMock.mock.calls[0];
+    expect(callArgs[0]).toBe("https://api.pushover.net/1/messages.json");
+    const params = new URLSearchParams(String(callArgs[1]?.body ?? ""));
+    expect(params.get("token")).toBe("test-api-token");
     expect(params.get("user")).toBe("test-user-key");
-    expect(params.get("title")).toContain("Test Pushover");
-    expect(params.get("message")).toContain("low");
+    expect(params.get("title")).toBe("[CRITICAL] OpenAI Platform");
+    expect(params.get("message")).toContain("tracked against $50.00 monthly budget");
+    expect(params.get("priority")).toBe("1");
+    expect(params.get("url")).toBe("https://usage.jays.services/alerts");
   });
 
   it("fans budget alerts out over APNs with a mocked transport", async () => {

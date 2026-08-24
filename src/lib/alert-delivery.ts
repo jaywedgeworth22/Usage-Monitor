@@ -1008,14 +1008,31 @@ async function sendToChannelOnce(
   }
 
   if (channel.kind === "pushover") {
+    const isAnomaly =
+      alert.code === "spend_anomaly" ||
+      alert.code === "request_anomaly" ||
+      alert.code === "project_spend_anomaly";
     const priority = alert.severity === "critical" ? 1 : 0;
+    const titlePrefix = isAnomaly
+      ? alert.severity === "critical"
+        ? "🚨 [CRITICAL SPIKE]"
+        : "⚠️ [USAGE SPIKE]"
+      : `[${alert.severity.toUpperCase()}]`;
+
     const params = new URLSearchParams({
       token: channel.apiToken,
       user: channel.userKey,
-      title: `[${alert.severity.toUpperCase()}] ${provider.displayName || provider.name}`,
+      title: `${titlePrefix} ${provider.displayName || provider.name}`,
       message: alert.message,
       priority: String(priority),
+      url: "https://usage.jays.services/alerts",
+      url_title: "View in Usage Monitor",
     });
+
+    if (isAnomaly && alert.severity === "critical") {
+      params.set("sound", "siren");
+    }
+
     await postForm(
       "Pushover API",
       "https://api.pushover.net/1/messages.json",
