@@ -12,6 +12,7 @@ import UIKit
 struct LocalAlertsTab: View {
     @Bindable var model: LocalAppModel
     var openProvider: (String) -> Void
+    var openNeedsKey: (() -> Void)? = nil
 
     var body: some View {
         NavigationStack {
@@ -29,6 +30,8 @@ struct LocalAlertsTab: View {
                                 Button {
                                     if let id = alert.providerId {
                                         openProvider(id)
+                                    } else if alert.id == "needs-key-many" {
+                                        openNeedsKey?()
                                     }
                                 } label: {
                                     HStack(alignment: .top, spacing: Theme.Spacing.md) {
