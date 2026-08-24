@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Gauge, Zap, Clock } from "lucide-react";
+import { Gauge, Zap, Clock, AlertCircle } from "lucide-react";
 
 const SENTENCE_GAP = "\u00a0 ";
 
@@ -17,10 +17,10 @@ interface QuotaBucket {
   occurredAt: string;
 }
 
-function formatCountdown(resetAtStr: string | null): string {
+function formatCountdown(resetAtStr: string | null, nowMs: number): string {
   if (!resetAtStr) return "Rolling refresh";
   const target = new Date(resetAtStr).getTime();
-  const diffMs = target - Date.now();
+  const diffMs = target - nowMs;
   if (diffMs <= 0) return "Refreshing now";
 
   const diffSec = Math.floor(diffMs / 1000);
@@ -66,18 +66,37 @@ function quotaTone(percent: number): {
 
 export default function FleetQuotaMatrixCard() {
   const [buckets, setBuckets] = useState<QuotaBucket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  // Recompute ticking countdowns every 10 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowMs(Date.now());
+    }, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let unmounted = false;
     const fetchQuota = async () => {
       try {
-        const res = await fetch("/api/snapshots", { cache: "no-store" });
+        const res = await fetch("/api/usage-events?raw=1&metricType=quota&limit=50", {
+          cache: "no-store",
+        });
         if (res.ok) {
           const data = await res.json();
-          const extracted: QuotaBucket[] = [];
-          if (Array.isArray(data.quotaEvents) && data.quotaEvents.length > 0) {
-            for (const ev of data.quotaEvents) {
-              const group = ev.metadata?.modelGroup || "Gemini Models";
+          if (Array.isArray(data.events) && data.events.length > 0) {
+            // Deduplicate by bucketId or label, keeping latest event
+            const seen = new Set<string>();
+            const extracted: QuotaBucket[] = [];
+            for (const ev of data.events) {
+              const meta = (ev.metadata || {}) as Record<string, unknown>;
+              const bucketId = String(meta.bucketId || ev.idempotencyKey || ev.id);
+              if (seen.has(bucketId)) continue;
+              seen.add(bucketId);
+
+              const group = String(meta.modelGroup || ev.provider || "Gemini Models");
               const logo = group.toLowerCase().includes("gemini")
                 ? "/logos/gemini.svg"
                 : group.toLowerCase().includes("claude")
@@ -86,31 +105,37 @@ export default function FleetQuotaMatrixCard() {
                 ? "/logos/grok.svg"
                 : "/logos/openai.svg";
 
+              const rawCredits = Number(ev.credits ?? ev.quantity ?? 100);
+              const limit = Number(ev.limit ?? 100);
+
               extracted.push({
-                id: ev.metadata?.bucketId || ev.eventId,
-                label: ev.label || "Model Quota",
+                id: bucketId,
+                label: String(meta.label || ev.service || "Model Quota"),
                 modelGroup: group,
                 logoSrc: logo,
-                window: ev.metadata?.quotaWindow || "weekly",
-                creditsRemaining: ev.credits ?? 100,
-                limit: ev.limit ?? 100,
-                resetAt: ev.metadata?.resetAt || null,
+                window: (meta.quotaWindow as "5h" | "weekly" | "daily" | "monthly") || "weekly",
+                creditsRemaining: rawCredits,
+                limit,
+                resetAt: typeof meta.resetAt === "string" ? meta.resetAt : null,
                 occurredAt: ev.occurredAt,
               });
             }
-          }
-          if (!unmounted && extracted.length > 0) {
-            setBuckets(extracted);
+            if (!unmounted && extracted.length > 0) {
+              setBuckets(extracted);
+            }
           }
         }
       } catch {
         // preserve
+      } finally {
+        if (!unmounted) setLoading(false);
       }
     };
 
     fetchQuota();
   }, []);
 
+  // Baseline starter buckets representing current sliding windows if initial telemetry is synchronizing
   const displayBuckets: QuotaBucket[] = buckets.length > 0 ? buckets : [
     {
       id: "gemini-5h",
@@ -181,9 +206,13 @@ export default function FleetQuotaMatrixCard() {
 
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
         {displayBuckets.map((bucket) => {
-          const percent = bucket.creditsRemaining;
+          // Normalize remaining percentage against limit
+          const percent =
+            bucket.limit > 0
+              ? (bucket.creditsRemaining / bucket.limit) * 100
+              : bucket.creditsRemaining;
           const tone = quotaTone(percent);
-          const countdown = formatCountdown(bucket.resetAt);
+          const countdown = formatCountdown(bucket.resetAt, nowMs);
 
           return (
             <div

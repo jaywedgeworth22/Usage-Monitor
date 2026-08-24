@@ -52,7 +52,7 @@ export default function AgentsPageClient() {
             <span className="text-xs font-medium uppercase tracking-wider">Active Fleet Seats</span>
             <Bot className="h-4 w-4 text-indigo-500" />
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">6 Active</p>
+          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">6 active</p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Antigravity, Monet, Cursor, Grok, Codex, DeepSeek (Kimi retired)
           </p>
@@ -63,7 +63,7 @@ export default function AgentsPageClient() {
             <span className="text-xs font-medium uppercase tracking-wider">Quota Monitoring</span>
             <Gauge className="h-4 w-4 text-emerald-500" />
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">4 Sliding Pools</p>
+          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">4 sliding pools</p>
           <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">
             5h burst windows & 7-day rolling pools
           </p>
@@ -74,7 +74,7 @@ export default function AgentsPageClient() {
             <span className="text-xs font-medium uppercase tracking-wider">Shadow PAYG Value</span>
             <Sparkles className="h-4 w-4 text-amber-500" />
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">LiteLLM Catalog</p>
+          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">LiteLLM catalog</p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Calculates token value vs flat subscriptions
           </p>
@@ -85,7 +85,7 @@ export default function AgentsPageClient() {
             <span className="text-xs font-medium uppercase tracking-wider">Traffic Separation</span>
             <ShieldCheck className="h-4 w-4 text-blue-500" />
           </div>
-          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">100% Isolated</p>
+          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">100% isolated</p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             End-user app calls bypass agent telemetry
           </p>

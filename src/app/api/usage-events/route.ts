@@ -68,6 +68,7 @@ export async function GET(request: NextRequest) {
     // order=asc|desc — default newest first for operator debugging.
     const order =
       searchParams.get("order") === "asc" ? ("asc" as const) : ("desc" as const);
+    const metricTypeFilter = searchParams.get("metricType");
 
     const where = {
       occurredAt: {
@@ -79,6 +80,7 @@ export async function GET(request: NextRequest) {
           ? { projectId: null }
           : { projectId: projectFilter }
         : {}),
+      ...(metricTypeFilter ? { metricType: metricTypeFilter } : {}),
     };
 
     const rows = await prisma.externalUsageEvent.findMany({
@@ -100,6 +102,10 @@ export async function GET(request: NextRequest) {
         service: true,
         projectId: true,
         metricType: true,
+        quantity: true,
+        unit: true,
+        limit: true,
+        credits: true,
         costUsd: true,
         requests: true,
         billingMode: true,
@@ -107,6 +113,7 @@ export async function GET(request: NextRequest) {
         verificationStatus: true,
         occurredAt: true,
         idempotencyKey: true,
+        metadata: true,
       },
     });
 
