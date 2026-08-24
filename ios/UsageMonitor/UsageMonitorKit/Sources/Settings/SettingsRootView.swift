@@ -23,6 +23,7 @@ public struct SettingsRootView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var model: SettingsViewModel
     @State private var access: ManagementAccessStore
+    @State private var showProviderInventory = false
 
     public init() {
         _model = State(initialValue: SettingsViewModel())
@@ -72,6 +73,20 @@ public struct SettingsRootView: View {
             }
             .refreshable {
                 await access.refresh(using: env.apiClient)
+            }
+            .navigationDestination(isPresented: $showProviderInventory) {
+                ProviderManagementInventoryView(
+                    client: env.apiClient,
+                    afterMutation: { await env.budgetStore.refresh() }
+                )
+            }
+            .onChange(of: env.pendingSettingsDestination) { _, destination in
+                guard let destination else { return }
+                switch destination {
+                case .providerBudgets:
+                    showProviderInventory = true
+                }
+                env.pendingSettingsDestination = nil
             }
         }
     }

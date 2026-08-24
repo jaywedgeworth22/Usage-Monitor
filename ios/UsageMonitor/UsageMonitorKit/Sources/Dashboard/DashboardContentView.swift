@@ -2,6 +2,7 @@ import SwiftUI
 import DesignSystem
 import AppCore
 import Models
+import ProjectBudgets
 
 /// The loaded Dashboard: hero, key stats, month-pace forecast, attention peek,
 /// and top providers, composed into the standard scrolling screen. Pure
@@ -12,6 +13,12 @@ struct DashboardContentView: View {
     /// Cross-tab open of a provider detail (wired by `DashboardRootView` via
     /// `AppEnvironment.openProvider`). Optional so previews stay standalone.
     var onSelectProvider: ((String) -> Void)? = nil
+    /// Opens Settings → provider inventory to edit monthly budgets.
+    var onManageBudgets: (() -> Void)? = nil
+    /// Optional project rollup for a second budget lens (distinct from provider totals).
+    var projectRollup: ProjectBudgetsRollup? = nil
+    /// Jump to the Projects tab for project budget detail.
+    var onOpenProjects: (() -> Void)? = nil
 
     private let columns = [
         GridItem(.flexible(), spacing: Theme.Spacing.md),
@@ -19,7 +26,11 @@ struct DashboardContentView: View {
     ]
 
     var body: some View {
-        DashboardHeroCard(data: data)
+        DashboardHeroCard(data: data, onManageBudgets: onManageBudgets)
+
+        if let rollup = projectRollup, rollup.budgetedCount + rollup.unbudgetedCount > 0 {
+            ProjectBudgetsOverviewCard(rollup: rollup, onOpen: onOpenProjects)
+        }
 
         statsGrid
 
@@ -152,6 +163,80 @@ struct DashboardContentView: View {
             projected: data.projectedEom,
             budget: data.totalBudget
         )
+    }
+}
+
+/// Compact project-budget rollup on Overview — separate from the provider-scoped
+/// hero card so the two budget lenses are never summed or double-counted.
+private struct ProjectBudgetsOverviewCard: View {
+    let rollup: ProjectBudgetsRollup
+    var onOpen: (() -> Void)?
+
+    var body: some View {
+        Group {
+            if let onOpen {
+                Button {
+                    Haptics.tap()
+                    onOpen()
+                } label: {
+                    cardBody
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens project budgets")
+            } else {
+                cardBody
+            }
+        }
+    }
+
+    private var cardBody: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Project Budgets", systemImage: "folder.fill")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .labelStyle(.titleAndIcon)
+                Spacer(minLength: Theme.Spacing.sm)
+                if onOpen != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.Colors.tertiaryText)
+                }
+            }
+
+            Text(rollup.totalSpentDisplay)
+                .font(Theme.Typography.title)
+                .monospacedDigit()
+                .foregroundStyle(Theme.Colors.primaryText)
+
+            if rollup.hasBudget {
+                BudgetMeter(fraction: rollup.fraction, status: rollup.status)
+                HStack {
+                    Text("of \(rollup.totalBudgetDisplay) across projects")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                    Spacer()
+                    Text("\(rollup.remainingDisplay) left")
+                        .font(Theme.Typography.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(rollup.remaining < 0 ? Theme.Colors.danger : Theme.Colors.secondaryText)
+                }
+            } else {
+                Text("No project monthly budgets set yet.")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+
+            Text("Project totals are separate from provider budgets above.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.tertiaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dsCard()
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Project budgets. Spent \(rollup.totalSpentDisplay).")
     }
 }
 
