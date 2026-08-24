@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Gauge, Zap, Clock, ShieldCheck, AlertTriangle } from "lucide-react";
-import { formatNumber } from "@/lib/format";
+import { Gauge, Zap, Clock } from "lucide-react";
 
 const SENTENCE_GAP = "\u00a0 ";
 
@@ -10,6 +9,7 @@ interface QuotaBucket {
   id: string;
   label: string;
   modelGroup: string;
+  logoSrc: string;
   window: "5h" | "weekly" | "daily" | "monthly";
   creditsRemaining: number;
   limit: number;
@@ -66,7 +66,6 @@ function quotaTone(percent: number): {
 
 export default function FleetQuotaMatrixCard() {
   const [buckets, setBuckets] = useState<QuotaBucket[]>([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let unmounted = false;
@@ -75,14 +74,23 @@ export default function FleetQuotaMatrixCard() {
         const res = await fetch("/api/snapshots", { cache: "no-store" });
         if (res.ok) {
           const data = await res.json();
-          // Fallback static demonstration buckets if snapshots are still populating
           const extracted: QuotaBucket[] = [];
           if (Array.isArray(data.quotaEvents) && data.quotaEvents.length > 0) {
             for (const ev of data.quotaEvents) {
+              const group = ev.metadata?.modelGroup || "Gemini Models";
+              const logo = group.toLowerCase().includes("gemini")
+                ? "/logos/gemini.svg"
+                : group.toLowerCase().includes("claude")
+                ? "/logos/claude.svg"
+                : group.toLowerCase().includes("grok")
+                ? "/logos/grok.svg"
+                : "/logos/openai.svg";
+
               extracted.push({
                 id: ev.metadata?.bucketId || ev.eventId,
                 label: ev.label || "Model Quota",
-                modelGroup: ev.metadata?.modelGroup || "Gemini Models",
+                modelGroup: group,
+                logoSrc: logo,
                 window: ev.metadata?.quotaWindow || "weekly",
                 creditsRemaining: ev.credits ?? 100,
                 limit: ev.limit ?? 100,
@@ -97,20 +105,18 @@ export default function FleetQuotaMatrixCard() {
         }
       } catch {
         // preserve
-      } finally {
-        if (!unmounted) setLoading(false);
       }
     };
 
     fetchQuota();
   }, []);
 
-  // Default initial authoritative buckets from live Antigravity quota telemetry
   const displayBuckets: QuotaBucket[] = buckets.length > 0 ? buckets : [
     {
       id: "gemini-5h",
       label: "Gemini 3.7 / 3.6 Flash (5-Hour Window)",
-      modelGroup: "Gemini Models",
+      modelGroup: "Google Gemini",
+      logoSrc: "/logos/gemini.svg",
       window: "5h",
       creditsRemaining: 69.93,
       limit: 100,
@@ -120,7 +126,8 @@ export default function FleetQuotaMatrixCard() {
     {
       id: "gemini-weekly",
       label: "Gemini Models (7-Day Rolling Pool)",
-      modelGroup: "Gemini Models",
+      modelGroup: "Google Gemini",
+      logoSrc: "/logos/gemini.svg",
       window: "weekly",
       creditsRemaining: 68.88,
       limit: 100,
@@ -130,7 +137,8 @@ export default function FleetQuotaMatrixCard() {
     {
       id: "3p-5h",
       label: "Claude 3.7 & GPT-4o 3P Models (5-Hour Window)",
-      modelGroup: "Claude and GPT models",
+      modelGroup: "Anthropic Claude",
+      logoSrc: "/logos/claude.svg",
       window: "5h",
       creditsRemaining: 100.0,
       limit: 100,
@@ -140,7 +148,8 @@ export default function FleetQuotaMatrixCard() {
     {
       id: "3p-weekly",
       label: "Claude and GPT models (7-Day Pool)",
-      modelGroup: "Claude and GPT models",
+      modelGroup: "Anthropic & OpenAI",
+      logoSrc: "/logos/claude.svg",
       window: "weekly",
       creditsRemaining: 31.96,
       limit: 100,
@@ -183,13 +192,23 @@ export default function FleetQuotaMatrixCard() {
             >
               <div>
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      {bucket.label}
-                    </h3>
-                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                      {bucket.modelGroup} · <span className="uppercase font-medium">{bucket.window} window</span>
-                    </p>
+                  <div className="flex items-center gap-2.5">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={bucket.logoSrc}
+                      alt={`${bucket.modelGroup} logo`}
+                      className="w-7 h-7 object-contain rounded-md p-0.5 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-700 shadow-2xs shrink-0"
+                      width={28}
+                      height={28}
+                    />
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 leading-tight">
+                        {bucket.label}
+                      </h3>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        {bucket.modelGroup} · <span className="uppercase font-medium">{bucket.window} window</span>
+                      </p>
+                    </div>
                   </div>
                   <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full ${tone.badge}`}>
                     {tone.label}

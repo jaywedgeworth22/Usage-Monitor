@@ -109,7 +109,7 @@ export default function AgentsPageClient() {
         </h3>
         <ul className="mt-2.5 space-y-1.5 list-disc list-inside text-indigo-800/90 dark:text-indigo-300">
           <li>
-            <b>Live Quota Windows:</b> Queried from local language servers and CLI sessions (e.g. <code>agy -p "/usage"</code>), showing exact percentages and reset countdowns.
+            <b>Live Quota Windows:</b> Queried from local language servers and CLI sessions (e.g. <code>agy -p &quot;/usage&quot;</code>), showing exact percentages and reset countdowns.
           </li>
           <li>
             <b>Session Token Metrics:</b> Parsed turn-by-turn from local transcript ledgers across Antigravity (<code>~/.gemini/antigravity/brain</code>), Claude Code (<code>~/.claude/projects</code>), Grok Build (<code>~/.grok/sessions</code>), Codex CLI (<code>~/.codex/sessions</code>), Copilot, and DeepSeek Harness.

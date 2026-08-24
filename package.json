@@ -19,6 +19,7 @@
     "db:studio": "prisma studio",
     "repair:claude-cost": "node scripts/repair-claude-cumulative-cost.mjs",
     "pricing:update": "node scripts/update-model-pricing.mjs",
+    "pricing:audit": "node scripts/audit-model-pricing.mjs",
     "repair:anthropic-funding": "node scripts/repair-anthropic-funding.mjs",
     "add:cursor-subscription": "node scripts/add-cursor-subscription.mjs",
     "antigravity:collect": "node scripts/antigravity-usage-collector.mjs",

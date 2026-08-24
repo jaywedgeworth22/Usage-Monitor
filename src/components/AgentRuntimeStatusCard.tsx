@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Activity, CheckCircle, Clock, Cpu, Server, XCircle } from "lucide-react";
+import { CheckCircle, Clock, Server } from "lucide-react";
 import type { MacHealthResponse } from "@/lib/mac-health";
 
 const SENTENCE_GAP = "\u00a0 ";
@@ -11,6 +11,7 @@ interface AgentAppDefinition {
   name: string;
   category: "Primary Fleet" | "Support Seat" | "Retired";
   processKey: string;
+  logoSrc: string;
   description: string;
   worktreePath?: string;
   statusOverride?: "retired" | "running" | "stopped";
@@ -22,6 +23,7 @@ const FLEET_AGENTS: AgentAppDefinition[] = [
     name: "Google Antigravity",
     category: "Primary Fleet",
     processKey: "antigravity",
+    logoSrc: "/logos/antigravity.svg",
     description: "Gemini 3.7 / 3.6 Flash & Pro IDE language server with live sliding quota meter.",
     worktreePath: "~/apps/usage-antigravity",
   },
@@ -30,6 +32,7 @@ const FLEET_AGENTS: AgentAppDefinition[] = [
     name: "Claude Code (Monet)",
     category: "Primary Fleet",
     processKey: "claude",
+    logoSrc: "/logos/claude.svg",
     description: "Claude 3.7 Sonnet & Opus 5 CLI harness with OTLP telemetry & session token tracking.",
     worktreePath: "~/apps/trading-claude",
   },
@@ -38,6 +41,7 @@ const FLEET_AGENTS: AgentAppDefinition[] = [
     name: "Cursor Desktop & Cloud",
     category: "Primary Fleet",
     processKey: "cursor",
+    logoSrc: "/logos/cursor.png",
     description: "Cursor Cloud Agent bridge & local ACP daemon with codebase embedding multiplier.",
     worktreePath: "~/apps/cursor-chat-surfaces",
   },
@@ -46,6 +50,7 @@ const FLEET_AGENTS: AgentAppDefinition[] = [
     name: "Grok Build CLI",
     category: "Primary Fleet",
     processKey: "grok",
+    logoSrc: "/logos/grok.svg",
     description: "SuperGrok Heavy xAI agent harness with turn-by-turn cost ticks.",
     worktreePath: "~/apps/trading-grok",
   },
@@ -54,6 +59,7 @@ const FLEET_AGENTS: AgentAppDefinition[] = [
     name: "OpenAI Codex CLI",
     category: "Support Seat",
     processKey: "codex",
+    logoSrc: "/logos/codex.svg",
     description: "ChatGPT Plus/Pro rolling rate-limit window with local session token ledger.",
     worktreePath: "~/apps/trading-codex",
   },
@@ -62,6 +68,7 @@ const FLEET_AGENTS: AgentAppDefinition[] = [
     name: "DeepSeek Harness (dsh)",
     category: "Support Seat",
     processKey: "deepseek",
+    logoSrc: "/logos/deepseek.svg",
     description: "DeepSeek v4 Pro & Flash ACP stdio runtime and headless session engine.",
     worktreePath: "~/apps/dsh-runtime",
   },
@@ -70,6 +77,7 @@ const FLEET_AGENTS: AgentAppDefinition[] = [
     name: "Kimi Code",
     category: "Retired",
     processKey: "kimi",
+    logoSrc: "/logos/monet.svg",
     description: "Retired per fleet protocol — inactive across all effort boards and queues.",
     statusOverride: "retired",
   },
@@ -77,7 +85,6 @@ const FLEET_AGENTS: AgentAppDefinition[] = [
 
 export default function AgentRuntimeStatusCard() {
   const [health, setHealth] = useState<MacHealthResponse | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let unmounted = false;
@@ -90,8 +97,6 @@ export default function AgentRuntimeStatusCard() {
         }
       } catch {
         // preserve previous state
-      } finally {
-        if (!unmounted) setLoading(false);
       }
     };
 
@@ -151,13 +156,23 @@ export default function AgentRuntimeStatusCard() {
               }`}
             >
               <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-                    {agent.name}
-                  </h3>
-                  <span className="text-[10px] uppercase font-semibold tracking-wider text-gray-500 dark:text-gray-400">
-                    {agent.category}
-                  </span>
+                <div className="flex items-center gap-2.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={agent.logoSrc}
+                    alt={`${agent.name} logo`}
+                    className="w-7 h-7 object-contain rounded-md p-0.5 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-700 shadow-2xs shrink-0"
+                    width={28}
+                    height={28}
+                  />
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 leading-tight">
+                      {agent.name}
+                    </h3>
+                    <span className="text-[10px] uppercase font-semibold tracking-wider text-gray-500 dark:text-gray-400">
+                      {agent.category}
+                    </span>
+                  </div>
                 </div>
                 {isRetired ? (
                   <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
@@ -176,7 +191,7 @@ export default function AgentRuntimeStatusCard() {
                 )}
               </div>
 
-              <p className="mt-2 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
+              <p className="mt-2.5 text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
                 {agent.description}
               </p>
 
