@@ -9,13 +9,15 @@
  * - xAI (grok-4.6, grok-3)
  * - DeepSeek (deepseek-v4-pro, deepseek-chat)
  *
- * Detects price changes, newly priced models, and outputs fleet model economics recommendations.
+ * Compares input, output, cache-read, and cache-creation token pricing.
+ * Supports `--update` flag to synchronize the bundled snapshot file directly.
  *
  * Usage:
  *   node scripts/audit-model-pricing.mjs [--update]
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,6 +28,11 @@ const SNAPSHOT_PATH = path.join(
   "lib",
   "pricing",
   "model-pricing.snapshot.json"
+);
+
+const UPDATER_SCRIPT = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "update-model-pricing.mjs"
 );
 
 const UPSTREAM_URL =
@@ -47,17 +54,27 @@ const PROVIDER_BASELINES = {
 };
 
 async function runAudit() {
+  const shouldUpdate = process.argv.includes("--update");
+
+  if (shouldUpdate) {
+    console.log("🔄 --update flag provided: executing canonical pricing updater first...");
+    execFileSync(process.execPath, [UPDATER_SCRIPT], { stdio: "inherit" });
+    console.log("");
+  }
+
   console.log("=== Weekly Model Pricing Audit & Catalog Verification ===");
   console.log(`Checking snapshot at: ${SNAPSHOT_PATH}`);
 
-  let currentSnapshot = {};
+  let currentPricing = {};
   try {
-    currentSnapshot = JSON.parse(readFileSync(SNAPSHOT_PATH, "utf8"));
+    const rawSnapshot = JSON.parse(readFileSync(SNAPSHOT_PATH, "utf8"));
+    currentPricing = rawSnapshot.pricing || rawSnapshot;
   } catch (err) {
     console.warn("Could not read current snapshot, starting fresh:", err.message);
   }
 
-  console.log(`Current snapshot has ${Object.keys(currentSnapshot).length} priced models.`);
+  const modelCount = Object.keys(currentPricing).length;
+  console.log(`Current snapshot has ${modelCount} priced models.`);
   console.log(`Fetching latest catalog from LiteLLM upstream...`);
 
   const res = await fetch(UPSTREAM_URL, {
@@ -69,39 +86,47 @@ async function runAudit() {
 
   const upstreamData = await res.json();
   const changes = [];
-  const newModels = [];
 
-  // Check key fleet models
+  // Check key fleet models comparing input, output, and cache rates
   for (const [modelKey, baseline] of Object.entries(PROVIDER_BASELINES)) {
     const upstreamEntry = upstreamData[modelKey];
-    const currentEntry = currentSnapshot[modelKey];
+    const currentEntry = currentPricing[modelKey];
 
-    if (!upstreamEntry) {
+    if (!upstreamEntry && !currentEntry) {
       console.log(`ℹ️ [Notice] ${modelKey} is managed via runtime override in model-pricing.ts.`);
       continue;
     }
 
-    const currentInputCost = (currentEntry?.input_cost_per_token || 0) * 1_000_000;
-    const upstreamInputCost = (upstreamEntry?.input_cost_per_token || 0) * 1_000_000;
+    const currentInput = (currentEntry?.input_cost_per_token || 0) * 1_000_000;
+    const upstreamInput = (upstreamEntry?.input_cost_per_token || 0) * 1_000_000;
+    const currentOutput = (currentEntry?.output_cost_per_token || 0) * 1_000_000;
+    const upstreamOutput = (upstreamEntry?.output_cost_per_token || 0) * 1_000_000;
 
-    if (Math.abs(currentInputCost - upstreamInputCost) > 0.0001) {
+    const inputDiff = Math.abs(currentInput - upstreamInput) > 0.0001;
+    const outputDiff = Math.abs(currentOutput - upstreamOutput) > 0.0001;
+
+    if (inputDiff || outputDiff) {
       changes.push({
         model: modelKey,
         provider: baseline.provider,
-        oldInputPerM: currentInputCost,
-        newInputPerM: upstreamInputCost,
+        oldInputPerM: currentInput,
+        newInputPerM: upstreamInput,
+        oldOutputPerM: currentOutput,
+        newOutputPerM: upstreamOutput,
       });
     }
   }
 
   console.log("\n--- Provider Baseline Check Results ---");
   if (changes.length === 0) {
-    console.log("✓ All tracked model prices match current provider list rates.");
+    console.log("✓ All tracked model input & output prices match current provider catalog.");
   } else {
     console.log(`⚠️ Detected ${changes.length} price modifications:`);
     for (const c of changes) {
       console.log(
-        `  • ${c.model} (${c.provider}): $${c.oldInputPerM.toFixed(3)}/M -> $${c.newInputPerM.toFixed(3)}/M`
+        `  • ${c.model} (${c.provider}):\n` +
+        `      Input:  $${c.oldInputPerM.toFixed(3)}/M -> $${c.newInputPerM.toFixed(3)}/M\n` +
+        `      Output: $${c.oldOutputPerM.toFixed(3)}/M -> $${c.newOutputPerM.toFixed(3)}/M`
       );
     }
   }

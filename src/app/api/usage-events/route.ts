@@ -102,6 +102,7 @@ export async function GET(request: NextRequest) {
         service: true,
         projectId: true,
         metricType: true,
+        label: true,
         quantity: true,
         unit: true,
         limit: true,

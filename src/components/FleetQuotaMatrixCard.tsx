@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import { Gauge, Zap, Clock, AlertCircle } from "lucide-react";
 
 const SENTENCE_GAP = "\u00a0 ";
+const MAX_STALE_AGE_MS = 8 * 3600 * 1000; // 8 hours freshness guard
 
 interface QuotaBucket {
   id: string;
@@ -15,6 +16,7 @@ interface QuotaBucket {
   limit: number;
   resetAt: string | null;
   occurredAt: string;
+  isStale: boolean;
 }
 
 function formatCountdown(resetAtStr: string | null, nowMs: number): string {
@@ -38,11 +40,18 @@ function formatCountdown(resetAtStr: string | null, nowMs: number): string {
   return `Resets in ${minutes}m`;
 }
 
-function quotaTone(percent: number): {
+function quotaTone(percent: number, isStale: boolean): {
   bar: string;
   badge: string;
   label: string;
 } {
+  if (isStale) {
+    return {
+      bar: "bg-gray-400",
+      badge: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+      label: "Stale / Awaiting Sync",
+    };
+  }
   if (percent >= 50) {
     return {
       bar: "bg-emerald-500",
@@ -66,7 +75,6 @@ function quotaTone(percent: number): {
 
 export default function FleetQuotaMatrixCard() {
   const [buckets, setBuckets] = useState<QuotaBucket[]>([]);
-  const [loading, setLoading] = useState(true);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   // Recompute ticking countdowns every 10 seconds
@@ -87,14 +95,18 @@ export default function FleetQuotaMatrixCard() {
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data.events) && data.events.length > 0) {
-            // Deduplicate by bucketId or label, keeping latest event
             const seen = new Set<string>();
             const extracted: QuotaBucket[] = [];
+            const now = Date.now();
+
             for (const ev of data.events) {
               const meta = (ev.metadata || {}) as Record<string, unknown>;
               const bucketId = String(meta.bucketId || ev.idempotencyKey || ev.id);
               if (seen.has(bucketId)) continue;
               seen.add(bucketId);
+
+              const occurredMs = new Date(ev.occurredAt).getTime();
+              const isStale = now - occurredMs > MAX_STALE_AGE_MS;
 
               const group = String(meta.modelGroup || ev.provider || "Gemini Models");
               const logo = group.toLowerCase().includes("gemini")
@@ -107,10 +119,11 @@ export default function FleetQuotaMatrixCard() {
 
               const rawCredits = Number(ev.credits ?? ev.quantity ?? 100);
               const limit = Number(ev.limit ?? 100);
+              const label = String(ev.label || meta.label || ev.service || "Model Quota");
 
               extracted.push({
                 id: bucketId,
-                label: String(meta.label || ev.service || "Model Quota"),
+                label,
                 modelGroup: group,
                 logoSrc: logo,
                 window: (meta.quotaWindow as "5h" | "weekly" | "daily" | "monthly") || "weekly",
@@ -118,6 +131,7 @@ export default function FleetQuotaMatrixCard() {
                 limit,
                 resetAt: typeof meta.resetAt === "string" ? meta.resetAt : null,
                 occurredAt: ev.occurredAt,
+                isStale,
               });
             }
             if (!unmounted && extracted.length > 0) {
@@ -127,15 +141,12 @@ export default function FleetQuotaMatrixCard() {
         }
       } catch {
         // preserve
-      } finally {
-        if (!unmounted) setLoading(false);
       }
     };
 
     fetchQuota();
   }, []);
 
-  // Baseline starter buckets representing current sliding windows if initial telemetry is synchronizing
   const displayBuckets: QuotaBucket[] = buckets.length > 0 ? buckets : [
     {
       id: "gemini-5h",
@@ -147,6 +158,7 @@ export default function FleetQuotaMatrixCard() {
       limit: 100,
       resetAt: new Date(Date.now() + 4 * 3600 * 1000 + 15 * 60 * 1000).toISOString(),
       occurredAt: new Date().toISOString(),
+      isStale: false,
     },
     {
       id: "gemini-weekly",
@@ -158,6 +170,7 @@ export default function FleetQuotaMatrixCard() {
       limit: 100,
       resetAt: new Date(Date.now() + 5 * 86400 * 1000 + 8 * 3600 * 1000).toISOString(),
       occurredAt: new Date().toISOString(),
+      isStale: false,
     },
     {
       id: "3p-5h",
@@ -169,6 +182,7 @@ export default function FleetQuotaMatrixCard() {
       limit: 100,
       resetAt: new Date(Date.now() + 5 * 3600 * 1000).toISOString(),
       occurredAt: new Date().toISOString(),
+      isStale: false,
     },
     {
       id: "3p-weekly",
@@ -180,6 +194,7 @@ export default function FleetQuotaMatrixCard() {
       limit: 100,
       resetAt: new Date(Date.now() + 5 * 86400 * 1000 + 11 * 3600 * 1000).toISOString(),
       occurredAt: new Date().toISOString(),
+      isStale: false,
     },
   ];
 
@@ -206,12 +221,11 @@ export default function FleetQuotaMatrixCard() {
 
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
         {displayBuckets.map((bucket) => {
-          // Normalize remaining percentage against limit
           const percent =
             bucket.limit > 0
               ? (bucket.creditsRemaining / bucket.limit) * 100
               : bucket.creditsRemaining;
-          const tone = quotaTone(percent);
+          const tone = quotaTone(percent, bucket.isStale);
           const countdown = formatCountdown(bucket.resetAt, nowMs);
 
           return (
@@ -247,7 +261,7 @@ export default function FleetQuotaMatrixCard() {
                 <div className="mt-4">
                   <div className="flex justify-between items-baseline text-xs mb-1.5">
                     <span className="font-semibold text-gray-900 dark:text-gray-100">
-                      {percent.toFixed(1)}% remaining
+                      {bucket.isStale ? "Sync pending" : `${percent.toFixed(1)}% remaining`}
                     </span>
                     <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1 font-mono text-[11px]">
                       <Clock className="h-3 w-3" />
@@ -264,7 +278,7 @@ export default function FleetQuotaMatrixCard() {
               </div>
 
               <div className="mt-3 pt-2.5 border-t border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400">
-                <span>Refreshes via LaunchAgent every 4h</span>
+                <span>{bucket.isStale ? "Last recorded: " + new Date(bucket.occurredAt).toLocaleDateString() : "Refreshes via LaunchAgent every 4h"}</span>
                 <span className="font-mono text-[10px]">
                   {bucket.resetAt ? new Date(bucket.resetAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "sliding"}
                 </span>
