@@ -103,9 +103,49 @@ const GROK_45: ModelPricingEntry = {
   max_input_tokens: 500_000,
 };
 
+const GEMINI_36_FLASH: ModelPricingEntry = {
+  input_cost_per_token: 3.75e-7,
+  output_cost_per_token: 1.875e-6,
+  cache_read_input_token_cost: 3.75e-8,
+  cache_creation_input_token_cost: 2.08333333333333e-8,
+  litellm_provider: "gemini",
+  mode: "chat",
+};
+
+const GEMINI_25_PRO: ModelPricingEntry = {
+  input_cost_per_token: 1.25e-6,
+  output_cost_per_token: 5e-6,
+  cache_read_input_token_cost: 3.125e-7,
+  cache_creation_input_token_cost: 1.25e-7,
+  litellm_provider: "gemini",
+  mode: "chat",
+};
+
+const CLAUDE_OPUS_5: ModelPricingEntry = {
+  input_cost_per_token: 1.5e-5,
+  output_cost_per_token: 7.5e-5,
+  cache_read_input_token_cost: 1.5e-6,
+  cache_creation_input_token_cost: 1.875e-5,
+  litellm_provider: "anthropic",
+  mode: "chat",
+};
+
+const DEEPSEEK_V4_PRO: ModelPricingEntry = {
+  input_cost_per_token: 1.4e-7,
+  output_cost_per_token: 2.8e-7,
+  cache_read_input_token_cost: 1.4e-8,
+  litellm_provider: "deepseek",
+  mode: "chat",
+};
+
 const RUNTIME_PRICING_OVERRIDES: Record<string, ModelPricingEntry> = {
   "gemini-3.7-flash": GEMINI_37_FLASH,
   "gemini-3.7-flash:batch": GEMINI_37_FLASH_BATCH,
+  "gemini-3.6-flash": GEMINI_36_FLASH,
+  "gemini-2.5-pro": GEMINI_25_PRO,
+  "claude-opus-5": CLAUDE_OPUS_5,
+  "deepseek-v4-pro": DEEPSEEK_V4_PRO,
+  "deepseek-v4-flash": DEEPSEEK_V4_PRO,
   "grok-4.6": GROK_46,
   "grok-4.6-build": GROK_46,
   "xai/grok-4.6": GROK_46,
