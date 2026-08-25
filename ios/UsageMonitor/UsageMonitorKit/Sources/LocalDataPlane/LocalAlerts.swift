@@ -94,7 +94,7 @@ public enum LocalAlertBuilder {
                 LocalAlertItem(
                     id: "needs-key-\(only.id)",
                     title: "\(only.displayName) needs API key",
-                    message: "Open this provider and tap Connect Account to paste a key. The Active toggle does not connect the account.",
+                    message: "Open this provider and tap Connect Account to paste a key.",
                     severity: .info,
                     providerId: only.id
                 )
@@ -104,7 +104,7 @@ public enum LocalAlertBuilder {
                 LocalAlertItem(
                     id: "needs-key-many",
                     title: "\(needingKey.count) accounts need an API key",
-                    message: "Restored cards are placeholders. Open Providers, filter Needs Key, and tap Connect Account on each. The Active toggle does not connect an account.",
+                    message: "Restored cards start empty.  Open Providers, choose Needs Key, and tap Connect Account on each.",
                     severity: .info
                 )
             )

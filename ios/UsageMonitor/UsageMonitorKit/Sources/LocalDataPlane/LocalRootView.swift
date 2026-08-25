@@ -219,7 +219,7 @@ public struct LocalRootView: View {
                     pendingDeleteProvider = nil
                 }
             } message: { provider in
-                Text("“\(provider.displayName)” and its Keychain credentials will be removed from this phone.")
+                Text("“\(provider.displayName)” and its saved key will be removed from this phone.")
             }
         }
     }
@@ -273,7 +273,7 @@ public struct LocalRootView: View {
                     LocalExportButton(model: model)
                     LocalImportButton(model: model)
                     LocalKeysImportButton(model: model)
-                    Text("JSON restore brings cards, budgets, and fees — never API keys. After import, open each provider and tap Connect Account, or use Import Keys for a Mac-built .umkeys bundle.")
+                    Text("A backup restores cards, budgets, and fees — never API keys.  After import, open each provider and tap Connect Account, or use Import Keys for a key file from your Mac.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -282,7 +282,7 @@ public struct LocalRootView: View {
                         .font(Theme.Typography.caption)
                 }
                 Section("Providers Catalog") {
-                    Text("\(LocalProviderCatalog.all.count) known services. “Add Missing Providers” only creates empty cards. It does not connect accounts. Open a card and tap Connect Account to paste a key.")
+                    Text("\(LocalProviderCatalog.all.count) known services.  Add Missing Providers only creates empty cards.  It does not connect accounts.  Open a card and tap Connect Account to paste a key.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button("Add Missing Providers") {
@@ -315,7 +315,7 @@ public struct LocalRootView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Removes every provider, plan, subscription charge, and Keychain API key on this phone.")
+                Text("Removes every provider, plan, subscription charge, and saved API key on this phone.")
             }
         }
     }
@@ -329,7 +329,7 @@ public struct LocalRootView: View {
                     .foregroundStyle(Theme.Colors.secondaryText)
                     .font(Theme.Typography.caption)
             } else {
-                Text("\(needingKey.count) pollable account\(needingKey.count == 1 ? "" : "s") still need an API key. The Active toggle does nothing until a key is saved.")
+                Text("\(needingKey.count) account\(needingKey.count == 1 ? "" : "s") still need an API key.  Open a card and tap Connect Account.")
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.secondaryText)
                 Button {
@@ -361,7 +361,7 @@ public struct LocalRootView: View {
         } header: {
             Text("Connect Accounts")
         } footer: {
-            Text("Restored or catalog cards are placeholders. Connect Account on a provider saves the key in Keychain and turns polling on. Import Keys (Backup below) is the Mac → phone bundle path.")
+            Text("Restored cards start empty.  Connect Account on a provider saves the key on this phone and starts usage fetch.  Import Keys under Backup restores a key file from your Mac.")
         }
     }
 }
@@ -403,7 +403,7 @@ private struct AddProviderSheet: View {
                         Button("Add Missing Providers") {
                             Task { await seed() }
                         }
-                        Text("Creates empty cards only. After they appear, open a card and tap Connect Account to paste a key — the Active toggle is not a connection.")
+                        Text("Creates empty cards only.  After they appear, open a card and tap Connect Account to paste a key.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         if let seedMessage {
@@ -517,8 +517,8 @@ private struct AddProviderSheet: View {
         do {
             let n = try await model.ensureCatalogProviders()
             seedMessage = n == 0
-                ? "All known services already have a card. Open one and tap Connect Account to add a key."
-                : "Added \(n) empty card\(n == 1 ? "" : "s"). Open a provider and tap Connect Account — the toggle is not a connection."
+                ? "All known services already have a card.  Open one and tap Connect Account to add a key."
+                : "Added \(n) empty card\(n == 1 ? "" : "s").  Open a provider and tap Connect Account to add a key."
             try? await model.reload()
         } catch {
             self.error = error.localizedDescription
@@ -735,13 +735,13 @@ private struct ProviderDetailView: View {
                             }
                             .disabled(model.isRefreshing)
                         } else {
-                            Label("Save a key under Connect Account to enable Fetch", systemImage: "key")
+                            Label("Paste a key above to enable Fetch", systemImage: "key")
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                     } footer: {
                         Text(p.canFetch
-                             ? "Pulls latest usage/cost from the provider API. Not an invoice."
-                             : "Paste a key in Connect Account above, or track cost as a recurring fee.")
+                             ? "Pulls latest usage and cost from the provider.  Not an invoice."
+                             : "Paste a key under Connect Account, or track cost as a Recurring Fee.")
                     }
                 } else {
                     Section {
@@ -781,7 +781,7 @@ private struct ProviderDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Removes this connection, Keychain key, and local history for it.")
+            Text("Removes this connection, its saved key, and local history for it.")
         }
     }
 
@@ -828,7 +828,7 @@ private struct ProviderDetailView: View {
             }
 
             if p.canFetch {
-                Toggle("Poll automatically when due", isOn: Binding(
+                Toggle("Fetch Usage Automatically", isOn: Binding(
                     get: { p.isActive },
                     set: { next in
                         Task {
@@ -879,15 +879,15 @@ private struct ProviderDetailView: View {
 
     private func connectionFooter(_ p: LocalProvider, entry: LocalProviderCatalogEntry?) -> String {
         if p.canFetch {
-            return "Key is in Keychain. Poll automatically runs on refresh. The toggle only pauses polling — it does not connect or disconnect."
+            return "The key is saved on this phone.  Fetch Usage Automatically runs on refresh.  Turn it off to pause fetch without removing the key."
         }
         if p.isPollable {
-            return "This card is a placeholder until you paste a key. Connect Account saves the key and turns polling on. The old Active toggle did nothing without a key."
+            return "This card is empty until you paste a key.  Connect Account saves the key and starts usage fetch."
         }
         if entry?.mode == .keyPlusSubscription {
-            return "A key is optional. Most cost for this service is the Recurring Fee below."
+            return "A key is optional.  Most cost for this service is the Recurring Fee below."
         }
-        return "No phone poll for this adapter. Enter a Recurring Fee below if you pay for it."
+        return "This service does not fetch usage on the phone.  Enter a Recurring Fee below if you pay for it."
     }
 
     private func saveConnectKey() async {

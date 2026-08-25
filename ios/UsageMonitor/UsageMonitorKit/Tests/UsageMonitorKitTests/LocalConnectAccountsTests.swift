@@ -97,6 +97,20 @@ final class LocalConnectAccountsTests: XCTestCase {
         )
         XCTAssertEqual(items.filter { $0.id == "needs-key-many" }.count, 1)
         XCTAssertTrue(items.contains { $0.message.contains("Connect Account") })
+        XCTAssertFalse(items.contains { $0.message.contains("Active toggle") })
+    }
+
+    func testEmptyCatalogShellsCannotFetchUntilConnected() async throws {
+        let store = SQLiteLocalStore.inMemory()
+        let model = LocalAppModel(store: store, secrets: InMemoryProviderSecrets())
+        try await store.open()
+        _ = try await model.ensureCatalogProviders()
+
+        let pollable = model.providers.filter(\.isPollable)
+        XCTAssertFalse(pollable.isEmpty)
+        XCTAssertTrue(pollable.allSatisfy { $0.needsKey })
+        XCTAssertTrue(pollable.allSatisfy { !$0.canFetch })
+        XCTAssertTrue(pollable.allSatisfy { !$0.isActive })
     }
 }
 

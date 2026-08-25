@@ -69,7 +69,7 @@ struct LocalOverviewContent: View {
                     Text("Connect Accounts")
                         .font(Theme.Typography.captionEmphasis)
                         .foregroundStyle(Theme.Colors.primaryText)
-                    Text("\(needsKeyCount) restored card\(needsKeyCount == 1 ? "" : "s") still need an API key. Open a provider and tap Connect Account — the Active toggle is not a connection.")
+                    Text("\(needsKeyCount) restored card\(needsKeyCount == 1 ? "" : "s") still need an API key.  Open a provider and tap Connect Account.")
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Colors.secondaryText)
                         .multilineTextAlignment(.leading)

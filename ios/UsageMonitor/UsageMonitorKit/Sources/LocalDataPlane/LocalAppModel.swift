@@ -268,9 +268,8 @@ public final class LocalAppModel {
         return replaced
     }
 
-    /// Attach or replace a Keychain credential on an existing provider card.
-    /// Activates the row so the next refresh can poll — the Active toggle is
-    /// not a substitute for this step.
+    /// Attach or replace a credential on an existing provider card.
+    /// Activates fetch so the next refresh can run.
     public func connectCredentials(
         providerId: String,
         apiKey: String,
@@ -734,7 +733,7 @@ public final class LocalAppModel {
             try? await store.setProviderFetchResult(
                 id: provider.id,
                 at: Date(),
-                error: "Missing API key in Keychain"
+                error: "No API key saved on this phone."
             )
             return
         }

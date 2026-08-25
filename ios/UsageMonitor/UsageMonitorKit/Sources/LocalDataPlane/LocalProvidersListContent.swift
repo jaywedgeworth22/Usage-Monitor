@@ -113,16 +113,16 @@ struct LocalProvidersListContent: View {
                                 } label: {
                                     Label("Fetch Now", systemImage: "arrow.triangle.2.circlepath")
                                 }
-                            }
-                            Button {
-                                Task {
-                                    try? await model.setActive(providerId: p.id, isActive: !p.isActive)
+                                Button {
+                                    Task {
+                                        try? await model.setActive(providerId: p.id, isActive: !p.isActive)
+                                    }
+                                } label: {
+                                    Label(
+                                        p.isActive ? "Pause Fetch" : "Resume Fetch",
+                                        systemImage: p.isActive ? "pause.circle" : "play.circle"
+                                    )
                                 }
-                            } label: {
-                                Label(
-                                    p.isActive ? "Deactivate" : "Activate",
-                                    systemImage: p.isActive ? "pause.circle" : "play.circle"
-                                )
                             }
                             Button(role: .destructive) {
                                 onRequestDelete(p)
@@ -162,7 +162,7 @@ struct LocalProvidersListContent: View {
                 EmptyState(
                     systemImage: "server.rack",
                     title: "No Providers Yet",
-                    message: "Add a pollable API or a recurring fee — same catalog families as the web.",
+                    message: "Add a provider with a key, or a Recurring Fee.",
                     actionTitle: "Add Provider",
                     action: onAdd
                 )
