@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { join } from "node:path";
 import { UsageTelemetryV2BatchSchema } from "@jaywedgeworth22/congress-trading-shared";
+import { fleetIngestJobs } from "./fleet-usage-collector.mjs";
 import {
   ANTIGRAVITY_PRODUCER_ID,
   CLAUDE_PRODUCER_ID,
@@ -497,5 +498,71 @@ const dsBatch = {
   events: dsEvents,
 };
 assert(UsageTelemetryV2BatchSchema.safeParse(dsBatch).success, "deepseek batch schema valid");
+
+const quotaEvent = {
+  eventId: "agy-quota:gemini-weekly:2026-08-26T00:00:00Z",
+  provider: "google-antigravity",
+  service: "antigravity-cli",
+  label: "Gemini Models (weekly)",
+  metricType: "quota",
+  billingMode: "actual",
+  confidence: "actual",
+  limit: 100,
+  credits: 93,
+  occurredAt: "2026-08-26T00:00:00.000Z",
+};
+const fleetJobs = fleetIngestJobs({
+  quotaEvents: [quotaEvent],
+  sessionResults: {
+    antigravity: agEvents,
+    claude: claudeEvents,
+    codex: codexEvents,
+    grok: grokEvents,
+    copilot: copilotEvents,
+    deepseek: dsEvents,
+  },
+});
+assert(
+  fleetJobs.every((job) => job.producerId !== "fleet-usage-collector"),
+  "fleet collector must not post a synthetic fleet-usage-collector producerId"
+);
+assert(
+  fleetJobs.find((job) => job.producerId === ANTIGRAVITY_PRODUCER_ID)?.events[0] ===
+    quotaEvent,
+  "Antigravity quota shares antigravity-cli with transcript events"
+);
+assert(
+  fleetJobs.find((job) => job.producerId === CLAUDE_PRODUCER_ID)?.events === claudeEvents,
+  "Claude batch uses claude-code"
+);
+assert(
+  fleetJobs.find((job) => job.producerId === CODEX_PRODUCER_ID)?.events === codexEvents,
+  "Codex batch uses openai-codex"
+);
+assert(
+  fleetJobs.find((job) => job.producerId === GROK_PRODUCER_ID)?.events === grokEvents,
+  "Grok batch uses grok-build"
+);
+assert(
+  fleetJobs.find((job) => job.producerId === COPILOT_PRODUCER_ID)?.events ===
+    copilotEvents,
+  "Copilot batch uses github-copilot"
+);
+assert(
+  fleetJobs.find((job) => job.producerId === DEEPSEEK_PRODUCER_ID)?.events === dsEvents,
+  "DeepSeek batch uses deepseek-dsh"
+);
+for (const job of fleetJobs) {
+  assert(
+    UsageTelemetryV2BatchSchema.safeParse({
+      schemaVersion: 2,
+      producerId: job.producerId,
+      producerInstanceId: "test-host",
+      events: job.events,
+    }).success,
+    `fleet ${job.producerId} batch schema valid`
+  );
+}
+assert(fleetIngestJobs({ quotaEvents: [], sessionResults: {} }).length === 0, "empty jobs");
 
 console.log("ok session-token-collectors");

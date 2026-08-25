@@ -46,6 +46,12 @@ describe("subscription analytics discriminators", () => {
     expect(
       isSubscriptionAnalyticsTelemetry({ sourceApp: "github", service: "copilot" })
     ).toBe(false);
+    expect(
+      isSubscriptionAnalyticsTelemetry({
+        sourceApp: "fleet-usage-collector",
+        service: "grok-cli",
+      })
+    ).toBe(false);
   });
 
   it("does not double-count Claude OTLP costUsd with token derivation", () => {

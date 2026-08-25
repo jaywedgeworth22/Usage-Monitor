@@ -170,6 +170,32 @@ async function collectAllSessionEvents(since) {
   return results;
 }
 
+/**
+ * v2 ingest maps sourceApp and the idempotency key from the *batch*
+ * producerId (hash(producerId, eventId)).  Posting every seat as
+ * `fleet-usage-collector` therefore:
+ *   - misses SUBSCRIPTION_ANALYTICS_SOURCE_APPS (claude-code / grok-build /
+ *     openai-codex / antigravity-cli / github-copilot), so Grok costUsdTicks
+ *     land on the cash/pushed-usage path instead of estimatedApiEquivalentUsd
+ *   - cannot dedupe against the per-seat LaunchAgents, so a dual install
+ *     persists the same tokens twice
+ * Keep one batch per seat producer id so eventIds already hashed with those
+ * ids stay idempotent with the individual collectors.
+ */
+export function fleetIngestJobs({ quotaEvents = [], sessionResults = {} } = {}) {
+  return [
+    {
+      producerId: ANTIGRAVITY_PRODUCER_ID,
+      events: [...quotaEvents, ...(sessionResults.antigravity ?? [])],
+    },
+    { producerId: CLAUDE_PRODUCER_ID, events: sessionResults.claude ?? [] },
+    { producerId: CODEX_PRODUCER_ID, events: sessionResults.codex ?? [] },
+    { producerId: GROK_PRODUCER_ID, events: sessionResults.grok ?? [] },
+    { producerId: COPILOT_PRODUCER_ID, events: sessionResults.copilot ?? [] },
+    { producerId: DEEPSEEK_PRODUCER_ID, events: sessionResults.deepseek ?? [] },
+  ].filter((job) => job.events.length > 0);
+}
+
 async function main() {
   let args;
   try {
@@ -202,17 +228,9 @@ async function main() {
   log(`  - Copilot CLI: ${sessionResults.copilot.length}`);
   log(`  - DeepSeek: ${sessionResults.deepseek.length}`);
 
-  const allEvents = [
-    ...quotaEvents,
-    ...sessionResults.antigravity,
-    ...sessionResults.claude,
-    ...sessionResults.codex,
-    ...sessionResults.grok,
-    ...sessionResults.copilot,
-    ...sessionResults.deepseek,
-  ];
+  const jobs = fleetIngestJobs({ quotaEvents, sessionResults });
 
-  if (allEvents.length === 0) {
+  if (jobs.length === 0) {
     log("Nothing to send.");
     return;
   }
@@ -223,17 +241,27 @@ async function main() {
     process.env.CLAUDE_INGEST_TOKEN?.trim();
 
   try {
-    const ack = await postUsageBatches({
-      events: allEvents,
-      ingestUrl: INGEST_URL,
-      ingestToken: token,
-      producerId: "fleet-usage-collector",
-      dryRun: DRY || args.dryRun,
-      log,
-    });
+    let received = 0;
+    let persisted = 0;
+    let rejected = 0;
+    let dryRun = false;
+    for (const job of jobs) {
+      const ack = await postUsageBatches({
+        events: job.events,
+        ingestUrl: INGEST_URL,
+        ingestToken: token,
+        producerId: job.producerId,
+        dryRun: DRY || args.dryRun,
+        log,
+      });
+      received += ack.received;
+      persisted += ack.persisted;
+      rejected += ack.rejected;
+      dryRun = dryRun || Boolean(ack.dryRun);
+    }
     log(
-      `Pass complete: received=${ack.received} persisted=${ack.persisted} rejected=${ack.rejected}${
-        ack.dryRun ? " (dry-run)" : ""
+      `Pass complete: received=${received} persisted=${persisted} rejected=${rejected}${
+        dryRun ? " (dry-run)" : ""
       }`
     );
   } catch (error) {
