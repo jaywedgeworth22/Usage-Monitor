@@ -80,4 +80,4 @@ ASC: create apps with the **new** bundle IDs before first upload (API key cannot
 - **Poll (API key):** OpenRouter, OpenAI org costs, DeepSeek balance, Anthropic Admin cost report
 - **API vs chat split:** OpenAI (API) + ChatGPT (subscription); Anthropic (API) + Claude (subscription); xAI + SuperGrok (subscription).
 - **Connection chips:** Polls Cost / Polls Balance / Recurring Fee / Optional Key / Fee Only — never raw `subscription_only`.
-- **+ → Add Missing Providers** creates inactive $0 cards for every known service (private SQLite; survives app updates; no keys/fees invented).
+- **+ → Add Missing Providers** creates empty cards for every known service (no keys or fees invented).  Open a card and tap **Connect Account** to paste a key.  Fetch Usage Automatically appears only after a key is saved.  **Add Provider** on an existing card updates that card instead of erroring.

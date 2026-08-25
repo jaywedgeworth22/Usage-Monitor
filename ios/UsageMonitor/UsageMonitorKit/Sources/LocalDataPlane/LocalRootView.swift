@@ -15,6 +15,7 @@ public struct LocalRootView: View {
     @State private var pendingDeleteProvider: LocalProvider?
     @State private var showWipeConfirmation = false
     @State private var pathProviders = NavigationPath()
+    @State private var providersFilter: LocalProviderFilter = .all
 
     /// Caller must supply a main-actor `AppSettings` (e.g. `@State` from the app
     /// entry). No default `AppSettings()` here — its `@MainActor` init cannot run
@@ -69,10 +70,13 @@ public struct LocalRootView: View {
             LocalProjectsTab(model: model)
                 .tabItem { Label(Tab.projects.title, systemImage: Tab.projects.systemImage) }
                 .tag(Tab.projects)
-            LocalAlertsTab(model: model) { providerId in
+            LocalAlertsTab(model: model, openProvider: { providerId in
                 tab = .providers
                 pathProviders.append(providerId)
-            }
+            }, openNeedsKey: {
+                providersFilter = .needsKey
+                tab = .providers
+            })
             .tabItem { Label(Tab.alerts.title, systemImage: Tab.alerts.systemImage) }
             .tag(Tab.alerts)
             .badge(model.alerts.isEmpty ? 0 : model.alerts.count)
@@ -119,12 +123,17 @@ public struct LocalRootView: View {
                         LocalOverviewContent(
                             summary: s,
                             alertCount: model.alerts.count,
+                            needsKeyCount: model.pollableProvidersNeedingKey.count,
                             onOpenProvider: { id in
                                 tab = .providers
                                 pathProviders.append(id)
                             },
                             onOpenAlerts: { tab = .alerts },
-                            onAddProvider: { showAddProvider = true }
+                            onAddProvider: { showAddProvider = true },
+                            onShowNeedsKey: {
+                                providersFilter = .needsKey
+                                tab = .providers
+                            }
                         )
                         if !model.subscriptions.filter({ $0.status == "active" && $0.costUsd > 0 }).isEmpty {
                             LocalRecurringFeesCard(
@@ -174,6 +183,7 @@ public struct LocalRootView: View {
         NavigationStack(path: $pathProviders) {
             LocalProvidersListContent(
                 model: model,
+                filter: $providersFilter,
                 onAdd: { showAddProvider = true },
                 onRequestDelete: { pendingDeleteProvider = $0 }
             )
@@ -209,7 +219,7 @@ public struct LocalRootView: View {
                     pendingDeleteProvider = nil
                 }
             } message: { provider in
-                Text("“\(provider.displayName)” and its Keychain credentials will be removed from this phone.")
+                Text("“\(provider.displayName)” and its saved key will be removed from this phone.")
             }
         }
     }
@@ -219,6 +229,7 @@ public struct LocalRootView: View {
     private var settingsTab: some View {
         NavigationStack {
             List {
+                connectAccountsSection
                 Section("This App") {
                     LabeledContent("Product", value: "on-device self-host")
                     LabeledContent("Schema", value: "v\(model.schemaVersion)")
@@ -262,7 +273,7 @@ public struct LocalRootView: View {
                     LocalExportButton(model: model)
                     LocalImportButton(model: model)
                     LocalKeysImportButton(model: model)
-                    Text("Export/import providers, plans, fees, charges, and snapshots as JSON. Never includes API keys — re-enter keys after import.")
+                    Text("A backup restores cards, budgets, and fees — never API keys.  After import, open each provider and tap Connect Account, or use Import Keys for a key file from your Mac.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -271,7 +282,7 @@ public struct LocalRootView: View {
                         .font(Theme.Typography.caption)
                 }
                 Section("Providers Catalog") {
-                    Text("\(LocalProviderCatalog.all.count) known services. “Add Missing Providers” creates inactive empty cards (no fees, no keys) so you can fill them in. Safe to re-run; data stays on this phone across app updates.")
+                    Text("\(LocalProviderCatalog.all.count) known services.  Add Missing Providers only creates empty cards.  It does not connect accounts.  Open a card and tap Connect Account to paste a key.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button("Add Missing Providers") {
@@ -304,8 +315,53 @@ public struct LocalRootView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Removes every provider, plan, subscription charge, and Keychain API key on this phone.")
+                Text("Removes every provider, plan, subscription charge, and saved API key on this phone.")
             }
+        }
+    }
+
+    @ViewBuilder
+    private var connectAccountsSection: some View {
+        let needingKey = model.pollableProvidersNeedingKey
+        Section {
+            if needingKey.isEmpty {
+                Label("Pollable accounts have keys, or none need one yet.", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .font(Theme.Typography.caption)
+            } else {
+                Text("\(needingKey.count) account\(needingKey.count == 1 ? "" : "s") still need an API key.  Open a card and tap Connect Account.")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                Button {
+                    providersFilter = .needsKey
+                    tab = .providers
+                } label: {
+                    Label("Show Accounts That Need a Key", systemImage: "key")
+                }
+                ForEach(needingKey.prefix(6)) { provider in
+                    Button {
+                        tab = .providers
+                        pathProviders.append(provider.id)
+                    } label: {
+                        HStack {
+                            Text(provider.displayName)
+                            Spacer()
+                            Text("Connect")
+                                .font(Theme.Typography.captionEmphasis)
+                                .foregroundStyle(Theme.Colors.accent)
+                        }
+                    }
+                }
+                if needingKey.count > 6 {
+                    Text("+\(needingKey.count - 6) more")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.tertiaryText)
+                }
+            }
+        } header: {
+            Text("Connect Accounts")
+        } footer: {
+            Text("Restored cards start empty.  Connect Account on a provider saves the key on this phone and starts usage fetch.  Import Keys under Backup restores a key file from your Mac.")
         }
     }
 }
@@ -347,7 +403,7 @@ private struct AddProviderSheet: View {
                         Button("Add Missing Providers") {
                             Task { await seed() }
                         }
-                        Text("Creates empty cards for every known service that isn’t on this phone yet — no keys, no fees invented. Your data stays in the app’s private storage across updates.")
+                        Text("Creates empty cards only.  After they appear, open a card and tap Connect Account to paste a key.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         if let seedMessage {
@@ -377,6 +433,15 @@ private struct AddProviderSheet: View {
                                                 .lineLimit(2)
                                         }
                                         Spacer()
+                                        if model.providers.contains(where: { $0.name == entry.name }) {
+                                            Text(
+                                                model.providers.first(where: { $0.name == entry.name })?.needsKey == true
+                                                    ? "Needs key"
+                                                    : "Added"
+                                            )
+                                            .font(.caption)
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                        }
                                         Image(systemName: "chevron.right")
                                             .font(.caption)
                                             .foregroundStyle(.tertiary)
@@ -440,7 +505,7 @@ private struct AddProviderSheet: View {
                 }
                 if selected != nil {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") { Task { await save() } }
+                        Button(saveLabel) { Task { await save() } }
                     }
                 }
             }
@@ -452,8 +517,8 @@ private struct AddProviderSheet: View {
         do {
             let n = try await model.ensureCatalogProviders()
             seedMessage = n == 0
-                ? "All known services already have a card on this phone."
-                : "Added \(n) provider card\(n == 1 ? "" : "s") (inactive, $0)."
+                ? "All known services already have a card.  Open one and tap Connect Account to add a key."
+                : "Added \(n) empty card\(n == 1 ? "" : "s").  Open a provider and tap Connect Account to add a key."
             try? await model.reload()
         } catch {
             self.error = error.localizedDescription
@@ -480,6 +545,14 @@ private struct AddProviderSheet: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    private var saveLabel: String {
+        guard let entry = selected else { return "Save" }
+        if model.providers.contains(where: { $0.name == entry.name }) {
+            return "Connect"
+        }
+        return "Save"
     }
 }
 
@@ -521,6 +594,11 @@ private struct ProviderDetailView: View {
     @State private var actionError: String?
     @State private var historyPoints: [Double] = []
     @State private var historyCaption: String?
+    @State private var connectKey = ""
+    @State private var connectTeamId = ""
+    @State private var connectAccountSid = ""
+    @State private var connectApiKeySid = ""
+    @State private var isConnecting = false
 
     private var provider: LocalProvider? {
         model.providers.first { $0.id == providerId }
@@ -533,47 +611,7 @@ private struct ProviderDetailView: View {
     var body: some View {
         List {
             if let p = provider {
-                Section {
-                    LabeledContent("Name", value: p.displayName)
-                    if let entry = LocalProviderCatalog.entry(name: p.name) {
-                        LabeledContent("Connection", value: entry.connectionSummary)
-                        Text(entry.help)
-                            .font(.caption)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                        FlowAbilityChips(abilities: entry.abilities)
-                    } else {
-                        LabeledContent(
-                            "Connection",
-                            value: p.isPollable
-                                ? (p.canFetch ? "polls when active" : "pollable · needs key")
-                                : "recurring fee only"
-                        )
-                    }
-                    Toggle("Active (poll / materialize)", isOn: Binding(
-                        get: { p.isActive },
-                        set: { next in
-                            Task {
-                                try? await model.setActive(providerId: providerId, isActive: next)
-                            }
-                        }
-                    ))
-                    if let last = p.lastFetchAt {
-                        LabeledContent("Last Fetch", value: last.formatted())
-                    }
-                    if let err = p.lastFetchError, !err.isEmpty {
-                        Text(err)
-                            .font(.caption)
-                            .foregroundStyle(Theme.Colors.warning)
-                    }
-                } header: {
-                    Text("Provider")
-                } footer: {
-                    Text(p.isPollable
-                         ? (p.canFetch
-                            ? "Phone can poll this adapter when Active."
-                            : "Poll adapter is available but no API key is stored — re-add with a key to fetch.")
-                         : "No phone poll for this adapter. Enter a recurring fee below (like a subscription on the web).")
-                }
+                connectionSection(p)
 
                 if let s = spend {
                     Section {
@@ -697,13 +735,13 @@ private struct ProviderDetailView: View {
                             }
                             .disabled(model.isRefreshing)
                         } else {
-                            Label("Add an API key to enable Fetch", systemImage: "key")
+                            Label("Paste a key above to enable Fetch", systemImage: "key")
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                     } footer: {
                         Text(p.canFetch
-                             ? "Pulls latest usage/cost from the provider API. Not an invoice."
-                             : "Re-add this provider with a key, or track cost as a recurring fee above.")
+                             ? "Pulls latest usage and cost from the provider.  Not an invoice."
+                             : "Paste a key under Connect Account, or track cost as a Recurring Fee.")
                     }
                 } else {
                     Section {
@@ -743,7 +781,142 @@ private struct ProviderDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Removes this connection, Keychain key, and local history for it.")
+            Text("Removes this connection, its saved key, and local history for it.")
+        }
+    }
+
+    @ViewBuilder
+    private func connectionSection(_ p: LocalProvider) -> some View {
+        let entry = LocalProviderCatalog.entry(name: p.name)
+        Section {
+            LabeledContent("Name", value: p.displayName)
+            LabeledContent("Status", value: connectionStatus(p, entry: entry))
+            if let entry {
+                Text(entry.help)
+                    .font(.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                FlowAbilityChips(abilities: entry.abilities)
+            }
+
+            if p.isPollable || entry?.mode == .keyPlusSubscription || entry?.mode == .poll {
+                if p.canFetch {
+                    Label("API key saved on this phone", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(Theme.Colors.success)
+                    SecureField(entry?.keyFieldLabel ?? "Replacement API key", text: $connectKey)
+                    extraConnectFields(entry)
+                    Button("Replace Key") {
+                        Task { await saveConnectKey() }
+                    }
+                    .disabled(connectKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isConnecting)
+                    Button("Remove Key", role: .destructive) {
+                        Task { await removeConnectKey() }
+                    }
+                } else {
+                    SecureField(entry?.keyFieldLabel ?? "API key", text: $connectKey)
+                    extraConnectFields(entry)
+                    Button {
+                        Task { await saveConnectKey() }
+                    } label: {
+                        if isConnecting {
+                            ProgressView()
+                        } else {
+                            Label("Connect Account", systemImage: "key.fill")
+                        }
+                    }
+                    .disabled(connectKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isConnecting)
+                }
+            }
+
+            if p.canFetch {
+                Toggle("Fetch Usage Automatically", isOn: Binding(
+                    get: { p.isActive },
+                    set: { next in
+                        Task {
+                            try? await model.setActive(providerId: providerId, isActive: next)
+                        }
+                    }
+                ))
+            }
+
+            if let last = p.lastFetchAt {
+                LabeledContent("Last Fetch", value: last.formatted())
+            }
+            if let err = p.lastFetchError, !err.isEmpty {
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(Theme.Colors.warning)
+            }
+        } header: {
+            Text("Connect Account")
+        } footer: {
+            Text(connectionFooter(p, entry: entry))
+        }
+    }
+
+    @ViewBuilder
+    private func extraConnectFields(_ entry: LocalProviderCatalogEntry?) -> some View {
+        if entry?.requiresTeamId == true || entry?.adapterKind == "xai" {
+            TextField("Team id (required for xAI)", text: $connectTeamId)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+        if entry?.requiresAccountSid == true || entry?.adapterKind == "twilio" {
+            TextField("Account SID (required)", text: $connectAccountSid)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            TextField("API Key SID (optional)", text: $connectApiKeySid)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+    }
+
+    private func connectionStatus(_ p: LocalProvider, entry: LocalProviderCatalogEntry?) -> String {
+        if p.canFetch { return p.isActive ? "connected · polling" : "connected · paused" }
+        if p.needsKey { return "needs API key" }
+        if entry?.mode == .subscription { return "recurring fee only" }
+        return "not connected"
+    }
+
+    private func connectionFooter(_ p: LocalProvider, entry: LocalProviderCatalogEntry?) -> String {
+        if p.canFetch {
+            return "The key is saved on this phone.  Fetch Usage Automatically runs on refresh.  Turn it off to pause fetch without removing the key."
+        }
+        if p.isPollable {
+            return "This card is empty until you paste a key.  Connect Account saves the key and starts usage fetch."
+        }
+        if entry?.mode == .keyPlusSubscription {
+            return "A key is optional.  Most cost for this service is the Recurring Fee below."
+        }
+        return "This service does not fetch usage on the phone.  Enter a Recurring Fee below if you pay for it."
+    }
+
+    private func saveConnectKey() async {
+        isConnecting = true
+        defer { isConnecting = false }
+        do {
+            try await model.connectCredentials(
+                providerId: providerId,
+                apiKey: connectKey,
+                teamId: connectTeamId.isEmpty ? nil : connectTeamId,
+                accountSid: connectAccountSid.isEmpty ? nil : connectAccountSid,
+                apiKeySid: connectApiKeySid.isEmpty ? nil : connectApiKeySid
+            )
+            connectKey = ""
+            connectTeamId = ""
+            connectAccountSid = ""
+            connectApiKeySid = ""
+            actionError = nil
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func removeConnectKey() async {
+        do {
+            try await model.disconnectCredentials(providerId: providerId)
+            actionError = nil
+        } catch {
+            actionError = error.localizedDescription
         }
     }
 
