@@ -422,6 +422,103 @@ final class OfflineCacheTests: XCTestCase {
         let data = try JSONEncoder().encode(legacy)
         let decoded = try JSONDecoder().decode(WidgetSnapshot.self, from: data)
         XCTAssertEqual(decoded.projects, [])
+        XCTAssertNil(decoded.llm)
+        XCTAssertNil(decoded.servers)
+    }
+
+    func testSnapshotDecodeBudgetOnlyJSONLeavesLlmAndServersMissing() throws {
+        let json = """
+        {
+          "generatedAt": 1,
+          "month": "2026-08",
+          "totalSpentUsd": 10,
+          "totalBudgetUsd": 100,
+          "projectedEomUsd": 20,
+          "overBudget": false,
+          "warning": false,
+          "topMeters": []
+        }
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(WidgetSnapshot.self, from: json)
+        XCTAssertEqual(decoded.projects, [])
+        XCTAssertNil(decoded.llm)
+        XCTAssertNil(decoded.servers)
+        XCTAssertEqual(decoded.totalSpentUsd, 10)
+    }
+
+    func testSnapshotRoundTripsLlmAndServerSections() throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let data = try encoder.encode(WidgetSnapshot.placeholder)
+        let decoded = try decoder.decode(WidgetSnapshot.self, from: data)
+        XCTAssertEqual(decoded.llm?.providers.count, 3)
+        XCTAssertEqual(decoded.llm?.providers.first?.estimateUsd, 8.40)
+        XCTAssertEqual(decoded.servers?.service?.name, "usage-monitor")
+        XCTAssertEqual(decoded.servers?.apps.count, 3)
+        XCTAssertEqual(decoded, .placeholder)
+    }
+
+    func testLlmSectionMapsKitFieldsAndKeepsMissingCostNil() {
+        let section = WidgetSnapshotBuilder.llmSection(from: .sample)
+        XCTAssertEqual(section?.windowHours, 5)
+        XCTAssertEqual(section?.providers.count, 2)
+        let anthropic = section?.providers.first { $0.id == "anthropic" }
+        XCTAssertEqual(anthropic?.tokensTotal, 184_200)
+        XCTAssertEqual(anthropic?.estimateUsd, 8.40)
+        XCTAssertEqual(anthropic?.budgetStatus, "watch")
+        XCTAssertEqual(anthropic?.quiet, false)
+        let voyage = section?.providers.first { $0.id == "voyage" }
+        XCTAssertEqual(voyage?.quiet, true)
+        XCTAssertNil(voyage?.estimateUsd)
+        XCTAssertNil(voyage?.derivedCostUsd)
+        XCTAssertNil(voyage?.reportedCostUsd)
+    }
+
+    func testLlmSectionNilWhenResponseNotOk() {
+        let failed = LlmBurnResponse(ok: false, providers: [])
+        XCTAssertNil(WidgetSnapshotBuilder.llmSection(from: failed))
+    }
+
+    func testServerServiceMapsHealthAndReadinessChecks() {
+        let service = WidgetSnapshotBuilder.serverService(
+            health: .sample,
+            readiness: .sample,
+            now: Date(timeIntervalSince1970: 1_720_000_000)
+        )
+        XCTAssertEqual(service.name, "usage-monitor")
+        XCTAssertTrue(service.ok)
+        XCTAssertEqual(service.readyOk, true)
+        XCTAssertEqual(service.uptimeSeconds, 84_213)
+        XCTAssertTrue(service.checks.contains { $0.name == "Database" && $0.ok })
+        XCTAssertTrue(service.checks.contains { $0.name == "Disk" && $0.freeBytes != nil })
+    }
+
+    func testServerHostOmitsMissingCpuAndKeepsServerCounts() {
+        let projected = WidgetSnapshotBuilder.serverHost(from: .sample)
+        XCTAssertEqual(projected.host.cpuPct, 18.5)
+        XCTAssertEqual(projected.host.name, "ubuntu-16gb-nbg1-cx43")
+        XCTAssertEqual(projected.apps.count, 3)
+        XCTAssertTrue(projected.apps.contains { $0.selfApp && $0.id == "um" })
+
+        var bare = ServerMetrics()
+        bare.host = .init(name: "only-name")
+        let missing = WidgetSnapshotBuilder.serverHost(from: bare)
+        XCTAssertNil(missing.host.cpuPct)
+        XCTAssertNil(missing.host.diskUsedPct)
+        XCTAssertEqual(missing.host.name, "only-name")
+        XCTAssertTrue(missing.apps.isEmpty)
+    }
+
+    func testBudgetSnapshotMergeKeepsLlmAndServerSections() {
+        let budget = WidgetSnapshotBuilder.snapshot(from: .sample)
+        XCTAssertNil(budget.llm)
+        XCTAssertNil(budget.servers)
+        let merged = budget.mergingPreservedSections(from: .placeholder)
+        XCTAssertEqual(merged.totalSpentUsd, budget.totalSpentUsd)
+        XCTAssertEqual(merged.llm, WidgetSnapshot.placeholder.llm)
+        XCTAssertEqual(merged.servers, WidgetSnapshot.placeholder.servers)
     }
 }
 

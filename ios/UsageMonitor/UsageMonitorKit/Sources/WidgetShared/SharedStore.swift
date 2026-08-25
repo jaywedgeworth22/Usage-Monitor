@@ -8,6 +8,7 @@ import Foundation
 /// first device unlock so WidgetKit and background refresh keep working.
 public struct SharedStore {
     public static let shared = SharedStore()
+    private static let writeLock = NSLock()
 
     private static let schemaVersion = 2
     private static let maximumFileSize = 1 * 1_024 * 1_024
@@ -30,7 +31,22 @@ public struct SharedStore {
         self.fileManager = fileManager
     }
 
+    /// Read-modify-write so a budget refresh cannot wipe LLM / server tiles.
+    public func update(_ mutate: (inout WidgetSnapshot) -> Void) {
+        Self.writeLock.lock()
+        defer { Self.writeLock.unlock() }
+        var snapshot = readUnlocked() ?? .empty
+        mutate(&snapshot)
+        writeUnlocked(snapshot)
+    }
+
     public func write(_ snapshot: WidgetSnapshot) {
+        Self.writeLock.lock()
+        defer { Self.writeLock.unlock() }
+        writeUnlocked(snapshot)
+    }
+
+    private func writeUnlocked(_ snapshot: WidgetSnapshot) {
         cleanupLegacyData()
         let envelope = SnapshotEnvelope(schemaVersion: Self.schemaVersion, snapshot: snapshot)
         guard let data = try? encoder.encode(envelope) else { return }
@@ -50,6 +66,12 @@ public struct SharedStore {
     }
 
     public func read() -> WidgetSnapshot? {
+        Self.writeLock.lock()
+        defer { Self.writeLock.unlock() }
+        return readUnlocked()
+    }
+
+    private func readUnlocked() -> WidgetSnapshot? {
         cleanupLegacyData()
         guard let fileURL else {
             guard let data = defaults.data(forKey: Self.defaultsKey) else { return nil }
@@ -79,6 +101,8 @@ public struct SharedStore {
     /// The next widget timeline renders ``WidgetSnapshot/empty`` until a fresh
     /// response for the new identity is stored.
     public func clear() {
+        Self.writeLock.lock()
+        defer { Self.writeLock.unlock() }
         if let fileURL { try? fileManager.removeItem(at: fileURL) }
         if let legacyFileURL { try? fileManager.removeItem(at: legacyFileURL) }
         defaults.removeObject(forKey: Self.defaultsKey)

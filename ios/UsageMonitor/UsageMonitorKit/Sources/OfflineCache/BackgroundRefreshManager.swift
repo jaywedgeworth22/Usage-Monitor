@@ -6,9 +6,6 @@ import WidgetShared
 #if canImport(BackgroundTasks)
 import BackgroundTasks
 #endif
-#if canImport(WidgetKit)
-import WidgetKit
-#endif
 
 /// Drives a `BGAppRefreshTask` that quietly refreshes budget status in the
 /// background: it fetches `GET /api/budget-status`, writes the timestamped disk
@@ -102,7 +99,8 @@ public final class BackgroundRefreshManager: @unchecked Sendable {
         do {
             let response = try await client.budgetStatus()
             BudgetDiskCache(directory: cacheDirectory).save(response)
-            SharedStore.shared.write(WidgetSnapshotBuilder.snapshot(from: response))
+            WidgetSnapshotStore.updateBudget(response)
+            await refreshSecondaryWidgetSections(using: client)
             reloadWidgets()
             // The whole point of a background budget monitor: turn a freshly
             // fetched over/near-budget alert into a Lock Screen notification
@@ -126,10 +124,23 @@ public final class BackgroundRefreshManager: @unchecked Sendable {
         }
     }
 
+    /// Best-effort LLM + server cache.  Failures leave the previous section
+    /// in place so a 401 or timeout cannot stamp empty tiles as live.
+    private func refreshSecondaryWidgetSections(using client: APIClient) async {
+        if let burn = try? await client.llmBurn() {
+            WidgetSnapshotStore.updateLlm(burn)
+        }
+        if let health = try? await client.health() {
+            let readiness = try? await client.readiness()
+            WidgetSnapshotStore.updateServerService(health: health, readiness: readiness)
+        }
+        if let metrics = try? await client.serverMetrics() {
+            WidgetSnapshotStore.updateServerHost(metrics)
+        }
+    }
+
     private func reloadWidgets() {
-        #if canImport(WidgetKit) && os(iOS)
-        WidgetCenter.shared.reloadAllTimelines()
-        #endif
+        WidgetSnapshotStore.reloadWidgetsIfNeeded(force: true)
     }
 
     #if canImport(BackgroundTasks) && os(iOS)

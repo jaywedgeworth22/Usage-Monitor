@@ -73,7 +73,7 @@ let package = Package(
         ),
         .target(
             name: "ServerStatus",
-            dependencies: ["AppCore", "DesignSystem", "Networking", "Models"]
+            dependencies: ["AppCore", "DesignSystem", "Networking", "Models", "OfflineCache"]
         ),
         .target(
             name: "Computers",
