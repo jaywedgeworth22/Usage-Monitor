@@ -608,6 +608,31 @@ export function filterEventsSince(events, since) {
   });
 }
 
+/**
+ * Ingest maps sourceApp from the batch envelope producerId.  V2 events cannot
+ * carry a per-event producerId (unrecognized key).  The unified fleet
+ * collector must therefore post one envelope per seat so Grok cost ticks stay
+ * sourceApp=grok-build (analytics) instead of entering cash spend.
+ */
+export function buildFleetSeatBatches({
+  quotaEvents = [],
+  antigravity = [],
+  claude = [],
+  codex = [],
+  grok = [],
+  copilot = [],
+  deepseek = [],
+} = {}) {
+  return [
+    { producerId: ANTIGRAVITY_PRODUCER_ID, events: [...quotaEvents, ...antigravity] },
+    { producerId: CLAUDE_PRODUCER_ID, events: claude },
+    { producerId: CODEX_PRODUCER_ID, events: codex },
+    { producerId: GROK_PRODUCER_ID, events: grok },
+    { producerId: COPILOT_PRODUCER_ID, events: copilot },
+    { producerId: DEEPSEEK_PRODUCER_ID, events: deepseek },
+  ].filter((batch) => batch.events.length > 0);
+}
+
 export async function postUsageBatches({
   events,
   ingestUrl,

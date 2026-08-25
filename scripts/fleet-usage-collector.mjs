@@ -12,17 +12,10 @@
 // Usage:
 //   node scripts/fleet-usage-collector.mjs [--dry-run] [--debug] [--days N] [--since ISO]
 
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
 import {
-  ANTIGRAVITY_PRODUCER_ID,
-  CLAUDE_PRODUCER_ID,
-  CODEX_PRODUCER_ID,
-  COPILOT_PRODUCER_ID,
-  DEEPSEEK_PRODUCER_ID,
-  GROK_PRODUCER_ID,
   filterEventsSince,
   parseAntigravityTranscriptJsonl,
   parseClaudeSessionJsonl,
@@ -30,6 +23,7 @@ import {
   parseCopilotEventsJsonl,
   parseDeepSeekSessionJsonl,
   parseGrokUpdatesJsonl,
+  buildFleetSeatBatches,
   postUsageBatches,
 } from "./lib/session-token-collectors.mjs";
 import {
@@ -202,17 +196,11 @@ async function main() {
   log(`  - Copilot CLI: ${sessionResults.copilot.length}`);
   log(`  - DeepSeek: ${sessionResults.deepseek.length}`);
 
-  const allEvents = [
-    ...quotaEvents,
-    ...sessionResults.antigravity,
-    ...sessionResults.claude,
-    ...sessionResults.codex,
-    ...sessionResults.grok,
-    ...sessionResults.copilot,
-    ...sessionResults.deepseek,
-  ];
-
-  if (allEvents.length === 0) {
+  const seatBatches = buildFleetSeatBatches({
+    quotaEvents,
+    ...sessionResults,
+  });
+  if (seatBatches.length === 0) {
     log("Nothing to send.");
     return;
   }
@@ -223,17 +211,27 @@ async function main() {
     process.env.CLAUDE_INGEST_TOKEN?.trim();
 
   try {
-    const ack = await postUsageBatches({
-      events: allEvents,
-      ingestUrl: INGEST_URL,
-      ingestToken: token,
-      producerId: "fleet-usage-collector",
-      dryRun: DRY || args.dryRun,
-      log,
-    });
+    let received = 0;
+    let persisted = 0;
+    let rejected = 0;
+    let dryRun = false;
+    for (const { producerId, events } of seatBatches) {
+      const ack = await postUsageBatches({
+        events,
+        ingestUrl: INGEST_URL,
+        ingestToken: token,
+        producerId,
+        dryRun: DRY || args.dryRun,
+        log,
+      });
+      received += ack.received;
+      persisted += ack.persisted;
+      rejected += ack.rejected;
+      dryRun = dryRun || Boolean(ack.dryRun);
+    }
     log(
-      `Pass complete: received=${ack.received} persisted=${ack.persisted} rejected=${ack.rejected}${
-        ack.dryRun ? " (dry-run)" : ""
+      `Pass complete: seats=${seatBatches.length} received=${received} persisted=${persisted} rejected=${rejected}${
+        dryRun ? " (dry-run)" : ""
       }`
     );
   } catch (error) {

@@ -16,6 +16,7 @@ import {
   parseCopilotEventsJsonl,
   parseDeepSeekSessionJsonl,
   parseGrokUpdatesJsonl,
+  buildFleetSeatBatches,
   splitInclusiveCache,
 } from "./lib/session-token-collectors.mjs";
 import {
@@ -497,5 +498,51 @@ const dsBatch = {
   events: dsEvents,
 };
 assert(UsageTelemetryV2BatchSchema.safeParse(dsBatch).success, "deepseek batch schema valid");
+
+const quotaEvent = {
+  eventId: "agy-quota:flash:reset",
+  provider: "google-antigravity",
+  service: "antigravity-cli",
+  metricType: "quota",
+  credits: 69.93,
+  limit: 100,
+};
+const seatBatches = buildFleetSeatBatches({
+  quotaEvents: [quotaEvent],
+  claude: claudeEvents,
+  grok: grokEvents,
+});
+assert(
+  seatBatches.every((batch) => batch.producerId !== "fleet-usage-collector"),
+  "fleet pass never posts a fleet-usage-collector envelope"
+);
+const grokBatchEnvelope = seatBatches.find((batch) => batch.producerId === GROK_PRODUCER_ID);
+assert(grokBatchEnvelope, "grok events get a grok-build envelope");
+assert(
+  grokBatchEnvelope.events.some((event) => event.metricType === "cost" && event.costUsd === 2),
+  "grok cost ticks stay in the grok-build batch"
+);
+assert(
+  seatBatches.find((batch) => batch.producerId === CLAUDE_PRODUCER_ID)?.events === claudeEvents,
+  "claude events get a claude-code envelope"
+);
+assert(
+  seatBatches
+    .find((batch) => batch.producerId === ANTIGRAVITY_PRODUCER_ID)
+    ?.events.includes(quotaEvent),
+  "antigravity quota shares the antigravity-cli envelope"
+);
+for (const batch of seatBatches) {
+  const parsedBatch = UsageTelemetryV2BatchSchema.safeParse({
+    schemaVersion: 2,
+    producerId: batch.producerId,
+    producerInstanceId: "test-host",
+    events: batch.events,
+  });
+  assert(
+    parsedBatch.success,
+    `${batch.producerId} fleet envelope ${parsedBatch.success ? "" : JSON.stringify(parsedBatch.error)}`
+  );
+}
 
 console.log("ok session-token-collectors");
