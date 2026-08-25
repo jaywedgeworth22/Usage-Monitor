@@ -15,21 +15,6 @@ const nextConfig = {
     "@datadog/native-iast-taint-tracking",
     "@datadog/wasm-js-rewriter",
   ],
-  webpack: (config, { isServer }) => {
-    if (isServer) {
-      const extras = [
-        "@datadog/native-metrics",
-        "@datadog/pprof",
-        "@datadog/native-appsec",
-        "@datadog/native-iast-taint-tracking",
-        "@datadog/wasm-js-rewriter",
-      ];
-      if (Array.isArray(config.externals)) {
-        config.externals.push(...extras);
-      }
-    }
-    return config;
-  },
   poweredByHeader: false,
   async headers() {
     return [
