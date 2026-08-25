@@ -41,6 +41,7 @@ describe("middleware matcher — /api/budget-status exclusion (regression for th
       "/api/cron",
       "/api/auth/login",
       "/api/bills.ics",
+      "/api/datadog-public-config",
       // App Store Connect privacy/support URLs (public legal pages)
       "/privacy",
       "/support",
@@ -76,6 +77,18 @@ describe("CSP build (blank-page regression)", () => {
   it("allows unsafe-eval only outside production (Next dev)", () => {
     expect(buildContentSecurityPolicy("n", false)).toContain("'unsafe-eval'");
     expect(buildContentSecurityPolicy("n", true)).not.toContain("'unsafe-eval'");
+  });
+
+  it("adds Datadog US5 RUM intake to connect-src only when supplied", () => {
+    const withoutRum = buildContentSecurityPolicy("n", true);
+    expect(withoutRum).toContain("connect-src 'self'");
+    expect(withoutRum).not.toContain("browser-intake");
+    const withRum = buildContentSecurityPolicy("n", true, [
+      "https://browser-intake-us5-datadoghq.com",
+    ]);
+    expect(withRum).toContain(
+      "connect-src 'self' https://browser-intake-us5-datadoghq.com"
+    );
   });
 });
 

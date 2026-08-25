@@ -117,6 +117,14 @@ describe("usage scheduler instrumentation", () => {
   // into every boot. The SWR cache must stay lazily populated on first
   // request. Advancing timers here catches a re-introduced deferred warm-up,
   // not just a synchronous one.
+  it("fails closed in production Node runtime when DD_SERVICE is missing", async () => {
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+    vi.stubEnv("NODE_ENV", "production");
+
+    await expect(register()).rejects.toThrow(/DD_SERVICE/);
+    expect(mocks.startUsagePollingScheduler).not.toHaveBeenCalled();
+  });
+
   it("does not warm the budget-status caches at boot (OOM'd the 512MB instance)", async () => {
     vi.useFakeTimers();
     vi.stubEnv("NEXT_RUNTIME", "nodejs");

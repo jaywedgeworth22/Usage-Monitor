@@ -263,6 +263,29 @@ describe("GET /api/ready", () => {
     );
   });
 
+  it("exposes secret-free Datadog observability, never gating ok", async () => {
+    vi.stubEnv("DD_API_KEY", "dd-secret-must-not-leak");
+    vi.stubEnv("DD_AGENT_HOST", "127.0.0.1");
+
+    const response = await GET(READY_REQUEST);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.checks.datadog).toEqual({
+      required: false,
+      apmConfigured: false,
+      rumConfigured: false,
+      service: null,
+      env: null,
+      site: null,
+      missing: ["DD_SERVICE"],
+    });
+    expect(JSON.stringify(body.checks.datadog)).not.toContain(
+      "dd-secret-must-not-leak"
+    );
+  });
+
   it("keeps HTTP liveness-safe while reporting SQLite unavailable", async () => {
     vi.spyOn(process, "uptime").mockReturnValue(301);
     mocks.queryRawUnsafe.mockRejectedValue(new Error("database unavailable"));

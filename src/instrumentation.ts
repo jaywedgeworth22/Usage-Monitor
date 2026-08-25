@@ -5,6 +5,18 @@ export function isUsageSchedulerEnabled(
 }
 
 export async function register() {
+  // Datadog APM + log injection.  Fail closed on missing/partial keys in
+  // production runtime (not during `next build`).  Sentry stays DSN-gated
+  // and is not replaced.
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { assertDatadogRuntimeConfig } = await import("@/lib/datadog-options");
+    const { server } = assertDatadogRuntimeConfig();
+    if (server.enabled) {
+      const { initDatadogTracer } = await import("@/lib/datadog-server");
+      initDatadogTracer(server);
+    }
+  }
+
   // Self error-reporting (review finding O4). Both config modules are fully
   // DSN-gated internally: with SENTRY_DSN unset they import and no-op, so
   // this costs nothing in CI/dev. Done BEFORE the nodejs early-return below

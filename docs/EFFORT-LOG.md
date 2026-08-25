@@ -77,6 +77,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **2026-08-25 — CURSOR — IN PROGRESS — Datadog logs + APM + RUM on usage.jays.services (branch `cursor/datadog-logs-apm-rum-802c`).**  Existing US5 account only.  No new Datadog spend.  Reuse DD_* / NEXT_PUBLIC_DD_*.  Fail closed on missing/partial keys.  Sentry/PD stay.  No Designer UX.  No Oracle RAG.
 - **2026-08-21 — CURSOR — IN PR #1307 — Ledger email corrections (branch `cursor/ledger-email-corrections-c163`).**  Live voids applied: Massive/FMP/Anthropic/Kimi August seed cash is now $0.  Those four rows are `considering`.  Namecheap `$1.18` ingested from Gmail order `#211025634`.  iCloud still unread (no IMAP).  Keepout: iOS TestFlight/update-prompt lanes.
 - **2026-08-21 — CURSOR — iOS first-launch update prompt (fleet) — IN PROGRESS (branch `cursor/ios-update-prompt-9992`, worktree `~/apps/usage-cursor-ios-update`).**  Client + Local.  TestFlight opens TestFlight; App Store opens the App Store.  Manifest `jaywedgeworth22/ios-app-versions`.
 - **2026-08-21 — CURSOR — IN PR #1303 — Client+Local last rows hide under the glass tab bar; Jay Old R2 looks degraded (branch `cursor/settings-about-footer-visible-db38`).**  Shell-wide 72pt scroll clearance on every Client tab and Local `TabView`.  iOS now treats `r2_not_enabled` / Jay Old leftovers as neutral, not Unavailable.  Keepout: RootView, DesignSystem clearance, LocalRootView, Platforms R2 mapping.

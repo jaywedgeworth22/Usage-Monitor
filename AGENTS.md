@@ -268,6 +268,26 @@ list in `src/lib/sentry-health.ts` (`socratic-trade`, `congress-trade`, `fleet-i
 `SENTRY_READ_TOKEN` is never sent to the client. This is the "errors/health stay in Sentry" half of
 the owner's goal split — the OTLP route above is the "usage metrics land here" half.
 
+## Datadog (logs + APM + RUM)
+
+Uses the **existing** fleet Datadog account (US5, `DD_SITE=us5.datadoghq.com`).  Do not create a
+new org, do not enable extra paid products, and do not invent secrets in git.  Reuse the host-agent
+names: `DD_SERVICE`, `DD_ENV`, `DD_SITE`, `DD_AGENT_HOST`, `DD_TRACE_AGENT_PORT`, `DD_API_KEY`
+(agent-side), plus public RUM twins `NEXT_PUBLIC_DD_APPLICATION_ID` / `NEXT_PUBLIC_DD_CLIENT_TOKEN`.
+
+- **APM:** `dd-trace` in `src/instrumentation.ts` + `--require dd-trace/init` when `DD_SERVICE` is
+  set.  Production runtime (not `next build`) fails closed without `DD_SERVICE`.  Sample rate
+  defaults to 0.2.  Log injection correlates container stdout (already collected by the host agent)
+  with traces.
+- **RUM / browser logs:** dashboard UI exists, so the client SDK is wired.  The live org does **not**
+  already have RUM enabled — do not buy it from this repo.  Incomplete public keys 503
+  `/api/datadog-public-config` and refuse to init.  Session replay sample rate is hard 0.
+- **Does not replace Sentry or PagerDuty.**  Errors stay visible.
+- Secret-free `checks.datadog` on `GET /api/ready` (never part of `ok`).
+- Throwaway opt-out: `DD_TRACE_ENABLED=false`.
+
+See `src/lib/datadog-options.ts` and `docs/rollouts/2026-08-25-datadog-logs-apm-rum.md`.
+
 ## Receipt email inbox and operations health
 
 `workers/receipt-inbox/` is an optional Cloudflare Email Routing Worker that

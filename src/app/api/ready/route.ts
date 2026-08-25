@@ -13,6 +13,7 @@ import {
   getStartupRuntimeStatus,
 } from "@/lib/runtime-health";
 import { getIngestAdmissionMetrics } from "@/lib/ingest-admission";
+import { getDatadogReadiness } from "@/lib/datadog-options";
 import { getUsageReadTokenReadiness } from "@/lib/ingest-auth";
 
 export const dynamic = "force-dynamic";
@@ -384,6 +385,10 @@ export async function GET(request: Request) {
       // budget-status / subscriptions GET; before this, the only signal was
       // a boot-time console.warn on the host. Booleans only, no token value.
       usageReadToken: getUsageReadTokenReadiness(),
+      // Observability only — never part of `ok`.  Secret-free: service /
+      // site / missing key NAMES only.  Production without DD_SERVICE fails
+      // closed at process boot; this block is the public view of that state.
+      datadog: getDatadogReadiness(),
     },
   };
 
