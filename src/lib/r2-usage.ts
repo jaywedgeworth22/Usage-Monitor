@@ -159,12 +159,14 @@ export const R2_GRAPHQL_STORAGE_MAX_AGE_MS = 90 * 60 * 1000;
 
 /**
  * Storage analytics are latest-per-bucket only (datetime_DESC, first win).
- * A month-long `limit: 10000` dump is 300–400 KiB for busy accounts and
- * overflows the Platforms probe's 256 KiB cap — that is why UM and Jay Old
- * rendered "Unavailable usage read failed" while ST/CT still fit.
+ * A 24h window hid idle orphan buckets (no writes, so no recent groups) and
+ * made UM look like ~0.3 GiB after the B2 cutover while Cloudflare still
+ * billed ~24 GiB.  32 days is long enough for daily idle snapshots; latest-
+ * per-bucket plus the live S3 overlay still wins after a prune.  Keep the
+ * group cap well under the Platforms probe's 1 MiB GraphQL ceiling.
  */
-export const R2_STORAGE_GRAPHQL_LOOKBACK_MS = 24 * 60 * 60 * 1000;
-export const R2_STORAGE_GRAPHQL_GROUP_LIMIT = 400;
+export const R2_STORAGE_GRAPHQL_LOOKBACK_MS = 32 * 24 * 60 * 60 * 1000;
+export const R2_STORAGE_GRAPHQL_GROUP_LIMIT = 2500;
 
 /** Auto-resume hysteresis: clear kill switch when live storage is below this. */
 export const R2_RESUME_STORAGE_PCT = 65;
@@ -824,11 +826,9 @@ function utcMonthStartIso(now: Date): string {
   ).toISOString();
 }
 
-/** Newest of (month start, now − lookback).  Ops still use the full UTC month. */
+/** Always `now − lookback` so early-month days still see idle orphan buckets. */
 export function utcStorageLookbackIso(now: Date): string {
-  const lookback = new Date(now.getTime() - R2_STORAGE_GRAPHQL_LOOKBACK_MS);
-  const monthStart = new Date(utcMonthStartIso(now));
-  return (lookback > monthStart ? lookback : monthStart).toISOString();
+  return new Date(now.getTime() - R2_STORAGE_GRAPHQL_LOOKBACK_MS).toISOString();
 }
 
 /**
