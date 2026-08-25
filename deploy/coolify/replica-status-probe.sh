@@ -85,7 +85,7 @@ run_in_container_heartbeat() {
 
 run_ltx_via_process_env() {
   python3 - <<'PY' "${CONTAINER}" "${MAX_LTX_AGE_SECONDS}"
-import datetime, re, subprocess, sys
+import datetime, os, re, subprocess, sys
 
 container = sys.argv[1]
 max_age = int(sys.argv[2])
@@ -154,21 +154,29 @@ if any(not env_map.get(k) for k in required):
     print("CREDS_MISSING", file=sys.stderr)
     sys.exit(4)
 
+# Pass names only. `docker exec -e KEY=value` puts secrets on argv;
+# journald records the systemd oneshot command line, and
+# subprocess.TimeoutExpired includes cmd. Housekeeper 2026-08-25.
 export_args = []
 for k in required + ["LITESTREAM_S3_REGION"]:
     if env_map.get(k):
-        export_args.extend(["-e", f"{k}={env_map[k]}"])
+        os.environ[k] = env_map[k]
+        export_args.extend(["-e", k])
 
 latest = None
 for level in range(0, 6):
-    r = subprocess.run(
-        ["docker", "exec", *export_args, container,
-         "/app/bin/litestream", "ltx",
-         "-config", "/app/litestream.yml",
-         "-level", str(level),
-         "/data/prod.db"],
-        capture_output=True, text=True, timeout=70,
-    )
+    try:
+        r = subprocess.run(
+            ["docker", "exec", *export_args, container,
+             "/app/bin/litestream", "ltx",
+             "-config", "/app/litestream.yml",
+             "-level", str(level),
+             "/data/prod.db"],
+            capture_output=True, text=True, timeout=70,
+        )
+    except subprocess.TimeoutExpired:
+        print("TIMEOUT", file=sys.stderr)
+        sys.exit(7)
     if r.returncode != 0:
         continue
     times = []
@@ -239,7 +247,10 @@ case "${out}" in
   *NO_LTX*) reason="no_parseable_ltx" ;;
   *BAD_TS*) reason="invalid_ltx_timestamp" ;;
   *ENV_READ_FAILED*) reason="replica_status_unreadable" ;;
+  *TIMEOUT*) reason="ltx_list_timeout" ;;
 esac
 write_status_host "${STATUS_FILE}" false null "${reason}"
-log "ERROR: probe failed (${reason}): ${out}"
+# Do not echo ${out}: TimeoutExpired used to dump docker exec argv
+# (including LITESTREAM_S3_*) into the journal.
+log "ERROR: probe failed (${reason}) rc=${rc}"
 exit 1

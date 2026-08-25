@@ -598,6 +598,7 @@ assert.deepEqual(
 for (const relativePath of [
   "deploy/oracle/deploy-production.sh",
   "deploy/oracle/auto-deploy.sh",
+  "deploy/coolify/replica-status-probe.sh",
 ]) {
   const result = spawnSync("bash", ["-n", path.join(repoRoot, relativePath)], {
     encoding: "utf8",
@@ -631,6 +632,48 @@ assert.ok(
     recoveryUnlock > recoveryCall &&
     childDeploy > recoveryUnlock,
   "recovery must hold the shared transaction lock and release it before child deployment",
+);
+
+const coolifyProbe = read("deploy/coolify/replica-status-probe.sh");
+forbidLiteral(
+  coolifyProbe,
+  'f"{k}={env_map[k]}"',
+  "Coolify replica probe must not interpolate secret values onto docker exec argv",
+);
+forbidText(
+  coolifyProbe,
+  /export_args\.extend\(\["-e", f"\{k\}=/,
+  "Coolify replica probe must not pass -e KEY=value (journald records argv)",
+);
+requireText(
+  coolifyProbe,
+  /os\.environ\[k\] = env_map\[k\]/,
+  "Coolify replica probe must export replica creds into the local environ",
+);
+requireText(
+  coolifyProbe,
+  /export_args\.extend\(\["-e", k\]\)/,
+  "Coolify replica probe must pass docker exec -e KEY with no value",
+);
+requireText(
+  coolifyProbe,
+  /except subprocess\.TimeoutExpired:/,
+  "Coolify replica probe must catch TimeoutExpired so cmd is not printed",
+);
+requireText(
+  coolifyProbe,
+  /print\("TIMEOUT", file=sys\.stderr\)/,
+  "Coolify replica probe timeout path must emit a secret-free token",
+);
+requireText(
+  coolifyProbe,
+  /\*TIMEOUT\*\) reason="ltx_list_timeout"/,
+  "Coolify replica probe must map TIMEOUT to ltx_list_timeout",
+);
+forbidText(
+  coolifyProbe,
+  /log "ERROR: probe failed \(\$\{reason\}\): \$\{out\}"/,
+  "Coolify replica probe must not journal the raw python/docker output",
 );
 
 console.log("Oracle auto-deploy configuration checks passed.");
