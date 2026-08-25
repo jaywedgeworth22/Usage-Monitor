@@ -36,6 +36,7 @@
 		9FC1AA41DEEF222CA0DD91F6 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 37C47BD409744EC363A5D9C3 /* DesignSystem */; };
 		A25988FF08C31D2498209FB2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DA93AC5DCCD01FBB2A560D25 /* Assets.xcassets */; };
 		A33EA13C79DE4913AEC1B6D2 /* BudgetWidgetIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 345CB985D932922EA66F6D73 /* BudgetWidgetIntent.swift */; };
+		7F3A2B8E4C1D5096E8A2F4B3 /* GlanceWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D9E6C1A8F7B4035D4E89012 /* GlanceWidgets.swift */; };
 		A976B24560232E9756646779 /* LocalSecrets in Frameworks */ = {isa = PBXBuildFile; productRef = 0368BE726DC57AFA46C92F87 /* LocalSecrets */; };
 		B0D9919838E639EB7D80FEEA /* Computers in Frameworks */ = {isa = PBXBuildFile; productRef = 8A796F6A95CE0AFCC45F9CAA /* Computers */; };
 		B82FFD609432C0928F46DA8F /* AccountChangeNotifyingTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB1864248318F2267ECF38E2 /* AccountChangeNotifyingTokenStore.swift */; };
@@ -96,6 +97,7 @@
 		218D4D62AEF190D10BE2A1B7 /* UsageMonitor.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = UsageMonitor.entitlements; sourceTree = "<group>"; };
 		2B30FDC3F50A61E4D10BC24B /* UsageMonitorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageMonitorApp.swift; sourceTree = "<group>"; };
 		345CB985D932922EA66F6D73 /* BudgetWidgetIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BudgetWidgetIntent.swift; sourceTree = "<group>"; };
+		2D9E6C1A8F7B4035D4E89012 /* GlanceWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlanceWidgets.swift; sourceTree = "<group>"; };
 		37A37C7541E4CEA8D9236FFF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5EB1FDD22E0727C2B30590AB /* AppUpdatePrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdatePrompt.swift; sourceTree = "<group>"; };
 		685168BCC902543D51E9E6BA /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -206,6 +208,7 @@
 			isa = PBXGroup;
 			children = (
 				345CB985D932922EA66F6D73 /* BudgetWidgetIntent.swift */,
+				2D9E6C1A8F7B4035D4E89012 /* GlanceWidgets.swift */,
 				028258141B7C69C684D9238D /* Info.plist */,
 				D3FA9AE664C5C606A9368339 /* PrivacyInfo.xcprivacy */,
 				764AB0422F0A2B31B88D25D2 /* UsageMonitorWidget.entitlements */,
@@ -505,6 +508,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A33EA13C79DE4913AEC1B6D2 /* BudgetWidgetIntent.swift in Sources */,
+				7F3A2B8E4C1D5096E8A2F4B3 /* GlanceWidgets.swift in Sources */,
 				E813273A1FAAB7D3E13847EC /* UsageMonitorWidgetBundle.swift in Sources */,
 				5D7B4982B98EF255980605B5 /* WidgetPresentation.swift in Sources */,
 			);
