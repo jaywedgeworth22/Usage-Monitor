@@ -11,8 +11,9 @@
 #   GitHub-hosted macos-latest has no /Users/jay/apps/ios-fleet. This repo
 #   vendors the fleet scripts (Congress.Trade / Socratic.Trade #3089 protocol)
 #   and pins their sha256 so an unreviewed edit to ship-testflight.sh /
-#   apps.json / asc-api.mjs cannot silently change what TestFlight uploads.
-#   Refreshing the pin is a reviewed 3-line PR.
+#   apps.json / asc-api.mjs / AppUpdatePrompt.swift cannot silently change
+#   what TestFlight uploads or what each iOS target prompts.  Refreshing
+#   the pin is a reviewed PR.
 #
 # ON DRIFT
 #   Read the diff, decide whether the tooling change is wanted, then either
@@ -27,8 +28,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLEET_DIR="${IOS_FLEET_DIR:-${REPO_ROOT}/scripts/ios-fleet}"
 PIN_FILE="${REPO_ROOT}/scripts/ios-fleet.sha256"
 
-# Exactly the runtime files that can change what this repo ships.
-PINNED_FILES="ship-testflight.sh asc-api.mjs apps.json"
+# Exactly the runtime files that can change what this repo ships, plus the
+# one AppUpdatePrompt.swift that every iOS target must copy byte-for-byte.
+PINNED_FILES="ship-testflight.sh asc-api.mjs apps.json AppUpdatePrompt.swift"
+COPIED_PROMPT_TARGETS="ios/UsageMonitor/App/AppUpdatePrompt.swift ios/UsageMonitor/LocalApp/AppUpdatePrompt.swift"
 
 MODE="check"
 case "${1:-}" in
@@ -55,6 +58,25 @@ compute_all() {
   done
 }
 
+check_prompt_copies() {
+  # One pinned file, copied into each iOS target.  Not a Swift package.
+  local pin="${FLEET_DIR}/AppUpdatePrompt.swift"
+  local dest
+  [[ -f "$pin" ]] || { echo "error: missing ${pin}" >&2; return 1; }
+  if grep -q 'knownAppleIds' "$pin"; then
+    echo "error: AppUpdatePrompt.swift still embeds knownAppleIds; Apple IDs live in apps.json / versions.json" >&2
+    return 1
+  fi
+  for dest in $COPIED_PROMPT_TARGETS; do
+    [[ -f "${REPO_ROOT}/${dest}" ]] || { echo "error: missing target copy ${dest}" >&2; return 1; }
+    if ! cmp -s "$pin" "${REPO_ROOT}/${dest}"; then
+      echo "error: ${dest} drifted from scripts/ios-fleet/AppUpdatePrompt.swift" >&2
+      echo "       copy the pin into each target; do not fork behavior" >&2
+      return 1
+    fi
+  done
+}
+
 if [[ "$MODE" == "update" ]]; then
   {
     echo "# sha256 pin for the in-repo iOS ship tooling in scripts/ios-fleet."
@@ -63,6 +85,7 @@ if [[ "$MODE" == "update" ]]; then
     compute_all
   } >"$PIN_FILE"
   echo "[ios-fleet-pin] wrote ${PIN_FILE}"
+  check_prompt_copies || exit 1
   exit 0
 fi
 
@@ -81,7 +104,9 @@ EXPECTED="$(grep -v '^#' "$PIN_FILE" | sed '/^$/d')"
 ACTUAL="$(compute_all)" || exit 1
 
 if [[ "$EXPECTED" == "$ACTUAL" ]]; then
+  check_prompt_copies || exit 1
   echo "[ios-fleet-pin] OK - ${FLEET_DIR} matches scripts/ios-fleet.sha256"
+  echo "[ios-fleet-pin] OK - AppUpdatePrompt.swift copies match both iOS targets"
   exit 0
 fi
 
