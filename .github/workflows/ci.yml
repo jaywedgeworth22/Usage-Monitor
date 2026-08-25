@@ -254,16 +254,20 @@ jobs:
 
       # ios-ship.yml now runs on a cron, and a cron carries no `paths:` filter.
       # scripts/ios-scheduled-ship-gate.sh is the only thing keeping a
-      # backend-only commit from becoming a TestFlight build. It executes
-      # exclusively on the Mac runner, so a defect in it would otherwise be
-      # invisible until testers were spammed (or until an iOS change silently
-      # never shipped). Fully offline: throwaway git repos in a scratch dir.
+      # backend-only commit from becoming a TestFlight build. Hosted
+      # macos-latest is the ship host, so a defect in the gate would otherwise
+      # be invisible until testers were spammed (or until an iOS change
+      # silently never shipped). Fully offline: throwaway git repos in a
+      # scratch dir.
       - name: Test the scheduled iOS ship gate
         run: |
           bash -n scripts/ios-scheduled-ship-gate.sh
           bash -n scripts/test-ios-scheduled-ship-gate.sh
           bash -n scripts/ios-ship-testflight.sh
           bash -n scripts/ios-ship-testflight-local.sh
+          bash -n scripts/ios-appstore-gm-prepare.sh
+          bash -n scripts/ios-fleet-pin.sh
+          bash scripts/ios-fleet-pin.sh --check
           bash scripts/test-ios-scheduled-ship-gate.sh
 
       # Replays a captured `agy -p "/usage"` envelope — the CLI itself is only

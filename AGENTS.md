@@ -479,13 +479,23 @@ Canonical: `/Users/jay/apps/AGENT-SYNC.md` § iOS agent build loop. Onboarding: 
 - Do not hand-edit `.pbxproj` / entitlements / xibs. This app uses XcodeGen: edit `ios/UsageMonitor/project.yml`, then `xcodegen generate`. `UsageMonitorKit/Package.swift` is agent-editable.
 - `@Observable` + `@MainActor`; `NavigationStack`; light theme default.
 
-## iOS native ship (TestFlight, no Xcode UI)
+## iOS native ship (TestFlight, GitHub-hosted macos-latest)
+
+Agents do not archive locally. `.github/workflows/ios-ship.yml` on `macos-latest`
+imports signing from GitHub Actions secrets (same five names as Congress.Trade /
+Socratic.Trade #3089) and runs `scripts/ios-ship-testflight.sh`, which execs
+in-repo `scripts/ios-fleet/ship-testflight.sh`. LocalUsageMonitor stays skipped.
+Dispatch:
 
 ```bash
-bash scripts/ios-ship-testflight.sh
+gh workflow run ios-ship.yml
 ```
 
-Fleet: `/Users/jay/apps/ios-fleet/README.md`. Bundles `services.jays.usage.client.monitor` (Usage Client Monitor) + `services.jays.usage.local.monitor` (Usage Local Monitor), team `CC8UTF7ATG`.
+Bundle IDs `services.jays.usage.client.monitor` (Usage Client Monitor) and
+`services.jays.usage.local.monitor` (Usage Local Monitor), team `CC8UTF7ATG`.
+Do not mint a new App Store Connect key. Do not exec
+`/Users/jay/apps/ios-fleet/ship-testflight.sh` from a cloud seat -- that path
+does not exist on hosted runners.
 
 ## Theme default = light (owner 2026-08-10)
 
