@@ -2281,7 +2281,7 @@ export async function fetchR2FleetSummary(
         classA: assessment.classA,
         classB: assessment.classB,
         overallOnTrackToExceed70Pct: assessment.overallOnTrackToExceed70Pct,
-        metricsSource: source,
+        metricsSource: overlaid.metricsSource,
         buckets: overlaid.buckets.map((b) => ({
           bucketName: b.bucketName,
           bytes: b.bytes,
