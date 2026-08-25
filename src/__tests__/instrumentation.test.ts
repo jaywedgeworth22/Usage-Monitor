@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   computeProjectBudgetStatus: vi.fn().mockResolvedValue({}),
   deactivateDecommissionedBuiltInProviders: vi.fn().mockResolvedValue(0),
   clearLlmMustKeepFundedFlags: vi.fn().mockResolvedValue(0),
+  initDatadogTracer: vi.fn(),
 }));
 
 vi.mock("@/lib/usage-recorder", () => ({
@@ -31,6 +32,10 @@ vi.mock("@/lib/budget-status", () => ({
   computeProjectBudgetStatus: mocks.computeProjectBudgetStatus,
 }));
 
+vi.mock("@/lib/datadog-server", () => ({
+  initDatadogTracer: mocks.initDatadogTracer,
+}));
+
 import { isUsageSchedulerEnabled, register } from "@/instrumentation";
 
 describe("usage scheduler instrumentation", () => {
@@ -45,6 +50,7 @@ describe("usage scheduler instrumentation", () => {
     mocks.deactivateDecommissionedBuiltInProviders.mockResolvedValue(0);
     mocks.clearLlmMustKeepFundedFlags.mockClear();
     mocks.clearLlmMustKeepFundedFlags.mockResolvedValue(0);
+    mocks.initDatadogTracer.mockReset();
   });
 
   afterEach(() => {
@@ -123,6 +129,34 @@ describe("usage scheduler instrumentation", () => {
 
     await expect(register()).rejects.toThrow(/DD_SERVICE/);
     expect(mocks.startUsagePollingScheduler).not.toHaveBeenCalled();
+  });
+
+  it("starts in production when APM is complete and RUM is only labeled", async () => {
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DD_SERVICE", "usage-monitor");
+    vi.stubEnv("DD_ENV", "prod");
+    vi.stubEnv("DD_SITE", "us5.datadoghq.com");
+    vi.stubEnv("NEXT_PUBLIC_DD_SITE", "us5.datadoghq.com");
+    vi.stubEnv("NEXT_PUBLIC_DD_SERVICE", "usage-monitor");
+    vi.stubEnv("NEXT_PUBLIC_DD_ENV", "prod");
+
+    await register();
+
+    expect(mocks.initDatadogTracer).toHaveBeenCalledOnce();
+    expect(mocks.startUsagePollingScheduler).toHaveBeenCalledOnce();
+  });
+
+  it("starts in production when APM is complete and one RUM intake var is set", async () => {
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DD_SERVICE", "usage-monitor");
+    vi.stubEnv("NEXT_PUBLIC_DD_APPLICATION_ID", "app-id");
+
+    await register();
+
+    expect(mocks.initDatadogTracer).toHaveBeenCalledOnce();
+    expect(mocks.startUsagePollingScheduler).toHaveBeenCalledOnce();
   });
 
   it("does not warm the budget-status caches at boot (OOM'd the 512MB instance)", async () => {
