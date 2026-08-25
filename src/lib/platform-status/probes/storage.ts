@@ -201,8 +201,9 @@ const R2_SWEEP_DEADLINE_MS = 14_000;
 /**
  * Trusted Cloudflare GraphQL only.  The default probe cap is 256 KiB so a
  * status check cannot pull an unbounded dump; this query is compile-time
- * pinned and now asks for a 24h latest-per-bucket storage window.  1 MiB
- * leaves headroom if an account grows more buckets without failing the card.
+ * pinned and asks for a 32-day latest-per-bucket storage window (idle orphan
+ * buckets disappear from a 24h window).  1 MiB leaves headroom if an account
+ * grows more buckets without failing the card.
  */
 export const R2_GRAPHQL_MAX_RESPONSE_BYTES = 1024 * 1024;
 

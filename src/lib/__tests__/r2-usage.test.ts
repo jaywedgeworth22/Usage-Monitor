@@ -503,7 +503,7 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(lines.some((l) => l.includes("Socratic Trade") && l.includes("⚠️"))).toBe(true);
   });
 
-  it("asks GraphQL for a short latest-per-bucket storage window, not a month dump", async () => {
+  it("asks GraphQL for a multi-week latest-per-bucket storage window so idle buckets stay visible", async () => {
     const now = new Date("2026-08-14T18:00:00.000Z");
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -543,7 +543,16 @@ describe("R2 usage monitoring & auto-disable", () => {
     );
     expect(body.query).toContain(`limit: ${R2_STORAGE_GRAPHQL_GROUP_LIMIT}`);
     expect(body.query).toContain("datetime_geq: $storageStartDate");
-    expect(R2_STORAGE_GRAPHQL_GROUP_LIMIT).toBeLessThan(1000);
+    expect(R2_STORAGE_GRAPHQL_LOOKBACK_MS).toBeGreaterThan(7 * 24 * 60 * 60 * 1000);
+    expect(R2_STORAGE_GRAPHQL_GROUP_LIMIT).toBeGreaterThan(400);
+    expect(R2_STORAGE_GRAPHQL_GROUP_LIMIT).toBeLessThan(10000);
+  });
+
+  it("does not clip the storage lookback to month start on the 2nd", () => {
+    const earlyMonth = new Date("2026-08-02T06:00:00.000Z");
+    const start = Date.parse(utcStorageLookbackIso(earlyMonth));
+    expect(start).toBe(earlyMonth.getTime() - R2_STORAGE_GRAPHQL_LOOKBACK_MS);
+    expect(start).toBeLessThan(Date.parse("2026-08-01T00:00:00.000Z"));
   });
 
   it("keeps GraphQL storage when the UM live S3 overlay throws", async () => {
