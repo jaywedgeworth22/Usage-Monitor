@@ -59,6 +59,35 @@ describe("usage telemetry v2 shared contract", () => {
     });
   });
 
+  it("keys v2 idempotency and sourceApp on batch producerId, not eventId alone", async () => {
+    const event = {
+      eventId: "same-session-token",
+      provider: "xai",
+      service: "grok-cli",
+      metricType: "cost",
+      unit: "usd",
+      costUsd: 2,
+      billingMode: "estimated",
+      confidence: "estimated",
+      occurredAt: "2026-08-25T00:00:00.000Z",
+    };
+    const [fleet, seat] = await Promise.all([
+      parseUsageTelemetryV2Batch({
+        schemaVersion: 2,
+        producerId: "fleet-usage-collector",
+        events: [event],
+      }),
+      parseUsageTelemetryV2Batch({
+        schemaVersion: 2,
+        producerId: "grok-build",
+        events: [event],
+      }),
+    ]);
+    expect(fleet.events[0].sourceApp).toBe("fleet-usage-collector");
+    expect(seat.events[0].sourceApp).toBe("grok-build");
+    expect(fleet.events[0].idempotencyKey).not.toBe(seat.events[0].idempotencyKey);
+  });
+
   it("reserves persisted coverage authority from arbitrary producer metadata", async () => {
     const { events: [event] } = await parseUsageTelemetryV2Batch({
       schemaVersion: 2,
