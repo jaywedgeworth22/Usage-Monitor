@@ -6,7 +6,15 @@ const isProduction = process.env.NODE_ENV === "production";
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   outputFileTracingRoot: path.join(__dirname),
-  serverExternalPackages: ["@prisma/client"],
+  serverExternalPackages: [
+    "@prisma/client",
+    "dd-trace",
+    "@datadog/native-metrics",
+    "@datadog/pprof",
+    "@datadog/native-appsec",
+    "@datadog/native-iast-taint-tracking",
+    "@datadog/wasm-js-rewriter",
+  ],
   poweredByHeader: false,
   async headers() {
     return [

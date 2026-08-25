@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, isCsrfSafeRequest, verifySessionToken } from "@/lib/auth";
+import { datadogConnectSrcOrigins } from "@/lib/datadog-options";
 
 export const config = {
   runtime: "nodejs",
@@ -53,6 +54,8 @@ export const isPublicPath = (pathname: string) => {
     "/api/operations",
     // Unlisted Apple Calendar subscribe URL; the route checks BILLS_CALENDAR_TOKEN.
     "/api/bills.ics",
+    // Public RUM/browser-log config.  Returns only public intake fields.
+    "/api/datadog-public-config",
   ];
   if (publicPaths.includes(pathname)) return true;
   if (publicPaths.some((p) => pathname.startsWith(p + "/"))) return true;
@@ -80,15 +83,17 @@ export const isPublicPath = (pathname: string) => {
  */
 export function buildContentSecurityPolicy(
   nonce: string,
-  isProduction: boolean
+  isProduction: boolean,
+  extraConnectSrc: readonly string[] = []
 ): string {
+  const connectSrc = ["'self'", ...extraConnectSrc].join(" ");
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}'${isProduction ? "" : " 'unsafe-eval'"}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self'",
+    `connect-src ${connectSrc}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -102,7 +107,11 @@ export function middleware(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
 
   const isProduction = process.env.NODE_ENV === "production";
-  const cspHeader = buildContentSecurityPolicy(nonce, isProduction);
+  const cspHeader = buildContentSecurityPolicy(
+    nonce,
+    isProduction,
+    datadogConnectSrcOrigins()
+  );
 
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);

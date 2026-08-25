@@ -133,6 +133,36 @@ if [[ "${STARTUP_PREFLIGHT_ONLY:-false}" == "true" ]]; then
   exit 0
 fi
 
+# Datadog APM fail-closed (existing fleet vars only).  Partial keys or a
+# production start without DD_SERVICE refuse to boot instead of running
+# half-blind.  DD_TRACE_ENABLED=false is the throwaway-container opt-out.
+dd_opted_out=false
+case "${DD_TRACE_ENABLED:-}" in
+  0|false|FALSE|off|OFF|no|NO) dd_opted_out=true ;;
+esac
+dd_signaled=false
+for dd_key in DD_SERVICE DD_ENV DD_AGENT_HOST DD_TRACE_AGENT_PORT DD_API_KEY DD_SITE DD_TRACE_ENABLED DD_TRACE_SAMPLE_RATE; do
+  if [[ -n "${!dd_key:-}" ]]; then
+    dd_signaled=true
+    break
+  fi
+done
+if [[ "${dd_opted_out}" != "true" ]]; then
+  if [[ -z "${DD_SERVICE:-}" && ( "${dd_signaled}" == "true" || "${NODE_ENV:-}" == "production" ) ]]; then
+    log "ERROR: Datadog is required or partially configured but DD_SERVICE is missing."
+    log "Reuse the existing fleet DD_* vars. Do not invent secrets. Set DD_TRACE_ENABLED=false only for throwaway containers."
+    exit 1
+  fi
+  if [[ -n "${DD_SERVICE:-}" ]]; then
+    case " ${NODE_OPTIONS:-} " in
+      *" --require dd-trace/init "*|*" --require dd-trace/init") ;;
+      *)
+        export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--require dd-trace/init"
+        ;;
+    esac
+  fi
+fi
+
 if [[ "${litestream_enabled}" == "true" ]]; then
   export LITESTREAM_ACTIVE=true
   # Side-channel path consumed by getBackupRuntimeStatus. Coolify/Infisical

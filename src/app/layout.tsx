@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import DatadogRumInit from "@/components/DatadogRumInit";
 import Nav from "@/components/Nav";
 import PwaRegistration from "@/components/PwaRegistration";
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -70,6 +71,7 @@ export default async function RootLayout({
             {children}
           </main>
           <PwaRegistration />
+          <DatadogRumInit />
         </ThemeProvider>
       </body>
     </html>

@@ -99,6 +99,16 @@ try {
       "start-with-infisical.sh must keep the UM Infisical project UUID fallback"
     );
   }
+  if (!/DD_SERVICE is missing/.test(startupSource)) {
+    throw new Error(
+      "start-with-litestream.sh must fail closed when production/partial Datadog config is missing DD_SERVICE"
+    );
+  }
+  if (!/--require dd-trace\/init/.test(startupSource)) {
+    throw new Error(
+      "start-with-litestream.sh must preload dd-trace/init when DD_SERVICE is set"
+    );
+  }
   const backupIndex = startupSource.indexOf(
     'node "${REPO_ROOT}/scripts/backup-sqlite-before-migrate.mjs"'
   );
