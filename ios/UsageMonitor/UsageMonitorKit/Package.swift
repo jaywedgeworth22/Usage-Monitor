@@ -77,7 +77,7 @@ let package = Package(
         ),
         .target(
             name: "Computers",
-            dependencies: ["AppCore", "DesignSystem", "Networking", "Models"]
+            dependencies: ["AppCore", "DesignSystem", "Networking", "Models", "OfflineCache"]
         ),
         .target(
             name: "Settings",

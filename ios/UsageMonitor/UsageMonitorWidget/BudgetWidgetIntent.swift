@@ -8,13 +8,19 @@ enum WidgetTopicChoice: String, AppEnum {
     case budget
     case llmQuotas
     case servers
+    case mac
+    case alerts
+    case providers
 
     static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Topic")
 
     static var caseDisplayRepresentations: [WidgetTopicChoice: DisplayRepresentation] = [
         .budget: "Budget",
         .llmQuotas: "LLM Quotas",
-        .servers: "Servers"
+        .servers: "Servers",
+        .mac: "Mac",
+        .alerts: "Alerts",
+        .providers: "Providers"
     ]
 
     var topic: WidgetTopic {
@@ -22,6 +28,9 @@ enum WidgetTopicChoice: String, AppEnum {
         case .budget: return .budget
         case .llmQuotas: return .llmQuotas
         case .servers: return .servers
+        case .mac: return .mac
+        case .alerts: return .alerts
+        case .providers: return .providers
         }
     }
 }
@@ -210,7 +219,7 @@ struct ServerFocusEntityQuery: EntityQuery {
 struct SelectBudgetIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "Usage Monitor"
     static var description = IntentDescription(
-        "Choose Budget, LLM Quotas, or Servers.  Add more than one copy to watch different topics."
+        "Choose Budget, LLM Quotas, Servers, Mac, Alerts, or Providers.  Add more than one copy to watch different topics."
     )
 
     @Parameter(title: "Topic", default: .budget)

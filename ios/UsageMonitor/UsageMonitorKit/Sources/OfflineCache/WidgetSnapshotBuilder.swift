@@ -10,7 +10,12 @@ public enum WidgetSnapshotBuilder {
     /// provider meters, and every project so the widget can focus overall or
     /// on a single project budget.
     /// - Parameter maxMeters: how many provider meters to keep for the overall view.
-    public static func snapshot(from response: BudgetStatusResponse, maxMeters: Int = 3) -> WidgetSnapshot {
+    /// - Parameter maxSpenders: how many top-spend providers to keep for Providers.
+    public static func snapshot(
+        from response: BudgetStatusResponse,
+        maxMeters: Int = 3,
+        maxSpenders: Int = 6
+    ) -> WidgetSnapshot {
         let meters: [WidgetSnapshot.Meter] = response.providers
             .filter { $0.hasBudget }
             .sorted { ($0.percentUsed ?? 0) > ($1.percentUsed ?? 0) }
@@ -72,7 +77,102 @@ public enum WidgetSnapshotBuilder {
             overBudget: overBudget,
             warning: warning,
             topMeters: meters,
-            projects: projects
+            projects: projects,
+            spenders: spenders(from: response, maxSpenders: maxSpenders),
+            alerts: alertsSection(from: response)
+        )
+    }
+
+    /// Highest month-to-date spend, including providers with no budget.
+    /// Zero-spend rows stay out so the tile cannot show a fake $0 ranking.
+    public static func spenders(
+        from response: BudgetStatusResponse,
+        maxSpenders: Int = 6
+    ) -> [WidgetSnapshot.Meter] {
+        Array(
+            response.providers
+                .filter { $0.spentUsd > 0 }
+                .sorted { lhs, rhs in
+                    if lhs.spentUsd != rhs.spentUsd { return lhs.spentUsd > rhs.spentUsd }
+                    return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+                }
+                .prefix(maxSpenders)
+                .map { provider in
+                    WidgetSnapshot.Meter(
+                        id: provider.id,
+                        name: provider.title,
+                        spentUsd: provider.spentUsd,
+                        budgetUsd: provider.monthlyBudgetUsd,
+                        percentUsed: provider.percentUsed,
+                        status: provider.status.rawValue,
+                        projectedEomUsd: provider.projectedEomUsd
+                    )
+                }
+        )
+    }
+
+    /// Active alerts in the same severity order as `BudgetStore.alertItems`.
+    public static func alertsSection(
+        from response: BudgetStatusResponse,
+        maxItems: Int = 6
+    ) -> WidgetSnapshot.AlertsSection {
+        let items = response.providers
+            .flatMap { provider in
+                provider.alerts.map { alert in
+                    WidgetSnapshot.AlertsSection.Item(
+                        id: "\(provider.id)|\(alert.id)",
+                        title: alert.title,
+                        providerName: provider.title,
+                        severity: alert.severity.rawValue
+                    )
+                }
+            }
+            .sorted { lhs, rhs in
+                severityOrder(lhs.severity) < severityOrder(rhs.severity)
+            }
+        let latest = items.first
+        let needsAttention = items.filter {
+            $0.severity == AlertSeverity.critical.rawValue
+                || $0.severity == AlertSeverity.warning.rawValue
+        }.count
+        return WidgetSnapshot.AlertsSection(
+            generatedAt: response.generatedAtDate ?? Date(),
+            openCount: items.count,
+            needsAttentionCount: needsAttention,
+            latestTitle: latest?.title,
+            latestProvider: latest?.providerName,
+            latestSeverity: latest?.severity,
+            items: Array(items.prefix(maxItems))
+        )
+    }
+
+    /// Mac heartbeat.  Always returns a section so "not reported" is distinct
+    /// from "never cached".
+    public static func macSection(
+        from response: MacHealthResponse,
+        now: Date = Date()
+    ) -> WidgetSnapshot.MacSection {
+        let heartbeat = response.lastHeartbeatAt.flatMap(ISO8601DateParser.date(from:))
+            ?? response.mac?.lastHeartbeatAt.flatMap(ISO8601DateParser.date(from:))
+        let mac = response.mac
+        return WidgetSnapshot.MacSection(
+            generatedAt: heartbeat ?? now,
+            ok: response.ok,
+            status: response.status,
+            reported: mac != nil,
+            hostname: mac?.hostname,
+            osVersion: mac?.osVersion,
+            arch: mac?.arch,
+            cpuUsagePct: mac?.cpuUsagePct,
+            memoryUsagePct: mac?.memoryUsagePct,
+            diskUsagePct: mac?.diskUsagePct,
+            uptimeSeconds: mac?.uptimeSeconds,
+            lastHeartbeatAt: heartbeat,
+            secondsSinceHeartbeat: response.secondsSinceHeartbeat,
+            flags: macFlags(from: response),
+            processes: (mac?.processRows ?? []).map {
+                WidgetSnapshot.MacSection.Process(name: $0.name, status: $0.status)
+            }
         )
     }
 
@@ -146,6 +246,36 @@ public enum WidgetSnapshotBuilder {
             )
         }
         return (host, apps)
+    }
+
+    /// Same issue flags the Computers tab already shows.  Do not invent new
+    /// thresholds here.
+    static func macFlags(from health: MacHealthResponse) -> [String] {
+        var flags: [String] = []
+        if health.status == "offline" {
+            flags.append("Heartbeat stale — Mac looks offline.")
+        }
+        guard let mac = health.mac else { return flags }
+        if mac.cpuUsagePct > 90 { flags.append("CPU above 90%.") }
+        if mac.memoryUsagePct > 90 { flags.append("Memory above 90%.") }
+        if mac.diskUsagePct > 95 { flags.append("Disk above 95%.") }
+        for row in mac.processRows where row.status != "running" {
+            flags.append("\(shortProcessName(row.name)) is \(row.status).")
+        }
+        return flags
+    }
+
+    private static func shortProcessName(_ name: String) -> String {
+        name.replacingOccurrences(of: "com.jay.", with: "")
+    }
+
+    private static func severityOrder(_ raw: String) -> Int {
+        switch raw {
+        case AlertSeverity.critical.rawValue: return 0
+        case AlertSeverity.warning.rawValue: return 1
+        case AlertSeverity.info.rawValue: return 2
+        default: return 3
+        }
     }
 
     private static func llmProvider(

@@ -4,9 +4,9 @@ import Foundation
 /// render without pulling in the app's full model/networking stack. The app
 /// derives and persists this after every successful refresh.
 ///
-/// Budget fields are the original payload.  LLM and server sections are
-/// optional so older app-group files still decode.  Missing sections are
-/// absent data, not zeros.
+/// Budget fields are the original payload.  LLM, server, Mac, and alerts
+/// sections are optional so older app-group files still decode.  Missing
+/// sections are absent data, not zeros.
 public struct WidgetSnapshot: Codable, Equatable, Sendable {
     public struct Meter: Codable, Equatable, Sendable, Identifiable {
         public var id: String
@@ -249,6 +249,118 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         }
     }
 
+    /// Latest Mac heartbeat from Computers (`GET /api/health/mac`).  Distinct
+    /// from the Coolify host under Servers.  `nil` means the app has never
+    /// cached a Mac response.  `reported == false` means the monitor answered
+    /// but this Mac has not checked in.
+    public struct MacSection: Codable, Equatable, Sendable {
+        public var generatedAt: Date
+        public var ok: Bool
+        public var status: String
+        public var reported: Bool
+        public var hostname: String?
+        public var osVersion: String?
+        public var arch: String?
+        public var cpuUsagePct: Double?
+        public var memoryUsagePct: Double?
+        public var diskUsagePct: Double?
+        public var uptimeSeconds: Int?
+        public var lastHeartbeatAt: Date?
+        public var secondsSinceHeartbeat: Int?
+        public var flags: [String]
+        public var processes: [Process]
+
+        public init(
+            generatedAt: Date,
+            ok: Bool,
+            status: String,
+            reported: Bool,
+            hostname: String? = nil,
+            osVersion: String? = nil,
+            arch: String? = nil,
+            cpuUsagePct: Double? = nil,
+            memoryUsagePct: Double? = nil,
+            diskUsagePct: Double? = nil,
+            uptimeSeconds: Int? = nil,
+            lastHeartbeatAt: Date? = nil,
+            secondsSinceHeartbeat: Int? = nil,
+            flags: [String] = [],
+            processes: [Process] = []
+        ) {
+            self.generatedAt = generatedAt
+            self.ok = ok
+            self.status = status
+            self.reported = reported
+            self.hostname = hostname
+            self.osVersion = osVersion
+            self.arch = arch
+            self.cpuUsagePct = cpuUsagePct
+            self.memoryUsagePct = memoryUsagePct
+            self.diskUsagePct = diskUsagePct
+            self.uptimeSeconds = uptimeSeconds
+            self.lastHeartbeatAt = lastHeartbeatAt
+            self.secondsSinceHeartbeat = secondsSinceHeartbeat
+            self.flags = flags
+            self.processes = processes
+        }
+
+        public struct Process: Codable, Equatable, Sendable, Identifiable {
+            public var name: String
+            public var status: String
+            public var id: String { name }
+
+            public init(name: String, status: String) {
+                self.name = name
+                self.status = status
+            }
+        }
+    }
+
+    /// Active provider alerts copied from the budget snapshot.  `nil` means
+    /// the app has never cached budget-status.  A loaded section with
+    /// `openCount == 0` is an honest all-clear.
+    public struct AlertsSection: Codable, Equatable, Sendable {
+        public var generatedAt: Date
+        public var openCount: Int
+        public var needsAttentionCount: Int
+        public var latestTitle: String?
+        public var latestProvider: String?
+        public var latestSeverity: String?
+        public var items: [Item]
+
+        public init(
+            generatedAt: Date,
+            openCount: Int,
+            needsAttentionCount: Int,
+            latestTitle: String? = nil,
+            latestProvider: String? = nil,
+            latestSeverity: String? = nil,
+            items: [Item] = []
+        ) {
+            self.generatedAt = generatedAt
+            self.openCount = openCount
+            self.needsAttentionCount = needsAttentionCount
+            self.latestTitle = latestTitle
+            self.latestProvider = latestProvider
+            self.latestSeverity = latestSeverity
+            self.items = items
+        }
+
+        public struct Item: Codable, Equatable, Sendable, Identifiable {
+            public var id: String
+            public var title: String
+            public var providerName: String
+            public var severity: String
+
+            public init(id: String, title: String, providerName: String, severity: String) {
+                self.id = id
+                self.title = title
+                self.providerName = providerName
+                self.severity = severity
+            }
+        }
+    }
+
     public var generatedAt: Date
     public var month: String
     /// Account-wide (provider-scoped) month-to-date totals.
@@ -266,6 +378,13 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     public var llm: LlmSection?
     /// Service / host / app rows.  `nil` means the app has never cached them.
     public var servers: ServerSection?
+    /// Top spenders by month-to-date spend (not utilisation).  Empty when the
+    /// latest budget snapshot has no positive spend.
+    public var spenders: [Meter]
+    /// Mac heartbeat.  `nil` means Computers has never written a cache.
+    public var mac: MacSection?
+    /// Active alerts.  `nil` means budget-status has never been cached.
+    public var alerts: AlertsSection?
 
     public init(
         generatedAt: Date,
@@ -279,7 +398,10 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         topMeters: [Meter],
         projects: [Meter] = [],
         llm: LlmSection? = nil,
-        servers: ServerSection? = nil
+        servers: ServerSection? = nil,
+        spenders: [Meter] = [],
+        mac: MacSection? = nil,
+        alerts: AlertsSection? = nil
     ) {
         self.generatedAt = generatedAt
         self.month = month
@@ -293,11 +415,15 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         self.projects = projects
         self.llm = llm
         self.servers = servers
+        self.spenders = spenders
+        self.mac = mac
+        self.alerts = alerts
     }
 
     private enum CodingKeys: String, CodingKey {
         case generatedAt, month, totalSpentUsd, totalBudgetUsd, projectedEomUsd
         case percentUsed, overBudget, warning, topMeters, projects, llm, servers
+        case spenders, mac, alerts
     }
 
     public init(from decoder: Decoder) throws {
@@ -311,17 +437,23 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         overBudget = try c.decode(Bool.self, forKey: .overBudget)
         warning = try c.decode(Bool.self, forKey: .warning)
         topMeters = try c.decode([Meter].self, forKey: .topMeters)
-        // Backward-compatible: older snapshots omit projects / llm / servers.
+        // Backward-compatible: older snapshots omit projects / llm / servers /
+        // spenders / mac / alerts.
         projects = try c.decodeIfPresent([Meter].self, forKey: .projects) ?? []
         llm = try c.decodeIfPresent(LlmSection.self, forKey: .llm)
         servers = try c.decodeIfPresent(ServerSection.self, forKey: .servers)
+        spenders = try c.decodeIfPresent([Meter].self, forKey: .spenders) ?? []
+        mac = try c.decodeIfPresent(MacSection.self, forKey: .mac)
+        alerts = try c.decodeIfPresent(AlertsSection.self, forKey: .alerts)
     }
 
-    /// Keep LLM / server cache when a budget-only write lands.
+    /// Keep LLM / server / Mac cache when a budget-only write lands.
     public func mergingPreservedSections(from existing: WidgetSnapshot) -> WidgetSnapshot {
         var next = self
         if next.llm == nil { next.llm = existing.llm }
         if next.servers == nil { next.servers = existing.servers }
+        if next.mac == nil { next.mac = existing.mac }
+        if next.alerts == nil { next.alerts = existing.alerts }
         return next
     }
 
@@ -345,6 +477,12 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         section.host = host
         section.apps = apps
         next.servers = section
+        return next
+    }
+
+    public func replacingMac(_ mac: MacSection?) -> WidgetSnapshot {
+        var next = self
+        next.mac = mac
         return next
     }
 
@@ -454,12 +592,59 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
                 ServerSection.App(id: "st", name: "socratic-app", status: "running:healthy", selfApp: false),
                 ServerSection.App(id: "ct", name: "congress-trade", status: "running:unknown", selfApp: false)
             ]
+        ),
+        spenders: [
+            Meter(id: "anthropic", name: "Anthropic", spentUsd: 212.4, budgetUsd: 250, percentUsed: 0.85, status: "warning", projectedEomUsd: 280),
+            Meter(id: "openai", name: "OpenAI", spentUsd: 96.2, budgetUsd: 200, percentUsed: 0.48, status: "ok", projectedEomUsd: 140),
+            Meter(id: "voyage", name: "Voyage", spentUsd: 61.0, budgetUsd: 150, percentUsed: 0.41, status: "ok", projectedEomUsd: 90)
+        ],
+        mac: MacSection(
+            generatedAt: Date(timeIntervalSince1970: 1_720_000_000),
+            ok: true,
+            status: "online",
+            reported: true,
+            hostname: "jays-macbook-pro",
+            osVersion: "macOS 26.0",
+            arch: "arm64",
+            cpuUsagePct: 24,
+            memoryUsagePct: 61,
+            diskUsagePct: 47,
+            uptimeSeconds: 86_400,
+            lastHeartbeatAt: Date(timeIntervalSince1970: 1_720_000_000),
+            secondsSinceHeartbeat: 12,
+            flags: ["z-last is stopped."],
+            processes: [
+                MacSection.Process(name: "com.jay.agy-acp", status: "running"),
+                MacSection.Process(name: "com.jay.z-last", status: "stopped")
+            ]
+        ),
+        alerts: AlertsSection(
+            generatedAt: Date(timeIntervalSince1970: 1_720_000_000),
+            openCount: 2,
+            needsAttentionCount: 2,
+            latestTitle: "Budget exceeded",
+            latestProvider: "OpenRouter",
+            latestSeverity: "critical",
+            items: [
+                AlertsSection.Item(
+                    id: "openrouter|budget_exceeded",
+                    title: "Budget exceeded",
+                    providerName: "OpenRouter",
+                    severity: "critical"
+                ),
+                AlertsSection.Item(
+                    id: "anthropic|budget_warning",
+                    title: "Approaching budget",
+                    providerName: "Anthropic",
+                    severity: "warning"
+                )
+            ]
         )
     )
 
     /// Live empty state when no snapshot has been written (signed-out / fresh install).
     /// Zeros only — never fabricated spend that looks like real money.
-    /// LLM and server sections stay `nil` so those topics cannot show fake live zeros.
+    /// Optional sections stay `nil` so those topics cannot show fake live zeros.
     public static let empty = WidgetSnapshot(
         generatedAt: Date(timeIntervalSince1970: 0),
         month: "",
@@ -472,6 +657,9 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         topMeters: [],
         projects: [],
         llm: nil,
-        servers: nil
+        servers: nil,
+        spenders: [],
+        mac: nil,
+        alerts: nil
     )
 }

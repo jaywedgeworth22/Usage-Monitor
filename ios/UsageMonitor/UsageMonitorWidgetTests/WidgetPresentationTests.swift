@@ -331,6 +331,159 @@ final class WidgetTopicPresentationTests: XCTestCase {
         let decoded = try decoder.decode(WidgetSnapshot.self, from: data)
         XCTAssertNil(decoded.llm)
         XCTAssertNil(decoded.servers)
+        XCTAssertNil(decoded.mac)
+        XCTAssertNil(decoded.alerts)
+        XCTAssertEqual(decoded.spenders, [])
         XCTAssertEqual(decoded, .empty)
+    }
+
+    func testMacMissingSectionIsUnavailableNotZero() {
+        let content = WidgetTopicPresentation.macContent(from: .empty)
+        guard case .unavailable(let unavailable) = content else {
+            return XCTFail("expected unavailable")
+        }
+        XCTAssertEqual(unavailable.title, "Mac")
+        XCTAssertEqual(unavailable.message, "Open the app to load Mac stats.")
+        XCTAssertEqual(unavailable.deepLink?.absoluteString, "usageclientmonitor://computers")
+    }
+
+    func testMacNotReportedIsUnavailable() {
+        var snapshot = WidgetSnapshot.empty
+        snapshot.mac = WidgetSnapshot.MacSection(
+            generatedAt: Date(timeIntervalSince1970: 1_720_000_000),
+            ok: false,
+            status: "offline",
+            reported: false
+        )
+        let content = WidgetTopicPresentation.macContent(from: snapshot)
+        guard case .unavailable(let unavailable) = content else {
+            return XCTFail("expected unavailable")
+        }
+        XCTAssertEqual(unavailable.message, "The Mac has not reported yet.")
+    }
+
+    func testMacPlaceholderUsesCachedPercents() {
+        let content = WidgetTopicPresentation.macContent(from: .placeholder)
+        guard case .mac(let mac) = content else {
+            return XCTFail("expected mac content")
+        }
+        XCTAssertEqual(mac.section.cpuUsagePct, 24)
+        XCTAssertEqual(WidgetTopicPresentation.macLabel(mac.section), "Online")
+        XCTAssertEqual(mac.deepLink?.absoluteString, "usageclientmonitor://computers")
+    }
+
+    func testMacOfflineIsStaleEvenWhenJustCached() {
+        let now = Date(timeIntervalSince1970: 1_720_000_000)
+        let section = WidgetSnapshot.MacSection(
+            generatedAt: now,
+            ok: false,
+            status: "offline",
+            reported: true,
+            hostname: "jays-macbook-pro",
+            cpuUsagePct: 10,
+            lastHeartbeatAt: now
+        )
+        XCTAssertTrue(WidgetTopicPresentation.macIsStale(section, asOf: now))
+        XCTAssertEqual(WidgetTopicPresentation.macLabel(section), "Offline")
+        XCTAssertEqual(WidgetTopicPresentation.macStatus(section), .danger)
+    }
+
+    func testAlertsMissingSectionIsUnavailable() {
+        let content = WidgetTopicPresentation.alertsContent(from: .empty)
+        guard case .unavailable(let unavailable) = content else {
+            return XCTFail("expected unavailable")
+        }
+        XCTAssertEqual(unavailable.message, "Open the app to load alerts.")
+        XCTAssertEqual(unavailable.deepLink?.absoluteString, "usageclientmonitor://alerts")
+    }
+
+    func testAlertsCountAndLatestTitle() {
+        let content = WidgetTopicPresentation.alertsContent(from: .placeholder)
+        guard case .alerts(let alerts) = content else {
+            return XCTFail("expected alerts content")
+        }
+        XCTAssertEqual(alerts.section.openCount, 2)
+        XCTAssertEqual(alerts.section.needsAttentionCount, 2)
+        XCTAssertEqual(alerts.section.latestTitle, "Budget exceeded")
+        XCTAssertEqual(WidgetTopicPresentation.alertsHeadline(openCount: 2), "2 Open")
+        XCTAssertEqual(
+            WidgetTopicPresentation.alertsNeedsAttentionLabel(count: 2),
+            "Needs Attention"
+        )
+    }
+
+    func testAlertsAllClearHeadline() {
+        var snapshot = WidgetSnapshot.empty
+        snapshot.month = "2026-08"
+        snapshot.generatedAt = Date(timeIntervalSince1970: 1_720_000_000)
+        snapshot.alerts = WidgetSnapshot.AlertsSection(
+            generatedAt: Date(timeIntervalSince1970: 1_720_000_000),
+            openCount: 0,
+            needsAttentionCount: 0
+        )
+        let content = WidgetTopicPresentation.alertsContent(from: snapshot)
+        guard case .alerts(let alerts) = content else {
+            return XCTFail("expected alerts content")
+        }
+        XCTAssertEqual(WidgetTopicPresentation.alertsHeadline(openCount: alerts.section.openCount), "All Clear")
+        XCTAssertNil(WidgetTopicPresentation.alertsNeedsAttentionLabel(count: 0))
+    }
+
+    func testProvidersMissingMonthIsUnavailable() {
+        let content = WidgetTopicPresentation.providersContent(from: .empty)
+        guard case .unavailable(let unavailable) = content else {
+            return XCTFail("expected unavailable")
+        }
+        XCTAssertEqual(unavailable.message, "Open the app to load providers.")
+        XCTAssertEqual(unavailable.deepLink?.absoluteString, "usageclientmonitor://providers")
+    }
+
+    func testProvidersUsesSpendersNotUtilisationOrder() {
+        let content = WidgetTopicPresentation.providersContent(from: .placeholder)
+        guard case .providers(let providers) = content else {
+            return XCTFail("expected providers content")
+        }
+        XCTAssertEqual(providers.meters.map(\.name), ["Anthropic", "OpenAI", "Voyage"])
+        XCTAssertEqual(providers.deepLink?.absoluteString, "usageclientmonitor://providers")
+    }
+
+    func testProvidersEmptySpendIsUnavailableNotZero() {
+        var snapshot = WidgetSnapshot.empty
+        snapshot.month = "2026-08"
+        snapshot.generatedAt = Date(timeIntervalSince1970: 1_720_000_000)
+        let content = WidgetTopicPresentation.providersContent(from: snapshot)
+        guard case .unavailable(let unavailable) = content else {
+            return XCTFail("expected unavailable")
+        }
+        XCTAssertEqual(unavailable.message, "No provider spend in the latest cache.")
+    }
+
+    func testTopicContentMacAlertsProviders() {
+        let mac = WidgetTopicPresentation.topicContent(
+            from: .placeholder,
+            topic: .mac,
+            budgetFocus: .overall,
+            llmProviderId: nil,
+            serverFocus: .service
+        )
+        guard case .mac = mac else { return XCTFail("expected mac") }
+
+        let alerts = WidgetTopicPresentation.topicContent(
+            from: .placeholder,
+            topic: .alerts,
+            budgetFocus: .overall,
+            llmProviderId: nil,
+            serverFocus: .service
+        )
+        guard case .alerts = alerts else { return XCTFail("expected alerts") }
+
+        let providers = WidgetTopicPresentation.topicContent(
+            from: .placeholder,
+            topic: .providers,
+            budgetFocus: .overall,
+            llmProviderId: nil,
+            serverFocus: .service
+        )
+        guard case .providers = providers else { return XCTFail("expected providers") }
     }
 }

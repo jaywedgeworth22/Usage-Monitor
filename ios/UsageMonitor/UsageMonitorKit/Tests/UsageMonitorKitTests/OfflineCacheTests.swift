@@ -443,6 +443,9 @@ final class OfflineCacheTests: XCTestCase {
         XCTAssertEqual(decoded.projects, [])
         XCTAssertNil(decoded.llm)
         XCTAssertNil(decoded.servers)
+        XCTAssertNil(decoded.mac)
+        XCTAssertNil(decoded.alerts)
+        XCTAssertEqual(decoded.spenders, [])
         XCTAssertEqual(decoded.totalSpentUsd, 10)
     }
 
@@ -457,6 +460,9 @@ final class OfflineCacheTests: XCTestCase {
         XCTAssertEqual(decoded.llm?.providers.first?.estimateUsd, 8.40)
         XCTAssertEqual(decoded.servers?.service?.name, "usage-monitor")
         XCTAssertEqual(decoded.servers?.apps.count, 3)
+        XCTAssertEqual(decoded.mac?.hostname, "jays-macbook-pro")
+        XCTAssertEqual(decoded.alerts?.openCount, 2)
+        XCTAssertEqual(decoded.spenders.count, 3)
         XCTAssertEqual(decoded, .placeholder)
     }
 
@@ -511,14 +517,81 @@ final class OfflineCacheTests: XCTestCase {
         XCTAssertTrue(missing.apps.isEmpty)
     }
 
-    func testBudgetSnapshotMergeKeepsLlmAndServerSections() {
+    func testBudgetSnapshotMergeKeepsLlmServerAndMacSections() {
         let budget = WidgetSnapshotBuilder.snapshot(from: .sample)
         XCTAssertNil(budget.llm)
         XCTAssertNil(budget.servers)
+        XCTAssertNil(budget.mac)
+        XCTAssertNotNil(budget.alerts)
+        XCTAssertFalse(budget.spenders.isEmpty)
         let merged = budget.mergingPreservedSections(from: .placeholder)
         XCTAssertEqual(merged.totalSpentUsd, budget.totalSpentUsd)
         XCTAssertEqual(merged.llm, WidgetSnapshot.placeholder.llm)
         XCTAssertEqual(merged.servers, WidgetSnapshot.placeholder.servers)
+        XCTAssertEqual(merged.mac, WidgetSnapshot.placeholder.mac)
+        XCTAssertEqual(merged.alerts?.openCount, budget.alerts?.openCount)
+    }
+
+    func testSpendersAreHighestMonthToDateSpendIncludingUnbudgeted() {
+        let spenders = WidgetSnapshotBuilder.spenders(from: .sample)
+        XCTAssertEqual(spenders.map(\.name), ["Anthropic", "OpenRouter", "OpenAI", "Voyage AI"])
+        XCTAssertEqual(spenders.first?.spentUsd, 212.40, accuracy: 0.001)
+        XCTAssertEqual(spenders.last?.name, "Voyage AI")
+        XCTAssertNil(spenders.last?.budgetUsd)
+    }
+
+    func testAlertsSectionUsesKitTitlesAndSeverityOrder() {
+        let section = WidgetSnapshotBuilder.alertsSection(from: .sample)
+        XCTAssertEqual(section.openCount, 3)
+        XCTAssertEqual(section.needsAttentionCount, 2)
+        XCTAssertEqual(section.latestTitle, "Budget exceeded")
+        XCTAssertEqual(section.latestProvider, "OpenRouter")
+        XCTAssertEqual(section.latestSeverity, "critical")
+        XCTAssertEqual(section.items.map(\.title), [
+            "Budget exceeded",
+            "Approaching budget",
+            "Billing sync incomplete",
+        ])
+    }
+
+    func testAlertsSectionAllClearWhenNoAlerts() {
+        let section = WidgetSnapshotBuilder.alertsSection(from: .sampleEmpty)
+        XCTAssertEqual(section.openCount, 0)
+        XCTAssertEqual(section.needsAttentionCount, 0)
+        XCTAssertNil(section.latestTitle)
+        XCTAssertTrue(section.items.isEmpty)
+    }
+
+    func testMacSectionMapsHeartbeatAndDoesNotInventPercents() {
+        let online = MacHealthResponse(
+            ok: true,
+            status: "online",
+            lastHeartbeatAt: "2026-08-16T12:00:00.000Z",
+            secondsSinceHeartbeat: 12,
+            mac: MacHostTelemetry(
+                hostname: "jays-macbook-pro",
+                osVersion: "macOS 26.0",
+                arch: "arm64",
+                cpuUsagePct: 24,
+                memoryUsagePct: 61,
+                diskUsagePct: 47,
+                uptimeSeconds: 100,
+                processes: ["com.jay.agy-acp": "running", "com.jay.z-last": "stopped"],
+                lastHeartbeatAt: "2026-08-16T12:00:00.000Z"
+            )
+        )
+        let section = WidgetSnapshotBuilder.macSection(from: online)
+        XCTAssertTrue(section.reported)
+        XCTAssertEqual(section.hostname, "jays-macbook-pro")
+        XCTAssertEqual(section.cpuUsagePct, 24)
+        XCTAssertTrue(section.flags.contains("z-last is stopped."))
+
+        let offline = MacHealthResponse(ok: false, status: "offline")
+        let missing = WidgetSnapshotBuilder.macSection(from: offline)
+        XCTAssertFalse(missing.reported)
+        XCTAssertNil(missing.cpuUsagePct)
+        XCTAssertEqual(missing.status, "offline")
+        XCTAssertTrue(missing.flags.contains("Heartbeat stale — Mac looks offline."))
     }
 }
 
