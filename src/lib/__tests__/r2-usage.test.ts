@@ -22,6 +22,7 @@ import {
   fetchR2FleetSummary,
   fetchR2UsageMetrics,
   utcStorageLookbackIso,
+  R2_STORAGE_GRAPHQL_BUCKET_LIMIT,
   R2_STORAGE_GRAPHQL_GROUP_LIMIT,
   R2_STORAGE_GRAPHQL_LOOKBACK_MS,
   r2FreeTierFailClosedRequired,
@@ -408,6 +409,50 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(metrics.buckets[0].bucketName).toBe("usage-monitor-bucket");
   });
 
+  it("keeps month-window orphan buckets and prefers a fresher 24h sample after prune", () => {
+    const gib = 1024 * 1024 * 1024;
+    const metrics = parseR2GraphqlUsage({
+      data: {
+        viewer: {
+          accounts: [
+            {
+              r2OperationsAdaptiveGroups: [],
+              r2StorageByBucket: [
+                {
+                  max: { payloadSize: 15 * gib, metadataSize: 0, objectCount: 10 },
+                  dimensions: { bucketName: "usage-monitor-bucket" },
+                },
+                {
+                  max: { payloadSize: 9 * gib, metadataSize: 0, objectCount: 5 },
+                  dimensions: { bucketName: "usage-monitor-prod-v3" },
+                },
+                {
+                  max: { payloadSize: 5 * gib, metadataSize: 0, objectCount: 2 },
+                  dimensions: { bucketName: "weekly-archive" },
+                },
+              ],
+              r2StorageAdaptiveGroups: [
+                {
+                  max: { payloadSize: 2 * 1024 * 1024, metadataSize: 0, objectCount: 1 },
+                  dimensions: {
+                    datetime: "2026-08-25T00:00:00Z",
+                    bucketName: "weekly-archive",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(metrics.buckets).toHaveLength(3);
+    expect(metrics.storageBytes).toBe(24 * gib + 2 * 1024 * 1024);
+    const weekly = metrics.buckets.find((b) => b.bucketName === "weekly-archive");
+    expect(weekly?.bytes).toBe(2 * 1024 * 1024);
+    expect(weekly?.asOf).toBe("2026-08-25T00:00:00Z");
+  });
+
   it("mergeGraphqlStorageWithLiveOverlay keeps orphan buckets when live list is partial", () => {
     const graphqlBuckets = [
       {
@@ -503,7 +548,7 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(lines.some((l) => l.includes("Socratic Trade") && l.includes("⚠️"))).toBe(true);
   });
 
-  it("asks GraphQL for a multi-week latest-per-bucket storage window so idle buckets stay visible", async () => {
+  it("asks GraphQL for a short fresh window plus a month-long per-bucket group", async () => {
     const now = new Date("2026-08-14T18:00:00.000Z");
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -543,16 +588,11 @@ describe("R2 usage monitoring & auto-disable", () => {
     );
     expect(body.query).toContain(`limit: ${R2_STORAGE_GRAPHQL_GROUP_LIMIT}`);
     expect(body.query).toContain("datetime_geq: $storageStartDate");
-    expect(R2_STORAGE_GRAPHQL_LOOKBACK_MS).toBeGreaterThan(7 * 24 * 60 * 60 * 1000);
-    expect(R2_STORAGE_GRAPHQL_GROUP_LIMIT).toBeGreaterThan(400);
-    expect(R2_STORAGE_GRAPHQL_GROUP_LIMIT).toBeLessThan(10000);
-  });
-
-  it("does not clip the storage lookback to month start on the 2nd", () => {
-    const earlyMonth = new Date("2026-08-02T06:00:00.000Z");
-    const start = Date.parse(utcStorageLookbackIso(earlyMonth));
-    expect(start).toBe(earlyMonth.getTime() - R2_STORAGE_GRAPHQL_LOOKBACK_MS);
-    expect(start).toBeLessThan(Date.parse("2026-08-01T00:00:00.000Z"));
+    expect(body.query).toContain("r2StorageByBucket:");
+    expect(body.query).toContain(`limit: ${R2_STORAGE_GRAPHQL_BUCKET_LIMIT}`);
+    expect(R2_STORAGE_GRAPHQL_LOOKBACK_MS).toBe(24 * 60 * 60 * 1000);
+    expect(R2_STORAGE_GRAPHQL_GROUP_LIMIT).toBeLessThan(1000);
+    expect(R2_STORAGE_GRAPHQL_BUCKET_LIMIT).toBeLessThan(200);
   });
 
   it("keeps GraphQL storage when the UM live S3 overlay throws", async () => {

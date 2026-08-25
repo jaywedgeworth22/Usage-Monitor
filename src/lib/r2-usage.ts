@@ -158,15 +158,14 @@ export const R2_PRODUCT_STATUS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const R2_GRAPHQL_STORAGE_MAX_AGE_MS = 90 * 60 * 1000;
 
 /**
- * Storage analytics are latest-per-bucket only (datetime_DESC, first win).
- * A 24h window hid idle orphan buckets (no writes, so no recent groups) and
- * made UM look like ~0.3 GiB after the B2 cutover while Cloudflare still
- * billed ~24 GiB.  32 days is long enough for daily idle snapshots; latest-
- * per-bucket plus the live S3 overlay still wins after a prune.  Keep the
- * group cap well under the Platforms probe's 1 MiB GraphQL ceiling.
+ * Fresh storage samples (datetime_DESC, first win).  Keep this window short so
+ * one busy bucket cannot crowd the group cap and hide idle orphans.  Account-
+ * wide orphan coverage comes from `r2StorageByBucket` (bucketName only).
  */
-export const R2_STORAGE_GRAPHQL_LOOKBACK_MS = 32 * 24 * 60 * 60 * 1000;
-export const R2_STORAGE_GRAPHQL_GROUP_LIMIT = 2500;
+export const R2_STORAGE_GRAPHQL_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+export const R2_STORAGE_GRAPHQL_GROUP_LIMIT = 400;
+/** One row per bucket over the UTC month — idle orphans still bill. */
+export const R2_STORAGE_GRAPHQL_BUCKET_LIMIT = 80;
 
 /** Auto-resume hysteresis: clear kill switch when live storage is below this. */
 export const R2_RESUME_STORAGE_PCT = 65;
@@ -815,6 +814,20 @@ query R2FreeTierUsage(
           bucketName
         }
       }
+      r2StorageByBucket: r2StorageAdaptiveGroups(
+        limit: ${R2_STORAGE_GRAPHQL_BUCKET_LIMIT}
+        filter: { datetime_geq: $startDate, datetime_leq: $endDate }
+      ) {
+        max {
+          objectCount
+          uploadCount
+          payloadSize
+          metadataSize
+        }
+        dimensions {
+          bucketName
+        }
+      }
     }
   }
 }
@@ -826,7 +839,7 @@ function utcMonthStartIso(now: Date): string {
   ).toISOString();
 }
 
-/** Always `now − lookback` so early-month days still see idle orphan buckets. */
+/** Fresh-sample window start (`now − lookback`).  Month coverage is a separate group. */
 export function utcStorageLookbackIso(now: Date): string {
   return new Date(now.getTime() - R2_STORAGE_GRAPHQL_LOOKBACK_MS).toISOString();
 }
@@ -835,6 +848,34 @@ export function utcStorageLookbackIso(now: Date): string {
  * Parse a Cloudflare GraphQL R2 analytics response into free-tier counters.
  * Exported for unit tests.
  */
+type R2StorageGraphqlGroup = {
+  max?: {
+    objectCount?: number | null;
+    uploadCount?: number | null;
+    payloadSize?: number | null;
+    metadataSize?: number | null;
+  } | null;
+  dimensions?: {
+    datetime?: string | null;
+    bucketName?: string | null;
+  } | null;
+};
+
+function sampleFromStorageGroup(group: R2StorageGraphqlGroup): R2BucketStorageSample {
+  const bucketName = group.dimensions?.bucketName || "(unknown)";
+  const payload = Number(group.max?.payloadSize ?? 0);
+  const metadata = Number(group.max?.metadataSize ?? 0);
+  const objectCount = Number(group.max?.objectCount ?? 0);
+  return {
+    bucketName,
+    bytes:
+      (Number.isFinite(payload) ? payload : 0) +
+      (Number.isFinite(metadata) ? metadata : 0),
+    objectCount: Number.isFinite(objectCount) ? objectCount : 0,
+    asOf: group.dimensions?.datetime ?? null,
+  };
+}
+
 export function parseR2GraphqlUsage(
   payload: unknown
 ): FetchedR2UsageMetrics {
@@ -846,18 +887,8 @@ export function parseR2GraphqlUsage(
             sum?: { requests?: number | null } | null;
             dimensions?: { actionType?: string | null } | null;
           }>;
-          r2StorageAdaptiveGroups?: Array<{
-            max?: {
-              objectCount?: number | null;
-              uploadCount?: number | null;
-              payloadSize?: number | null;
-              metadataSize?: number | null;
-            } | null;
-            dimensions?: {
-              datetime?: string | null;
-              bucketName?: string | null;
-            } | null;
-          }>;
+          r2StorageAdaptiveGroups?: R2StorageGraphqlGroup[];
+          r2StorageByBucket?: R2StorageGraphqlGroup[];
         }>;
       };
     };
@@ -891,24 +922,20 @@ export function parseR2GraphqlUsage(
     else classAOps += n;
   }
 
-  // Latest sample per bucket (query is datetime_DESC).
+  // Month groups are one row per bucket (no datetime dimension) so idle
+  // orphans still appear.  Overlay 24h latest-per-bucket so a prune is not
+  // stuck on the month-window max.
   const latestByBucket = new Map<string, R2BucketStorageSample>();
+  for (const group of account.r2StorageByBucket ?? []) {
+    const sample = sampleFromStorageGroup(group);
+    latestByBucket.set(sample.bucketName, sample);
+  }
+  const seenFresh = new Set<string>();
   for (const group of account.r2StorageAdaptiveGroups ?? []) {
-    const bucketName = group.dimensions?.bucketName || "(unknown)";
-    const datetime = group.dimensions?.datetime ?? null;
-    if (latestByBucket.has(bucketName)) continue;
-    const payload = Number(group.max?.payloadSize ?? 0);
-    const metadata = Number(group.max?.metadataSize ?? 0);
-    const objectCount = Number(group.max?.objectCount ?? 0);
-    const bytes =
-      (Number.isFinite(payload) ? payload : 0) +
-      (Number.isFinite(metadata) ? metadata : 0);
-    latestByBucket.set(bucketName, {
-      bucketName,
-      bytes,
-      objectCount: Number.isFinite(objectCount) ? objectCount : 0,
-      asOf: datetime,
-    });
+    const sample = sampleFromStorageGroup(group);
+    if (seenFresh.has(sample.bucketName)) continue;
+    seenFresh.add(sample.bucketName);
+    latestByBucket.set(sample.bucketName, sample);
   }
 
   const buckets = [...latestByBucket.values()].sort((a, b) => b.bytes - a.bytes);
