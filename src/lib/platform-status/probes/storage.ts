@@ -349,11 +349,21 @@ async function probeCloudflareR2(): Promise<PlatformProbeResult> {
       );
       continue;
     }
+    const peakHint =
+      account.monthPeakBytes != null &&
+      account.monthPeakBytes > account.storage.actual + 1024 * 1024
+        ? `month peak ${formatBytes(account.monthPeakBytes)}${
+            account.monthPeakDate ? ` ${account.monthPeakDate}` : ""
+          }`
+        : account.currentBytes != null &&
+            Math.abs(account.currentBytes - account.storage.actual) > 1024 * 1024
+          ? `now ${formatBytes(account.currentBytes)}`
+          : undefined;
     metrics.push(
       metric(
         account.label,
         `${formatBytes(account.storage.actual)} / ${formatBytesCompact(freeTierBytes)} Free Tier`,
-        undefined,
+        peakHint,
         account.storage.mtdPct
       )
     );

@@ -23,11 +23,15 @@ import {
   fetchR2UsageMetrics,
   utcStorageLookbackIso,
   R2_STORAGE_GRAPHQL_BUCKET_LIMIT,
+  R2_STORAGE_GRAPHQL_DAY_LIMIT,
   R2_STORAGE_GRAPHQL_GROUP_LIMIT,
   R2_STORAGE_GRAPHQL_LOOKBACK_MS,
   r2FreeTierFailClosedRequired,
   graphqlStorageSamplesAreFresh,
   mergeGraphqlStorageWithLiveOverlay,
+  applyStorageOverlay,
+  resolveBillingStorageBytes,
+  summarizeR2DailyStorage,
   formatFleetR2DigestLines,
   planLtxTipPrune,
   DEFAULT_R2_FREE_TIER_LIMITS,
@@ -451,6 +455,142 @@ describe("R2 usage monitoring & auto-disable", () => {
     const weekly = metrics.buckets.find((b) => b.bucketName === "weekly-archive");
     expect(weekly?.bytes).toBe(2 * 1024 * 1024);
     expect(weekly?.asOf).toBe("2026-08-25T00:00:00Z");
+    expect(metrics.currentBytes).toBe(24 * gib + 2 * 1024 * 1024);
+    expect(metrics.gbMonthBytes).toBeNull();
+    expect(metrics.storageBytes).toBe(metrics.currentBytes);
+    expect(metrics.monthPeakBytes).toBe(29 * gib);
+  });
+
+  it("bills GB-month instead of a post-prune 24h snapshot after a gigabyte month", () => {
+    const gib = 1024 * 1024 * 1024;
+    const now = new Date("2026-08-25T20:00:00.000Z");
+    const metrics = parseR2GraphqlUsage(
+      {
+        data: {
+          viewer: {
+            accounts: [
+              {
+                r2OperationsAdaptiveGroups: [],
+                r2StorageByBucket: [
+                  {
+                    max: { payloadSize: 15 * gib, metadataSize: 0, objectCount: 10 },
+                    dimensions: { bucketName: "usage-monitor-bucket" },
+                  },
+                  {
+                    max: { payloadSize: 9 * gib, metadataSize: 0, objectCount: 5 },
+                    dimensions: { bucketName: "usage-monitor-prod-v3" },
+                  },
+                ],
+                r2StorageAdaptiveGroups: [
+                  {
+                    max: { payloadSize: 0, metadataSize: 0, objectCount: 0 },
+                    dimensions: {
+                      datetime: "2026-08-25T12:00:00Z",
+                      bucketName: "usage-monitor-bucket",
+                    },
+                  },
+                  {
+                    max: { payloadSize: 0.28 * gib, metadataSize: 0, objectCount: 2 },
+                    dimensions: {
+                      datetime: "2026-08-25T12:00:00Z",
+                      bucketName: "usage-monitor-prod-v3",
+                    },
+                  },
+                ],
+                r2StorageByDay: [
+                  {
+                    max: { payloadSize: 22 * gib, metadataSize: 0, objectCount: 20 },
+                    dimensions: { date: "2026-08-05", bucketName: "usage-monitor-bucket" },
+                  },
+                  {
+                    max: { payloadSize: 0.28 * gib, metadataSize: 0, objectCount: 2 },
+                    dimensions: { date: "2026-08-25", bucketName: "usage-monitor-prod-v3" },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      now
+    );
+
+    expect(metrics.currentBytes).toBeCloseTo(0.28 * gib, 0);
+    expect(metrics.monthPeakBytes).toBe(22 * gib);
+    expect(metrics.monthPeakDate).toBe("2026-08-05");
+    expect(metrics.gbMonthBytes).toBeCloseTo((22 * gib + 0.28 * gib) / 25, 0);
+    expect(metrics.storageBytes).toBe(metrics.gbMonthBytes);
+    expect(metrics.storageBytes).toBeGreaterThan(metrics.currentBytes);
+    expect(metrics.previousWeekPeakBytes).toBeCloseTo(0.28 * gib, 0);
+  });
+
+  it("resolveBillingStorageBytes prefers GB-month over a tiny live snapshot", () => {
+    const gib = 1024 * 1024 * 1024;
+    expect(resolveBillingStorageBytes(0.28 * gib, 2.6 * gib)).toBeCloseTo(2.6 * gib, 0);
+    expect(resolveBillingStorageBytes(8 * gib, 2.6 * gib)).toBe(8 * gib);
+    expect(resolveBillingStorageBytes(0.28 * gib, null)).toBeCloseTo(0.28 * gib, 0);
+  });
+
+  it("applyStorageOverlay keeps GB-month billing after a live prune", () => {
+    const gib = 1024 * 1024 * 1024;
+    const overlaid = applyStorageOverlay(
+      {
+        storageBytes: 9 * gib,
+        currentBytes: 9 * gib,
+        gbMonthBytes: 2.6 * gib,
+        monthPeakBytes: 22 * gib,
+        monthPeakDate: "2026-08-05",
+        previousWeekGbMonthBytes: 0.21 * gib,
+        previousWeekPeakBytes: 0.28 * gib,
+        classAOps: 0,
+        classBOps: 0,
+        buckets: [
+          {
+            bucketName: "usage-monitor-prod-v3",
+            bytes: 9 * gib,
+            objectCount: 5,
+            asOf: "2026-08-05T00:00:00Z",
+          },
+        ],
+        rawActionCounts: {},
+      },
+      {
+        buckets: [
+          {
+            bucketName: "usage-monitor-prod-v3",
+            bytes: 0.28 * gib,
+            objectCount: 2,
+            asOf: "2026-08-25T12:00:00Z",
+          },
+        ],
+      }
+    );
+    expect(overlaid.currentBytes).toBeCloseTo(0.28 * gib, 0);
+    expect(overlaid.billingBytes).toBeCloseTo(2.6 * gib, 0);
+    expect(overlaid.storageIsLive).toBe(true);
+  });
+
+  it("summarizeR2DailyStorage averages the whole month so one 22 GiB day is not 220%", () => {
+    const gib = 1024 * 1024 * 1024;
+    const summary = summarizeR2DailyStorage(
+      [
+        {
+          max: { payloadSize: 22 * gib },
+          dimensions: { date: "2026-08-05", bucketName: "usage-monitor-bucket" },
+        },
+        {
+          max: { payloadSize: 0.28 * gib },
+          dimensions: { date: "2026-08-25", bucketName: "usage-monitor-prod-v3" },
+        },
+      ],
+      new Date("2026-08-25T20:00:00.000Z")
+    );
+    expect(summary).not.toBeNull();
+    expect(summary?.monthPeakBytes).toBe(22 * gib);
+    expect(summary?.monthPeakDate).toBe("2026-08-05");
+    expect(summary?.gbMonthBytes).toBeCloseTo((22 * gib + 0.28 * gib) / 25, 0);
+    expect(summary?.previousWeekPeakBytes).toBeCloseTo(0.28 * gib, 0);
+    expect(summary?.previousWeekGbMonthBytes).toBeCloseTo((0.28 * gib) / 7, 0);
   });
 
   it("mergeGraphqlStorageWithLiveOverlay keeps orphan buckets when live list is partial", () => {
@@ -517,6 +657,10 @@ describe("R2 usage monitoring & auto-disable", () => {
           overallOnTrackToExceed70Pct: false,
           metricsSource: "cloudflare_graphql",
           buckets: [],
+          currentBytes: 0.28 * 1024 * 1024 * 1024,
+          monthPeakBytes: 22 * 1024 * 1024 * 1024,
+          monthPeakDate: "2026-08-05",
+          previousWeekGbMonthBytes: 0.21 * 1024 * 1024 * 1024,
         },
         {
           id: "st",
@@ -545,6 +689,9 @@ describe("R2 usage monitoring & auto-disable", () => {
     });
     expect(lines[0]).toContain("Fleet R2");
     expect(lines.some((l) => l.includes("Usage Monitor") && l.includes("5.00 GiB"))).toBe(true);
+    expect(lines.some((l) => l.includes("Usage Monitor") && l.includes("peak 22.00 GiB 2026-08-05"))).toBe(
+      true
+    );
     expect(lines.some((l) => l.includes("Socratic Trade") && l.includes("⚠️"))).toBe(true);
   });
 
@@ -589,10 +736,15 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(body.query).toContain(`limit: ${R2_STORAGE_GRAPHQL_GROUP_LIMIT}`);
     expect(body.query).toContain("datetime_geq: $storageStartDate");
     expect(body.query).toContain("r2StorageByBucket:");
+    expect(body.query).toContain("r2StorageByDay:");
+    expect(body.query).toContain("dimensions {");
+    expect(body.query).toContain("date");
     expect(body.query).toContain(`limit: ${R2_STORAGE_GRAPHQL_BUCKET_LIMIT}`);
+    expect(body.query).toContain(`limit: ${R2_STORAGE_GRAPHQL_DAY_LIMIT}`);
     expect(R2_STORAGE_GRAPHQL_LOOKBACK_MS).toBe(24 * 60 * 60 * 1000);
     expect(R2_STORAGE_GRAPHQL_GROUP_LIMIT).toBeLessThan(1000);
     expect(R2_STORAGE_GRAPHQL_BUCKET_LIMIT).toBeLessThan(200);
+    expect(R2_STORAGE_GRAPHQL_DAY_LIMIT).toBeLessThan(1000);
   });
 
   it("keeps GraphQL storage when the UM live S3 overlay throws", async () => {
@@ -975,6 +1127,32 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(body).toContain("Status: ✅ OK");
     expect(body).toContain("Backup:");
     expect(body).toContain("Hetzner");
+    expect(body).not.toContain("month peak:");
+  });
+
+  it("formats daily Pushover with current snapshot, month peak, and last 7 days", () => {
+    const gib = 1024 * 1024 * 1024;
+    const testDate = new Date("2026-08-25T12:00:00.000Z");
+    const assessment = assessR2Usage(
+      2.6 * gib,
+      50_000,
+      100_000,
+      DEFAULT_R2_FREE_TIER_LIMITS,
+      testDate,
+      {
+        currentBytes: 0.28 * gib,
+        gbMonthBytes: 2.6 * gib,
+        monthPeakBytes: 22 * gib,
+        monthPeakDate: "2026-08-05",
+        previousWeekGbMonthBytes: 0.21 * gib,
+        previousWeekPeakBytes: 0.28 * gib,
+      }
+    );
+    const { body } = formatDailyPushoverMessage(assessment, false);
+    expect(body).toContain("current snapshot: 0.28 GiB");
+    expect(body).toContain("month peak: 22.00 GiB (2026-08-05)");
+    expect(body).toContain("last 7 days: 0.21 GiB avg");
+    expect(body).toContain("peak 0.28 GiB");
   });
 
   it("does not auto-disable when GraphQL credentials are missing", async () => {

@@ -316,6 +316,11 @@ describe("OperationsOverview cards", () => {
             overallOnTrackToExceed70Pct: false,
             metricsSource: "cloudflare_graphql",
             buckets: [{ bucketName: "usage-monitor-prod-v3", bytes: 1e9 }],
+            currentBytes: 0.28 * 1024 ** 3,
+            gbMonthBytes: 2.6 * 1024 ** 3,
+            monthPeakBytes: 22 * 1024 ** 3,
+            monthPeakDate: "2026-08-05",
+            previousWeekGbMonthBytes: 0.21 * 1024 ** 3,
           },
           {
             id: "st",
@@ -355,6 +360,10 @@ describe("OperationsOverview cards", () => {
     expect(html).toContain("Class A ops");
     expect(html).toContain("Class B ops");
     expect(html).toContain("Top buckets");
+    expect(html).toContain("Storage (GB-month)");
+    expect(html).toContain("month peak");
+    expect(html).toContain("2026-08-05");
+    expect(html).toContain("last 7d");
   });
 
   it("renders Jay Old as R2 not enabled instead of leftover storage", () => {

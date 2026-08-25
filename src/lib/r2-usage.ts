@@ -12,9 +12,12 @@ import { createHash, createHmac } from "node:crypto";
  *   - Class B ops: 10,000,000 / month
  *
  * Hard policy at {@link R2_THRESHOLD_PCT} (70%):
- *   - **Storage (stock):** absolute MTD ≥ 70% of free tier → stop.
- *     No pace projection for storage (a steady 6 GiB all month is fine;
- *     7 GiB is not).
+ *   - **Storage:** max(current snapshot, GB-month so far) ≥ 70% of the
+ *     10 GiB free tier → stop.  Cloudflare bills GB-month, not the latest
+ *     ListObjects total.  A prune that drops the live card to a few hundred
+ *     MB does not erase a 20+ GiB day earlier in the month.  Month-peak
+ *     alone is not the kill input (that false-killed after the 2026-08-04
+ *     / 2026-08-12 prune).  No pace projection for storage.
  *   - **Class A / Class B (flows):** absolute MTD ≥ 70% **or** linear
  *     month-end pace projects ≥ 70% → stop.
  *
@@ -166,6 +169,10 @@ export const R2_STORAGE_GRAPHQL_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 export const R2_STORAGE_GRAPHQL_GROUP_LIMIT = 400;
 /** One row per bucket over the UTC month — idle orphans still bill. */
 export const R2_STORAGE_GRAPHQL_BUCKET_LIMIT = 80;
+/** One row per bucket per UTC date — used for GB-month and week/peak. */
+export const R2_STORAGE_GRAPHQL_DAY_LIMIT = 400;
+/** Rolling window for the digest "last 7 days" line. */
+export const R2_PREVIOUS_WEEK_DAYS = 7;
 
 /** Auto-resume hysteresis: clear kill switch when live storage is below this. */
 export const R2_RESUME_STORAGE_PCT = 65;
@@ -209,6 +216,18 @@ export interface R2UsageAssessment {
   storageIsLive?: boolean;
   /** True when GraphQL storage samples were too old to trust for kill decisions. */
   storageSampleStale?: boolean;
+  /** Latest per-bucket snapshot (24h + live S3 overlay). */
+  currentBytes?: number;
+  /** Time-average of daily account totals this UTC month (Cloudflare GB-month). */
+  gbMonthBytes?: number | null;
+  /** Highest daily account total this UTC month. */
+  monthPeakBytes?: number;
+  /** UTC date (`YYYY-MM-DD`) of {@link monthPeakBytes}. */
+  monthPeakDate?: string | null;
+  /** Average daily total over the last {@link R2_PREVIOUS_WEEK_DAYS} UTC days. */
+  previousWeekGbMonthBytes?: number | null;
+  /** Highest daily total over that same rolling week. */
+  previousWeekPeakBytes?: number | null;
 }
 
 export interface R2UsageCredentials {
@@ -217,7 +236,20 @@ export interface R2UsageCredentials {
 }
 
 export interface FetchedR2UsageMetrics {
+  /**
+   * Free-tier stock used for kill / %: max(current snapshot, GB-month).
+   * Never month-peak (false 15 GiB kill after prune).
+   */
   storageBytes: number;
+  /** Latest per-bucket snapshot (24h overlay, including empty samples). */
+  currentBytes: number;
+  /** Time-average of daily account totals this UTC month, or null if no daily series. */
+  gbMonthBytes: number | null;
+  /** Highest daily account total this UTC month (or month-window bucket max fallback). */
+  monthPeakBytes: number;
+  monthPeakDate: string | null;
+  previousWeekGbMonthBytes: number | null;
+  previousWeekPeakBytes: number | null;
   classAOps: number;
   classBOps: number;
   buckets: R2BucketStorageSample[];
@@ -397,6 +429,12 @@ export function assessR2Usage(
     metricsSource?: R2MetricsSource;
     metricsError?: string;
     buckets?: R2BucketStorageSample[];
+    currentBytes?: number;
+    gbMonthBytes?: number | null;
+    monthPeakBytes?: number;
+    monthPeakDate?: string | null;
+    previousWeekGbMonthBytes?: number | null;
+    previousWeekPeakBytes?: number | null;
   } = {}
 ): R2UsageAssessment {
   // Storage: absolute 70% of free tier only (stock). Ops: absolute or pace.
@@ -441,6 +479,12 @@ export function assessR2Usage(
     metricsError: extras.metricsError,
     buckets: extras.buckets,
     litestreamUsesR2: isLitestreamR2Endpoint(),
+    currentBytes: extras.currentBytes,
+    gbMonthBytes: extras.gbMonthBytes,
+    monthPeakBytes: extras.monthPeakBytes,
+    monthPeakDate: extras.monthPeakDate,
+    previousWeekGbMonthBytes: extras.previousWeekGbMonthBytes,
+    previousWeekPeakBytes: extras.previousWeekPeakBytes,
   };
 }
 
@@ -719,6 +763,8 @@ export function formatDailyPushoverMessage(
   const storageGIB = (assessment.storage.actual / (1024 * 1024 * 1024)).toFixed(
     2
   );
+  const formatGiBLine = (bytes: number): string =>
+    `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
   const title = "📊 Cloudflare R2 Free Tier Status";
 
   const statusStr = disabled
@@ -741,6 +787,23 @@ export function formatDailyPushoverMessage(
   const body = [
     `Usage Monitor account (UM Cloudflare free tier):`,
     `R2 Storage: ${storageGIB} GiB / 10.00 GiB (${assessment.storage.mtdPct}% MTD, ${assessment.storage.projectedPct}% proj)`,
+    assessment.currentBytes != null &&
+    assessment.currentBytes !== assessment.storage.actual
+      ? `  current snapshot: ${formatGiBLine(assessment.currentBytes)}`
+      : null,
+    assessment.monthPeakBytes != null &&
+    assessment.monthPeakBytes > assessment.storage.actual
+      ? `  month peak: ${formatGiBLine(assessment.monthPeakBytes)}${
+          assessment.monthPeakDate ? ` (${assessment.monthPeakDate})` : ""
+        }`
+      : null,
+    assessment.previousWeekGbMonthBytes != null
+      ? `  last 7 days: ${formatGiBLine(assessment.previousWeekGbMonthBytes)} avg${
+          assessment.previousWeekPeakBytes != null
+            ? ` (peak ${formatGiBLine(assessment.previousWeekPeakBytes)})`
+            : ""
+        }`
+      : null,
     `Class A Ops: ${assessment.classA.actual.toLocaleString()} / 1,000,000 (${assessment.classA.mtdPct}% MTD, ${assessment.classA.projectedPct}% proj)`,
     `Class B Ops: ${assessment.classB.actual.toLocaleString()} / 10,000,000 (${assessment.classB.mtdPct}% MTD, ${assessment.classB.projectedPct}% proj)`,
     `Threshold: ${R2_THRESHOLD_PCT}% max pace/MTD`,
@@ -828,6 +891,21 @@ query R2FreeTierUsage(
           bucketName
         }
       }
+      r2StorageByDay: r2StorageAdaptiveGroups(
+        limit: ${R2_STORAGE_GRAPHQL_DAY_LIMIT}
+        filter: { datetime_geq: $startDate, datetime_leq: $endDate }
+      ) {
+        max {
+          objectCount
+          uploadCount
+          payloadSize
+          metadataSize
+        }
+        dimensions {
+          date
+          bucketName
+        }
+      }
     }
   }
 }
@@ -848,7 +926,7 @@ export function utcStorageLookbackIso(now: Date): string {
  * Parse a Cloudflare GraphQL R2 analytics response into free-tier counters.
  * Exported for unit tests.
  */
-type R2StorageGraphqlGroup = {
+export type R2StorageGraphqlGroup = {
   max?: {
     objectCount?: number | null;
     uploadCount?: number | null;
@@ -857,9 +935,126 @@ type R2StorageGraphqlGroup = {
   } | null;
   dimensions?: {
     datetime?: string | null;
+    date?: string | null;
     bucketName?: string | null;
   } | null;
 };
+
+function groupStoredBytes(group: R2StorageGraphqlGroup): number {
+  const payload = Number(group.max?.payloadSize ?? 0);
+  const metadata = Number(group.max?.metadataSize ?? 0);
+  return (
+    (Number.isFinite(payload) ? payload : 0) +
+    (Number.isFinite(metadata) ? metadata : 0)
+  );
+}
+
+function graphqlDateKey(value: unknown): string | null {
+  if (typeof value !== "string" || value.length < 10) return null;
+  const key = value.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+  return key;
+}
+
+function utcDateKey(now: Date): string {
+  return now.toISOString().slice(0, 10);
+}
+
+function addUtcDays(dateKey: string, days: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return utcDateKey(new Date(Date.UTC(year, month - 1, day + days)));
+}
+
+/** Inclusive UTC calendar dates from `startKey` through `endKey`. */
+export function eachUtcDateInclusive(startKey: string, endKey: string): string[] {
+  const out: string[] = [];
+  let current = startKey;
+  for (let i = 0; i < 40 && current <= endKey; i += 1) {
+    out.push(current);
+    current = addUtcDays(current, 1);
+  }
+  return out;
+}
+
+/**
+ * Free-tier storage stock: the larger of the live snapshot and GB-month.
+ * A post-prune 284 MB card must not hide a multi-GiB month; a 22 GiB peak
+ * day must not keep the kill switch on after the objects are gone.
+ */
+export function resolveBillingStorageBytes(
+  currentBytes: number,
+  gbMonthBytes: number | null | undefined
+): number {
+  if (gbMonthBytes == null || !Number.isFinite(gbMonthBytes) || gbMonthBytes < 0) {
+    return currentBytes;
+  }
+  return Math.max(currentBytes, gbMonthBytes);
+}
+
+export interface R2StoragePeriodSummary {
+  gbMonthBytes: number;
+  monthPeakBytes: number;
+  monthPeakDate: string | null;
+  previousWeekGbMonthBytes: number;
+  previousWeekPeakBytes: number;
+}
+
+/**
+ * Build GB-month / week / peak from one row per bucket per UTC date.
+ * Missing calendar days count as zero so a short peak does not look like
+ * the whole month.
+ */
+export function summarizeR2DailyStorage(
+  groups: R2StorageGraphqlGroup[],
+  now: Date
+): R2StoragePeriodSummary | null {
+  if (groups.length === 0) return null;
+
+  const perDay = new Map<string, number>();
+  for (const group of groups) {
+    const dateKey =
+      graphqlDateKey(group.dimensions?.date) ??
+      graphqlDateKey(group.dimensions?.datetime);
+    if (!dateKey) continue;
+    perDay.set(dateKey, (perDay.get(dateKey) ?? 0) + groupStoredBytes(group));
+  }
+  if (perDay.size === 0) return null;
+
+  const todayKey = utcDateKey(now);
+  const monthStartKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  const monthDays = eachUtcDateInclusive(monthStartKey, todayKey);
+  if (monthDays.length === 0) return null;
+
+  let monthSum = 0;
+  let monthPeakBytes = 0;
+  let monthPeakDate: string | null = null;
+  for (const day of monthDays) {
+    const total = perDay.get(day) ?? 0;
+    monthSum += total;
+    if (total >= monthPeakBytes) {
+      monthPeakBytes = total;
+      monthPeakDate = day;
+    }
+  }
+
+  const weekStartKey = addUtcDays(todayKey, -(R2_PREVIOUS_WEEK_DAYS - 1));
+  const weekDays = eachUtcDateInclusive(weekStartKey, todayKey);
+  let weekSum = 0;
+  let previousWeekPeakBytes = 0;
+  for (const day of weekDays) {
+    const total = perDay.get(day) ?? 0;
+    weekSum += total;
+    if (total > previousWeekPeakBytes) previousWeekPeakBytes = total;
+  }
+
+  return {
+    gbMonthBytes: monthSum / monthDays.length,
+    monthPeakBytes,
+    monthPeakDate,
+    previousWeekGbMonthBytes: weekSum / weekDays.length,
+    previousWeekPeakBytes,
+  };
+}
 
 function sampleFromStorageGroup(group: R2StorageGraphqlGroup): R2BucketStorageSample {
   const bucketName = group.dimensions?.bucketName || "(unknown)";
@@ -877,7 +1072,8 @@ function sampleFromStorageGroup(group: R2StorageGraphqlGroup): R2BucketStorageSa
 }
 
 export function parseR2GraphqlUsage(
-  payload: unknown
+  payload: unknown,
+  now: Date = new Date()
 ): FetchedR2UsageMetrics {
   const root = payload as {
     data?: {
@@ -889,6 +1085,7 @@ export function parseR2GraphqlUsage(
           }>;
           r2StorageAdaptiveGroups?: R2StorageGraphqlGroup[];
           r2StorageByBucket?: R2StorageGraphqlGroup[];
+          r2StorageByDay?: R2StorageGraphqlGroup[];
         }>;
       };
     };
@@ -939,10 +1136,25 @@ export function parseR2GraphqlUsage(
   }
 
   const buckets = [...latestByBucket.values()].sort((a, b) => b.bytes - a.bytes);
-  const storageBytes = buckets.reduce((sum, b) => sum + b.bytes, 0);
+  const currentBytes = buckets.reduce((sum, b) => sum + b.bytes, 0);
+  const daily = summarizeR2DailyStorage(account.r2StorageByDay ?? [], now);
+  const monthPeakFromBuckets = (account.r2StorageByBucket ?? []).reduce(
+    (sum, group) => sum + groupStoredBytes(group),
+    0
+  );
+  const gbMonthBytes = daily?.gbMonthBytes ?? null;
+  const monthPeakBytes =
+    daily?.monthPeakBytes ??
+    (monthPeakFromBuckets > 0 ? monthPeakFromBuckets : currentBytes);
 
   return {
-    storageBytes,
+    storageBytes: resolveBillingStorageBytes(currentBytes, gbMonthBytes),
+    currentBytes,
+    gbMonthBytes,
+    monthPeakBytes,
+    monthPeakDate: daily?.monthPeakDate ?? null,
+    previousWeekGbMonthBytes: daily?.previousWeekGbMonthBytes ?? null,
+    previousWeekPeakBytes: daily?.previousWeekPeakBytes ?? null,
     classAOps,
     classBOps,
     buckets,
@@ -1700,6 +1912,33 @@ export function mergeGraphqlStorageWithLiveOverlay(
   };
 }
 
+/**
+ * Live S3 may replace configured-bucket snapshots.  Recompute billing after
+ * that overlay so a 284 MB weekly archive cannot hide a multi-GiB GB-month.
+ */
+export function applyStorageOverlay(
+  metrics: FetchedR2UsageMetrics,
+  live: { buckets: R2BucketStorageSample[] } | null
+): {
+  currentBytes: number;
+  billingBytes: number;
+  buckets: R2BucketStorageSample[];
+  storageIsLive: boolean;
+  metricsSource: R2MetricsSource;
+} {
+  const merged = mergeGraphqlStorageWithLiveOverlay(metrics.buckets, live);
+  return {
+    currentBytes: merged.storageBytes,
+    billingBytes: resolveBillingStorageBytes(
+      merged.storageBytes,
+      metrics.gbMonthBytes
+    ),
+    buckets: merged.buckets,
+    storageIsLive: merged.storageIsLive,
+    metricsSource: merged.metricsSource,
+  };
+}
+
 /** Short fleet rollup lines for the UM daily Pushover digest. */
 export function formatFleetR2DigestLines(
   fleet: R2FleetSummary
@@ -1721,8 +1960,31 @@ export function formatFleetR2DigestLines(
     const storageGiB = (account.storage?.actual ?? 0) / (1024 * 1024 * 1024);
     const mtdPct = account.storage?.mtdPct ?? 0;
     const flag = account.overallOnTrackToExceed70Pct ? " ⚠️" : "";
+    const details: string[] = [];
+    if (
+      account.currentBytes != null &&
+      Math.abs(account.currentBytes - (account.storage?.actual ?? 0)) > 1024 * 1024
+    ) {
+      details.push(
+        `now ${(account.currentBytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`
+      );
+    }
+    if (
+      account.monthPeakBytes != null &&
+      account.monthPeakBytes > (account.storage?.actual ?? 0) + 1024 * 1024
+    ) {
+      const peakGiB = (account.monthPeakBytes / (1024 * 1024 * 1024)).toFixed(2);
+      const peakWhen = account.monthPeakDate ? ` ${account.monthPeakDate}` : "";
+      details.push(`peak ${peakGiB} GiB${peakWhen}`);
+    }
+    if (account.previousWeekGbMonthBytes != null) {
+      details.push(
+        `last 7d ${(account.previousWeekGbMonthBytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`
+      );
+    }
+    const extra = details.length > 0 ? `; ${details.join("; ")}` : "";
     lines.push(
-      `  ${account.label}: ${storageGiB.toFixed(2)} GiB (${mtdPct.toFixed(1)}% MTD)${flag}`
+      `  ${account.label}: ${storageGiB.toFixed(2)} GiB (${mtdPct.toFixed(1)}% MTD)${extra}${flag}`
     );
   }
   return lines;
@@ -1774,7 +2036,7 @@ export async function fetchR2UsageMetrics(
     );
   }
 
-  return parseR2GraphqlUsage(payload);
+  return parseR2GraphqlUsage(payload, now);
 }
 
 // ── Fleet (4 Cloudflare accounts = 4 free tiers) ─────────────────────────────
@@ -1815,6 +2077,12 @@ export interface R2FleetAccountSnapshot {
   /** True only for the Usage Monitor (Jay) account when this host's kill flag is set. */
   autoDisabled?: boolean;
   litestreamUsesR2?: boolean;
+  currentBytes?: number;
+  gbMonthBytes?: number | null;
+  monthPeakBytes?: number;
+  monthPeakDate?: string | null;
+  previousWeekGbMonthBytes?: number | null;
+  previousWeekPeakBytes?: number | null;
 }
 
 export interface R2FleetSummary {
@@ -1959,16 +2227,11 @@ export async function fetchR2FleetSummary(
         now,
         fetchImpl
       );
-      let storageBytes = metrics.storageBytes;
-      let buckets = metrics.buckets;
-      let source: R2MetricsSource = "cloudflare_graphql";
+      let overlaid = applyStorageOverlay(metrics, null);
       if (slot.id === "um") {
         try {
           const live = await fetchLiveR2StorageViaS3(fetchImpl, now, env);
-          const merged = mergeGraphqlStorageWithLiveOverlay(metrics.buckets, live);
-          storageBytes = merged.storageBytes;
-          buckets = merged.buckets;
-          source = merged.metricsSource;
+          overlaid = applyStorageOverlay(metrics, live);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           console.warn(
@@ -1977,12 +2240,21 @@ export async function fetchR2FleetSummary(
         }
       }
       const assessment = assessR2Usage(
-        storageBytes,
+        overlaid.billingBytes,
         metrics.classAOps,
         metrics.classBOps,
         DEFAULT_R2_FREE_TIER_LIMITS,
         now,
-        { metricsSource: source, buckets }
+        {
+          metricsSource: overlaid.metricsSource,
+          buckets: overlaid.buckets,
+          currentBytes: overlaid.currentBytes,
+          gbMonthBytes: metrics.gbMonthBytes,
+          monthPeakBytes: metrics.monthPeakBytes,
+          monthPeakDate: metrics.monthPeakDate,
+          previousWeekGbMonthBytes: metrics.previousWeekGbMonthBytes,
+          previousWeekPeakBytes: metrics.previousWeekPeakBytes,
+        }
       );
       // GraphQL keeps serving leftover analytics after R2 is turned off
       // (Jay Old 2026-08-15: 116 GiB, REST 10042).  ListBuckets is Class A,
@@ -2010,13 +2282,19 @@ export async function fetchR2FleetSummary(
         classB: assessment.classB,
         overallOnTrackToExceed70Pct: assessment.overallOnTrackToExceed70Pct,
         metricsSource: source,
-        buckets: buckets.map((b) => ({
+        buckets: overlaid.buckets.map((b) => ({
           bucketName: b.bucketName,
           bytes: b.bytes,
         })),
         autoDisabled: slot.id === "um" ? isR2AutoDisabled() : undefined,
         litestreamUsesR2:
           slot.id === "um" ? isLitestreamR2Endpoint() : undefined,
+        currentBytes: overlaid.currentBytes,
+        gbMonthBytes: metrics.gbMonthBytes,
+        monthPeakBytes: metrics.monthPeakBytes,
+        monthPeakDate: metrics.monthPeakDate,
+        previousWeekGbMonthBytes: metrics.previousWeekGbMonthBytes,
+        previousWeekPeakBytes: metrics.previousWeekPeakBytes,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -2116,31 +2394,31 @@ export async function runR2UsageCheck(
   } else {
     try {
       const metrics = await fetchR2UsageMetrics(credentials, now, fetchImpl);
-      let storageBytes = metrics.storageBytes;
-      let buckets = metrics.buckets;
-      let source: R2MetricsSource = "cloudflare_graphql";
+      const overlaid = applyStorageOverlay(metrics, liveStorage);
+      let billingBytes = overlaid.billingBytes;
+      let buckets = overlaid.buckets;
+      let source: R2MetricsSource = overlaid.metricsSource;
+      let currentBytes = overlaid.currentBytes;
+      storageIsLive = overlaid.storageIsLive;
 
-      if (liveStorage) {
-        const merged = mergeGraphqlStorageWithLiveOverlay(
-          metrics.buckets,
-          liveStorage
-        );
-        storageBytes = merged.storageBytes;
-        buckets = merged.buckets;
-        source = merged.metricsSource;
-        storageIsLive = merged.storageIsLive;
-      } else if (!graphqlStorageSamplesAreFresh(metrics.buckets, now)) {
+      if (
+        !liveStorage &&
+        metrics.gbMonthBytes == null &&
+        !graphqlStorageSamplesAreFresh(metrics.buckets, now)
+      ) {
         // Stale GraphQL storage caused a delayed false 15 GiB alert after prune.
         // Refuse to kill on storage when samples are old; still enforce ops.
+        // A GB-month series is month-long and does not need a fresh 24h row.
         storageSampleStale = true;
-        storageBytes = 0;
+        billingBytes = 0;
+        currentBytes = 0;
         console.warn(
           "[r2-usage] GraphQL storage samples are stale; ignoring storage for kill decisions (ops still enforced)"
         );
       }
 
       assessment = assessR2Usage(
-        storageBytes,
+        billingBytes,
         metrics.classAOps,
         metrics.classBOps,
         DEFAULT_R2_FREE_TIER_LIMITS,
@@ -2148,6 +2426,12 @@ export async function runR2UsageCheck(
         {
           metricsSource: source,
           buckets,
+          currentBytes,
+          gbMonthBytes: metrics.gbMonthBytes,
+          monthPeakBytes: metrics.monthPeakBytes,
+          monthPeakDate: metrics.monthPeakDate,
+          previousWeekGbMonthBytes: metrics.previousWeekGbMonthBytes,
+          previousWeekPeakBytes: metrics.previousWeekPeakBytes,
           metricsError: storageSampleStale
             ? "GraphQL storage samples stale; storage kill deferred until live list or fresh sample"
             : undefined,
@@ -2219,7 +2503,10 @@ export async function runR2UsageCheck(
         const opsA = assessment.classA.actual;
         const opsB = assessment.classB.actual;
         assessment = assessR2Usage(
-          refreshed.storageBytes,
+          resolveBillingStorageBytes(
+            refreshed.storageBytes,
+            assessment.gbMonthBytes
+          ),
           opsA,
           opsB,
           DEFAULT_R2_FREE_TIER_LIMITS,
@@ -2228,6 +2515,12 @@ export async function runR2UsageCheck(
             metricsSource: "live_s3_storage+graphql_ops",
             buckets: refreshed.buckets,
             metricsError: assessment.metricsError,
+            currentBytes: refreshed.storageBytes,
+            gbMonthBytes: assessment.gbMonthBytes,
+            monthPeakBytes: assessment.monthPeakBytes,
+            monthPeakDate: assessment.monthPeakDate,
+            previousWeekGbMonthBytes: assessment.previousWeekGbMonthBytes,
+            previousWeekPeakBytes: assessment.previousWeekPeakBytes,
           }
         );
         assessment.storageIsLive = true;

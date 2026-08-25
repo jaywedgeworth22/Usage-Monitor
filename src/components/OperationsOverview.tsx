@@ -404,7 +404,7 @@ function FleetAccountBlock({
   const metrics = [
     {
       key: "storage",
-      label: "Storage",
+      label: account.gbMonthBytes != null ? "Storage (GB-month)" : "Storage",
       m: account.storage,
       fmt: formatGiB,
       limitLabel: formatGiB(freeTier.storageBytes),
@@ -488,6 +488,21 @@ function FleetAccountBlock({
           );
         })}
       </div>
+      {account.currentBytes != null || account.monthPeakBytes != null ? (
+        <p className="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
+          {account.currentBytes != null
+            ? `now ${formatGiB(account.currentBytes)}`
+            : null}
+          {account.monthPeakBytes != null
+            ? `${account.currentBytes != null ? " · " : ""}month peak ${formatGiB(account.monthPeakBytes)}${
+                account.monthPeakDate ? ` ${account.monthPeakDate}` : ""
+              }`
+            : null}
+          {account.previousWeekGbMonthBytes != null
+            ? ` · last 7d ${formatGiB(account.previousWeekGbMonthBytes)}`
+            : null}
+        </p>
+      ) : null}
       <p className="mt-2 text-[10px] text-gray-500 dark:text-gray-400">
         Threshold {thresholdPct}% · Source {account.metricsSource}
         {account.litestreamUsesR2 != null
