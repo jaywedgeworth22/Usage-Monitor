@@ -12,11 +12,18 @@ import { resolveDatadogRumConfig } from "@/lib/datadog-options";
 import { nonEmptyEnv, parseTracesSampleRate } from "@/lib/sentry-options";
 
 // Build-time RUM (same NEXT_PUBLIC_* bake as Sentry).  Incomplete public
-// keys throw here — fail closed rather than a silent half-init.  Runtime
-// Infisical tokens are picked up by DatadogRumInit when these are unset.
-const rum = resolveDatadogRumConfig();
-if (rum.enabled) {
-  startDatadogRum(rum);
+// keys stay dark — do not throw from this module or Next.js white-screens
+// login.  Runtime Infisical tokens are picked up by DatadogRumInit.
+try {
+  const rum = resolveDatadogRumConfig();
+  if (rum.enabled) {
+    startDatadogRum(rum);
+  }
+} catch (error) {
+  console.error(
+    "[datadog] incomplete RUM config; skipping client init",
+    error
+  );
 }
 
 const dsn = nonEmptyEnv(process.env.NEXT_PUBLIC_SENTRY_DSN);

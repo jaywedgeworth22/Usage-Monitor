@@ -101,6 +101,43 @@ describe("datadog-options", () => {
     ).toThrow(/NEXT_PUBLIC_DD_CLIENT_TOKEN/);
   });
 
+  it("keeps RUM dark when only site/service/env labels are set", () => {
+    const rum = resolveDatadogRumConfig({
+      NODE_ENV: "production",
+      NEXT_PUBLIC_DD_SITE: "us5.datadoghq.com",
+      NEXT_PUBLIC_DD_SERVICE: "usage-monitor",
+      NEXT_PUBLIC_DD_ENV: "prod",
+      DD_SITE: "us5.datadoghq.com",
+      DD_SERVICE: "usage-monitor",
+      DD_ENV: "prod",
+    });
+    expect(rum.enabled).toBe(false);
+  });
+
+  it("does not abort APM boot when RUM labels are set without tokens", () => {
+    const { server, rum } = assertDatadogRuntimeConfig({
+      NODE_ENV: "production",
+      DD_SERVICE: "usage-monitor",
+      DD_ENV: "prod",
+      DD_SITE: "us5.datadoghq.com",
+      NEXT_PUBLIC_DD_SITE: "us5.datadoghq.com",
+      NEXT_PUBLIC_DD_SERVICE: "usage-monitor",
+      NEXT_PUBLIC_DD_ENV: "prod",
+    });
+    expect(server.enabled).toBe(true);
+    expect(rum.enabled).toBe(false);
+  });
+
+  it("does not abort APM boot when only one RUM intake var is set", () => {
+    const { server, rum } = assertDatadogRuntimeConfig({
+      NODE_ENV: "production",
+      DD_SERVICE: "usage-monitor",
+      NEXT_PUBLIC_DD_APPLICATION_ID: "app-id",
+    });
+    expect(server.enabled).toBe(true);
+    expect(rum.enabled).toBe(false);
+  });
+
   it("enables RUM only when both existing public vars are present", () => {
     const rum = resolveDatadogRumConfig({
       NEXT_PUBLIC_DD_APPLICATION_ID: "app-id",

@@ -9,8 +9,8 @@ export async function register() {
   // production runtime (not during `next build`).  Sentry stays DSN-gated
   // and is not replaced.
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    const { assertDatadogRuntimeConfig } = await import("@/lib/datadog-options");
-    const { server } = assertDatadogRuntimeConfig();
+    const { resolveDatadogServerConfig } = await import("@/lib/datadog-options");
+    const server = resolveDatadogServerConfig();
     if (server.enabled) {
       const { initDatadogTracer } = await import("@/lib/datadog-server");
       initDatadogTracer(server);

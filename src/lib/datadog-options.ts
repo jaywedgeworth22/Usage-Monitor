@@ -35,12 +35,13 @@ const SERVER_SIGNAL_KEYS = [
   "DD_TRACE_SAMPLE_RATE",
 ] as const;
 
+// Only the public intake pair and the explicit RUM opt-in are keys.
+// NEXT_PUBLIC_DD_SITE / SERVICE / ENV are labels.  Treating them as
+// signals made a documented APM-only Infisical set (plus the .env.example
+// twins) throw in register() and white-screen instrumentation-client.
 const RUM_SIGNAL_KEYS = [
   "NEXT_PUBLIC_DD_APPLICATION_ID",
   "NEXT_PUBLIC_DD_CLIENT_TOKEN",
-  "NEXT_PUBLIC_DD_SITE",
-  "NEXT_PUBLIC_DD_SERVICE",
-  "NEXT_PUBLIC_DD_ENV",
   "DD_RUM_ENABLED",
 ] as const;
 
@@ -275,16 +276,12 @@ export function resolveDatadogRumConfig(
   const applicationId = nonEmptyEnv(env.NEXT_PUBLIC_DD_APPLICATION_ID);
   const clientToken = nonEmptyEnv(env.NEXT_PUBLIC_DD_CLIENT_TOKEN);
   const version = resolveDatadogVersion(env);
-  const site = parseDatadogSite(
-    env.NEXT_PUBLIC_DD_SITE ?? env.DD_SITE,
-    DEFAULT_DD_SITE
-  );
 
   const disabled: DatadogRumConfig = {
     enabled: false,
     applicationId: "",
     clientToken: "",
-    site,
+    site: DEFAULT_DD_SITE,
     service: DEFAULT_DD_SERVICE,
     env: DEFAULT_DD_ENV,
     version,
@@ -311,7 +308,10 @@ export function resolveDatadogRumConfig(
     enabled: true,
     applicationId: applicationId as string,
     clientToken: clientToken as string,
-    site,
+    site: parseDatadogSite(
+      env.NEXT_PUBLIC_DD_SITE ?? env.DD_SITE,
+      DEFAULT_DD_SITE
+    ),
     service:
       nonEmptyEnv(env.NEXT_PUBLIC_DD_SERVICE) ??
       nonEmptyEnv(env.DD_SERVICE) ??
@@ -330,10 +330,31 @@ export function assertDatadogRuntimeConfig(env: EnvMap = process.env): {
   server: DatadogServerConfig;
   rum: DatadogRumConfig;
 } {
-  return {
-    server: resolveDatadogServerConfig(env),
-    rum: resolveDatadogRumConfig(env),
-  };
+  const server = resolveDatadogServerConfig(env);
+  // RUM is optional and stays dark until both public intake vars exist.
+  // A partial RUM pair must not abort APM / process boot — that path is
+  // GET /api/datadog-public-config (503) and the client init (log, no UI).
+  let rum: DatadogRumConfig;
+  try {
+    rum = resolveDatadogRumConfig(env);
+  } catch (error) {
+    if (error instanceof DatadogConfigError) {
+      rum = {
+        enabled: false,
+        applicationId: "",
+        clientToken: "",
+        site: DEFAULT_DD_SITE,
+        service: DEFAULT_DD_SERVICE,
+        env: DEFAULT_DD_ENV,
+        version: resolveDatadogVersion(env),
+        sessionSampleRate: 100,
+        sessionReplaySampleRate: 0,
+      };
+    } else {
+      throw error;
+    }
+  }
+  return { server, rum };
 }
 
 /**
