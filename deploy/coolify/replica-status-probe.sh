@@ -92,17 +92,27 @@ run_in_container_heartbeat() {
   docker exec "${CONTAINER}" bash /app/scripts/replica-status-heartbeat.sh --once 2>/dev/null
 }
 
-# Prefer the in-container heartbeat (Infisical env already present). Never
-# overwrite its verdict with a host-side replica_credentials_missing fallback.
-run_in_container_heartbeat || true
+# Prefer a cred-equipped in-container heartbeat (the looping child of
+# start-with-litestream, which inherits Infisical). `docker exec --once`
+# does not — Coolify injects secrets into the process tree only, so that
+# path writes replica_credentials_missing and must not skip the host
+# --env-file fallback. Trust the --once write only when it exits 0
+# (healthy, snapshot_only, age-exceeded, or an intentional R2 pause).
+hb_rc=0
+run_in_container_heartbeat || hb_rc=$?
 status_mtime_after="$(status_mtime_epoch "${STATUS_FILE}")"
 
-if [[ -f "${STATUS_FILE}" ]] && (( status_mtime_after >= status_mtime_before )); then
+if [[ "${hb_rc}" -eq 0 && -f "${STATUS_FILE}" ]] \
+  && (( status_mtime_after >= status_mtime_before )); then
   if jq -e '.checkedAt != null and .checkedAt != ""' "${STATUS_FILE}" >/dev/null 2>&1; then
     ok="$(jq -r '.ok' "${STATUS_FILE}")"
     reason="$(jq -r '.reason // "null"' "${STATUS_FILE}")"
-    log "in-container heartbeat verdict ok=${ok} reason=${reason} → ${STATUS_FILE}"
-    exit 0
+    if [[ "${reason}" == "replica_credentials_missing" ]]; then
+      log "in-container heartbeat wrote replica_credentials_missing (docker exec has no Infisical env); using host fallback"
+    else
+      log "in-container heartbeat verdict ok=${ok} reason=${reason} → ${STATUS_FILE}"
+      exit 0
+    fi
   fi
 fi
 
