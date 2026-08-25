@@ -75,4 +75,187 @@ public enum WidgetSnapshotBuilder {
             projects: projects
         )
     }
+
+    /// Compact LLM section from the kit's `LlmBurnResponse`.  Refuses a
+    /// non-ok payload so a failed fetch cannot stamp empty providers as live.
+    public static func llmSection(from response: LlmBurnResponse, now: Date = Date()) -> WidgetSnapshot.LlmSection? {
+        guard response.ok else { return nil }
+        let generatedAt = response.generatedAt.flatMap(ISO8601DateParser.date(from:)) ?? now
+        var providers: [WidgetSnapshot.LlmSection.Provider] = response.providers.map {
+            llmProvider($0, quiet: false)
+        }
+        for quiet in response.quietProviders ?? [] {
+            if providers.contains(where: { $0.id.caseInsensitiveCompare(quiet.provider) == .orderedSame }) {
+                continue
+            }
+            providers.append(llmProvider(quiet, quiet: true))
+        }
+        return WidgetSnapshot.LlmSection(
+            generatedAt: generatedAt,
+            windowHours: response.windowHours,
+            providers: providers
+        )
+    }
+
+    /// Service probe from public health + readiness.  Readiness is optional.
+    public static func serverService(
+        health: ServerHealth,
+        readiness: ServerReadiness?,
+        now: Date = Date()
+    ) -> WidgetSnapshot.ServerSection.Service {
+        WidgetSnapshot.ServerSection.Service(
+            generatedAt: now,
+            name: health.service ?? "usage-monitor",
+            ok: health.ok,
+            status: health.status,
+            uptimeSeconds: health.uptimeSeconds,
+            readyOk: readiness?.ok,
+            checks: serviceChecks(from: readiness)
+        )
+    }
+
+    /// Host + Coolify app inventory from `ServerMetrics`.
+    public static func serverHost(
+        from metrics: ServerMetrics,
+        now: Date = Date()
+    ) -> (host: WidgetSnapshot.ServerSection.Host, apps: [WidgetSnapshot.ServerSection.App]) {
+        let summary = metrics.prevention?.summary
+        let disk = metrics.appDisk
+        let host = WidgetSnapshot.ServerSection.Host(
+            generatedAt: now,
+            name: metrics.host?.name,
+            status: metrics.host?.status,
+            cpuPct: metrics.hostUsage?.cpuPct,
+            memoryTotalBytes: metrics.host?.memoryTotalBytes,
+            diskUsedPct: summary?.diskUsedPct ?? disk?.usedPct,
+            diskFreeBytes: summary?.diskFreeBytes ?? disk?.freeBytes,
+            diskTotalBytes: summary?.diskTotalBytes ?? disk?.totalBytes,
+            degraded: metrics.degraded,
+            stale: metrics.stale,
+            preventionOverall: metrics.prevention?.overall,
+            appsHealthy: summary?.appsHealthy,
+            appsDown: summary?.appsDown,
+            appsTotal: summary?.appsTotal
+        )
+        let apps = metrics.resources.map { resource in
+            WidgetSnapshot.ServerSection.App(
+                id: resource.uuid,
+                name: resource.fleetLabel ?? resource.name,
+                status: resource.status,
+                selfApp: resource.selfApp
+            )
+        }
+        return (host, apps)
+    }
+
+    private static func llmProvider(
+        _ row: LlmBurnProviderReport,
+        quiet: Bool
+    ) -> WidgetSnapshot.LlmSection.Provider {
+        WidgetSnapshot.LlmSection.Provider(
+            id: row.provider,
+            name: row.provider,
+            quiet: quiet,
+            tokensTotal: row.window.tokens.total,
+            tokensInput: row.window.tokens.input,
+            tokensOutput: row.window.tokens.output,
+            derivedCostUsd: row.window.derivedCostUsd,
+            reportedCostUsd: row.window.reportedCostUsd,
+            estimateUsd: row.window.estimateUsd,
+            tokensPerHour: row.window.tokensPerHour,
+            usdPerHour: row.window.usdPerHour,
+            monthlyBudgetUsd: row.budget?.monthlyBudgetUsd,
+            budgetStatus: row.budget?.status,
+            projectedMonthEndUsd: row.budget?.projectedMonthEndUsd
+        )
+    }
+
+    /// Mirrors `ServerStatusSnapshot` dependency + backup-layer rows so the
+    /// widget shows the same checks the Server tab already computes.
+    private static func serviceChecks(from readiness: ServerReadiness?) -> [WidgetSnapshot.ServerSection.Check] {
+        guard let checks = readiness?.checks else { return [] }
+        var rows: [WidgetSnapshot.ServerSection.Check] = []
+        if let c = checks.database {
+            rows.append(.init(name: "Database", ok: c.ok, gatesService: true))
+        }
+        if let c = checks.scheduler {
+            rows.append(.init(name: "Scheduler", ok: c.ok, gatesService: true))
+        }
+        if let c = checks.startup {
+            rows.append(.init(name: "Startup", ok: c.ok, gatesService: true))
+        }
+        if let d = checks.disk {
+            rows.append(.init(
+                name: "Disk",
+                ok: d.ok,
+                gatesService: false,
+                freeBytes: d.freeBytes,
+                totalBytes: d.totalBytes
+            ))
+        }
+        if let layers = checks.backupLayers {
+            let layered = backupLayerChecks(layers)
+            if !layered.isEmpty {
+                rows.append(contentsOf: layered)
+                return rows
+            }
+        }
+        if let c = checks.backup {
+            rows.append(.init(name: "Backup (Off-Site)", ok: c.ok, gatesService: false))
+        }
+        return rows
+    }
+
+    private static func backupLayerChecks(
+        _ layers: ServerReadiness.BackupLayers
+    ) -> [WidgetSnapshot.ServerSection.Check] {
+        var rows: [WidgetSnapshot.ServerSection.Check] = []
+        if let local = layers.local {
+            rows.append(.init(
+                name: trimmedOrNil(local.title) ?? "Local Backup",
+                ok: local.ok,
+                gatesService: false,
+                detail: trimmedOrNil(local.detail)
+            ))
+        }
+        if let primary = layers.primary {
+            rows.append(.init(
+                name: trimmedOrNil(primary.title) ?? primaryBackupName(primary),
+                ok: primary.ok,
+                gatesService: false,
+                detail: trimmedOrNil(primary.detail)
+            ))
+        }
+        if let r2 = layers.r2Historic {
+            rows.append(.init(
+                name: trimmedOrNil(r2.title) ?? "R2 Weekly Archive",
+                ok: r2HistoricRowOk(r2),
+                gatesService: false,
+                detail: trimmedOrNil(r2.detail)
+            ))
+        }
+        return rows
+    }
+
+    private static func primaryBackupName(_ primary: ServerReadiness.BackupLayers.PrimaryLayer) -> String {
+        switch (primary.label ?? primary.target)?.lowercased() {
+        case "b2": return "B2 Backup"
+        case "r2": return "R2 Backup"
+        default: return "Off-Site Backup"
+        }
+    }
+
+    private static func r2HistoricRowOk(_ r2: ServerReadiness.BackupLayers.R2HistoricLayer) -> Bool {
+        guard r2.role?.lowercased() == "historic" else { return r2.ok }
+        if let archive = r2.weeklyArchive {
+            return r2.ok && archive.ok
+        }
+        return false
+    }
+
+    private static func trimmedOrNil(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }

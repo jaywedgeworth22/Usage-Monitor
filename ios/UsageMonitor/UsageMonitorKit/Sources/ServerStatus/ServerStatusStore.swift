@@ -4,6 +4,7 @@ import Models
 import Networking
 import AppCore
 import DesignSystem
+import OfflineCache
 
 /// A combined snapshot of the two public health probes — `GET /api/health`
 /// (liveness) and `GET /api/ready` (readiness + dependency checks). Readiness
@@ -240,7 +241,12 @@ final class ServerStatusStore {
 
     private func fetch(using client: APIClient) async {
         do {
-            state = .loaded(try await probe(client))
+            let snapshot = try await probe(client)
+            state = .loaded(snapshot)
+            WidgetSnapshotStore.updateServerService(
+                health: snapshot.health,
+                readiness: snapshot.readiness
+            )
         } catch let error as APIError {
             handle(error)
         } catch {

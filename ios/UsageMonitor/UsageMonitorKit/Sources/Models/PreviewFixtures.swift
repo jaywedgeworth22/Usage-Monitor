@@ -227,6 +227,44 @@ public extension SubscriptionSummary {
     static let sampleList: [SubscriptionSummary] = [.sampleClaude, .sampleCursor]
 }
 
+public extension LlmBurnResponse {
+    static let sample = LlmBurnResponse(
+        ok: true,
+        generatedAt: "2026-07-19T09:15:00.000Z",
+        windowHours: 5,
+        providers: [
+            LlmBurnProviderReport(
+                provider: "anthropic",
+                window: LlmBurnWindowReport(
+                    hours: 5,
+                    tokens: LlmBurnTokenTotals(input: 120_000, output: 64_200, total: 184_200),
+                    derivedCostUsd: 8.40,
+                    reportedCostUsd: 8.10,
+                    estimateUsd: 8.40,
+                    eventCount: 12,
+                    tokensPerHour: 36_840,
+                    usdPerHour: 1.68
+                ),
+                budget: LlmBurnBudgetPace(
+                    monthlyBudgetUsd: 250,
+                    status: "watch",
+                    projectedMonthEndUsd: 280
+                )
+            )
+        ],
+        quietProviders: [
+            LlmBurnProviderReport(
+                provider: "voyage",
+                window: LlmBurnWindowReport(
+                    hours: 5,
+                    tokens: LlmBurnTokenTotals(input: 0, output: 0, total: 0)
+                ),
+                budget: LlmBurnBudgetPace(monthlyBudgetUsd: 150, status: "no-budget")
+            )
+        ]
+    )
+}
+
 public extension ServerHealth {
     static let sample = ServerHealth(
         ok: true,

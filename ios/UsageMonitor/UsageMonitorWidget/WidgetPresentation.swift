@@ -281,3 +281,381 @@ enum WidgetPresentation {
         return meterDetail(spent: spent, budget: budget)
     }
 }
+
+/// Gallery / Edit Widget topic.  One widget kind; users add copies per topic.
+enum WidgetTopic: String, Equatable, Sendable {
+    case budget
+    case llmQuotas
+    case servers
+
+    var title: String {
+        switch self {
+        case .budget: return "Budget"
+        case .llmQuotas: return "LLM Quotas"
+        case .servers: return "Servers"
+        }
+    }
+
+    static func parse(_ raw: String?) -> WidgetTopic {
+        guard let raw else { return .budget }
+        return WidgetTopic(rawValue: raw) ?? .budget
+    }
+}
+
+enum WidgetServerFocus: Equatable, Sendable {
+    case service
+    case host
+    case app(id: String)
+
+    var selectionId: String {
+        switch self {
+        case .service: return "server:service"
+        case .host: return "server:host"
+        case .app(let id): return "server:app:\(id)"
+        }
+    }
+
+    static func parse(selectionId: String?) -> WidgetServerFocus {
+        guard let selectionId, !selectionId.isEmpty, selectionId != "server:service" else {
+            return .service
+        }
+        if selectionId == "server:host" { return .host }
+        if selectionId.hasPrefix("server:app:") {
+            let id = String(selectionId.dropFirst("server:app:".count))
+            return id.isEmpty ? .service : .app(id: id)
+        }
+        if selectionId.hasPrefix("app:") {
+            let id = String(selectionId.dropFirst("app:".count))
+            return id.isEmpty ? .service : .app(id: id)
+        }
+        return .service
+    }
+}
+
+/// Honest empty / missing-cache copy.  Never rewrite a missing metric as $0.
+struct WidgetUnavailableContent: Equatable, Sendable {
+    var title: String
+    var message: String
+    var deepLink: URL?
+}
+
+struct WidgetLlmContent: Equatable, Sendable {
+    var provider: WidgetSnapshot.LlmSection.Provider
+    var windowHours: Double?
+    var peers: [WidgetSnapshot.LlmSection.Provider]
+    var generatedAt: Date
+    var deepLink: URL?
+}
+
+struct WidgetServerContent: Equatable, Sendable {
+    var focus: WidgetServerFocus
+    var title: String
+    var generatedAt: Date
+    var service: WidgetSnapshot.ServerSection.Service?
+    var host: WidgetSnapshot.ServerSection.Host?
+    var app: WidgetSnapshot.ServerSection.App?
+    var apps: [WidgetSnapshot.ServerSection.App]
+    var deepLink: URL?
+}
+
+enum WidgetTopicContent: Equatable, Sendable {
+    case budget(WidgetBudgetContent)
+    case llm(WidgetLlmContent)
+    case server(WidgetServerContent)
+    case unavailable(WidgetUnavailableContent)
+}
+
+enum WidgetTopicPresentation {
+    static func topicContent(
+        from snapshot: WidgetSnapshot,
+        topic: WidgetTopic,
+        budgetFocus: WidgetBudgetFocus,
+        llmProviderId: String?,
+        serverFocus: WidgetServerFocus,
+        maxMeters: Int = 3
+    ) -> WidgetTopicContent {
+        switch topic {
+        case .budget:
+            return .budget(
+                WidgetPresentation.content(from: snapshot, focus: budgetFocus, maxMeters: maxMeters)
+            )
+        case .llmQuotas:
+            return llmContent(from: snapshot, providerId: llmProviderId)
+        case .servers:
+            return serverContent(from: snapshot, focus: serverFocus)
+        }
+    }
+
+    static func llmContent(
+        from snapshot: WidgetSnapshot,
+        providerId: String?
+    ) -> WidgetTopicContent {
+        guard let section = snapshot.llm else {
+            return .unavailable(
+                WidgetUnavailableContent(
+                    title: "LLM Quotas",
+                    message: "Open the app to load LLM quotas.",
+                    deepLink: URL(string: "usageclientmonitor://dashboard")
+                )
+            )
+        }
+        if section.providers.isEmpty {
+            return .unavailable(
+                WidgetUnavailableContent(
+                    title: "LLM Quotas",
+                    message: "No LLM activity in the latest window.",
+                    deepLink: URL(string: "usageclientmonitor://dashboard")
+                )
+            )
+        }
+        let selected: WidgetSnapshot.LlmSection.Provider?
+        if let providerId, !providerId.isEmpty {
+            selected = section.providers.first { $0.id.caseInsensitiveCompare(providerId) == .orderedSame }
+            if selected == nil {
+                return .unavailable(
+                    WidgetUnavailableContent(
+                        title: "LLM Quotas",
+                        message: "That provider is not in the latest cache.",
+                        deepLink: URL(string: "usageclientmonitor://dashboard")
+                    )
+                )
+            }
+        } else {
+            selected = section.providers.first { !$0.quiet } ?? section.providers.first
+        }
+        guard let provider = selected else {
+            return .unavailable(
+                WidgetUnavailableContent(
+                    title: "LLM Quotas",
+                    message: "No LLM activity in the latest window.",
+                    deepLink: URL(string: "usageclientmonitor://dashboard")
+                )
+            )
+        }
+        return .llm(
+            WidgetLlmContent(
+                provider: provider,
+                windowHours: section.windowHours,
+                peers: section.providers.filter { $0.id != provider.id },
+                generatedAt: section.generatedAt,
+                deepLink: URL(string: "usageclientmonitor://dashboard")
+            )
+        )
+    }
+
+    static func serverContent(
+        from snapshot: WidgetSnapshot,
+        focus: WidgetServerFocus
+    ) -> WidgetTopicContent {
+        let section = snapshot.servers
+        switch focus {
+        case .service:
+            guard let service = section?.service else {
+                return .unavailable(
+                    WidgetUnavailableContent(
+                        title: "Servers",
+                        message: "Open the app to load server status.",
+                        deepLink: URL(string: "usageclientmonitor://serverStatus")
+                    )
+                )
+            }
+            return .server(
+                WidgetServerContent(
+                    focus: .service,
+                    title: service.name,
+                    generatedAt: service.generatedAt,
+                    service: service,
+                    host: section?.host,
+                    apps: section?.apps ?? [],
+                    deepLink: URL(string: "usageclientmonitor://serverStatus")
+                )
+            )
+        case .host:
+            guard let host = section?.host else {
+                return .unavailable(
+                    WidgetUnavailableContent(
+                        title: "Host",
+                        message: "Host metrics are not in the latest cache.",
+                        deepLink: URL(string: "usageclientmonitor://serverStatus")
+                    )
+                )
+            }
+            return .server(
+                WidgetServerContent(
+                    focus: .host,
+                    title: host.name ?? "Host",
+                    generatedAt: host.generatedAt,
+                    host: host,
+                    apps: section?.apps ?? [],
+                    deepLink: URL(string: "usageclientmonitor://serverStatus")
+                )
+            )
+        case .app(let id):
+            guard let app = section?.apps.first(where: { $0.id == id }) else {
+                return .unavailable(
+                    WidgetUnavailableContent(
+                        title: "Servers",
+                        message: "That app is not in the latest cache.",
+                        deepLink: URL(string: "usageclientmonitor://serverStatus")
+                    )
+                )
+            }
+            return .server(
+                WidgetServerContent(
+                    focus: .app(id: id),
+                    title: app.name,
+                    generatedAt: section?.host?.generatedAt ?? section?.service?.generatedAt ?? snapshot.generatedAt,
+                    app: app,
+                    apps: section?.apps ?? [],
+                    deepLink: URL(string: "usageclientmonitor://serverStatus")
+                )
+            )
+        }
+    }
+
+    /// Recorded-wins display cost: estimate, else derived, else reported.
+    /// Returns `nil` when the cache has no cost so the widget cannot show $0 as live.
+    static func llmDisplayCostUsd(for provider: WidgetSnapshot.LlmSection.Provider) -> Double? {
+        provider.estimateUsd ?? provider.derivedCostUsd ?? provider.reportedCostUsd
+    }
+
+    static func llmCostCaption(for provider: WidgetSnapshot.LlmSection.Provider, redacted: Bool) -> String? {
+        guard let usd = llmDisplayCostUsd(for: provider) else { return nil }
+        return WidgetPresentation.displayAmount(usd, redacted: redacted)
+    }
+
+    static func llmTokenCaption(for provider: WidgetSnapshot.LlmSection.Provider) -> String {
+        "\(compactCount(provider.tokensTotal)) tok"
+    }
+
+    static func llmWindowCaption(hours: Double?) -> String? {
+        guard let hours, hours > 0 else { return nil }
+        if hours == 1 { return "Last 1 hour" }
+        if hours == floor(hours) {
+            return "Last \(Int(hours)) hours"
+        }
+        return "Last \(hours) hours"
+    }
+
+    static func llmBudgetStatus(_ raw: String?) -> Theme.SemanticStatus {
+        switch raw {
+        case "over-pace": return .danger
+        case "watch": return .warning
+        case "on-pace": return .ok
+        default: return .neutral
+        }
+    }
+
+    static func llmBudgetLabel(_ raw: String?) -> String? {
+        switch raw {
+        case "over-pace": return "Over pace"
+        case "watch": return "Watch"
+        case "on-pace": return "On pace"
+        case "no-budget": return nil
+        default: return nil
+        }
+    }
+
+    static func serverOverallLabel(for service: WidgetSnapshot.ServerSection.Service) -> String {
+        if !service.ok { return "Offline" }
+        if let ready = service.readyOk, !ready { return "Degraded" }
+        return "Operational"
+    }
+
+    static func serverOverallStatus(for service: WidgetSnapshot.ServerSection.Service) -> Theme.SemanticStatus {
+        if !service.ok { return .danger }
+        if let ready = service.readyOk, !ready { return .warning }
+        return .ok
+    }
+
+    static func serverCheckLabel(_ check: WidgetSnapshot.ServerSection.Check) -> String {
+        if check.ok { return "OK" }
+        return check.gatesService ? "Down" : "Lagging"
+    }
+
+    static func serverCheckStatus(_ check: WidgetSnapshot.ServerSection.Check) -> Theme.SemanticStatus {
+        if check.ok { return .ok }
+        return check.gatesService ? .danger : .warning
+    }
+
+    static func serverCheckDetail(_ check: WidgetSnapshot.ServerSection.Check) -> String? {
+        if let detail = check.detail, !detail.isEmpty { return detail }
+        return DiskFormat.summary(free: check.freeBytes, total: check.totalBytes)
+    }
+
+    static func hostStatus(_ host: WidgetSnapshot.ServerSection.Host) -> Theme.SemanticStatus {
+        if host.stale || host.degraded { return .warning }
+        switch host.preventionOverall {
+        case "critical": return .danger
+        case "warning": return .warning
+        default: return .ok
+        }
+    }
+
+    static func hostLabel(_ host: WidgetSnapshot.ServerSection.Host) -> String {
+        if host.stale { return "Stale" }
+        if host.degraded { return "Degraded" }
+        switch host.preventionOverall {
+        case "critical": return "Critical"
+        case "warning": return "Watch"
+        case "ok": return "Live"
+        default:
+            return host.status?.capitalized ?? "Host"
+        }
+    }
+
+    static func appLabel(_ status: String) -> String {
+        let lower = status.lowercased()
+        if lower.hasPrefix("exited") || lower.hasPrefix("stopped") { return "Stopped" }
+        if lower.contains("unhealthy") { return "Unhealthy" }
+        if lower.contains("healthy") || lower == "running" { return "Healthy" }
+        if lower.contains("unknown") { return "Unknown" }
+        if lower.contains("degraded") { return "Degraded" }
+        return status
+    }
+
+    static func appStatus(_ status: String) -> Theme.SemanticStatus {
+        let lower = status.lowercased()
+        if lower.hasPrefix("exited") || lower.hasPrefix("stopped") { return .danger }
+        if lower.contains("unhealthy") { return .danger }
+        if lower.contains("healthy") || lower == "running" { return .ok }
+        if lower.contains("unknown") { return .warning }
+        if lower.contains("degraded") { return .warning }
+        return .warning
+    }
+
+    static func showsUpdatedAt(generatedAt: Date) -> Bool {
+        generatedAt.timeIntervalSince1970 > 0
+    }
+
+    static func isStale(generatedAt: Date, asOf now: Date = Date()) -> Bool {
+        guard showsUpdatedAt(generatedAt: generatedAt) else { return false }
+        return now.timeIntervalSince(generatedAt) >= WidgetPresentation.staleThreshold
+    }
+
+    static func updatedCaption(generatedAt: Date, asOf now: Date = Date()) -> String? {
+        guard showsUpdatedAt(generatedAt: generatedAt) else { return nil }
+        return "Updated \(WidgetPresentation.relativeAge(since: generatedAt, asOf: now))"
+    }
+
+    static func generatedAt(for content: WidgetTopicContent, snapshot: WidgetSnapshot) -> Date? {
+        switch content {
+        case .budget:
+            return WidgetPresentation.showsUpdatedAt(for: snapshot) ? snapshot.generatedAt : nil
+        case .llm(let llm):
+            return showsUpdatedAt(generatedAt: llm.generatedAt) ? llm.generatedAt : nil
+        case .server(let server):
+            return showsUpdatedAt(generatedAt: server.generatedAt) ? server.generatedAt : nil
+        case .unavailable:
+            return nil
+        }
+    }
+
+    static func compactCount(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        return formatter.string(from: NSNumber(value: value)) ?? "0"
+    }
+}
+

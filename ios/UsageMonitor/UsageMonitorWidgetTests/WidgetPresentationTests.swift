@@ -192,3 +192,145 @@ final class WidgetPresentationTests: XCTestCase {
         )
     }
 }
+
+final class WidgetTopicPresentationTests: XCTestCase {
+    func testBudgetTopicStillUsesExistingFocus() {
+        let content = WidgetTopicPresentation.topicContent(
+            from: .placeholder,
+            topic: .budget,
+            budgetFocus: .project(id: "proj-ct"),
+            llmProviderId: nil,
+            serverFocus: .service
+        )
+        guard case .budget(let budget) = content else {
+            return XCTFail("expected budget content")
+        }
+        XCTAssertEqual(budget.title, "Congress.Trade")
+        XCTAssertEqual(budget.spentUsd, 180, accuracy: 0.001)
+    }
+
+    func testLlmUsesCachedProviderAndNotInventedCost() {
+        let content = WidgetTopicPresentation.topicContent(
+            from: .placeholder,
+            topic: .llmQuotas,
+            budgetFocus: .overall,
+            llmProviderId: "anthropic",
+            serverFocus: .service
+        )
+        guard case .llm(let llm) = content else {
+            return XCTFail("expected llm content")
+        }
+        XCTAssertEqual(llm.provider.name, "anthropic")
+        XCTAssertEqual(WidgetTopicPresentation.llmDisplayCostUsd(for: llm.provider), 8.40)
+        XCTAssertEqual(llm.deepLink?.absoluteString, "usageclientmonitor://dashboard")
+    }
+
+    func testLlmMissingSectionIsUnavailableNotZero() {
+        let content = WidgetTopicPresentation.llmContent(from: .empty, providerId: nil)
+        guard case .unavailable(let unavailable) = content else {
+            return XCTFail("expected unavailable")
+        }
+        XCTAssertEqual(unavailable.title, "LLM Quotas")
+        XCTAssertEqual(unavailable.message, "Open the app to load LLM quotas.")
+    }
+
+    func testLlmUnknownProviderIsUnavailable() {
+        let content = WidgetTopicPresentation.llmContent(
+            from: .placeholder,
+            providerId: "does-not-exist"
+        )
+        guard case .unavailable(let unavailable) = content else {
+            return XCTFail("expected unavailable")
+        }
+        XCTAssertEqual(unavailable.message, "That provider is not in the latest cache.")
+    }
+
+    func testLlmQuietProviderHasNoDisplayCost() {
+        let voyage = WidgetSnapshot.placeholder.llm?.providers.first { $0.id == "voyage" }
+        XCTAssertEqual(voyage?.quiet, true)
+        XCTAssertNil(voyage.flatMap { WidgetTopicPresentation.llmDisplayCostUsd(for: $0) })
+        XCTAssertEqual(
+            WidgetTopicPresentation.llmTokenCaption(for: voyage!),
+            "0 tok"
+        )
+    }
+
+    func testServerServiceUsesCachedProbe() {
+        let content = WidgetTopicPresentation.serverContent(from: .placeholder, focus: .service)
+        guard case .server(let server) = content else {
+            return XCTFail("expected server content")
+        }
+        XCTAssertEqual(server.title, "usage-monitor")
+        XCTAssertEqual(
+            WidgetTopicPresentation.serverOverallLabel(for: server.service!),
+            "Operational"
+        )
+        XCTAssertEqual(server.deepLink?.absoluteString, "usageclientmonitor://serverStatus")
+    }
+
+    func testServerHostMissingIsUnavailable() {
+        var snapshot = WidgetSnapshot.empty
+        snapshot.servers = WidgetSnapshot.ServerSection(
+            service: WidgetSnapshot.ServerSection.Service(
+                generatedAt: Date(timeIntervalSince1970: 1_720_000_000),
+                name: "usage-monitor",
+                ok: true,
+                status: "live"
+            )
+        )
+        let content = WidgetTopicPresentation.serverContent(from: snapshot, focus: .host)
+        guard case .unavailable(let unavailable) = content else {
+            return XCTFail("expected unavailable host")
+        }
+        XCTAssertEqual(unavailable.message, "Host metrics are not in the latest cache.")
+    }
+
+    func testServerMissingAppIsUnavailable() {
+        let content = WidgetTopicPresentation.serverContent(
+            from: .placeholder,
+            focus: .app(id: "missing")
+        )
+        guard case .unavailable(let unavailable) = content else {
+            return XCTFail("expected unavailable app")
+        }
+        XCTAssertEqual(unavailable.message, "That app is not in the latest cache.")
+    }
+
+    func testServerFocusParse() {
+        XCTAssertEqual(WidgetServerFocus.parse(selectionId: nil), .service)
+        XCTAssertEqual(WidgetServerFocus.parse(selectionId: "server:host"), .host)
+        XCTAssertEqual(WidgetServerFocus.parse(selectionId: "server:app:um"), .app(id: "um"))
+    }
+
+    func testTopicStaleUsesSectionTimestamp() {
+        let now = Date(timeIntervalSince1970: 1_720_003_600)
+        XCTAssertFalse(
+            WidgetTopicPresentation.isStale(
+                generatedAt: now.addingTimeInterval(-30 * 60),
+                asOf: now
+            )
+        )
+        XCTAssertTrue(
+            WidgetTopicPresentation.isStale(
+                generatedAt: now.addingTimeInterval(-2 * 60 * 60),
+                asOf: now
+            )
+        )
+        XCTAssertFalse(WidgetTopicPresentation.isStale(generatedAt: Date(timeIntervalSince1970: 0)))
+        XCTAssertNil(
+            WidgetTopicPresentation.updatedCaption(generatedAt: Date(timeIntervalSince1970: 0))
+        )
+    }
+
+    func testEmptySnapshotDoesNotInventLlmOrServer() throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let data = try encoder.encode(WidgetSnapshot.empty)
+        let decoded = try decoder.decode(WidgetSnapshot.self, from: data)
+        XCTAssertNil(decoded.llm)
+        XCTAssertNil(decoded.servers)
+        XCTAssertEqual(decoded, .empty)
+    }
+}

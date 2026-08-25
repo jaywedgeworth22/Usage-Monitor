@@ -2,7 +2,31 @@ import AppIntents
 import WidgetKit
 import WidgetShared
 
-// MARK: - Entity
+// MARK: - Topic
+
+enum WidgetTopicChoice: String, AppEnum {
+    case budget
+    case llmQuotas
+    case servers
+
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Topic")
+
+    static var caseDisplayRepresentations: [WidgetTopicChoice: DisplayRepresentation] = [
+        .budget: "Budget",
+        .llmQuotas: "LLM Quotas",
+        .servers: "Servers"
+    ]
+
+    var topic: WidgetTopic {
+        switch self {
+        case .budget: return .budget
+        case .llmQuotas: return .llmQuotas
+        case .servers: return .servers
+        }
+    }
+}
+
+// MARK: - Budget entity (existing)
 
 /// One selectable budget focus for the home-screen widget.
 ///
@@ -66,17 +90,149 @@ struct BudgetFocusEntityQuery: EntityQuery {
     }
 }
 
+// MARK: - LLM entity
+
+struct LlmProviderEntity: AppEntity {
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "LLM Provider")
+    static var defaultQuery = LlmProviderEntityQuery()
+
+    var id: String
+    var title: String
+    var subtitle: String?
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(title)", subtitle: subtitle.map { "\($0)" })
+    }
+}
+
+struct LlmProviderEntityQuery: EntityQuery {
+    func entities(for identifiers: [LlmProviderEntity.ID]) async throws -> [LlmProviderEntity] {
+        let all = availableEntities()
+        let byId = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
+        return identifiers.compactMap { byId[$0] }
+    }
+
+    func suggestedEntities() async throws -> [LlmProviderEntity] {
+        availableEntities()
+    }
+
+    func defaultResult() async -> LlmProviderEntity? {
+        availableEntities().first
+    }
+
+    private func availableEntities() -> [LlmProviderEntity] {
+        let snapshot = SharedStore.shared.read() ?? .empty
+        return (snapshot.llm?.providers ?? []).map { provider in
+            LlmProviderEntity(
+                id: provider.id,
+                title: provider.name,
+                subtitle: provider.quiet ? "Quiet in the latest window" : "LLM Quotas"
+            )
+        }
+    }
+}
+
+// MARK: - Server entity
+
+struct ServerFocusEntity: AppEntity {
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Server")
+    static var defaultQuery = ServerFocusEntityQuery()
+
+    var id: String
+    var title: String
+    var subtitle: String?
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(title)", subtitle: subtitle.map { "\($0)" })
+    }
+
+    static var service: ServerFocusEntity {
+        ServerFocusEntity(
+            id: WidgetServerFocus.service.selectionId,
+            title: "Usage Monitor",
+            subtitle: "Service status"
+        )
+    }
+
+    static var host: ServerFocusEntity {
+        ServerFocusEntity(
+            id: WidgetServerFocus.host.selectionId,
+            title: "Host",
+            subtitle: "Host metrics"
+        )
+    }
+}
+
+struct ServerFocusEntityQuery: EntityQuery {
+    func entities(for identifiers: [ServerFocusEntity.ID]) async throws -> [ServerFocusEntity] {
+        let all = availableEntities()
+        let byId = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
+        return identifiers.compactMap { byId[$0] }
+    }
+
+    func suggestedEntities() async throws -> [ServerFocusEntity] {
+        availableEntities()
+    }
+
+    func defaultResult() async -> ServerFocusEntity? {
+        .service
+    }
+
+    private func availableEntities() -> [ServerFocusEntity] {
+        let snapshot = SharedStore.shared.read() ?? .empty
+        var entities: [ServerFocusEntity] = [.service]
+        if let host = snapshot.servers?.host {
+            entities.append(
+                ServerFocusEntity(
+                    id: WidgetServerFocus.host.selectionId,
+                    title: host.name ?? "Host",
+                    subtitle: "Host metrics"
+                )
+            )
+        } else {
+            entities.append(.host)
+        }
+        for app in snapshot.servers?.apps ?? [] {
+            entities.append(
+                ServerFocusEntity(
+                    id: WidgetServerFocus.app(id: app.id).selectionId,
+                    title: app.name,
+                    subtitle: app.selfApp ? "This app" : "App on host"
+                )
+            )
+        }
+        return entities
+    }
+}
+
 // MARK: - Configuration intent
 
 struct SelectBudgetIntent: WidgetConfigurationIntent {
-    static var title: LocalizedStringResource = "Budget"
-    static var description = IntentDescription("Choose overall spend or a project budget.")
+    static var title: LocalizedStringResource = "Usage Monitor"
+    static var description = IntentDescription(
+        "Choose Budget, LLM Quotas, or Servers.  Add more than one copy to watch different topics."
+    )
+
+    @Parameter(title: "Topic", default: .budget)
+    var topic: WidgetTopicChoice
 
     @Parameter(title: "Budget", default: nil)
     var budget: BudgetFocusEntity?
 
-    /// Resolved focus for timeline providers.
+    @Parameter(title: "LLM Provider", default: nil)
+    var llmProvider: LlmProviderEntity?
+
+    @Parameter(title: "Server", default: nil)
+    var server: ServerFocusEntity?
+
+    /// Resolved budget focus for timeline providers (existing widgets).
     var focus: WidgetBudgetFocus {
         WidgetBudgetFocus.parse(selectionId: budget?.id)
+    }
+
+    var resolvedTopic: WidgetTopic { topic.topic }
+
+    var resolvedServerFocus: WidgetServerFocus {
+        WidgetServerFocus.parse(selectionId: server?.id)
     }
 }
