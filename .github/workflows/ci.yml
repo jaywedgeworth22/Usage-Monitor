@@ -267,8 +267,10 @@ jobs:
           bash -n scripts/ios-ship-testflight-local.sh
           bash -n scripts/ios-appstore-gm-prepare.sh
           bash -n scripts/ios-fleet-pin.sh
+          bash -n scripts/test-ios-fleet-appupdate-pin.sh
           bash scripts/ios-fleet-pin.sh --check
           bash scripts/test-ios-scheduled-ship-gate.sh
+          bash scripts/test-ios-fleet-appupdate-pin.sh
 
       # Replays a captured `agy -p "/usage"` envelope — the CLI itself is only
       # installed on the Mac that runs Antigravity, so this is the only place
