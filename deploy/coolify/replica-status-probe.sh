@@ -12,6 +12,10 @@
 #     `docker exec litestream ltx` fails with "bucket required"
 #   - Container /proc/*/environ is ptrace-restricted; host root reads the
 #     litestream PID via `docker top` instead
+#
+# Secret safety: never pass LITESTREAM_S3_* (or any replica credential) on
+# docker exec argv — systemd journals capture argv. Host fallback injects env
+# via a mode-0600 --env-file that is deleted immediately after exec.
 set -euo pipefail
 umask 022
 export LC_ALL=C
@@ -65,6 +69,11 @@ write_status_host() {
   mv -f "${temporary}" "${status_file}"
 }
 
+status_mtime_epoch() {
+  local path="$1"
+  stat -c '%Y' "${path}" 2>/dev/null || stat -f '%m' "${path}" 2>/dev/null || echo 0
+}
+
 CONTAINER="$(find_container || true)"
 STATUS_FILE="$(volume_status_path || true)"
 
@@ -77,15 +86,36 @@ if [[ -z "${STATUS_FILE}" ]]; then
   exit 1
 fi
 
-# Prefer in-container heartbeat script when present (has Infisical env via
-# process re-export). Fall back to host-PID environ LTX listing.
+status_mtime_before="$(status_mtime_epoch "${STATUS_FILE}")"
+
 run_in_container_heartbeat() {
   docker exec "${CONTAINER}" bash /app/scripts/replica-status-heartbeat.sh --once 2>/dev/null
 }
 
+# Prefer the in-container heartbeat (Infisical env already present). Never
+# overwrite its verdict with a host-side replica_credentials_missing fallback.
+run_in_container_heartbeat || true
+status_mtime_after="$(status_mtime_epoch "${STATUS_FILE}")"
+
+if [[ -f "${STATUS_FILE}" ]] && (( status_mtime_after >= status_mtime_before )); then
+  if jq -e '.checkedAt != null and .checkedAt != ""' "${STATUS_FILE}" >/dev/null 2>&1; then
+    ok="$(jq -r '.ok' "${STATUS_FILE}")"
+    reason="$(jq -r '.reason // "null"' "${STATUS_FILE}")"
+    log "in-container heartbeat verdict ok=${ok} reason=${reason} → ${STATUS_FILE}"
+    exit 0
+  fi
+fi
+
+log "in-container heartbeat did not refresh ${STATUS_FILE}; using host env-file LTX fallback on ${CONTAINER}"
+
 run_ltx_via_process_env() {
   python3 - <<'PY' "${CONTAINER}" "${MAX_LTX_AGE_SECONDS}"
-import datetime, re, subprocess, sys
+import datetime
+import json
+import os
+import subprocess
+import sys
+import tempfile
 
 container = sys.argv[1]
 max_age = int(sys.argv[2])
@@ -154,62 +184,117 @@ if any(not env_map.get(k) for k in required):
     print("CREDS_MISSING", file=sys.stderr)
     sys.exit(4)
 
-export_args = []
-for k in required + ["LITESTREAM_S3_REGION"]:
-    if env_map.get(k):
-        export_args.extend(["-e", f"{k}={env_map[k]}"])
+def classify(stderr: str, rc: int) -> str:
+    lower = stderr.lower()
+    if rc == 124:
+        return "list_timeout"
+    if "tls handshake timeout" in lower or "i/o timeout" in lower:
+        return "list_timeout"
+    if "timed out" in lower or "deadline exceeded" in lower:
+        return "list_timeout"
+    return "list_error"
 
-latest = None
-for level in range(0, 6):
-    r = subprocess.run(
-        ["docker", "exec", *export_args, container,
-         "/app/bin/litestream", "ltx",
-         "-config", "/app/litestream.yml",
-         "-level", str(level),
-         "/data/prod.db"],
-        capture_output=True, text=True, timeout=70,
-    )
-    if r.returncode != 0:
-        continue
-    times = []
-    for line in r.stdout.splitlines():
-        parts = line.split()
-        if len(parts) == 5 and re.fullmatch(r"[0-9]+", parts[0]):
-            times.append(parts[4])
-    if times:
-        latest = sorted(times)[-1]
-        break
+def newest_timestamp(payload: str):
+    try:
+        rows = json.loads(payload or "[]")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(rows, list):
+        return None
+    stamps = [row.get("timestamp") for row in rows if isinstance(row, dict) and row.get("timestamp")]
+    return sorted(stamps)[-1] if stamps else None
 
-if not latest:
-    print("NO_LTX", file=sys.stderr)
-    sys.exit(5)
-
+env_path = None
 try:
-    dt = datetime.datetime.fromisoformat(latest.replace("Z", "+00:00"))
-except Exception:
-    print(f"BAD_TS {latest}", file=sys.stderr)
-    sys.exit(6)
+    with tempfile.NamedTemporaryFile(
+        mode="w", prefix="litestream-env.", delete=False, dir="/tmp"
+    ) as env_file:
+        env_path = env_file.name
+        for key in required + ["LITESTREAM_S3_REGION"]:
+            value = env_map.get(key)
+            if value:
+                env_file.write(f"{key}={value}\n")
+    os.chmod(env_path, 0o600)
 
-age = int((datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds())
-ok = 0 <= age <= max_age
-print(f"LATEST={latest}")
-print(f"AGE={age}")
-print(f"OK={1 if ok else 0}")
-sys.exit(0 if ok else 10)
+    continuous_newest = None
+    snapshot_newest = None
+    saw_empty = False
+    saw_timeout = False
+    saw_error = False
+
+    for level in (0, 1, 2, 3, 9):
+        proc = subprocess.run(
+            [
+                "docker", "exec", "--env-file", env_path, container,
+                "/app/bin/litestream", "ltx", "-json",
+                "-config", "/app/litestream.yml",
+                "-level", str(level),
+                "/data/prod.db",
+            ],
+            capture_output=True, text=True, timeout=70,
+        )
+        if proc.returncode == 0:
+            if proc.stdout.strip() in ("", "[]"):
+                saw_empty = True
+                continue
+            ts = newest_timestamp(proc.stdout)
+            if not ts:
+                saw_error = True
+                continue
+            if level == 9:
+                snapshot_newest = ts
+            elif continuous_newest is None or ts > continuous_newest:
+                continuous_newest = ts
+        else:
+            kind = classify(proc.stderr, proc.returncode)
+            if kind == "list_timeout":
+                saw_timeout = True
+            else:
+                saw_error = True
+
+    chosen = continuous_newest or snapshot_newest
+    probe_reason = ""
+    if continuous_newest:
+        probe_reason = ""
+    elif snapshot_newest:
+        probe_reason = "snapshot_only"
+
+    if not chosen:
+        if saw_timeout:
+            print("REASON=list_timeout", file=sys.stderr)
+            sys.exit(7)
+        if saw_empty and not saw_error:
+            print("REASON=empty_ltx", file=sys.stderr)
+            sys.exit(8)
+        if saw_error:
+            print("REASON=list_error", file=sys.stderr)
+            sys.exit(9)
+        print("REASON=no_parseable_ltx", file=sys.stderr)
+        sys.exit(5)
+
+    try:
+        dt = datetime.datetime.fromisoformat(chosen.replace("Z", "+00:00"))
+    except Exception:
+        print(f"BAD_TS {chosen}", file=sys.stderr)
+        sys.exit(6)
+
+    age = int((datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds())
+    ok = 0 <= age <= max_age
+    print(f"LATEST={chosen}")
+    print(f"AGE={age}")
+    print(f"OK={1 if ok else 0}")
+    if probe_reason:
+        print(f"REASON={probe_reason}")
+    sys.exit(0 if ok else 10)
+finally:
+    if env_path:
+        try:
+            os.unlink(env_path)
+        except OSError:
+            pass
 PY
 }
 
-if run_in_container_heartbeat; then
-  if [[ -f "${STATUS_FILE}" ]]; then
-    # Reject a prior false verdict from an older probe if heartbeat rewrote ok.
-    if jq -e '.ok == true' "${STATUS_FILE}" >/dev/null 2>&1; then
-      log "in-container heartbeat OK → ${STATUS_FILE}"
-      exit 0
-    fi
-  fi
-fi
-
-log "using host-PID environ LTX listing on ${CONTAINER}"
 set +e
 out="$(run_ltx_via_process_env 2>&1)"
 rc=$?
@@ -219,7 +304,8 @@ log "ltx probe rc=${rc}"
 if [[ "${rc}" -eq 0 ]]; then
   age="$(printf '%s\n' "${out}" | awk -F= '/^AGE=/{print $2; exit}')"
   age="${age:-0}"
-  write_status_host "${STATUS_FILE}" true "${age}" ""
+  reason="$(printf '%s\n' "${out}" | awk -F= '/^REASON=/{print $2; exit}')"
+  write_status_host "${STATUS_FILE}" true "${age}" "${reason}"
   log "replica healthy: age=${age}s → ${STATUS_FILE}"
   exit 0
 fi
@@ -227,8 +313,12 @@ fi
 if [[ "${rc}" -eq 10 ]]; then
   age="$(printf '%s\n' "${out}" | awk -F= '/^AGE=/{print $2; exit}')"
   age="${age:-0}"
-  write_status_host "${STATUS_FILE}" false "${age}" "ltx_age_exceeds_budget"
-  log "LTX age ${age}s exceeds budget"
+  reason="$(printf '%s\n' "${out}" | awk -F= '/^REASON=/{print $2; exit}')"
+  if [[ -z "${reason}" ]]; then
+    reason="ltx_age_exceeds_budget"
+  fi
+  write_status_host "${STATUS_FILE}" false "${age}" "${reason}"
+  log "LTX age ${age}s exceeds budget (${reason})"
   exit 0
 fi
 
@@ -236,10 +326,13 @@ reason="no_parseable_ltx"
 case "${out}" in
   *NO_LITESTREAM_PID*) reason="litestream_not_running" ;;
   *CREDS_MISSING*) reason="replica_credentials_missing" ;;
-  *NO_LTX*) reason="no_parseable_ltx" ;;
+  *REASON=list_timeout*) reason="list_timeout" ;;
+  *REASON=empty_ltx*) reason="empty_ltx" ;;
+  *REASON=list_error*) reason="list_error" ;;
+  *REASON=no_parseable_ltx*) reason="no_parseable_ltx" ;;
   *BAD_TS*) reason="invalid_ltx_timestamp" ;;
   *ENV_READ_FAILED*) reason="replica_status_unreadable" ;;
 esac
 write_status_host "${STATUS_FILE}" false null "${reason}"
-log "ERROR: probe failed (${reason}): ${out}"
-exit 1
+log "ERROR: probe failed (${reason})"
+exit 0
