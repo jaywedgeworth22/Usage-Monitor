@@ -63,11 +63,15 @@ Canonical IDs are only the **client** / **local** rows in the table above.
 
 ## TestFlight
 
+Hosted path: `.github/workflows/ios-ship.yml` on GitHub-hosted `macos-latest`.
+It imports the existing team ASC/P12 GitHub secrets and execs in-repo
+`scripts/ios-fleet/`.  LocalUsageMonitor stays skipped on that workflow.
+
 ```bash
-# Usage Client Monitor (server-backed)
+# Usage Client Monitor (server-backed) -- what hosted ios-ship runs
 bash scripts/ios-ship-testflight.sh
 
-# Usage Local Monitor (on-device only)
+# Usage Local Monitor (on-device only) -- not started by hosted ios-ship
 bash scripts/ios-ship-testflight-local.sh
 ```
 

@@ -1,13 +1,16 @@
 name: iOS TestFlight ship (Mac runner)
 
-# Archive + upload on the owned Mac runner so TestFlight (the phone) actually
-# updates when iOS code lands on main. Unsigned compile stays in ios-build.yml.
+# Archive + upload on GitHub-hosted macos-latest so TestFlight (the phone)
+# actually updates when iOS code lands on main. Unsigned compile stays in
+# ios-build.yml. Do not run xcodebuild locally. Do not restart a self-hosted
+# Mac runner or /Users/jay/apps/ios-fleet.
 #
-# XCODE BUILDS ONLY (owner 2026-08-12): this workflow may target mac-runner
-# labels. Backend jobs stay off this host. Fork PRs never run here.
+# Signing: scripts/ios-appstore-gm-prepare.sh writes ~/.secrets from GitHub
+# Actions secrets (same names as Congress.Trade / Socratic.Trade #3089:
+# ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8, IOS_DIST_P12_BASE64,
+# IOS_DIST_P12_PASSWORD). Never mint a new App Store Connect key.
 #
-# Secrets stay on the Mac (~/.secrets/appstore-connect.env). Ships both the
-# server-backed client and the on-device local app.
+# LocalUsageMonitor stays skipped. This job ships Usage Client Monitor only.
 #
 # WHY THERE IS A `schedule:` TRIGGER (2026-08-13)
 # ----------------------------------------------
@@ -23,13 +26,16 @@ name: iOS TestFlight ship (Mac runner)
 # workflow. The cron is now a backstop, not the only path. Do not fall back to
 # GITHUB_TOKEN for merges.
 #
+# Hosted runners have an empty home directory each job, so ~/.cache/ios-fleet
+# is restored from actions/cache. Without that cache every scheduled tick
+# would look like "no prior ship" and re-archive.
+#
 # NOT EVERY TICK SHIPS -- the scheduled path is guarded twice.
 #   1. scripts/ios-scheduled-ship-gate.sh refuses to try unless ios/ actually
-#      changed between an app's last successful ship and HEAD. A cron carries
+#      changed between the last successful ship and HEAD. A cron carries
 #      no `paths:` filter of its own, so without this a backend-only commit
 #      would ship a TestFlight build. The owner does not want TestFlight
-#      spammed; this is the guard that prevents it. It decides per app, so a
-#      caught-up app is not re-shipped alongside a behind one.
+#      spammed; this is the guard that prevents it.
 #   2. The fleet ship script then rate-limits successful uploads to one per app
 #      per DEFAULT_MIN_INTERVAL_SEC=3600 seconds (1 hour) and independently
 #      skips when git HEAD already shipped. Those runs print "ship-gate: skip"
@@ -42,11 +48,14 @@ on:
       - 'ios/**'
       - '.github/workflows/ios-ship.yml'
       - 'scripts/ios-*.sh'
+      - 'scripts/ios-fleet/**'
+      - 'scripts/ios-fleet-pin.sh'
+      - 'scripts/ios-fleet.sha256'
   workflow_dispatch:
   schedule:
     # Twice an hour, offset from Socratic.Trade ('*/30') and Congress.Trade
-    # ('7,37') so the three fleet repos do not ask the single Mac runner to
-    # start three ships on the same minute.
+    # ('7,37') so the three fleet repos do not start three ships on the same
+    # minute.
     - cron: '13,43 * * * *'
 
 permissions:
@@ -70,13 +79,20 @@ jobs:
           # The gate diffs HEAD against the sha recorded by the last successful
           # ship, which can be many commits back. Default depth-1 makes that
           # range uncomputable and the gate would degrade to skipping forever.
-          # The runner workspace persists, so this costs once per runner.
           fetch-depth: 0
+
+      - name: Restore iOS ship state
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ios-fleet
+          key: ios-fleet-usage-${{ github.run_id }}
+          restore-keys: |
+            ios-fleet-usage-
 
       # Runs FIRST so a tick with nothing to ship costs seconds.
       # Logic lives in a script, not inline YAML, so CI can unit-test it on
-      # every PR instead of it only ever being exercised on the one Mac that
-      # can ship.
+      # every PR instead of it only ever being exercised on the ship job.
+      # usage-local is intentionally omitted: LocalUsageMonitor stays skipped.
       - name: Scheduled ship gate (skip unless iOS code changed)
         id: gate
         run: |
@@ -84,10 +100,13 @@ jobs:
             --event "${{ github.event_name }}" \
             --path-prefix 'ios/' \
             --repo-root "$GITHUB_WORKSPACE" \
-            usage usage-local
+            usage
+
+      - name: Verify in-repo ios-fleet pin
+        if: steps.gate.outputs.should_ship == '1'
+        run: bash scripts/ios-fleet-pin.sh --check
 
       - name: Assert stable Xcode and a non-beta host OS
-        id: host
         if: steps.gate.outputs.should_ship == '1'
         run: |
           echo "DEVELOPER_DIR=${DEVELOPER_DIR}"
@@ -106,19 +125,34 @@ jobs:
           build=$(sw_vers -buildVersion)
           echo "macOS ${os} (${build})"
           if echo "$build" | grep -Eq '[0-9][a-z]$'; then
-            echo "ok=0" >> "$GITHUB_OUTPUT"
-            echo "::warning::macOS ${os} build ${build} is a beta host. Skipping upload (Invalid Binary)."
-            exit 0
+            echo "::error::macOS ${os} build ${build} is a beta host. App Store rejects these as INVALID_BINARY."
+            exit 1
           fi
-          echo "ok=1" >> "$GITHUB_OUTPUT"
+
+      # Do not use `secrets.*` in `if:` -- GitHub's dispatch parser rejects it
+      # (`Unrecognized named-value: secrets`) and the whole workflow dies at 0s.
+      - name: Import signing + ASC key
+        if: steps.gate.outputs.should_ship == '1'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          IOS_DIST_P12_BASE64: ${{ secrets.IOS_DIST_P12_BASE64 }}
+          IOS_DIST_P12_PASSWORD: ${{ secrets.IOS_DIST_P12_PASSWORD }}
+        run: |
+          if [ -z "${ASC_KEY_ID}" ]; then
+            echo "::error::ASC_KEY_ID is missing on this GitHub repo. Copy ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8, IOS_DIST_P12_BASE64, IOS_DIST_P12_PASSWORD from Congress.Trade (same team CC8UTF7ATG). Do not mint a new key. Do not restart a Mac runner."
+            exit 1
+          fi
+          bash "$GITHUB_WORKSPACE/scripts/ios-appstore-gm-prepare.sh"
 
       # Via the in-repo wrappers rather than /Users/jay/apps/ios-fleet directly:
       # the wrappers pin DEVELOPER_DIR to stable Xcode and resolve --repo-root,
       # so the workflow cannot drift from what a local operator runs.
+      # No --force-ship. Standing rate limit is DEFAULT_MIN_INTERVAL_SEC=3600.
       - name: Ship UsageMonitor to TestFlight
-        if: steps.gate.outputs.ship_usage == '1' && steps.host.outputs.ok == '1'
+        if: steps.gate.outputs.should_ship == '1'
         run: bash "$GITHUB_WORKSPACE/scripts/ios-ship-testflight.sh"
 
-      - name: Ship LocalUsageMonitor to TestFlight
-        if: steps.gate.outputs.ship_usage_local == '1' && steps.host.outputs.ok == '1'
-        run: bash "$GITHUB_WORKSPACE/scripts/ios-ship-testflight-local.sh"
+      # LocalUsageMonitor stays skipped. Do not add a TestFlight upload step
+      # for usage-local here.

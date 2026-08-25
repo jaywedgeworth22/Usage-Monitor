@@ -1,4 +1,14 @@
-## Current (2026-08-22 GROK — Copilot CLI API-equivalent + Infisical bake)
+## Current (2026-08-25 GROK — hosted ios-ship ASC import)
+
+GitHub-hosted `macos-latest` `ios-ship` run 32795404598 failed because
+`~/.secrets/appstore-connect.env` does not exist on a hosted runner (same
+class as Socratic.Trade before #3089).  The workflow now imports the existing
+team ASC/P12 GitHub secrets and writes that env via
+`scripts/ios-appstore-gm-prepare.sh`.  LocalUsageMonitor stays skipped.  No
+new key.  No `--force-ship`.  Receipt:
+`docs/rollouts/2026-08-25-ios-hosted-asc-import.md`.
+
+## Prior (2026-08-22 GROK — Copilot CLI API-equivalent + Infisical bake)
 
 #1316 is merged but Coolify rolled it back: #1315 removed the UM Infisical
 project UUID fallback and Infisical 404'd `projectId=undefined`.  This lane

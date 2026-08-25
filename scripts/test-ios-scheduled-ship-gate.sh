@@ -2,8 +2,8 @@
 # test-scheduled-ship-gate.sh - Offline tests for scheduled-ship-gate.sh.
 #
 # The gate is the only thing standing between a half-hourly cron and a
-# TestFlight build for every backend commit. It runs exclusively on the owned
-# Mac runner, so without these tests a defect in it is invisible until either
+# TestFlight build for every backend commit. Hosted macos-latest is the ship
+# host, so without these tests a defect in it is invisible until either
 # testers get spammed or an iOS change silently never ships. Everything here is
 # a throwaway git repo in a scratch dir: no network, no credentials, no
 # xcodebuild, no App Store Connect.

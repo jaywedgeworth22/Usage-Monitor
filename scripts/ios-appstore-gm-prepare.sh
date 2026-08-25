@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Prepare a GitHub-hosted macos-26 runner to archive for App Store review.
-# Writes ASC credentials and imports the iOS Distribution identity.
-# Never prints secret values.  Fail closed on a beta macOS host.
+# Prepare a GitHub-hosted macos runner to archive for App Store / TestFlight.
+# Writes ~/.secrets/appstore-connect.env from existing team GitHub secrets
+# (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8, IOS_DIST_P12_BASE64,
+# IOS_DIST_P12_PASSWORD) and imports the iOS Distribution identity.
+# Never prints secret values.  Never mint a new key.  Fail closed on a
+# beta macOS host.
 set -euo pipefail
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -59,7 +62,7 @@ security import "$P12_PATH" -k "$KC_PATH" -P "$IOS_DIST_P12_PASSWORD" \
 security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" "$KC_PATH" >/dev/null
 security list-keychain -d user -s "$KC_PATH" login.keychain-db
 
-# Identity names only — never dump the p12.
+# Identity names only -- never dump the p12.
 if ! security find-identity -v -p codesigning "$KC_PATH" | grep -q 'Apple Distribution'; then
   die "imported keychain has no Apple Distribution identity"
 fi
