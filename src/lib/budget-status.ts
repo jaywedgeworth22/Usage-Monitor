@@ -143,6 +143,11 @@ export interface ProviderBudgetStatus {
   verifiedPreferredCashApplied: boolean;
   /** The verified period cost that replaced the self-reported estimate, or null. */
   verifiedPreferredCashUsd: number | null;
+  /**
+   * Provider-reported external billing / bucket inventory records synced from
+   * the provider's API. Populated for multi-service/bucket providers like Backblaze B2.
+   */
+  externalBilling?: ProviderExternalBillingDTO[];
   // Budget-breach automated-control observability (default-off). These reflect
   // the durable state written by src/lib/budget-controls.ts. keyDisableRecommended
   // is advisory only and never reflects a credential mutation.
@@ -155,6 +160,23 @@ export interface ProviderBudgetStatus {
     pauseObservedSpendUsd: number | null;
     keyDisableRecommended: boolean;
   };
+}
+
+export interface ProviderExternalBillingDTO {
+  source: string;
+  externalId: string | null;
+  kind: string;
+  serviceName: string | null;
+  planName: string | null;
+  status: string | null;
+  amountUsd: number | null;
+  currency: string | null;
+  billingInterval: string | null;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  usageQuantity: number | null;
+  usageUnit: string | null;
+  syncedAt: string;
 }
 
 export interface BudgetStatusResponse {
@@ -846,12 +868,16 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
             source: true,
             externalId: true,
             kind: true,
+            serviceName: true,
+            planName: true,
             status: true,
             amountUsd: true,
             currency: true,
             billingInterval: true,
             currentPeriodStart: true,
             currentPeriodEnd: true,
+            usageQuantity: true,
+            usageUnit: true,
             rollupRole: true,
             syncedAt: true,
           },
@@ -1753,6 +1779,22 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
       status,
       projectedStatus,
       alerts: budgetAlerts,
+      externalBilling: p.externalBilling.map((b) => ({
+        source: b.source,
+        externalId: b.externalId,
+        kind: b.kind,
+        serviceName: b.serviceName,
+        planName: b.planName,
+        status: b.status,
+        amountUsd: b.amountUsd,
+        currency: b.currency,
+        billingInterval: b.billingInterval,
+        currentPeriodStart: b.currentPeriodStart?.toISOString() ?? null,
+        currentPeriodEnd: b.currentPeriodEnd?.toISOString() ?? null,
+        usageQuantity: b.usageQuantity,
+        usageUnit: b.usageUnit,
+        syncedAt: b.syncedAt.toISOString(),
+      })),
       verifiedPreferredCashApplied: verifiedCashResult.verifiedPreferredCashApplied,
       verifiedPreferredCashUsd: verifiedCashResult.verifiedPreferredCashUsd,
       budgetControls: {

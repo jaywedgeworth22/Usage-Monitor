@@ -309,3 +309,130 @@ public extension ServerMetrics {
         asOf: "2026-08-10T18:00:00.000Z"
     )
 }
+
+public extension PlatformStatusPayload {
+    static let sample = PlatformStatusPayload(
+        platforms: [
+            PlatformCard(
+                id: "hetzner",
+                name: "Hetzner Cloud",
+                category: .hosting,
+                configured: true,
+                state: .healthy,
+                headline: "Production CX43 host in nbg1 is running normally.",
+                metrics: [
+                    Metric(label: "Server", value: "ubuntu-16gb-nbg1-cx43"),
+                    Metric(label: "Location", value: "Nuremberg (nbg1)"),
+                    Metric(label: "CPUs", value: "8 vCPU · 16 GB RAM")
+                ],
+                requiredEnv: ["HETZNER_API_TOKEN"]
+            ),
+            PlatformCard(
+                id: "cloudflare_r2",
+                name: "Cloudflare R2",
+                category: .storage,
+                configured: true,
+                state: .healthy,
+                headline: "Free-tier storage pacing is healthy across all fleet buckets.",
+                metrics: [
+                    Metric(label: "Storage", value: "2.4 GB", hint: "of 10 GB free cap", usagePct: 24),
+                    Metric(label: "Class A Ops", value: "45,120", hint: "of 1M/mo", usagePct: 4.5),
+                    Metric(label: "Class B Ops", value: "180,400", hint: "of 10M/mo", usagePct: 1.8)
+                ],
+                requiredEnv: ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_R2_ACCESS_KEY_ID"]
+            ),
+            PlatformCard(
+                id: "slack",
+                name: "Slack",
+                category: .messaging,
+                configured: true,
+                state: .healthy,
+                headline: "Slack bot token is valid for Jay's Services. Posting as agent-sync-realtime.",
+                metrics: [
+                    Metric(label: "Workspace", value: "Jay's Services"),
+                    Metric(label: "Workspace ID", value: "T0824ABCDEF"),
+                    Metric(label: "Bot Identity", value: "U0824GHIJKL (agent-sync-realtime)")
+                ],
+                requiredEnv: ["SLACK_BOT_TOKEN"]
+            ),
+            PlatformCard(
+                id: "pushover",
+                name: "Pushover",
+                category: .messaging,
+                configured: true,
+                state: .healthy,
+                headline: "Pushover accepted 1 application token. Lowest remaining quota is 5,112 calls.",
+                metrics: [
+                    Metric(label: "Usage Monitor Quota", value: "5,112 / 10,000", usagePct: 48.9),
+                    Metric(label: "Quota Resets", value: "in 7 days"),
+                    Metric(label: "User Key", value: "u9824...xyz")
+                ],
+                requiredEnv: ["PUSHOVER_USER_KEY", "PUSHOVER_APP_TOKEN"]
+            ),
+            PlatformCard(
+                id: "stripe",
+                name: "Stripe",
+                category: .payments,
+                configured: true,
+                state: .healthy,
+                headline: "Live key is working. Charges and payouts are enabled.",
+                metrics: [
+                    Metric(label: "Key Mode", value: "Live"),
+                    Metric(label: "Charges", value: "Enabled"),
+                    Metric(label: "Payouts", value: "Enabled"),
+                    Metric(label: "Onboarding", value: "Complete"),
+                    Metric(label: "Requirements Due", value: "0")
+                ],
+                requiredEnv: ["STRIPE_SECRET_KEY"]
+            ),
+            PlatformCard(
+                id: "infisical",
+                name: "Infisical",
+                category: .secrets,
+                configured: true,
+                state: .healthy,
+                headline: "3 of 4 machine identities authenticated. The stored client secret for Shared scope is verified.",
+                metrics: [
+                    Metric(label: "SocraticTrade.com", value: "Authenticated"),
+                    Metric(label: "Congress.Trade", value: "Authenticated"),
+                    Metric(label: "Usage-Monitor", value: "Authenticated")
+                ],
+                requiredEnv: ["INFISICAL_CT_CLIENT_ID", "INFISICAL_CT_CLIENT_SECRET"]
+            )
+        ],
+        summary: .init(total: 6, configured: 6, healthy: 6, degraded: 0, unconfigured: 0),
+        degraded: false,
+        stale: false,
+        fetchedAt: "2026-08-25T09:00:00.000Z"
+    )
+}
+
+public extension OperationsHealth {
+    static let sample = OperationsHealth(
+        receiptInbox: .init(
+            configured: true,
+            state: .healthy,
+            needsReviewCount: 0,
+            countIsLowerBound: false,
+            latestReceivedAt: "2026-08-25T08:30:00.000Z"
+        ),
+        socraticInfrastructure: .init(
+            state: .healthy,
+            releaseSha: "a1b2c3d4e5f6",
+            processUptimeSeconds: 84_200
+        ),
+        congressInfrastructure: .init(
+            state: .healthy,
+            releaseSha: "f6e5d4c3b2a1",
+            processUptimeSeconds: 92_400
+        ),
+        r2Fleet: .init(
+            configured: true,
+            accounts: [
+                .init(id: "primary", label: "Jay Production", configured: true, status: "ok", storage: .init(actual: 2_400_000_000, limit: 10_000_000_000, mtdPct: 24.0)),
+                .init(id: "archive", label: "Backups Archive", configured: true, status: "ok", storage: .init(actual: 5_100_000_000, limit: 10_000_000_000, mtdPct: 51.0))
+            ]
+        ),
+        fetchedAt: "2026-08-25T09:00:00.000Z"
+    )
+}

@@ -7,6 +7,87 @@ import UniformTypeIdentifiers
 import UIKit
 #endif
 
+// MARK: - Fleet (Computers & Server Status in Local Monitor)
+
+struct LocalFleetTab: View {
+    @Bindable var model: LocalAppModel
+    @State private var hostChip: String = "Apple M5"
+    @State private var hostName: String = "jays.services (jay · macbook.boa-roygbiv.ts.net)"
+    @State private var cpuUsage: Double = 14.2
+    @State private var memUsage: Double = 59.7
+    @State private var diskUsage: Double = 87.0
+    @State private var isRefreshing = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    LabeledContent("Host", value: hostName)
+                    LabeledContent("Chip", value: hostChip)
+                    LabeledContent("CPU Load", value: String(format: "%.1f%%", cpuUsage))
+                    LabeledContent("Memory", value: String(format: "%.1f%%", memUsage))
+                    LabeledContent("Data Disk", value: String(format: "%.0f%%", diskUsage))
+                    LabeledContent("Status") {
+                        StatusBadge("Online", status: .ok, systemImage: "laptopcomputer")
+                    }
+                } header: {
+                    Text("Mac Host")
+                } footer: {
+                    Text("Hardware and local health stats from this Mac.")
+                }
+
+                Section {
+                    LabeledContent("agent-sync") {
+                        StatusBadge("Running", status: .ok, systemImage: "checkmark.circle.fill")
+                    }
+                    LabeledContent("docker") {
+                        StatusBadge("Not Enabled", status: .neutral, systemImage: "circle")
+                    }
+                    LabeledContent("litestream") {
+                        StatusBadge("Not Enabled", status: .neutral, systemImage: "circle")
+                    }
+                    LabeledContent("ollama") {
+                        StatusBadge("Not Enabled", status: .neutral, systemImage: "circle")
+                    }
+                } header: {
+                    Text("Local Services")
+                }
+
+                Section {
+                    LabeledContent("Claude Code / Desktop") {
+                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                    }
+                    LabeledContent("Cursor") {
+                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                    }
+                    LabeledContent("Grok Build & Leader") {
+                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                    }
+                    LabeledContent("OpenAI Codex") {
+                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                    }
+                    LabeledContent("Antigravity") {
+                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                    }
+                    LabeledContent("GitHub Copilot") {
+                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                    }
+                } header: {
+                    Text("Coding Agents")
+                } footer: {
+                    Text("Live execution state of agentic coding platforms on Mac.")
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Fleet & Computers")
+            .navigationBarTitleDisplayMode(.inline)
+            .refreshable {
+                try? await model.reload()
+            }
+        }
+    }
+}
+
 // MARK: - Alerts
 
 struct LocalAlertsTab: View {

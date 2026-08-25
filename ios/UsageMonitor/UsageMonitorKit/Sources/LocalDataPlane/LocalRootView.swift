@@ -36,13 +36,14 @@ public struct LocalRootView: View {
     }
 
     public enum Tab: String, CaseIterable, Identifiable {
-        case overview, providers, projects, alerts, settings
+        case overview, providers, projects, fleet, alerts, settings
         public var id: String { rawValue }
         var title: String {
             switch self {
             case .overview: return "Overview"
             case .providers: return "Providers"
             case .projects: return "Projects"
+            case .fleet: return "Fleet"
             case .alerts: return "Alerts"
             case .settings: return "Settings"
             }
@@ -52,6 +53,7 @@ public struct LocalRootView: View {
             case .overview: return "chart.pie.fill"
             case .providers: return "server.rack"
             case .projects: return "folder.fill"
+            case .fleet: return "laptopcomputer.and.ipad"
             case .alerts: return "bell.badge.fill"
             case .settings: return "gearshape.fill"
             }
@@ -69,6 +71,9 @@ public struct LocalRootView: View {
             LocalProjectsTab(model: model)
                 .tabItem { Label(Tab.projects.title, systemImage: Tab.projects.systemImage) }
                 .tag(Tab.projects)
+            LocalFleetTab(model: model)
+                .tabItem { Label(Tab.fleet.title, systemImage: Tab.fleet.systemImage) }
+                .tag(Tab.fleet)
             LocalAlertsTab(model: model) { providerId in
                 tab = .providers
                 pathProviders.append(providerId)

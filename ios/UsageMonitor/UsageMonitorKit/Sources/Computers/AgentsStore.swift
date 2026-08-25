@@ -4,15 +4,16 @@ import Models
 import Networking
 import AppCore
 
-/// Owns the Computers tab.  Reads `GET /api/health/mac` (bearer or session).
+/// Owns the Agents tab. Reads `GET /api/agents-overview?window=` (bearer or session).
 @MainActor
 @Observable
-final class ComputersStore {
-    private(set) var state: LoadState<MacHealthResponse> = .idle
+final class AgentsStore {
+    private(set) var state: LoadState<AgentsOverviewResponse> = .idle
+    var window: String = "30d"
 
-    private let probe: @Sendable (APIClient) async throws -> MacHealthResponse
+    private let probe: @Sendable (APIClient, String) async throws -> AgentsOverviewResponse
 
-    init(probe: @escaping @Sendable (APIClient) async throws -> MacHealthResponse = ComputersStore.liveProbe) {
+    init(probe: @escaping @Sendable (APIClient, String) async throws -> AgentsOverviewResponse = AgentsStore.liveProbe) {
         self.probe = probe
     }
 
@@ -29,6 +30,12 @@ final class ComputersStore {
         await fetch(using: client)
     }
 
+    func setWindow(_ newWindow: String, using client: APIClient) async {
+        guard window != newWindow else { return }
+        window = newWindow
+        await load(using: client)
+    }
+
     func reset() {
         state = .idle
     }
@@ -39,7 +46,7 @@ final class ComputersStore {
             return
         }
         do {
-            state = .loaded(try await probe(client))
+            state = .loaded(try await probe(client, window))
         } catch let error as APIError {
             handle(error)
         } catch {
@@ -53,7 +60,7 @@ final class ComputersStore {
         }
     }
 
-    nonisolated static let liveProbe: @Sendable (APIClient) async throws -> MacHealthResponse = { client in
-        try await client.macHealth()
+    nonisolated static let liveProbe: @Sendable (APIClient, String) async throws -> AgentsOverviewResponse = { client, window in
+        try await client.agentsOverview(window: window)
     }
 }

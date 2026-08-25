@@ -117,6 +117,13 @@ public actor APIClient {
         try await get("/api/health/mac", authorization: .read)
     }
 
+    /// `GET /api/agents-overview?window=` — AI coding agent telemetry, live run
+    /// status, subscription quotas, and PAYG API-equivalent cost savings.
+    /// Bearer read token or dashboard session.
+    public func agentsOverview(window: String = "30d") async throws -> AgentsOverviewResponse {
+        try await get("/api/agents-overview?window=\(window)", authorization: .read, timeout: Self.operationsTimeout)
+    }
+
     /// Validate the currently stored bearer token without accepting a dashboard
     /// cookie as a substitute. Settings uses a disposable client for candidate
     /// tokens, so a stale cookie cannot make an invalid replacement look valid.
