@@ -7,8 +7,8 @@ import WidgetKit
 #endif
 
 /// Merge-writes compact widget sections into the shared app-group snapshot.
-/// Budget, LLM, and server refreshes each update only their own fields so a
-/// successful budget poll cannot wipe a later LLM or host cache.
+/// Budget, LLM, server, and Mac refreshes each update only their own fields
+/// so a successful budget poll cannot wipe a later LLM, host, or Mac cache.
 public enum WidgetSnapshotStore {
     private static var lastWidgetReload = Date.distantPast
     private static let minimumWidgetReloadInterval: TimeInterval = 60
@@ -46,6 +46,14 @@ public enum WidgetSnapshotStore {
         let projected = WidgetSnapshotBuilder.serverHost(from: metrics, now: now)
         SharedStore.shared.update { current in
             current = current.replacingServerHost(projected.host, apps: projected.apps)
+        }
+        reloadWidgetsIfNeeded()
+    }
+
+    public static func updateMac(_ response: MacHealthResponse, now: Date = Date()) {
+        let section = WidgetSnapshotBuilder.macSection(from: response, now: now)
+        SharedStore.shared.update { current in
+            current = current.replacingMac(section)
         }
         reloadWidgetsIfNeeded()
     }

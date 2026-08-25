@@ -9,12 +9,14 @@ import DesignSystem
 ///
 /// The extension is deliberately model- and networking-free: it renders the
 /// compact `WidgetSnapshot` the app persists to the shared app-group container
-/// after every successful refresh.  Edit Widget picks a topic (Budget, LLM
-/// Quotas, or Servers).  Users add multiple copies with different topics.
+/// after every successful refresh.  Edit Widget picks a topic.  Dedicated Mac
+/// and Alerts tiles live in this same bundle when a count-only card is too thin.
 @main
 struct UsageMonitorWidgetBundle: WidgetBundle {
     var body: some Widget {
         BudgetSummaryWidget()
+        MacGlanceWidget()
+        AlertsGlanceWidget()
     }
 }
 
@@ -104,7 +106,7 @@ struct BudgetSummaryWidget: Widget {
                 .widgetURL(widgetURL(for: entry.content))
         }
         .configurationDisplayName("Usage Monitor")
-        .description("Budget, LLM quotas, or servers.  Edit Widget to choose a topic.")
+        .description("Budget, LLM quotas, servers, Mac, alerts, or providers.  Edit Widget to choose a topic.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 
@@ -113,6 +115,9 @@ struct BudgetSummaryWidget: Widget {
         case .budget(let budget): return budget.deepLink
         case .llm(let llm): return llm.deepLink
         case .server(let server): return server.deepLink
+        case .mac(let mac): return mac.deepLink
+        case .alerts(let alerts): return alerts.deepLink
+        case .providers(let providers): return providers.deepLink
         case .unavailable(let unavailable): return unavailable.deepLink
         }
     }
@@ -184,17 +189,25 @@ struct UsageMonitorWidgetView: View {
             LlmTopicView(entry: entry, llm: llm, family: family)
         case .server(let server):
             ServerTopicView(entry: entry, server: server, family: family)
+        case .mac(let mac):
+            MacTopicView(mac: mac, family: family)
+        case .alerts(let alerts):
+            AlertsTopicView(alerts: alerts, family: family, showsList: false)
+        case .providers(let providers):
+            ProvidersTopicView(providers: providers, family: family)
         }
     }
 }
 
 // MARK: - Shared chrome
 
-private struct TopicHeader: View {
+struct TopicHeader: View {
     var title: String
     var generatedAt: Date?
+    var forceStale: Bool = false
 
     private var stale: Bool {
+        if forceStale { return true }
         guard let generatedAt else { return false }
         return WidgetTopicPresentation.isStale(generatedAt: generatedAt)
     }
@@ -221,7 +234,7 @@ private struct TopicHeader: View {
     }
 }
 
-private struct UpdatedCaption: View {
+struct UpdatedCaption: View {
     var generatedAt: Date?
 
     private var stale: Bool {
@@ -245,7 +258,7 @@ private struct UpdatedCaption: View {
     }
 }
 
-private struct UnavailableTopicView: View {
+struct UnavailableTopicView: View {
     let content: WidgetUnavailableContent
     let family: WidgetFamily
 

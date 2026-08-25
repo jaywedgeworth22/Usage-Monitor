@@ -287,12 +287,18 @@ enum WidgetTopic: String, Equatable, Sendable {
     case budget
     case llmQuotas
     case servers
+    case mac
+    case alerts
+    case providers
 
     var title: String {
         switch self {
         case .budget: return "Budget"
         case .llmQuotas: return "LLM Quotas"
         case .servers: return "Servers"
+        case .mac: return "Mac"
+        case .alerts: return "Alerts"
+        case .providers: return "Providers"
         }
     }
 
@@ -358,10 +364,32 @@ struct WidgetServerContent: Equatable, Sendable {
     var deepLink: URL?
 }
 
+struct WidgetMacContent: Equatable, Sendable {
+    var section: WidgetSnapshot.MacSection
+    var deepLink: URL?
+}
+
+struct WidgetAlertsContent: Equatable, Sendable {
+    var section: WidgetSnapshot.AlertsSection
+    var deepLink: URL?
+}
+
+struct WidgetProvidersContent: Equatable, Sendable {
+    var title: String
+    var spentUsd: Double
+    var budgetUsd: Double
+    var meters: [WidgetSnapshot.Meter]
+    var generatedAt: Date
+    var deepLink: URL?
+}
+
 enum WidgetTopicContent: Equatable, Sendable {
     case budget(WidgetBudgetContent)
     case llm(WidgetLlmContent)
     case server(WidgetServerContent)
+    case mac(WidgetMacContent)
+    case alerts(WidgetAlertsContent)
+    case providers(WidgetProvidersContent)
     case unavailable(WidgetUnavailableContent)
 }
 
@@ -383,6 +411,12 @@ enum WidgetTopicPresentation {
             return llmContent(from: snapshot, providerId: llmProviderId)
         case .servers:
             return serverContent(from: snapshot, focus: serverFocus)
+        case .mac:
+            return macContent(from: snapshot)
+        case .alerts:
+            return alertsContent(from: snapshot)
+        case .providers:
+            return providersContent(from: snapshot, maxMeters: max(maxMeters, 6))
         }
     }
 
@@ -646,8 +680,178 @@ enum WidgetTopicPresentation {
             return showsUpdatedAt(generatedAt: llm.generatedAt) ? llm.generatedAt : nil
         case .server(let server):
             return showsUpdatedAt(generatedAt: server.generatedAt) ? server.generatedAt : nil
+        case .mac(let mac):
+            return showsUpdatedAt(generatedAt: mac.section.generatedAt) ? mac.section.generatedAt : nil
+        case .alerts(let alerts):
+            return showsUpdatedAt(generatedAt: alerts.section.generatedAt) ? alerts.section.generatedAt : nil
+        case .providers(let providers):
+            return showsUpdatedAt(generatedAt: providers.generatedAt) ? providers.generatedAt : nil
         case .unavailable:
             return nil
+        }
+    }
+
+    static func macContent(from snapshot: WidgetSnapshot) -> WidgetTopicContent {
+        guard let section = snapshot.mac else {
+            return .unavailable(
+                WidgetUnavailableContent(
+                    title: "Mac",
+                    message: "Open the app to load Mac stats.",
+                    deepLink: URL(string: "usageclientmonitor://computers")
+                )
+            )
+        }
+        if !section.reported {
+            return .unavailable(
+                WidgetUnavailableContent(
+                    title: "Mac",
+                    message: "The Mac has not reported yet.",
+                    deepLink: URL(string: "usageclientmonitor://computers")
+                )
+            )
+        }
+        return .mac(
+            WidgetMacContent(
+                section: section,
+                deepLink: URL(string: "usageclientmonitor://computers")
+            )
+        )
+    }
+
+    static func alertsContent(from snapshot: WidgetSnapshot) -> WidgetTopicContent {
+        guard let section = snapshot.alerts else {
+            return .unavailable(
+                WidgetUnavailableContent(
+                    title: "Alerts",
+                    message: "Open the app to load alerts.",
+                    deepLink: URL(string: "usageclientmonitor://alerts")
+                )
+            )
+        }
+        return .alerts(
+            WidgetAlertsContent(
+                section: section,
+                deepLink: URL(string: "usageclientmonitor://alerts")
+            )
+        )
+    }
+
+    static func providersContent(
+        from snapshot: WidgetSnapshot,
+        maxMeters: Int = 6
+    ) -> WidgetTopicContent {
+        if snapshot.month.isEmpty {
+            return .unavailable(
+                WidgetUnavailableContent(
+                    title: "Providers",
+                    message: "Open the app to load providers.",
+                    deepLink: URL(string: "usageclientmonitor://providers")
+                )
+            )
+        }
+        let meters = Array(
+            (snapshot.spenders.isEmpty ? snapshot.topMeters : snapshot.spenders).prefix(maxMeters)
+        )
+        if meters.isEmpty {
+            return .unavailable(
+                WidgetUnavailableContent(
+                    title: "Providers",
+                    message: "No provider spend in the latest cache.",
+                    deepLink: URL(string: "usageclientmonitor://providers")
+                )
+            )
+        }
+        return .providers(
+            WidgetProvidersContent(
+                title: "Providers",
+                spentUsd: snapshot.totalSpentUsd,
+                budgetUsd: snapshot.totalBudgetUsd,
+                meters: meters,
+                generatedAt: snapshot.generatedAt,
+                deepLink: URL(string: "usageclientmonitor://providers")
+            )
+        )
+    }
+
+    static func macStatus(_ section: WidgetSnapshot.MacSection) -> Theme.SemanticStatus {
+        switch section.status {
+        case "online": return .ok
+        case "degraded": return .warning
+        default: return .danger
+        }
+    }
+
+    static func macLabel(_ section: WidgetSnapshot.MacSection) -> String {
+        switch section.status {
+        case "online": return "Online"
+        case "degraded": return "High Load"
+        case "offline": return "Offline"
+        default: return section.status.capitalized
+        }
+    }
+
+    static func macIsStale(
+        _ section: WidgetSnapshot.MacSection,
+        asOf now: Date = Date()
+    ) -> Bool {
+        if section.status == "offline" { return true }
+        if let seconds = section.secondsSinceHeartbeat, seconds >= Int(WidgetPresentation.staleThreshold) {
+            return true
+        }
+        return isStale(generatedAt: section.generatedAt, asOf: now)
+    }
+
+    static func macPercentLabel(_ value: Double?) -> String? {
+        DiskFormat.cpuString(value)
+    }
+
+    static func macProcessName(_ name: String) -> String {
+        name.replacingOccurrences(of: "com.jay.", with: "")
+    }
+
+    static func macProcessLabel(_ status: String) -> String {
+        switch status {
+        case "running": return "Running"
+        case "degraded": return "Degraded"
+        case "stopped": return "Stopped"
+        default: return status.capitalized
+        }
+    }
+
+    static func macProcessStatus(_ status: String) -> Theme.SemanticStatus {
+        switch status {
+        case "running": return .ok
+        case "degraded": return .warning
+        default: return .danger
+        }
+    }
+
+    static func alertsHeadline(openCount: Int) -> String {
+        if openCount == 0 { return "All Clear" }
+        if openCount == 1 { return "1 Open" }
+        return "\(openCount) Open"
+    }
+
+    static func alertsNeedsAttentionLabel(count: Int) -> String? {
+        guard count > 0 else { return nil }
+        return "Needs Attention"
+    }
+
+    static func alertsSeverityStatus(_ raw: String?) -> Theme.SemanticStatus {
+        switch raw {
+        case "critical": return .danger
+        case "warning": return .warning
+        case "info": return .ok
+        default: return .neutral
+        }
+    }
+
+    static func alertsSeverityLabel(_ raw: String?) -> String {
+        switch raw {
+        case "critical": return "Critical"
+        case "warning": return "Warning"
+        case "info": return "Info"
+        default: return "Alert"
         }
     }
 

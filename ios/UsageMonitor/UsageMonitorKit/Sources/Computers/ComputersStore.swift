@@ -3,6 +3,7 @@ import Observation
 import Models
 import Networking
 import AppCore
+import OfflineCache
 
 /// Owns the Computers tab.  Reads `GET /api/health/mac` (bearer or session).
 @MainActor
@@ -40,8 +41,10 @@ final class ComputersStore {
 
     private func fetch(using client: APIClient) async {
         do {
-            state = .loaded(try await probe(client))
+            let health = try await probe(client)
+            state = .loaded(health)
             lastError = nil
+            WidgetSnapshotStore.updateMac(health)
         } catch let error as APIError {
             handle(error)
         } catch {

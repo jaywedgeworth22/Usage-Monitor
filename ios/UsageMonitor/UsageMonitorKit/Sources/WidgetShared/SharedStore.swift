@@ -31,7 +31,7 @@ public struct SharedStore {
         self.fileManager = fileManager
     }
 
-    /// Read-modify-write so a budget refresh cannot wipe LLM / server tiles.
+    /// Read-modify-write so a budget refresh cannot wipe LLM / server / Mac tiles.
     public func update(_ mutate: (inout WidgetSnapshot) -> Void) {
         Self.writeLock.lock()
         defer { Self.writeLock.unlock() }
