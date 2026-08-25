@@ -37,10 +37,19 @@ if grep -nE 'docker exec.*LITESTREAM_S3_' "$COOLIFY_PROBE" >/dev/null; then
 fi
 grep -q '\-\-env-file' "$COOLIFY_PROBE" || fail "coolify probe missing docker exec --env-file"
 
-# In-container verdict must win over host credential-missing fallback.
+# In-container verdict must win over host credential-missing fallback —
+# but only when heartbeat exits 0. A cred-less `docker exec --once` writes
+# replica_credentials_missing and must still reach --env-file fallback.
 grep -q 'status_mtime_before' "$COOLIFY_PROBE" || fail "coolify probe missing mtime guard"
 grep -q 'in-container heartbeat verdict' "$COOLIFY_PROBE" \
   || fail "coolify probe missing in-container verdict preference"
+grep -q 'hb_rc' "$COOLIFY_PROBE" || fail "coolify probe missing heartbeat exit-code gate"
+if grep -nE 'run_in_container_heartbeat \|\| true' "$COOLIFY_PROBE" >/dev/null; then
+  fail "coolify probe still ignores heartbeat exit code"
+fi
+if ! grep -n 'replica_credentials_missing' "$COOLIFY_PROBE" | grep -q 'host fallback'; then
+  fail "coolify probe must not treat replica_credentials_missing as a skip"
+fi
 
 # Fixture-driven classify / snapshot behavior.
 bash "$HEARTBEAT" --self-test || fail "heartbeat --self-test"
