@@ -126,21 +126,30 @@ public struct AgentsRootView: View {
     @ViewBuilder
     private func summarySection(_ data: AgentsOverviewResponse) -> some View {
         Section {
+            let activeText = "\(data.summary.activeAgentCount)/\(data.summary.totalAgentCount) Active"
             LabeledContent("Active on Mac") {
                 StatusBadge(
-                    "\(data.summary.activeAgentCount)/\(data.summary.totalAgentCount) Active",
+                    activeText,
                     status: data.summary.activeAgentCount > 0 ? .ok : .neutral,
                     systemImage: "desktopcomputer"
                 )
             }
+            .copyableRow(label: "Active on Mac", value: activeText)
             LabeledContent("Host Chip", value: data.macChip)
-            LabeledContent("Total Tokens", value: formatTokens(data.summary.totalTokens))
-            LabeledContent("PAYG Value", value: formatCurrency(data.summary.totalApiEquivalentCostUsd))
+                .copyableRow(label: "Host Chip", value: data.macChip)
+            let tokensStr = formatTokens(data.summary.totalTokens)
+            LabeledContent("Total Tokens", value: tokensStr)
+                .copyableRow(label: "Total Tokens", value: tokensStr)
+            let paygStr = formatCurrency(data.summary.totalApiEquivalentCostUsd)
+            LabeledContent("PAYG Value", value: paygStr)
+                .copyableRow(label: "PAYG Value", value: paygStr)
+            let savingsStr = "+\(formatCurrency(data.summary.totalNetSavingsUsd))"
             LabeledContent("Net Savings") {
-                Text("+\(formatCurrency(data.summary.totalNetSavingsUsd))")
+                Text(savingsStr)
                     .font(Theme.Typography.body.weight(.bold))
                     .foregroundStyle(Theme.Colors.success)
             }
+            .copyableRow(label: "Net Savings", value: savingsStr)
         } header: {
             Text("Fleet Summary · \(data.windowLabel)")
         } footer: {
@@ -151,10 +160,18 @@ public struct AgentsRootView: View {
     @ViewBuilder
     private func burnSection(_ burn: Burn5hSummary) -> some View {
         Section {
-            LabeledContent("5h Token Burn", value: formatTokens(burn.tokens5h))
-            LabeledContent("5h Cost Estimate", value: formatCurrency(burn.costEstimate5hUsd))
-            LabeledContent("Token Burn Rate", value: "\(formatTokens(burn.burnRateTokensPerHour))/hr")
-            LabeledContent("Spend Pace", value: "\(formatCurrency(burn.burnRateUsdPerHour))/hr")
+            let burnTokensStr = formatTokens(burn.tokens5h)
+            LabeledContent("5h Token Burn", value: burnTokensStr)
+                .copyableRow(label: "5h Token Burn", value: burnTokensStr)
+            let burnCostStr = formatCurrency(burn.costEstimate5hUsd)
+            LabeledContent("5h Cost Estimate", value: burnCostStr)
+                .copyableRow(label: "5h Cost Estimate", value: burnCostStr)
+            let rateStr = "\(formatTokens(burn.burnRateTokensPerHour))/hr"
+            LabeledContent("Token Burn Rate", value: rateStr)
+                .copyableRow(label: "Token Burn Rate", value: rateStr)
+            let paceStr = "\(formatCurrency(burn.burnRateUsdPerHour))/hr"
+            LabeledContent("Spend Pace", value: paceStr)
+                .copyableRow(label: "Spend Pace", value: paceStr)
         } header: {
             Text("5-Hour Rolling Activity")
         } footer: {
@@ -167,20 +184,30 @@ public struct AgentsRootView: View {
         Group {
             ForEach(platforms) { platform in
                 Section {
+                    let statusStr = platform.isRunningOnMac ? "Active on Mac" : "Idle on Mac"
                     LabeledContent("Status") {
                         StatusBadge(
-                            platform.isRunningOnMac ? "Active on Mac" : "Idle on Mac",
+                            statusStr,
                             status: platform.isRunningOnMac ? .ok : .neutral,
                             systemImage: platform.isRunningOnMac ? "checkmark.circle.fill" : "circle"
                         )
                     }
-                    LabeledContent("Seat Cost", value: "$\(Int(platform.monthlySeatCostUsd))/mo")
-                    LabeledContent("Tokens Processed", value: formatTokens(platform.totalTokens))
-                    LabeledContent("PAYG Value", value: formatCurrency(platform.estimatedCostUsd))
+                    .copyableRow(label: "\(platform.name) Status", value: statusStr)
+                    let seatStr = "$\(Int(platform.monthlySeatCostUsd))/mo"
+                    LabeledContent("Seat Cost", value: seatStr)
+                        .copyableRow(label: "\(platform.name) Seat Cost", value: seatStr)
+                    let pTokensStr = formatTokens(platform.totalTokens)
+                    LabeledContent("Tokens Processed", value: pTokensStr)
+                        .copyableRow(label: "\(platform.name) Tokens", value: pTokensStr)
+                    let pPaygStr = formatCurrency(platform.estimatedCostUsd)
+                    LabeledContent("PAYG Value", value: pPaygStr)
+                        .copyableRow(label: "\(platform.name) PAYG Value", value: pPaygStr)
+                    let pSavingsStr = "+\(formatCurrency(platform.netSavingsUsd))"
                     LabeledContent("Net Savings") {
-                        Text("+\(formatCurrency(platform.netSavingsUsd))")
+                        Text(pSavingsStr)
                             .foregroundStyle(Theme.Colors.success)
                     }
+                    .copyableRow(label: "\(platform.name) Net Savings", value: pSavingsStr)
 
                     if !platform.modelsUsed.isEmpty {
                         ForEach(platform.modelsUsed) { model in
@@ -197,6 +224,7 @@ public struct AgentsRootView: View {
                                     .tint(Theme.Colors.accent)
                             }
                             .padding(.vertical, 2)
+                            .copyableValue("\(model.model): \(formatTokens(model.tokens)) (\(Int(model.percentOfPlatform))%)", label: model.model)
                         }
                     }
                 } header: {
@@ -227,6 +255,7 @@ public struct AgentsRootView: View {
                             .foregroundStyle(Theme.Colors.success)
                     }
                 }
+                .copyableValue("\(item.model): \(formatTokens(item.tokens)) (\(String(format: "%.1f", item.percent))%), \(formatCurrency(item.apiEquivalentCostUsd))", label: item.model)
             }
         } header: {
             Text("Model Distribution")

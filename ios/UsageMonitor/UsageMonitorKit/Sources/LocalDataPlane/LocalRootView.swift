@@ -236,10 +236,17 @@ public struct LocalRootView: View {
             List {
                 connectAccountsSection
                 Section("This App") {
+                    let schemaVal = "v\(model.schemaVersion)"
+                    let provVal = "\(model.providers.count)"
+                    let subVal = "\(model.subscriptions.filter { $0.status == "active" }.count) active"
                     LabeledContent("Product", value: "on-device self-host")
-                    LabeledContent("Schema", value: "v\(model.schemaVersion)")
-                    LabeledContent("Providers", value: "\(model.providers.count)")
-                    LabeledContent("Subscriptions", value: "\(model.subscriptions.filter { $0.status == "active" }.count) active")
+                        .copyableRow(label: "Product", value: "on-device self-host")
+                    LabeledContent("Schema", value: schemaVal)
+                        .copyableRow(label: "Schema", value: schemaVal)
+                    LabeledContent("Providers", value: provVal)
+                        .copyableRow(label: "Providers", value: provVal)
+                    LabeledContent("Subscriptions", value: subVal)
+                        .copyableRow(label: "Subscriptions", value: subVal)
                     Text("Money-truth is local SQLite. Provider API keys stay in Keychain. No remote server required.")
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Colors.secondaryText)
@@ -252,12 +259,16 @@ public struct LocalRootView: View {
                             .foregroundStyle(Theme.Colors.secondaryText)
                     } else {
                         ForEach(active.sorted { $0.costUsd > $1.costUsd }) { sub in
-                            LabeledContent(sub.name, value: CurrencyFormat.usd(sub.costUsd))
+                            let costStr = CurrencyFormat.usd(sub.costUsd)
+                            LabeledContent(sub.name, value: costStr)
+                                .copyableRow(label: sub.name, value: costStr)
                         }
+                        let runRateStr = CurrencyFormat.usd(active.reduce(0) { $0 + $1.costUsd })
                         LabeledContent(
                             "Monthly Run-Rate",
-                            value: CurrencyFormat.usd(active.reduce(0) { $0 + $1.costUsd })
+                            value: runRateStr
                         )
+                        .copyableRow(label: "Monthly Run-Rate", value: runRateStr)
                     }
                     Text("Edit fees on each provider detail (Recurring Fee). Materializer posts one charge per billing period into MTD spend.")
                         .font(Theme.Typography.caption)
@@ -620,14 +631,25 @@ private struct ProviderDetailView: View {
 
                 if let s = spend {
                     Section {
-                        LabeledContent("Total", value: CurrencyFormat.usd(s.spentUsd))
-                        LabeledContent("Poll Variable", value: CurrencyFormat.usd(s.pollVariableUsd))
-                        LabeledContent("Subscriptions", value: CurrencyFormat.usd(s.subscriptionChargesUsd))
-                        LabeledContent("Plan Fixed", value: CurrencyFormat.usd(s.planFixedUsd))
+                        let totalStr = CurrencyFormat.usd(s.spentUsd)
+                        LabeledContent("Total", value: totalStr)
+                            .copyableRow(label: "Total", value: totalStr)
+                        let pollStr = CurrencyFormat.usd(s.pollVariableUsd)
+                        LabeledContent("Poll Variable", value: pollStr)
+                            .copyableRow(label: "Poll Variable", value: pollStr)
+                        let subStr = CurrencyFormat.usd(s.subscriptionChargesUsd)
+                        LabeledContent("Subscriptions", value: subStr)
+                            .copyableRow(label: "Subscriptions", value: subStr)
+                        let planStr = CurrencyFormat.usd(s.planFixedUsd)
+                        LabeledContent("Plan Fixed", value: planStr)
+                            .copyableRow(label: "Plan Fixed", value: planStr)
                         if let b = s.monthlyBudgetUsd {
-                            LabeledContent("Budget", value: CurrencyFormat.usd(b))
+                            let budgetStr = CurrencyFormat.usd(b)
+                            LabeledContent("Budget", value: budgetStr)
+                                .copyableRow(label: "Budget", value: budgetStr)
                         } else {
                             LabeledContent("Budget", value: "no budget set")
+                                .copyableRow(label: "Budget", value: "no budget set")
                         }
                     } header: {
                         Text("Spend (MTD)")
@@ -637,10 +659,18 @@ private struct ProviderDetailView: View {
 
                     if let proj = s.projectedEomUsd, proj > 0.005 {
                         Section {
-                            LabeledContent("Projected EOM", value: CurrencyFormat.usd(proj))
-                            LabeledContent("Usage (Extrapolated)", value: CurrencyFormat.usd(s.pacedVariableUsd))
-                            LabeledContent("Fixed Accrued MTD", value: CurrencyFormat.usd(s.fixedAccruedUsd))
-                            LabeledContent("Known Renewals Remaining", value: CurrencyFormat.usd(s.remainingScheduledUsd))
+                            let projStr = CurrencyFormat.usd(proj)
+                            LabeledContent("Projected EOM", value: projStr)
+                                .copyableRow(label: "Projected EOM", value: projStr)
+                            let pacedStr = CurrencyFormat.usd(s.pacedVariableUsd)
+                            LabeledContent("Usage (Extrapolated)", value: pacedStr)
+                                .copyableRow(label: "Usage (Extrapolated)", value: pacedStr)
+                            let fixedStr = CurrencyFormat.usd(s.fixedAccruedUsd)
+                            LabeledContent("Fixed Accrued MTD", value: fixedStr)
+                                .copyableRow(label: "Fixed Accrued MTD", value: fixedStr)
+                            let remainStr = CurrencyFormat.usd(s.remainingScheduledUsd)
+                            LabeledContent("Known Renewals Remaining", value: remainStr)
+                                .copyableRow(label: "Known Renewals Remaining", value: remainStr)
                         } header: {
                             Text("EOM Projection Parts")
                         } footer: {
