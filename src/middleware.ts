@@ -52,6 +52,9 @@ export const isPublicPath = (pathname: string) => {
     // the same class as server-metrics, exposed to the iOS client via the same
     // dual-auth preamble. See src/app/api/operations/route.ts.
     "/api/operations",
+    // Agents overview aggregator (live agent runs, token counts, quota burn,
+    // API-equivalent cost comparison). Self-authenticates via session or USAGE_READ_TOKEN.
+    "/api/agents-overview",
     // Unlisted Apple Calendar subscribe URL; the route checks BILLS_CALENDAR_TOKEN.
     "/api/bills.ics",
     // Public RUM/browser-log config.  Returns only public intake fields.

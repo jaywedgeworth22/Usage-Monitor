@@ -57,13 +57,24 @@ struct UsageMonitorApp: App {
                 _selection = State(initialValue: tab)
             }
         } else {
+            let tokenStore = AccountChangeNotifyingTokenStore()
+            if let token = ProcessInfo.processInfo.environment["USAGE_READ_TOKEN"] {
+                try? tokenStore.setToken(token)
+            }
+            let args = ProcessInfo.processInfo.arguments
+            if let idx = args.firstIndex(of: "-ReadToken"), args.indices.contains(idx + 1) {
+                try? tokenStore.setToken(args[idx + 1])
+            }
             _environment = State(
                 initialValue: AppEnvironment(
                     settings: AppSettings(sharedDefaults: AppGroup.defaults),
-                    tokenStore: AccountChangeNotifyingTokenStore(),
+                    tokenStore: tokenStore,
                     snapshotSink: OfflineCacheSnapshotSink()
                 )
             )
+            if let tab = ScreenshotDemo.preferredTab {
+                _selection = State(initialValue: tab)
+            }
         }
     }
 
@@ -142,6 +153,7 @@ private extension AppFeatures {
         alerts: { AnyView(AlertsRootView()) },
         serverStatus: { AnyView(ServerStatusRootView()) },
         computers: { AnyView(ComputersRootView()) },
+        agents: { AnyView(AgentsRootView()) },
         platforms: { AnyView(PlatformsRootView()) },
         projects: { AnyView(ProjectBudgetsRootView()) },
         settings: { AnyView(SettingsRootView()) }
