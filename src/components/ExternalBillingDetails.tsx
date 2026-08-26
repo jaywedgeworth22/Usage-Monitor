@@ -137,6 +137,14 @@ export default function ExternalBillingDetails({
                       }`}
                 </dd>
               </div>
+              {record.usageQuantity != null && (
+                <div>
+                  <dt className="text-xs text-gray-500">Tracked usage</dt>
+                  <dd className="mt-0.5 font-medium text-gray-900">
+                    {formatNumber(record.usageQuantity)} {record.usageUnit ?? ""}
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt className="text-xs text-gray-500">Last synced</dt>
                 <dd className="mt-0.5 text-gray-700">{new Date(record.syncedAt).toLocaleString()}</dd>

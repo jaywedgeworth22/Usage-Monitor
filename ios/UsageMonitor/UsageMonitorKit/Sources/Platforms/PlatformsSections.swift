@@ -547,19 +547,28 @@ struct PlatformCardsSection: View {
 
 struct PlatformCardRow: View {
     let platform: PlatformStatusPayload.PlatformCard
+    @State private var showingDetailSheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(spacing: Theme.Spacing.sm) {
-                Text(platform.name)
-                    .font(Theme.Typography.body)
-                    .foregroundStyle(
-                        platform.configured
-                            ? Theme.Colors.primaryText : Theme.Colors.secondaryText
-                    )
-                Spacer(minLength: Theme.Spacing.sm)
-                StatusBadge(platform.state.title, status: semantic(platform.state))
+            Button {
+                showingDetailSheet = true
+            } label: {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Text(platform.name)
+                        .font(Theme.Typography.body.weight(.medium))
+                        .foregroundStyle(
+                            platform.configured
+                                ? Theme.Colors.primaryText : Theme.Colors.secondaryText
+                        )
+                    Spacer(minLength: Theme.Spacing.sm)
+                    StatusBadge(platform.state.title, status: semantic(platform.state))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.tertiaryText)
+                }
             }
+            .buttonStyle(.plain)
 
             if let headline = platform.headline, !headline.isEmpty {
                 Text(headline)
@@ -569,18 +578,21 @@ struct PlatformCardRow: View {
             }
 
             if platform.configured, !platform.metrics.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                     ForEach(platform.metrics) { entry in
-                        HStack(alignment: .center, spacing: Theme.Spacing.sm) {
+                        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
                             Text(entry.label)
-                                .font(Theme.Typography.caption)
-                                .foregroundStyle(Theme.Colors.tertiaryText)
-                            Spacer(minLength: Theme.Spacing.sm)
+                                .font(Theme.Typography.caption.weight(.medium))
+                                .foregroundStyle(Theme.Colors.primaryText)
+                                .frame(minWidth: 70, alignment: .leading)
+                            Spacer(minLength: Theme.Spacing.xs)
                             VStack(alignment: .trailing, spacing: 4) {
-                                Text(entry.hint.map { "\(entry.value) \($0)" } ?? entry.value)
+                                let formattedValue = entry.hint.map { "\(entry.value) \($0)" } ?? entry.value
+                                Text(formattedValue)
                                     .font(Theme.Typography.caption)
                                     .foregroundStyle(Theme.Colors.secondaryText)
                                     .multilineTextAlignment(.trailing)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 if let pct = entry.usagePct {
                                     BudgetMeter(
                                         fraction: pct / 100,
@@ -591,16 +603,157 @@ struct PlatformCardRow: View {
                                     .accessibilityLabel("Free-tier storage used")
                                 }
                             }
-                            .fixedSize(horizontal: true, vertical: false)
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing)
                         }
                     }
                 }
+                .padding(.top, Theme.Spacing.xxs)
             }
 
             if !platform.configured, let first = platform.requiredEnv.first {
                 Text("Set \(first) to enable.")
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.tertiaryText)
+            }
+        }
+        .sheet(isPresented: $showingDetailSheet) {
+            PlatformDetailSheet(platform: platform)
+        }
+    }
+
+    private func semantic(_ state: PlatformStatusPayload.State) -> Theme.SemanticStatus {
+        switch state {
+        case .healthy, .receiving: return .ok
+        case .degraded, .stale: return .warning
+        case .unavailable, .unreachable: return .danger
+        case .unconfigured: return .neutral
+        }
+    }
+}
+
+/// Full detail modal for a platform showing complete uncropped descriptions,
+/// metrics, and configuration keys with copy actions.
+struct PlatformDetailSheet: View {
+    let platform: PlatformStatusPayload.PlatformCard
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    LabeledContent("Status") {
+                        StatusBadge(platform.state.title, status: semantic(platform.state))
+                    }
+                    LabeledContent("Platform", value: platform.name)
+                    LabeledContent("Category", value: platform.category.title)
+                    if let consoleUrl = platform.consoleUrl, let url = URL(string: consoleUrl) {
+                        Link(destination: url) {
+                            HStack {
+                                Text("Open Console")
+                                    .foregroundStyle(Theme.Colors.accent)
+                                Spacer()
+                                Image(systemName: "arrow.up.right.square")
+                                    .foregroundStyle(Theme.Colors.accent)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Overview")
+                }
+
+                if let error = platform.error, !error.isEmpty {
+                    Section {
+                        Text(error)
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Colors.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } header: {
+                        Text("Error Details")
+                    }
+                }
+
+                if let headline = platform.headline, !headline.isEmpty {
+                    Section {
+                        Text(headline)
+                            .font(Theme.Typography.body)
+                            .foregroundStyle(Theme.Colors.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } header: {
+                        Text("Status Description")
+                    }
+                }
+
+                if !platform.metrics.isEmpty {
+                    Section {
+                        ForEach(platform.metrics) { entry in
+                            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                HStack(alignment: .top) {
+                                    Text(entry.label)
+                                        .font(Theme.Typography.captionEmphasis)
+                                        .foregroundStyle(Theme.Colors.primaryText)
+                                    Spacer()
+                                    Text(entry.value)
+                                        .font(Theme.Typography.caption)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .multilineTextAlignment(.trailing)
+                                        .textSelection(.enabled)
+                                }
+                                if let hint = entry.hint {
+                                    Text(hint)
+                                        .font(Theme.Typography.caption)
+                                        .foregroundStyle(Theme.Colors.tertiaryText)
+                                }
+                                if let pct = entry.usagePct {
+                                    BudgetMeter(
+                                        fraction: pct / 100,
+                                        status: PlatformFormat.usageBarStatus(pct),
+                                        height: 8
+                                    )
+                                    .padding(.top, 2)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    } header: {
+                        Text("Metrics & Attributes")
+                    }
+                }
+
+                if !platform.requiredEnv.isEmpty {
+                    Section {
+                        ForEach(platform.requiredEnv, id: \.self) { envVar in
+                            HStack {
+                                Text(envVar)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(Theme.Colors.primaryText)
+                                Spacer()
+                                Button {
+                                    #if canImport(UIKit)
+                                    UIPasteboard.general.string = envVar
+                                    #endif
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(Theme.Colors.accent)
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                    } header: {
+                        Text("Configuration Keys")
+                    } footer: {
+                        Text("Environment variable keys used by this integration.")
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle(platform.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                }
             }
         }
     }

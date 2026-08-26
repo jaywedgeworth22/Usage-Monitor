@@ -15,7 +15,8 @@ final class LocalConnectAccountsTests: XCTestCase {
         _ = try await model.ensureCatalogProviders()
 
         let openrouter = try XCTUnwrap(LocalProviderCatalog.entry(name: "openrouter"))
-        let before = try XCTUnwrap((try await store.listProviders()).first { $0.name == "openrouter" })
+        let storedProviders = try await store.listProviders()
+        let before = try XCTUnwrap(storedProviders.first { $0.name == "openrouter" })
         XCTAssertTrue(before.needsKey)
         XCTAssertFalse(before.isActive)
 

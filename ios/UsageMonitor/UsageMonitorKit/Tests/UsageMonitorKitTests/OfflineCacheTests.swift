@@ -535,7 +535,7 @@ final class OfflineCacheTests: XCTestCase {
     func testSpendersAreHighestMonthToDateSpendIncludingUnbudgeted() {
         let spenders = WidgetSnapshotBuilder.spenders(from: .sample)
         XCTAssertEqual(spenders.map(\.name), ["Anthropic", "OpenRouter", "OpenAI", "Voyage AI"])
-        XCTAssertEqual(spenders.first?.spentUsd, 212.40, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(spenders.first?.spentUsd), 212.40, accuracy: 0.001)
         XCTAssertEqual(spenders.last?.name, "Voyage AI")
         XCTAssertNil(spenders.last?.budgetUsd)
     }
@@ -583,7 +583,7 @@ final class OfflineCacheTests: XCTestCase {
         let section = WidgetSnapshotBuilder.macSection(from: online)
         XCTAssertTrue(section.reported)
         XCTAssertEqual(section.hostname, "jays-macbook-pro")
-        XCTAssertEqual(section.cpuUsagePct, 24)
+        XCTAssertEqual(section.cpuUsagePct, 24.0)
         XCTAssertTrue(section.flags.contains("z-last is stopped."))
 
         let offline = MacHealthResponse(ok: false, status: "offline")
