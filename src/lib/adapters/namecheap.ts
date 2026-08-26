@@ -78,7 +78,7 @@ export function parseBalancesXml(xml: string): NamecheapBalances | null {
  */
 export function parseDomainsXml(
   xml: string
-): { domains: NamecheapDomainRecord[]; totalItems: number | null } {
+): { domains: NamecheapDomainRecord[]; totalItems: number | null; pageSize: number } {
   const domains: NamecheapDomainRecord[] = [];
   const domainRegex = /<Domain\b([^>]*)\/?>/gi;
   let match: RegExpExecArray | null;
@@ -102,7 +102,39 @@ export function parseDomainsXml(
   const pagingMatch = /<TotalItems>(\d+)<\/TotalItems>/i.exec(xml);
   const totalItems = pagingMatch ? Number.parseInt(pagingMatch[1], 10) : domains.length;
 
-  return { domains, totalItems };
+  const pageSizeMatch = /<PageSize>(\d+)<\/PageSize>/i.exec(xml);
+  const pageSize = pageSizeMatch ? Number.parseInt(pageSizeMatch[1], 10) : 100;
+
+  return { domains, totalItems, pageSize };
+}
+
+/**
+ * Validates and normalizes the Namecheap API base URL to ensure credential-bearing
+ * requests are only sent to official Namecheap endpoints.
+ */
+export function validateNamecheapBaseUrl(rawUrl?: string): string {
+  const trimmed = rawUrl?.trim();
+  if (!trimmed) return "https://api.namecheap.com/xml.response";
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "https:") {
+      configurationError("baseUrl for Namecheap must use HTTPS protocol");
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname !== "api.namecheap.com" &&
+      hostname !== "api.sandbox.namecheap.com" &&
+      !hostname.endsWith(".namecheap.com")
+    ) {
+      configurationError(
+        `baseUrl must be an official Namecheap endpoint (https://api.namecheap.com/xml.response or https://api.sandbox.namecheap.com/xml.response), got: ${hostname}`
+      );
+    }
+    return parsed.toString();
+  } catch (err) {
+    if (err instanceof AdapterError) throw err;
+    configurationError(`Invalid Namecheap baseUrl: ${trimmed}`);
+  }
 }
 
 export async function fetchUsage(
@@ -123,33 +155,47 @@ export async function fetchUsage(
   ).trim();
 
   if (!apiUser) {
-    configurationError("apiUser (Namecheap Account Username) is required in config or NAMECHEAP_API_USER env");
+    configurationError(
+      "apiUser (Namecheap Account Username) is required in config or NAMECHEAP_API_USER env"
+    );
   }
+
+  const userName = (
+    (config?.userName as string | undefined) ||
+    (config?.username as string | undefined) ||
+    apiUser
+  ).trim();
 
   const clientIp = (
     (config?.clientIp as string | undefined) ||
     (config?.clientIP as string | undefined) ||
     process.env.NAMECHEAP_CLIENT_IP ||
-    "127.0.0.1"
+    ""
   ).trim();
 
-  const baseUrl =
-    (config?.baseUrl as string | undefined)?.trim() || "https://api.namecheap.com/xml.response";
+  if (!clientIp || clientIp === "127.0.0.1" || clientIp === "localhost") {
+    configurationError(
+      "clientIp (whitelisted public IP) is required for Namecheap in config or NAMECHEAP_CLIENT_IP env"
+    );
+  }
+
+  const baseUrl = validateNamecheapBaseUrl(config?.baseUrl as string | undefined);
 
   const balancesUrl = new URL(baseUrl);
   balancesUrl.searchParams.set("ApiUser", apiUser);
   balancesUrl.searchParams.set("ApiKey", trimmedKey);
-  balancesUrl.searchParams.set("UserName", apiUser);
+  balancesUrl.searchParams.set("UserName", userName);
   balancesUrl.searchParams.set("ClientIP", clientIp);
   balancesUrl.searchParams.set("Command", "namecheap.users.getBalances");
 
   const domainsUrl = new URL(baseUrl);
   domainsUrl.searchParams.set("ApiUser", apiUser);
   domainsUrl.searchParams.set("ApiKey", trimmedKey);
-  domainsUrl.searchParams.set("UserName", apiUser);
+  domainsUrl.searchParams.set("UserName", userName);
   domainsUrl.searchParams.set("ClientIP", clientIp);
   domainsUrl.searchParams.set("Command", "namecheap.domains.getList");
   domainsUrl.searchParams.set("PageSize", "100");
+  domainsUrl.searchParams.set("Page", "1");
 
   const [balancesRes, domainsRes] = await Promise.all([
     fetchJson(balancesUrl.toString()),
@@ -165,17 +211,68 @@ export async function fetchUsage(
   const balancesRawText = typeof balancesRes.data === "string" ? balancesRes.data : "";
   const domainsRawText = typeof domainsRes.data === "string" ? domainsRes.data : "";
 
-  // Check for API-level errors
+  // Check for API-level errors in XML envelopes
   const balancesErrors = extractNamecheapErrors(balancesRawText);
-  if (balancesErrors.length > 0 && !domainsRes.ok) {
-    throw new AdapterError(`Namecheap API error: ${balancesErrors.join("; ")}`, {
+  if (!balancesRes.ok || balancesErrors.length > 0) {
+    const errorMsg =
+      balancesErrors.length > 0
+        ? balancesErrors.join("; ")
+        : `HTTP ${balancesRes.status || 400}`;
+    throw new AdapterError(`Namecheap API balance error: ${errorMsg}`, {
       code: "HTTP_ERROR",
       status: balancesRes.status || 400,
     });
   }
 
+  const domainsErrors = extractNamecheapErrors(domainsRawText);
+  if (!domainsRes.ok || domainsErrors.length > 0) {
+    const errorMsg =
+      domainsErrors.length > 0
+        ? domainsErrors.join("; ")
+        : `HTTP ${domainsRes.status || 400}`;
+    throw new AdapterError(`Namecheap API domain list error: ${errorMsg}`, {
+      code: "HTTP_ERROR",
+      status: domainsRes.status || 400,
+    });
+  }
+
   const balances = parseBalancesXml(balancesRawText);
-  const { domains, totalItems } = parseDomainsXml(domainsRawText);
+  const firstPage = parseDomainsXml(domainsRawText);
+  const allDomains: NamecheapDomainRecord[] = [...firstPage.domains];
+  const totalItems = firstPage.totalItems ?? allDomains.length;
+  const pageSize = firstPage.pageSize > 0 ? firstPage.pageSize : 100;
+  const maxPages = 50;
+  const totalPages = Math.min(Math.ceil(totalItems / pageSize), maxPages);
+
+  // Fetch remaining domain pages if inventory exceeds page 1
+  for (let page = 2; page <= totalPages && allDomains.length < totalItems; page++) {
+    const pageUrl = new URL(baseUrl);
+    pageUrl.searchParams.set("ApiUser", apiUser);
+    pageUrl.searchParams.set("ApiKey", trimmedKey);
+    pageUrl.searchParams.set("UserName", userName);
+    pageUrl.searchParams.set("ClientIP", clientIp);
+    pageUrl.searchParams.set("Command", "namecheap.domains.getList");
+    pageUrl.searchParams.set("PageSize", String(pageSize));
+    pageUrl.searchParams.set("Page", String(page));
+
+    const pageRes = await fetchJson(pageUrl.toString());
+    const pageRawText = typeof pageRes.data === "string" ? pageRes.data : "";
+    const pageErrors = extractNamecheapErrors(pageRawText);
+    if (!pageRes.ok || pageErrors.length > 0) {
+      const errorMsg =
+        pageErrors.length > 0
+          ? pageErrors.join("; ")
+          : `HTTP ${pageRes.status || 400}`;
+      throw new AdapterError(`Namecheap API domain list page ${page} error: ${errorMsg}`, {
+        code: "HTTP_ERROR",
+        status: pageRes.status || 400,
+      });
+    }
+
+    const { domains: pageDomains } = parseDomainsXml(pageRawText);
+    if (pageDomains.length === 0) break;
+    allDomains.push(...pageDomains);
+  }
 
   const availableBalance = balances?.availableBalance ?? balances?.accountBalance ?? null;
 
@@ -186,7 +283,7 @@ export async function fetchUsage(
     credits: availableBalance,
     rawData: {
       balances,
-      domains,
+      domains: allDomains,
       totalDomains: totalItems,
       apiUser,
     },
