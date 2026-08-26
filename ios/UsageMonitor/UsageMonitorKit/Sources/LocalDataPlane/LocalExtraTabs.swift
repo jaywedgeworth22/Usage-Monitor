@@ -11,34 +11,35 @@ import UIKit
 
 struct LocalFleetTab: View {
     @Bindable var model: LocalAppModel
-    @State private var hostChip: String = "Apple M5"
-    @State private var hostName: String = "jays.services (jay · macbook.boa-roygbiv.ts.net)"
-    @State private var cpuUsage: Double = 14.2
-    @State private var memUsage: Double = 59.7
-    @State private var diskUsage: Double = 87.0
-    @State private var isRefreshing = false
+    private var isDemo: Bool {
+        LocalScreenshotDemoSeeder.isEnabled
+    }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    LabeledContent("Host", value: hostName)
-                    LabeledContent("Chip", value: hostChip)
-                    LabeledContent("CPU Load", value: String(format: "%.1f%%", cpuUsage))
-                    LabeledContent("Memory", value: String(format: "%.1f%%", memUsage))
-                    LabeledContent("Data Disk", value: String(format: "%.0f%%", diskUsage))
+                    LabeledContent("Host", value: isDemo ? "jays.services (jay · macbook.boa-roygbiv.ts.net)" : "Local Device")
+                    LabeledContent("Chip", value: isDemo ? "Apple M5" : "iOS Device")
+                    LabeledContent("CPU Load", value: isDemo ? "14.2%" : "N/A")
+                    LabeledContent("Memory", value: isDemo ? "59.7%" : "N/A")
+                    LabeledContent("Data Disk", value: isDemo ? "87%" : "N/A")
                     LabeledContent("Status") {
-                        StatusBadge("Online", status: .ok, systemImage: "laptopcomputer")
+                        if isDemo {
+                            StatusBadge("Online", status: .ok, systemImage: "laptopcomputer")
+                        } else {
+                            StatusBadge("Standalone", status: .neutral, systemImage: "iphone")
+                        }
                     }
                 } header: {
                     Text("Mac Host")
                 } footer: {
-                    Text("Hardware and local health stats from this Mac.")
+                    Text(isDemo ? "Hardware and local health stats from this Mac." : "Local Data Plane runs standalone on this device. Remote Mac host telemetry is not connected.")
                 }
 
                 Section {
                     LabeledContent("agent-sync") {
-                        StatusBadge("Running", status: .ok, systemImage: "checkmark.circle.fill")
+                        StatusBadge(isDemo ? "Running" : "Not Connected", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
                     LabeledContent("docker") {
                         StatusBadge("Not Enabled", status: .neutral, systemImage: "circle")
@@ -55,27 +56,27 @@ struct LocalFleetTab: View {
 
                 Section {
                     LabeledContent("Claude Code / Desktop") {
-                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
                     LabeledContent("Cursor") {
-                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
                     LabeledContent("Grok Build & Leader") {
-                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
                     LabeledContent("OpenAI Codex") {
-                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
                     LabeledContent("Antigravity") {
-                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
                     LabeledContent("GitHub Copilot") {
-                        StatusBadge("Active on Mac", status: .ok, systemImage: "checkmark.circle.fill")
+                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
                 } header: {
                     Text("Coding Agents")
                 } footer: {
-                    Text("Live execution state of agentic coding platforms on Mac.")
+                    Text(isDemo ? "Live execution state of agentic coding platforms on Mac." : "Mac daemon and coding agent monitoring require connection to a Mac server host.")
                 }
             }
             .listStyle(.insetGrouped)
