@@ -60,6 +60,7 @@ async function loadAdapters() {
     import("./oracle"),
     import("./coolify"),
     import("./deno"),
+    import("./namecheap"),
   ]);
 
   const [
@@ -79,6 +80,7 @@ async function loadAdapters() {
     oracle,
     coolify,
     deno,
+    namecheap,
   ] = modules;
 
   // Active built-ins are loaded into the poll registry. Retired and dormant
@@ -130,6 +132,7 @@ async function loadAdapters() {
     apify: apify.fetchUsage,
     llamaindex: llamaindex.fetchUsage,
     stripe: stripe.fetchUsage,
+    namecheap: namecheap.fetchUsage,
     oracle: oracle.fetchUsage,
     coolify: coolify.fetchUsage,
     deno: deno.fetchUsage,

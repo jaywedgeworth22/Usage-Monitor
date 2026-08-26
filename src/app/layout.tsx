@@ -9,6 +9,14 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Usage Monitor",
   description: "Monitor usage and balance across multiple API providers",
+  icons: {
+    icon: [
+      { url: "/brand/icon-64.png", sizes: "64x64", type: "image/png" },
+      { url: "/icon.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+    apple: "/brand/icon-192.png",
+  },
   robots: {
     index: false,
     follow: false,
