@@ -77,7 +77,7 @@ check_process() {
 
 OLLAMA_STATUS="$(check_process "ollama" "true")"
 LITESTREAM_STATUS="$(check_process "litestream" "true")"
-DOCKER_STATUS="$(check_process "Docker" "true")"
+DOCKER_STATUS="$(check_process "(Docker|OrbStack|orbstack)" "true")"
 AGENT_SYNC_STATUS="$(check_process "agent-sync" "false")"
 
 # Coding agent live execution checks
