@@ -767,6 +767,15 @@ log "project=${PROJECT_PATH}"
 # "Unable to log in with account ... login details were rejected"), which fails
 # automatic signing even when an ASC API key is available. Passing the key
 # straight to xcodebuild removes the dependency on the Xcode UI session.
+# Xcode 26.6 rejected -authenticationKeyPath unless AuthKey_<id>.p8 is also
+# in ~/.appstoreconnect/private_keys (Usage-Monitor 1.0.15,  2026-08-26).
+if [[ -n "${ASC_KEY_PATH:-}" && -n "${ASC_KEY_ID:-}" ]]; then
+  _asc_key_for_link="${ASC_KEY_PATH/#\~/$HOME}"
+  if [[ -f "$_asc_key_for_link" ]]; then
+    link_private_key "$_asc_key_for_link" "$ASC_KEY_ID"
+  fi
+fi
+
 ASC_AUTH_FLAGS=()
 if [[ -n "${ASC_KEY_PATH:-}" && -n "${ASC_KEY_ID:-}" && -n "${ASC_ISSUER_ID:-}" ]]; then
   _asc_key_expanded="${ASC_KEY_PATH/#\~/$HOME}"
