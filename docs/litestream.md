@@ -93,10 +93,15 @@ Local pre-migration snapshots on `/data` still exist.
   scratch path, run inside the production app container (see below).
 - `scripts/replica-status-heartbeat.sh` + `run-app-with-replica-heartbeat.sh` —
   in-container LTX tip probe under Infisical-injected env (Coolify-safe).
+  Lists `ltx -json` at continuous levels 0–3 plus snapshot level 9.
 - `deploy/coolify/replica-status-probe.sh` — **production Hetzner** host timer
-  (Coolify UUID container + host-PID environ for S3 creds).
-- `deploy/oracle/replica-status-probe.sh` — **legacy Oracle** timer. Without a
+  (Coolify UUID container).  Tries `docker exec --once`, then a host
+  `--env-file` fallback from the litestream PID environ.  Never puts
+  `LITESTREAM_S3_*` on `docker exec` argv.
+- `deploy/oracle/replica-status-probe.sh` — **legacy Oracle** timer.  Without a
   live heartbeat, backup reports `env_active_unverified`.
+- Operator runbook: `docs/runbooks/replica-status-probe.md` (reasons, fallback
+  trust rules after #1354/#1355, Coolify verify commands).
 
 ## Production setup (host → Backblaze B2)
 
@@ -146,24 +151,37 @@ redeploy" on Oracle.
 
 ### Verify
 
-From the Oracle VM:
+Production is Coolify/Hetzner.  Oracle container name `usage-monitor-app-1`
+is leftover; Coolify names are UUID-prefixed.  Tip-list with
+`litestream ltx -json -level N` (0–3 continuous, 9 snapshot).  Avoid
+`-level all`, which lists thousands of compacted objects and can time out.
 
 ```bash
-# Config parses + replica is wired:
-sudo docker exec usage-monitor-app-1 /app/bin/litestream databases -config /app/litestream.yml
+# Inside the running app container (name from `docker ps`, prefix from fleet-ops):
+sudo docker exec "$UM_CONTAINER" /app/bin/litestream databases -config /app/litestream.yml
+sudo docker exec "$UM_CONTAINER" /app/bin/litestream ltx -json -config /app/litestream.yml -level 0 /data/prod.db
 
-# LTX files actually landed in R2 (tip listing; avoid `-level all`,
-# which lists thousands of compacted objects and can time out):
-sudo docker exec usage-monitor-app-1 /app/bin/litestream ltx -config /app/litestream.yml /data/prod.db
-
-# The readiness heartbeat is fresh (Coolify volume or inside container):
+# Status file (Coolify volume or inside the container):
 # host:
 cat /var/lib/docker/volumes/*usage-data*/_data/.litestream-replica-status.json
-# or inside the app container:
-#   cat /data/.litestream-replica-status.json
+# or:
+#   sudo docker exec "$UM_CONTAINER" cat /data/.litestream-replica-status.json
 curl -fsS https://usage.jays.services/api/ready | jq .checks.backup
-# Expect: active=true, envOnly=false, replicaOk=true, reason=null
 ```
+
+`checks.backup` is **observability only**.  It does not gate overall
+`/api/ready` `ok` (or `?strict=1` HTTP status).  Product readiness is
+database + databaseFile + scheduler + startup.  A replica listing timeout
+can leave `replicaOk=false` / `reason=list_timeout` while the app stays
+ready.
+
+Healthy side-channel: `active=true`, `envOnly=false`, `replicaOk=true`.
+`reason` may be `null` (continuous LTX) or `snapshot_only` (level-9 tip
+only).  Do not require `reason=null`.  `envOnly:true` means no status
+file path is configured (`LITESTREAM_REPLICA_STATUS_PATH` unset).
+
+Offline fixtures: `bash scripts/test-replica-status-probe.sh` and
+`bash scripts/replica-status-heartbeat.sh --self-test`.
 
 ### Coolify/Hetzner host timer install
 
@@ -179,20 +197,23 @@ Infisical `usage-monitor` / `prod` must include
 `LITESTREAM_REPLICA_STATUS_PATH=/data/.litestream-replica-status.json` (also
 exported by `start-with-litestream.sh` after the next deploy).
 
-In `sudo docker logs usage-monitor-app-1`, look for the
+In `sudo docker logs "$UM_CONTAINER"`, look for the
 `[start-with-litestream] replication ENABLED` line and a
 `[sqlite-pre-migration-backup] verified ...` line at boot, followed by
 litestream's own `replicating to type=s3 bucket=...` and periodic
-`ltx file uploaded` / `replica sync` lines. If instead you see
+`ltx file uploaded` / `replica sync` lines.  If instead you see
 `[start-with-litestream] replication DISABLED`, all required `LITESTREAM_S3_*`
 vars are unset and the boot must be treated as misconfigured (production
-requires them). Partial values or a missing binary are startup errors; check
+requires them).  Partial values or a missing binary are startup errors; check
 `fetch-litestream.sh` and startup logs.
 
 Confirm `/api/ready` reports `checks.backup.required=true`,
 `checks.backup.active=true`, and `checks.backup.replicaOk=true` (the heartbeat
-side-channel; `envOnly:true` means the probe is not writing its status file
-and strict readiness will fail).
+side-channel).  `envOnly:true` means `LITESTREAM_REPLICA_STATUS_PATH` is
+unset so Next.js cannot read a probe verdict.  That is an ops gap, not a
+product-down signal: backup still does not gate overall `ok`.  Operator
+reasons and the Coolify `--once` vs `--env-file` fallback are in
+`docs/runbooks/replica-status-probe.md`.
 
 ### Free-tier growth (what to expect)
 
@@ -290,11 +311,12 @@ during an incident:
 ## Monitoring
 
 ```bash
-sudo docker exec usage-monitor-app-1 /app/bin/litestream ltx -config /app/litestream.yml /data/prod.db | tail
+sudo docker exec "$UM_CONTAINER" /app/bin/litestream ltx -json -config /app/litestream.yml -level 0 /data/prod.db | tail
 cat /data/.litestream-replica-status.json
 ```
 
-Or tail `sudo docker logs usage-monitor-app-1` and watch for repeated `replica sync`
-lines without errors. The strict readiness endpoint
-(`/api/ready?strict=1` → `checks.backup`) and the fleet-sentry-monitor Sentry
-cron check-in both alert on replica failure independently.
+Or tail `sudo docker logs "$UM_CONTAINER"` and watch for repeated `replica sync`
+lines without errors.  `/api/ready?strict=1` still does **not** fail HTTP
+on `checks.backup` (same `ok` as the default body).  Alert on
+`checks.backup.replicaOk` / `checks.backup.reason` independently, or via
+the fleet-sentry-monitor Sentry cron check-in.
