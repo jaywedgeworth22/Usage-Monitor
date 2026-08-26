@@ -20,11 +20,15 @@ struct FleetBackupDetailView: View {
                             : "exclamationmark.triangle.fill"
                     )
                 }
+                .copyableRow(label: "Overall", value: overallLabel)
                 if let configured = fleet.configured {
-                    LabeledContent("B2 Monitor", value: configured ? "Configured" : "Missing")
+                    let cfgText = configured ? "Configured" : "Missing"
+                    LabeledContent("B2 Monitor", value: cfgText)
+                        .copyableRow(label: "B2 Monitor", value: cfgText)
                 }
                 if let asOf = fleet.asOf {
                     LabeledContent("As Of", value: asOf)
+                        .copyableRow(label: "As Of", value: asOf)
                 }
             } footer: {
                 Text("Locations are independent.  A fresh B2 full dump keeps disaster recovery alive even when continuous Litestream is lagging.")
@@ -60,6 +64,7 @@ struct FleetBackupDetailView: View {
                         Text(warning)
                             .font(Theme.Typography.caption)
                             .foregroundStyle(Theme.Colors.warning)
+                            .copyableValue(warning, label: "Warning")
                     }
                 }
             }
@@ -83,9 +88,10 @@ struct FleetBackupDetailView: View {
     @ViewBuilder
     private func locationRow(_ location: ServerMetrics.FleetBackups.Location) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+            let labelText = locationLabel(location)
             LabeledContent(location.label) {
                 StatusBadge(
-                    locationLabel(location),
+                    labelText,
                     status: locationStatus(location),
                     systemImage: location.ok == true ? "checkmark" : "exclamationmark"
                 )
@@ -96,6 +102,8 @@ struct FleetBackupDetailView: View {
                     .foregroundStyle(Theme.Colors.secondaryText)
             }
         }
+        .contentShape(Rectangle())
+        .copyableValue(locationDetail(location).map { "\(locationLabel(location)) (\($0))" } ?? locationLabel(location), label: location.label)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(location.label): \(locationLabel(location)). \(locationDetail(location) ?? "")"

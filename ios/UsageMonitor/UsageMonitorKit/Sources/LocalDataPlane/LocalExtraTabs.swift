@@ -19,11 +19,22 @@ struct LocalFleetTab: View {
         NavigationStack {
             List {
                 Section {
-                    LabeledContent("Host", value: isDemo ? "jays.services (jay · macbook.boa-roygbiv.ts.net)" : "Local Device")
-                    LabeledContent("Chip", value: isDemo ? "Apple M5" : "iOS Device")
-                    LabeledContent("CPU Load", value: isDemo ? "14.2%" : "N/A")
-                    LabeledContent("Memory", value: isDemo ? "59.7%" : "N/A")
-                    LabeledContent("Data Disk", value: isDemo ? "87%" : "N/A")
+                    let hostVal = isDemo ? "jays.services (jay · macbook.boa-roygbiv.ts.net)" : "Local Device"
+                    LabeledContent("Host", value: hostVal)
+                        .copyableRow(label: "Host", value: hostVal)
+                    let chipVal = isDemo ? "Apple M5" : "iOS Device"
+                    LabeledContent("Chip", value: chipVal)
+                        .copyableRow(label: "Chip", value: chipVal)
+                    let cpuVal = isDemo ? "14.2%" : "N/A"
+                    LabeledContent("CPU Load", value: cpuVal)
+                        .copyableRow(label: "CPU Load", value: cpuVal)
+                    let memVal = isDemo ? "59.7%" : "N/A"
+                    LabeledContent("Memory", value: memVal)
+                        .copyableRow(label: "Memory", value: memVal)
+                    let diskVal = isDemo ? "87%" : "N/A"
+                    LabeledContent("Data Disk", value: diskVal)
+                        .copyableRow(label: "Data Disk", value: diskVal)
+                    let statusVal = isDemo ? "Online" : "Standalone"
                     LabeledContent("Status") {
                         if isDemo {
                             StatusBadge("Online", status: .ok, systemImage: "laptopcomputer")
@@ -31,6 +42,7 @@ struct LocalFleetTab: View {
                             StatusBadge("Standalone", status: .neutral, systemImage: "iphone")
                         }
                     }
+                    .copyableRow(label: "Status", value: statusVal)
                 } header: {
                     Text("Mac Host")
                 } footer: {
@@ -38,41 +50,53 @@ struct LocalFleetTab: View {
                 }
 
                 Section {
+                    let syncVal = isDemo ? "Running" : "Not Connected"
                     LabeledContent("agent-sync") {
-                        StatusBadge(isDemo ? "Running" : "Not Connected", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
+                        StatusBadge(syncVal, status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
+                    .copyableRow(label: "agent-sync", value: syncVal)
                     LabeledContent("docker") {
                         StatusBadge("Not Enabled", status: .neutral, systemImage: "circle")
                     }
+                    .copyableRow(label: "docker", value: "Not Enabled")
                     LabeledContent("litestream") {
                         StatusBadge("Not Enabled", status: .neutral, systemImage: "circle")
                     }
+                    .copyableRow(label: "litestream", value: "Not Enabled")
                     LabeledContent("ollama") {
                         StatusBadge("Not Enabled", status: .neutral, systemImage: "circle")
                     }
+                    .copyableRow(label: "ollama", value: "Not Enabled")
                 } header: {
                     Text("Local Services")
                 }
 
                 Section {
+                    let agentState = isDemo ? "Active on Mac" : "Remote Only"
                     LabeledContent("Claude Code / Desktop") {
-                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
+                        StatusBadge(agentState, status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
+                    .copyableRow(label: "Claude Code", value: agentState)
                     LabeledContent("Cursor") {
-                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
+                        StatusBadge(agentState, status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
+                    .copyableRow(label: "Cursor", value: agentState)
                     LabeledContent("Grok Build & Leader") {
-                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
+                        StatusBadge(agentState, status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
+                    .copyableRow(label: "Grok Build & Leader", value: agentState)
                     LabeledContent("OpenAI Codex") {
-                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
+                        StatusBadge(agentState, status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
+                    .copyableRow(label: "OpenAI Codex", value: agentState)
                     LabeledContent("Antigravity") {
-                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
+                        StatusBadge(agentState, status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
+                    .copyableRow(label: "Antigravity", value: agentState)
                     LabeledContent("GitHub Copilot") {
-                        StatusBadge(isDemo ? "Active on Mac" : "Remote Only", status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
+                        StatusBadge(agentState, status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
+                    .copyableRow(label: "GitHub Copilot", value: agentState)
                 } header: {
                     Text("Coding Agents")
                 } footer: {

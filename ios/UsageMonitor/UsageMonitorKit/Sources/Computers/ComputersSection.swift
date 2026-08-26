@@ -104,22 +104,34 @@ struct ComputersSection: View {
                 return mac.hostname
             }()
             LabeledContent("Name", value: hostTitle)
+                .copyableRow(label: "Host Name", value: hostTitle)
             if let os = mac.osVersion {
                 LabeledContent("System", value: os)
+                    .copyableRow(label: "System", value: os)
             }
             let chip = mac.chipName ?? mac.arch ?? "Apple M5"
             LabeledContent("Chip", value: chip)
-            LabeledContent("Uptime", value: UptimeFormat.string(fromSeconds: mac.uptimeSeconds))
+                .copyableRow(label: "Chip", value: chip)
+            let uptimeString = UptimeFormat.string(fromSeconds: mac.uptimeSeconds)
+            LabeledContent("Uptime", value: uptimeString)
+                .copyableRow(label: "Uptime", value: uptimeString)
 
-            LabeledContent("CPU", value: percent(mac.cpuUsagePct))
-            LabeledContent("Memory", value: percent(mac.memoryUsagePct))
-            LabeledContent("Data Disk", value: percent(mac.diskUsagePct))
+            let cpuString = percent(mac.cpuUsagePct)
+            LabeledContent("CPU", value: cpuString)
+                .copyableRow(label: "CPU", value: cpuString)
+            let memoryString = percent(mac.memoryUsagePct)
+            LabeledContent("Memory", value: memoryString)
+                .copyableRow(label: "Memory", value: memoryString)
+            let diskString = percent(mac.diskUsagePct)
+            LabeledContent("Data Disk", value: diskString)
+                .copyableRow(label: "Data Disk", value: diskString)
 
             let flags = issueFlags(health)
             if flags.isEmpty {
                 LabeledContent("Flags") {
                     StatusBadge("None", status: .ok, systemImage: "checkmark.circle.fill")
                 }
+                .copyableRow(label: "Flags", value: "None")
             } else {
                 Text("Flags")
                     .font(Theme.Typography.captionEmphasis)
@@ -130,6 +142,7 @@ struct ComputersSection: View {
                     Label(flag, systemImage: "exclamationmark.triangle.fill")
                         .font(Theme.Typography.caption)
                         .foregroundStyle(Theme.Colors.warning)
+                        .copyableValue(flag, label: "Flag")
                 }
             }
 
@@ -141,9 +154,11 @@ struct ComputersSection: View {
                     .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 2, trailing: 20))
                     .accessibilityAddTraits(.isHeader)
                 ForEach(rows, id: \.name) { row in
-                    LabeledContent(shortProcessName(row.name)) {
+                    let name = shortProcessName(row.name)
+                    let statusText = processLabel(row.status)
+                    LabeledContent(name) {
                         StatusBadge(
-                            processLabel(row.status),
+                            statusText,
                             status: processStatus(row.status),
                             systemImage: processStatus(row.status) == .ok
                                 ? "checkmark.circle.fill"
@@ -152,6 +167,7 @@ struct ComputersSection: View {
                                 : "exclamationmark.circle.fill"
                         )
                     }
+                    .copyableRow(label: name, value: statusText)
                 }
             }
 
@@ -162,13 +178,15 @@ struct ComputersSection: View {
                     .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 2, trailing: 20))
                     .accessibilityAddTraits(.isHeader)
                 ForEach(pm2, id: \.name) { p in
+                    let statusText = processLabel(p.status)
                     LabeledContent(p.name) {
                         StatusBadge(
-                            processLabel(p.status),
+                            statusText,
                             status: processStatus(p.status),
                             systemImage: processStatus(p.status) == .ok ? "checkmark.circle.fill" : "circle"
                         )
                     }
+                    .copyableRow(label: p.name, value: statusText)
                 }
             }
 
@@ -180,13 +198,15 @@ struct ComputersSection: View {
                     .accessibilityAddTraits(.isHeader)
                 ForEach(launchd, id: \.name) { l in
                     let clean = l.name.replacingOccurrences(of: "com.jay.", with: "").replacingOccurrences(of: "com.jays.", with: "")
+                    let statusText = processLabel(l.status)
                     LabeledContent(clean) {
                         StatusBadge(
-                            processLabel(l.status),
+                            statusText,
                             status: processStatus(l.status),
                             systemImage: processStatus(l.status) == .ok ? "checkmark.circle.fill" : "circle"
                         )
                     }
+                    .copyableRow(label: clean, value: statusText)
                 }
             }
         } else {

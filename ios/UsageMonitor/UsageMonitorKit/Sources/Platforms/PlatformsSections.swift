@@ -225,9 +225,10 @@ struct FleetAppsSection: View {
 
             ForEach(metrics.resources) { resource in
                 let status = FleetAppStatus.parse(resource.status)
+                let title = resource.fleetLabel ?? resource.name
                 HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.sm) {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
-                        Text(resource.fleetLabel ?? resource.name)
+                        Text(title)
                             .font(Theme.Typography.body)
                             .foregroundStyle(Theme.Colors.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
@@ -239,6 +240,8 @@ struct FleetAppsSection: View {
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     StatusBadge(status.title, status: status.semantic)
                 }
+                .contentShape(Rectangle())
+                .copyableValue(resource.status, label: title)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -416,27 +419,33 @@ struct FleetOperationsSection: View {
             SectionHeader("Operations")
 
             if let peer = operations.socraticInfrastructure {
+                let sha = peer.releaseSha.map { String($0.prefix(8)) } ?? "—"
                 row(
                     title: "Socratic.Trade",
-                    detail: peer.releaseSha.map { String($0.prefix(8)) } ?? "—",
+                    detail: sha,
                     state: peer.state
                 )
+                .copyableRow(label: "Socratic.Trade", value: sha)
             }
 
             if let congress = operations.congressInfrastructure {
+                let sha = congress.releaseSha.map { String($0.prefix(8)) } ?? "—"
                 row(
                     title: "Congress.Trade",
-                    detail: congress.releaseSha.map { String($0.prefix(8)) } ?? "—",
+                    detail: sha,
                     state: congress.state
                 )
+                .copyableRow(label: "Congress.Trade", value: sha)
             }
 
             if let inbox = operations.receiptInbox {
+                let countStr = inbox.needsReviewCount.map { "\($0) to review" } ?? "—"
                 row(
                     title: "Receipt Inbox",
-                    detail: inbox.needsReviewCount.map { "\($0) to review" } ?? "—",
+                    detail: countStr,
                     state: inbox.state
                 )
+                .copyableRow(label: "Receipt Inbox", value: countStr)
             }
 
             if let r2 = operations.r2Fleet, r2.configured {
@@ -644,8 +653,11 @@ struct PlatformDetailSheet: View {
                     LabeledContent("Status") {
                         StatusBadge(platform.state.title, status: semantic(platform.state))
                     }
+                    .copyableRow(label: "Status", value: platform.state.title)
                     LabeledContent("Platform", value: platform.name)
+                        .copyableRow(label: "Platform", value: platform.name)
                     LabeledContent("Category", value: platform.category.title)
+                        .copyableRow(label: "Category", value: platform.category.title)
                     if let consoleUrl = platform.consoleUrl, let url = URL(string: consoleUrl) {
                         Link(destination: url) {
                             HStack {
@@ -667,6 +679,7 @@ struct PlatformDetailSheet: View {
                             .font(Theme.Typography.caption)
                             .foregroundStyle(Theme.Colors.danger)
                             .fixedSize(horizontal: false, vertical: true)
+                            .copyableValue(error, label: "Error")
                     } header: {
                         Text("Error Details")
                     }
@@ -678,6 +691,7 @@ struct PlatformDetailSheet: View {
                             .font(Theme.Typography.body)
                             .foregroundStyle(Theme.Colors.primaryText)
                             .fixedSize(horizontal: false, vertical: true)
+                            .copyableValue(headline, label: "Description")
                     } header: {
                         Text("Status Description")
                     }
@@ -696,7 +710,6 @@ struct PlatformDetailSheet: View {
                                         .font(Theme.Typography.caption)
                                         .foregroundStyle(Theme.Colors.secondaryText)
                                         .multilineTextAlignment(.trailing)
-                                        .textSelection(.enabled)
                                 }
                                 if let hint = entry.hint {
                                     Text(hint)
@@ -713,6 +726,8 @@ struct PlatformDetailSheet: View {
                                 }
                             }
                             .padding(.vertical, 2)
+                            .contentShape(Rectangle())
+                            .copyableValue(entry.value, label: entry.label)
                         }
                     } header: {
                         Text("Metrics & Attributes")
