@@ -126,9 +126,13 @@ when `replicaOk` is false (except file-age, which becomes
 
 ## Install / verify (Coolify host)
 
-```bash
 sudo install -o root -g root -m 0755 deploy/coolify/replica-status-probe.sh \
   /usr/local/sbin/usage-monitor-replica-status
+sudo install -o root -g root -m 0644 deploy/coolify/usage-monitor-replica-status.service \
+  /etc/systemd/system/usage-monitor-replica-status.service
+sudo install -o root -g root -m 0644 deploy/coolify/usage-monitor-replica-status.timer \
+  /etc/systemd/system/usage-monitor-replica-status.timer
+sudo systemctl daemon-reload
 sudo systemctl enable --now usage-monitor-replica-status.timer
 sudo /usr/local/sbin/usage-monitor-replica-status
 # journal: prefer "in-container heartbeat verdict" or "host env-file LTX fallback"

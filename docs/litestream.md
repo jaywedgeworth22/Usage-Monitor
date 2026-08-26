@@ -151,15 +151,11 @@ redeploy" on Oracle.
 
 ### Verify
 
-Production is Coolify/Hetzner.  Oracle container name `usage-monitor-app-1`
-is leftover; Coolify names are UUID-prefixed.  Tip-list with
-`litestream ltx -json -level N` (0–3 continuous, 9 snapshot).  Avoid
-`-level all`, which lists thousands of compacted objects and can time out.
+From the host (or see `docs/runbooks/replica-status-probe.md`):
 
 ```bash
-# Inside the running app container (name from `docker ps`, prefix from fleet-ops):
-sudo docker exec "$UM_CONTAINER" /app/bin/litestream databases -config /app/litestream.yml
-sudo docker exec "$UM_CONTAINER" /app/bin/litestream ltx -json -config /app/litestream.yml -level 0 /data/prod.db
+# Refresh and verify the replica probe verdict via host script:
+sudo /usr/local/sbin/usage-monitor-replica-status
 
 # Status file (Coolify volume or inside the container):
 # host:
@@ -188,7 +184,11 @@ Offline fixtures: `bash scripts/test-replica-status-probe.sh` and
 ```bash
 sudo install -o root -g root -m 0755 deploy/coolify/replica-status-probe.sh \
   /usr/local/sbin/usage-monitor-replica-status
-# units: same shape as deploy/oracle/usage-monitor-replica-status.{service,timer}
+sudo install -o root -g root -m 0644 deploy/coolify/usage-monitor-replica-status.service \
+  /etc/systemd/system/usage-monitor-replica-status.service
+sudo install -o root -g root -m 0644 deploy/coolify/usage-monitor-replica-status.timer \
+  /etc/systemd/system/usage-monitor-replica-status.timer
+sudo systemctl daemon-reload
 sudo systemctl enable --now usage-monitor-replica-status.timer
 sudo /usr/local/sbin/usage-monitor-replica-status
 ```

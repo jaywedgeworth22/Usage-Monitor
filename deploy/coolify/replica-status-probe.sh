@@ -86,6 +86,7 @@ if [[ -z "${STATUS_FILE}" ]]; then
   exit 1
 fi
 
+status_checked_at_before="$(jq -r '.checkedAt // empty' "${STATUS_FILE}" 2>/dev/null || true)"
 status_mtime_before="$(status_mtime_epoch "${STATUS_FILE}")"
 
 run_in_container_heartbeat() {
@@ -93,17 +94,18 @@ run_in_container_heartbeat() {
 }
 
 # Prefer a cred-equipped in-container heartbeat (the looping child of
-# start-with-litestream, which inherits Infisical). `docker exec --once`
+# start-with-litestream, which inherits Infisical).  `docker exec --once`
 # does not — Coolify injects secrets into the process tree only, so that
 # path writes replica_credentials_missing and must not skip the host
-# --env-file fallback. Trust the --once write only when it exits 0
+# --env-file fallback.  Trust the --once write only when it exits 0
 # (healthy, snapshot_only, age-exceeded, or an intentional R2 pause).
 hb_rc=0
 run_in_container_heartbeat || hb_rc=$?
 status_mtime_after="$(status_mtime_epoch "${STATUS_FILE}")"
+status_checked_at_after="$(jq -r '.checkedAt // empty' "${STATUS_FILE}" 2>/dev/null || true)"
 
 if [[ "${hb_rc}" -eq 0 && -f "${STATUS_FILE}" ]] \
-  && (( status_mtime_after >= status_mtime_before )); then
+  && { (( status_mtime_after > status_mtime_before )) || [[ -n "${status_checked_at_after}" && "${status_checked_at_after}" != "${status_checked_at_before}" ]]; }; then
   if jq -e '.checkedAt != null and .checkedAt != ""' "${STATUS_FILE}" >/dev/null 2>&1; then
     ok="$(jq -r '.ok' "${STATUS_FILE}")"
     reason="$(jq -r '.reason // "null"' "${STATUS_FILE}")"
@@ -233,16 +235,24 @@ try:
     saw_error = False
 
     for level in (0, 1, 2, 3, 9):
-        proc = subprocess.run(
-            [
-                "docker", "exec", "--env-file", env_path, container,
-                "/app/bin/litestream", "ltx", "-json",
-                "-config", "/app/litestream.yml",
-                "-level", str(level),
-                "/data/prod.db",
-            ],
-            capture_output=True, text=True, timeout=70,
-        )
+        try:
+            proc = subprocess.run(
+                [
+                    "docker", "exec", "--env-file", env_path, container,
+                    "/app/bin/litestream", "ltx", "-json",
+                    "-config", "/app/litestream.yml",
+                    "-level", str(level),
+                    "/data/prod.db",
+                ],
+                capture_output=True, text=True, timeout=70,
+            )
+        except subprocess.TimeoutExpired:
+            saw_timeout = True
+            continue
+        except Exception:
+            saw_error = True
+            continue
+
         if proc.returncode == 0:
             if proc.stdout.strip() in ("", "[]"):
                 saw_empty = True

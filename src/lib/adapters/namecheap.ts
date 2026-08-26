@@ -123,8 +123,7 @@ export function validateNamecheapBaseUrl(rawUrl?: string): string {
     const hostname = parsed.hostname.toLowerCase();
     if (
       hostname !== "api.namecheap.com" &&
-      hostname !== "api.sandbox.namecheap.com" &&
-      !hostname.endsWith(".namecheap.com")
+      hostname !== "api.sandbox.namecheap.com"
     ) {
       configurationError(
         `baseUrl must be an official Namecheap endpoint (https://api.namecheap.com/xml.response or https://api.sandbox.namecheap.com/xml.response), got: ${hostname}`
@@ -151,6 +150,7 @@ export async function fetchUsage(
     (config?.userName as string | undefined) ||
     (config?.username as string | undefined) ||
     process.env.NAMECHEAP_API_USER ||
+    process.env.NAMECHEAP_USER_NAME ||
     ""
   ).trim();
 
@@ -163,6 +163,7 @@ export async function fetchUsage(
   const userName = (
     (config?.userName as string | undefined) ||
     (config?.username as string | undefined) ||
+    process.env.NAMECHEAP_USER_NAME ||
     apiUser
   ).trim();
 
@@ -202,37 +203,37 @@ export async function fetchUsage(
     fetchJson(domainsUrl.toString()),
   ]);
 
-  if (!balancesRes.ok && !domainsRes.ok) {
-    return errorResult(balancesRes.status || domainsRes.status, {
-      note: "Namecheap API requests failed",
-    });
-  }
-
   const balancesRawText = typeof balancesRes.data === "string" ? balancesRes.data : "";
   const domainsRawText = typeof domainsRes.data === "string" ? domainsRes.data : "";
 
   // Check for API-level errors in XML envelopes
   const balancesErrors = extractNamecheapErrors(balancesRawText);
   if (!balancesRes.ok || balancesErrors.length > 0) {
+    const status = balancesRes.status || 400;
+    const isRetryable = status === 429 || (status >= 500 && status < 600);
     const errorMsg =
       balancesErrors.length > 0
         ? balancesErrors.join("; ")
-        : `HTTP ${balancesRes.status || 400}`;
+        : `HTTP ${status}`;
     throw new AdapterError(`Namecheap API balance error: ${errorMsg}`, {
       code: "HTTP_ERROR",
-      status: balancesRes.status || 400,
+      status,
+      retryable: isRetryable,
     });
   }
 
   const domainsErrors = extractNamecheapErrors(domainsRawText);
   if (!domainsRes.ok || domainsErrors.length > 0) {
+    const status = domainsRes.status || 400;
+    const isRetryable = status === 429 || (status >= 500 && status < 600);
     const errorMsg =
       domainsErrors.length > 0
         ? domainsErrors.join("; ")
-        : `HTTP ${domainsRes.status || 400}`;
+        : `HTTP ${status}`;
     throw new AdapterError(`Namecheap API domain list error: ${errorMsg}`, {
       code: "HTTP_ERROR",
-      status: domainsRes.status || 400,
+      status,
+      retryable: isRetryable,
     });
   }
 
@@ -241,11 +242,12 @@ export async function fetchUsage(
   const allDomains: NamecheapDomainRecord[] = [...firstPage.domains];
   const totalItems = firstPage.totalItems ?? allDomains.length;
   const pageSize = firstPage.pageSize > 0 ? firstPage.pageSize : 100;
-  const maxPages = 50;
-  const totalPages = Math.min(Math.ceil(totalItems / pageSize), maxPages);
+  const totalPages = Math.ceil(totalItems / pageSize);
+  const maxPages = 200;
+  const pagesToFetch = Math.min(totalPages, maxPages);
 
   // Fetch remaining domain pages if inventory exceeds page 1
-  for (let page = 2; page <= totalPages && allDomains.length < totalItems; page++) {
+  for (let page = 2; page <= pagesToFetch && allDomains.length < totalItems; page++) {
     const pageUrl = new URL(baseUrl);
     pageUrl.searchParams.set("ApiUser", apiUser);
     pageUrl.searchParams.set("ApiKey", trimmedKey);
@@ -259,13 +261,16 @@ export async function fetchUsage(
     const pageRawText = typeof pageRes.data === "string" ? pageRes.data : "";
     const pageErrors = extractNamecheapErrors(pageRawText);
     if (!pageRes.ok || pageErrors.length > 0) {
+      const status = pageRes.status || 400;
+      const isRetryable = status === 429 || (status >= 500 && status < 600);
       const errorMsg =
         pageErrors.length > 0
           ? pageErrors.join("; ")
-          : `HTTP ${pageRes.status || 400}`;
+          : `HTTP ${status}`;
       throw new AdapterError(`Namecheap API domain list page ${page} error: ${errorMsg}`, {
         code: "HTTP_ERROR",
-        status: pageRes.status || 400,
+        status,
+        retryable: isRetryable,
       });
     }
 
@@ -274,6 +279,7 @@ export async function fetchUsage(
     allDomains.push(...pageDomains);
   }
 
+  const isPartial = allDomains.length < totalItems;
   const availableBalance = balances?.availableBalance ?? balances?.accountBalance ?? null;
 
   return {
@@ -286,6 +292,7 @@ export async function fetchUsage(
       domains: allDomains,
       totalDomains: totalItems,
       apiUser,
+      ...(isPartial ? { isPartial: true } : {}),
     },
   };
 }

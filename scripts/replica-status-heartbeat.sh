@@ -107,11 +107,64 @@ classify_list_failure() {
 
 newest_timestamp_from_json() {
   local json="$1"
-  if ! command -v jq >/dev/null 2>&1; then
-    return 1
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '.[] | select(.timestamp != null) | .timestamp' <<<"${json}" 2>/dev/null \
+      | sort | tail -n 1
+    return 0
   fi
-  jq -r '.[] | select(.timestamp != null) | .timestamp' <<<"${json}" 2>/dev/null \
+  if command -v node >/dev/null 2>&1; then
+    node -e '
+      try {
+        const data = JSON.parse(process.argv[1] || "[]");
+        if (Array.isArray(data)) {
+          const stamps = data.map(d => d.timestamp).filter(Boolean).sort();
+          if (stamps.length > 0) process.stdout.write(stamps[stamps.length - 1] + "\n");
+        }
+      } catch (e) {}
+    ' "${json}" 2>/dev/null
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c '
+import sys, json
+try:
+    data = json.loads(sys.argv[1] or "[]")
+    if isinstance(data, list):
+        stamps = sorted([d["timestamp"] for d in data if isinstance(d, dict) and d.get("timestamp")])
+        if stamps:
+            print(stamps[-1])
+except Exception:
+    pass
+' "${json}" 2>/dev/null
+    return 0
+  fi
+  grep -o '"timestamp"[[:space:]]*:[[:space:]]*"[^"]*"' <<<"${json}" 2>/dev/null \
+    | sed 's/.*"timestamp"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' \
     | sort | tail -n 1
+}
+
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${seconds}" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "${seconds}" "$@"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c '
+import subprocess, sys
+try:
+    sec = float(sys.argv[1])
+    res = subprocess.run(sys.argv[2:], timeout=sec)
+    sys.exit(res.returncode)
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+except Exception as e:
+    sys.exit(1)
+' "${seconds}" "$@"
+  else
+    "$@"
+  fi
 }
 
 list_ltx_level_json() {
@@ -119,7 +172,7 @@ list_ltx_level_json() {
   local stderr_file stdout_file rc=0
   stderr_file="$(mktemp)"
   stdout_file="$(mktemp)"
-  timeout 60 "${LITESTREAM_BIN}" ltx \
+  run_with_timeout 60 "${LITESTREAM_BIN}" ltx \
     -config "${LITESTREAM_CONFIG}" \
     -json \
     -level "${level}" \
@@ -132,7 +185,39 @@ list_ltx_level_json() {
 
 timestamp_to_epoch() {
   local ts="$1"
-  date -u -d "${ts}" +%s 2>/dev/null
+  local epoch=""
+  epoch="$(date -u -d "${ts}" +%s 2>/dev/null || true)"
+  if [[ -n "${epoch}" ]]; then
+    printf '%s\n' "${epoch}"
+    return 0
+  fi
+  epoch="$(date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "${ts}" +%s 2>/dev/null || true)"
+  if [[ -n "${epoch}" ]]; then
+    printf '%s\n' "${epoch}"
+    return 0
+  fi
+  if command -v node >/dev/null 2>&1; then
+    epoch="$(node -e 'const d = new Date(process.argv[1]); if (!isNaN(d)) console.log(Math.floor(d.getTime()/1000));' "${ts}" 2>/dev/null || true)"
+    if [[ -n "${epoch}" ]]; then
+      printf '%s\n' "${epoch}"
+      return 0
+    fi
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    epoch="$(python3 -c '
+import datetime, sys
+try:
+    dt = datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+    print(int(dt.timestamp()))
+except Exception:
+    pass
+' "${ts}" 2>/dev/null || true)"
+    if [[ -n "${epoch}" ]]; then
+      printf '%s\n' "${epoch}"
+      return 0
+    fi
+  fi
+  return 1
 }
 
 evaluate_ltx_probe() {
@@ -143,12 +228,13 @@ evaluate_ltx_probe() {
   local saw_empty_success=false
   local saw_list_timeout=false
   local saw_list_error=false
-  local level listing newest
+  local level listing newest stripped
 
   for level in "${CONTINUOUS_LEVELS[@]}"; do
     list_ltx_level_json "${level}"
     if (( LIST_LTX_RC == 0 )); then
-      if [[ "${LIST_LTX_STDOUT}" == "[]" || -z "${LIST_LTX_STDOUT//[[:space:]]/}" ]]; then
+      stripped="${LIST_LTX_STDOUT//[[:space:]]/}"
+      if [[ "${stripped}" == "[]" || -z "${stripped}" ]]; then
         saw_empty_success=true
         continue
       fi
@@ -169,7 +255,8 @@ evaluate_ltx_probe() {
 
   list_ltx_level_json "${SNAPSHOT_LEVEL}"
   if (( LIST_LTX_RC == 0 )); then
-    if [[ "${LIST_LTX_STDOUT}" == "[]" || -z "${LIST_LTX_STDOUT//[[:space:]]/}" ]]; then
+    stripped="${LIST_LTX_STDOUT//[[:space:]]/}"
+    if [[ "${stripped}" == "[]" || -z "${stripped}" ]]; then
       saw_empty_success=true
     elif newest="$(newest_timestamp_from_json "${LIST_LTX_STDOUT}")" && [[ -n "${newest}" ]]; then
       snapshot_newest="${newest}"

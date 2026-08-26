@@ -150,13 +150,31 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       : "All Time";
 
   const window5hStart = new Date(now.getTime() - 5 * 3_600_000);
+  const otherSeats = SUBSCRIPTION_ANALYTICS_SOURCE_APPS.filter(
+    (app) => app !== "claude-code"
+  );
+  const seatsFilter = [...otherSeats, "cursor-agent"];
 
-  const [macHealth, tokenGroups, costGroups, token5hGroups, cost5hGroups] = await Promise.all([
+  const eventWhereOr = [
+    { sourceApp: "claude-code", service: "claude-code" },
+    { sourceApp: { in: seatsFilter } },
+  ];
+
+  const [
+    macHealth,
+    tokenGroups,
+    costGroups,
+    token5hGroups,
+    cost5hGroups,
+    rollupTokenGroups,
+    rollupCostGroups,
+    earliestEvent,
+  ] = await Promise.all([
     getLatestMacHealth().catch(() => null),
     prisma.externalUsageEvent.groupBy({
       by: ["sourceApp", "provider", "keyRef", "label"],
       where: {
-        sourceApp: { in: [...SUBSCRIPTION_ANALYTICS_SOURCE_APPS, "cursor-agent"] },
+        OR: eventWhereOr,
         metricType: "usage",
         unit: "token",
         occurredAt: { gte: since },
@@ -166,7 +184,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     prisma.externalUsageEvent.groupBy({
       by: ["sourceApp", "provider", "keyRef"],
       where: {
-        sourceApp: { in: [...SUBSCRIPTION_ANALYTICS_SOURCE_APPS, "cursor-agent"] },
+        OR: eventWhereOr,
         metricType: "cost",
         occurredAt: { gte: since },
       },
@@ -175,7 +193,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     prisma.externalUsageEvent.groupBy({
       by: ["sourceApp", "provider", "keyRef", "label"],
       where: {
-        sourceApp: { in: [...SUBSCRIPTION_ANALYTICS_SOURCE_APPS, "cursor-agent"] },
+        OR: eventWhereOr,
         metricType: "usage",
         unit: "token",
         occurredAt: { gte: window5hStart },
@@ -185,12 +203,38 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     prisma.externalUsageEvent.groupBy({
       by: ["sourceApp", "provider", "keyRef"],
       where: {
-        sourceApp: { in: [...SUBSCRIPTION_ANALYTICS_SOURCE_APPS, "cursor-agent"] },
+        OR: eventWhereOr,
         metricType: "cost",
         occurredAt: { gte: window5hStart },
       },
       _sum: { costUsd: true },
     }),
+    prisma.externalUsageEventDailyRollup.groupBy({
+      by: ["sourceApp", "provider", "keyRef", "label"],
+      where: {
+        OR: eventWhereOr,
+        metricType: "usage",
+        unit: "token",
+        day: { gte: since },
+      },
+      _sum: { totalQuantity: true },
+    }),
+    prisma.externalUsageEventDailyRollup.groupBy({
+      by: ["sourceApp", "provider", "keyRef"],
+      where: {
+        OR: eventWhereOr,
+        metricType: "cost",
+        day: { gte: since },
+      },
+      _sum: { totalCostUsd: true },
+    }),
+    windowDays > 30
+      ? prisma.externalUsageEvent.findFirst({
+          where: { OR: eventWhereOr },
+          orderBy: { occurredAt: "asc" },
+          select: { occurredAt: true },
+        })
+      : null,
   ]);
 
   const agentProcesses = macHealth?.mac?.agentProcesses || {};
@@ -214,14 +258,36 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     const current = reportedCostByPlatform.get(app) || 0;
     reportedCostByPlatform.set(app, current + (row._sum.costUsd || 0));
   }
+  for (const row of rollupCostGroups) {
+    const app = row.sourceApp.toLowerCase();
+    const current = reportedCostByPlatform.get(app) || 0;
+    reportedCostByPlatform.set(app, current + (row._sum.totalCostUsd || 0));
+  }
 
   let grandTotalTokens = 0;
   const tokensByModel = new Map<string, { provider: string; tokens: number; apiCost: number }>();
 
-  for (const group of tokenGroups) {
+  const allTokenRows = [
+    ...tokenGroups.map((g) => ({
+      sourceApp: g.sourceApp,
+      provider: g.provider,
+      keyRef: g.keyRef,
+      label: g.label,
+      quantity: g._sum.quantity,
+    })),
+    ...rollupTokenGroups.map((g) => ({
+      sourceApp: g.sourceApp,
+      provider: g.provider,
+      keyRef: g.keyRef,
+      label: g.label,
+      quantity: g._sum.totalQuantity,
+    })),
+  ];
+
+  for (const group of allTokenRows) {
     const app = group.sourceApp.toLowerCase();
     const model = group.keyRef || "unknown-model";
-    const qty = Math.max(0, group._sum.quantity || 0);
+    const qty = Math.max(0, group.quantity || 0);
     grandTotalTokens += qty;
 
     if (!tokensByPlatformAndModel.has(app)) {
@@ -257,6 +323,18 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
   let totalApiEquivalentCost = 0;
   let totalSubscriptionCost = 0;
   let activeAgentCount = 0;
+
+  let effectiveDays = windowDays;
+  if (windowDays >= 3650) {
+    if (earliestEvent?.occurredAt) {
+      const elapsedDays = Math.ceil(
+        (now.getTime() - earliestEvent.occurredAt.getTime()) / 86_400_000
+      );
+      effectiveDays = Math.max(30, elapsedDays);
+    } else {
+      effectiveDays = 30;
+    }
+  }
 
   const platforms: AgentPlatformStatus[] = AGENT_PLATFORMS.map((meta) => {
     const appKey = meta.id.toLowerCase();
@@ -321,7 +399,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     const reportedCost = reportedCostByPlatform.get(appKey) || 0;
     const estimatedCost = Math.max(platformApiCost, reportedCost);
     const monthlySeat = meta.defaultMonthlySeatCostUsd;
-    const proratedSubscriptionCost = (monthlySeat / 30) * Math.min(windowDays, 30);
+    const proratedSubscriptionCost = (monthlySeat / 30) * Math.min(windowDays, effectiveDays);
     const netSavings = Math.max(0, estimatedCost - proratedSubscriptionCost);
 
     totalApiEquivalentCost += estimatedCost;
@@ -366,7 +444,8 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
 
   // 5-hour rolling burn numbers
   let tokens5h = 0;
-  let costEstimate5hUsd = 0;
+  let derivedCost5hUsd = 0;
+  let reportedCost5hUsd = 0;
 
   for (const g of token5hGroups) {
     const qty = Math.max(0, g._sum.quantity || 0);
@@ -376,14 +455,15 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     const priced = modelPricing
       ? deriveTokenCostUsd(modelPricing.pricing, { input: qty })
       : null;
-    costEstimate5hUsd += priced?.costUsd || 0;
+    derivedCost5hUsd += priced?.costUsd || 0;
   }
 
   for (const g of cost5hGroups) {
     const cost = Math.max(0, g._sum.costUsd || 0);
-    costEstimate5hUsd += cost;
+    reportedCost5hUsd += cost;
   }
 
+  const costEstimate5hUsd = Math.max(derivedCost5hUsd, reportedCost5hUsd);
   const burnRateTokensPerHour = Math.round(tokens5h / 5);
   const burnRateUsdPerHour = Number((costEstimate5hUsd / 5).toFixed(2));
 

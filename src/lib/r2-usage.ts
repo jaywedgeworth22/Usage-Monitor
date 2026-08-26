@@ -2403,15 +2403,17 @@ export async function runR2UsageCheck(
 
       if (
         !liveStorage &&
-        metrics.gbMonthBytes == null &&
         !graphqlStorageSamplesAreFresh(metrics.buckets, now)
       ) {
         // Stale GraphQL storage caused a delayed false 15 GiB alert after prune.
         // Refuse to kill on storage when samples are old; still enforce ops.
-        // A GB-month series is month-long and does not need a fresh 24h row.
+        // Exclude the stale current snapshot while preserving the GB-month series.
         storageSampleStale = true;
-        billingBytes = 0;
         currentBytes = 0;
+        billingBytes =
+          metrics.gbMonthBytes != null && Number.isFinite(metrics.gbMonthBytes)
+            ? metrics.gbMonthBytes
+            : 0;
         console.warn(
           "[r2-usage] GraphQL storage samples are stale; ignoring storage for kill decisions (ops still enforced)"
         );
@@ -2487,13 +2489,22 @@ export async function runR2UsageCheck(
 
   // Soft tip-prune before kill: multi-level LTX history is DR-optional; free
   // tier is not. Re-list after a successful prune so kill/resume use new bytes.
+  const currentStorageBytes =
+    assessment.currentBytes != null && Number.isFinite(assessment.currentBytes)
+      ? assessment.currentBytes
+      : assessment.storage.actual;
+  const currentStoragePct =
+    assessment.storage.limit > 0
+      ? (currentStorageBytes / assessment.storage.limit) * 100
+      : 0;
+
   if (
     storageIsLive &&
-    assessment.storage.mtdPct >= R2_SOFT_PRUNE_STORAGE_PCT &&
+    currentStoragePct >= R2_SOFT_PRUNE_STORAGE_PCT &&
     isLitestreamR2Endpoint()
   ) {
     const prune = await pruneR2LtxTipsIfNeeded(
-      assessment.storage.actual,
+      currentStorageBytes,
       fetchImpl,
       now
     );

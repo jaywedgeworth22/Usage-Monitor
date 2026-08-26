@@ -117,9 +117,38 @@ describe("namecheap adapter", () => {
     expect(() => validateNamecheapBaseUrl("http://api.namecheap.com/xml.response")).toThrow(
       /must use HTTPS/
     );
+    expect(() => validateNamecheapBaseUrl("https://www.namecheap.com/xml.response")).toThrow(
+      /must be an official Namecheap endpoint/
+    );
     expect(() => validateNamecheapBaseUrl("https://malicious-host.com/xml.response")).toThrow(
       /must be an official Namecheap endpoint/
     );
+  });
+
+  it("sets retryable on rate limit or 5xx responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response("Too Many Requests", {
+            status: 429,
+            headers: { "content-type": "text/plain" },
+          })
+        )
+      )
+    );
+
+    try {
+      await fetchUsage("mock-key", {
+        apiUser: "jaywedgeworth",
+        clientIp: "99.44.91.248",
+      });
+      expect.fail("should have thrown");
+    } catch (err: any) {
+      expect(err.retryable).toBe(true);
+      expect(err.code).toBe("HTTP_ERROR");
+      expect(err.status).toBe(429);
+    }
   });
 
   it("requires valid non-loopback client IP", async () => {
