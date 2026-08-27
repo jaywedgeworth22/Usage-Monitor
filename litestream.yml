@@ -44,8 +44,18 @@ dbs:
       endpoint: ${LITESTREAM_S3_ENDPOINT}
       access-key-id: ${LITESTREAM_S3_ACCESS_KEY_ID}
       secret-access-key: ${LITESTREAM_S3_SECRET_ACCESS_KEY}
-      # One multipart part at a time for reliability on constrained links.
-      concurrency: 1
+      # Large L1-compaction multipart uploads to B2 fail with "read multipart
+      # upload data failed ... checksum mismatch" around part 14 on the default
+      # 5MB part size, and each abort restarts the whole multipart — on
+      # 2026-08-27 that retry storm (119 failed compactions in ~2h, one every
+      # ~61s) burned through the shared Backblaze daily transaction caps.
+      # Socratic.Trade hit the identical failure class on 2026-08-07/22 and
+      # fixed it with larger parts + modest parallelism (its
+      # litestream.coolify.yml: part-size 10MB, concurrency 2) — mirror that
+      # proven pair here.  Larger parts cut request count per compaction;
+      # concurrency 2 keeps memory modest on the shared box.
+      part-size: 10MB
+      concurrency: 2
       # Disaster recovery only (host/disk death), not continuous PITR.
       # B2 is Class A cost-tolerant vs R2 free tier; 1h is a good DR cadence.
       sync-interval: 1h
