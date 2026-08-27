@@ -1,4 +1,14 @@
-## Current (2026-08-25 GROK — hosted ios-ship ASC import)
+## Current (2026-08-27 CLAUDE — Litestream B2 multipart fix)
+
+L1 compaction against Backblaze B2 was wedged in a retry storm — 119 "compaction
+failed" errors in ~2h (checksum mismatch ~part 14, whole multipart restarted every
+~61s) — which is what burned through the shared Backblaze daily transaction caps on
+2026-08-26/27.  `litestream.yml` now mirrors Socratic.Trade's proven fix for the
+identical failure class: `part-size: 10MB` + `concurrency: 2`.  Post-deploy proof:
+container logs show a clean `compaction complete level=1` with no new checksum
+mismatches.  Rollout: `docs/rollouts/2026-08-27-litestream-b2-part-size.md`.
+
+## Previous (2026-08-25 GROK — hosted ios-ship ASC import)
 
 GitHub-hosted `macos-latest` `ios-ship` run 32795404598 failed because
 `~/.secrets/appstore-connect.env` does not exist on a hosted runner (same
