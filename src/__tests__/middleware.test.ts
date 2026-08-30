@@ -44,6 +44,7 @@ describe("middleware matcher — /api/budget-status exclusion (regression for th
       "/api/datadog-public-config",
       // App Store Connect privacy/support URLs (public legal pages)
       "/privacy",
+      "/privacy-policy",
       "/support",
     ]) {
       expect(isSessionGated(p)).toBe(false);

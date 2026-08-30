@@ -25,6 +25,7 @@ export const isPublicPath = (pathname: string) => {
     "/login",
     // App Store Connect + public legal pages (must not require dashboard login).
     "/privacy",
+    "/privacy-policy",
     "/support",
     "/api/auth/login",
     "/api/cron",

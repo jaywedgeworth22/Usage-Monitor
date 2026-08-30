@@ -16,6 +16,15 @@ const nextConfig = {
     "@datadog/wasm-js-rewriter",
   ],
   poweredByHeader: false,
+  async redirects() {
+    return [
+      {
+        source: "/privacy-policy",
+        destination: "/privacy",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {
