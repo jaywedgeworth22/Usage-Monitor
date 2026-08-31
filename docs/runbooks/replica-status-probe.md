@@ -9,8 +9,8 @@ Verified against `scripts/replica-status-heartbeat.sh`,
 `deploy/coolify/replica-status-probe.sh`, `src/lib/runtime-health.ts`
 `getBackupRuntimeStatus`, and `src/app/api/ready/route.ts` as of
 #1354 / #1355 (`cfd532b`); host-probe cost trim (drop the always-failing
-`docker exec --once` attempt, levels 0+9 only, 30min cadence) as of
-2026-08-31.
+`docker exec --once` attempt, adaptive level-0-first escalation, 30min
+cadence) as of 2026-08-31 (PR #1378).
 
 ## Intent
 
@@ -38,7 +38,7 @@ Two writers, one status file:
 | Path | Who | Credentials | When |
 |---|---|---|---|
 | Looping heartbeat | `scripts/replica-status-heartbeat.sh` (child of `start-with-litestream.sh`) | Inherits Infisical from the process tree | Every `LITESTREAM_REPLICA_HEARTBEAT_INTERVAL_SECONDS` (default 600) |
-| Host oneshot | `deploy/coolify/replica-status-probe.sh` as `/usr/local/sbin/usage-monitor-replica-status` | Host env-file fallback (below) | 30-minute systemd timer |
+| Host oneshot | `deploy/coolify/replica-status-probe.sh` as `/usr/local/sbin/usage-monitor-replica-status` | Host env-file fallback (below) | 30-minute systemd timer, 1-5 LTX calls per tick (adaptive, see below) |
 
 Coolify injects Infisical into the **running process tree only**.
 `docker exec` does not see those vars, so a bare `litestream ltx` inside
@@ -79,8 +79,16 @@ litestream ltx -json -config /app/litestream.yml -level N /data/prod.db
 
 | Writer | Levels queried | Pick rule |
 |---|---|---|
-| Looping heartbeat (in-container) | 0–3 continuous + 9 snapshot | Newest timestamp among successful non-empty continuous lists; snapshot (9) used only when 0–3 are empty, `reason=snapshot_only` |
-| Host oneshot (2026-08-31) | **0 and 9 only** | Level 0 is the continuous tip (replication alive); level 9 is the snapshot. Levels 1–3 are coarser compactions of the same stream and never add a freshness signal level 0 doesn't already have, so the host fallback skips them to hold its Backblaze Class C usage to 2 LIST calls/tick instead of 5 |
+| Looping heartbeat (in-container) | 0–3 continuous + 9 snapshot, every tick | Newest timestamp among successful non-empty continuous lists; snapshot (9) used only when 0–3 are empty, `reason=snapshot_only` |
+| Host oneshot (2026-08-31) | **Adaptive: 0 first, then 1-3, then 9** | Try level 0 alone (the common case — replication actively writing — resolves in this single call). Only escalate to 1-3 when 0 comes back empty/erroring/timed-out: litestream's default L0 retention is brief, so a compaction can legitimately leave L0 empty for a beat with no new writes since, while the true continuous tip already sits at L1-L3 — skipping straight to a snapshot in that case would misreport a healthy replica as stale. Level 9 is queried only when no continuous tip was found at any level. Net: 1 Backblaze Class C LIST call/tick in steady state, up to 5 only during the rare escalation |
+
+An earlier version of this trim queried only levels {0, 9} unconditionally,
+on the (wrong) assumption that levels 1-3 could never hold a freshness
+signal level 0 didn't already have. Caught by code review before merge
+(PR #1378) — see `scripts/test-replica-status-probe.sh`'s escalation
+self-test, which execs the real embedded Python against mocked
+`subprocess.run` responses specifically to keep this regression from
+coming back silently.
 
 Timeouts are 60s (heartbeat) / 70s (host).  TLS / ListObjectsV2 hangs
 classify as `list_timeout`, not `no_parseable_ltx`.
@@ -116,6 +124,12 @@ when `replicaOk` is false (except file-age, which becomes
   script.**  It was removed 2026-08-31 because it always failed on Coolify
   (`replica_credentials_missing`) and always fell through anyway — it only
   ever cost a wasted `docker exec` + bash spawn per tick.
+- **Don't drop levels 1-3 from the host oneshot's escalation path to save
+  calls.**  Level 0 alone is *usually* sufficient, but litestream's L0
+  retention is brief; querying only {0, 9} unconditionally can report a
+  healthy replica as stale (or worse, `empty_ltx`) whenever a compaction
+  has just cleared L0 with no new writes since.  Escalate to 1-3 before
+  falling back to the snapshot — see "What it lists" above.
 - **Host script exit 0 is not "replica healthy".**  After a verdict is
   written, the oneshot exits 0 so systemd does not disable the timer.
   Read the JSON `ok` / `reason`.
