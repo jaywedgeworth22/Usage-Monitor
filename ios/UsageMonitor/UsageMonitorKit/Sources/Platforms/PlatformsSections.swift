@@ -477,19 +477,23 @@ struct FleetOperationsSection: View {
                         Text(r2UsageLabel(account))
                             .font(Theme.Typography.caption)
                             .foregroundStyle(Theme.Colors.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                         if let pct = account.storage?.mtdPct {
                             BudgetMeter(
                                 fraction: pct / 100,
                                 status: PlatformFormat.usageBarStatus(pct),
                                 height: 6
                             )
-                            .frame(maxWidth: .infinity)
                             .accessibilityLabel("Free-tier storage used")
                         }
                     }
-                    .fixedSize(horizontal: true, vertical: false)
+                    // Bounded, compressible width — .fixedSize here pushed the
+                    // badge/meter off the card's right edge on narrow phones.
+                    .frame(maxWidth: 150, alignment: .trailing)
                 }
                 StatusBadge(health.title, status: health.semantic)
+                    .layoutPriority(1)
             }
 
             if let detail = health.detail(for: account) {

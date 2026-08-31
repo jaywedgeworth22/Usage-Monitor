@@ -226,8 +226,22 @@ final class ServerStatusStore {
         self.probe = probe
     }
 
+    /// Snapshots older than this refresh automatically on the next
+    /// `loadIfNeeded`.  Deploy restarts produce 5-10 minute readiness blips
+    /// (three in the last week per UptimeRobot); without an age cap the tab
+    /// showed a mid-deploy "Database — Down" snapshot indefinitely because
+    /// tab views stay mounted and `.task` never re-fires.
+    static let autoRefreshAge: TimeInterval = 180
+
     func loadIfNeeded(using client: APIClient) async {
-        if case .idle = state { await load(using: client) }
+        if case .idle = state {
+            await load(using: client)
+            return
+        }
+        if let snapshot = state.value,
+           Date().timeIntervalSince(snapshot.fetchedAt) > Self.autoRefreshAge {
+            await fetch(using: client)
+        }
     }
 
     func load(using client: APIClient) async {

@@ -304,10 +304,8 @@ struct GlassTabBar: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
         .glassBarBackground()
-        .padding(.horizontal, 16)
-        .padding(.top, 4)
-        .padding(.bottom, 6)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Tab bar")
     }
@@ -369,17 +367,16 @@ private extension View {
         }
     }
 
-    /// Liquid Glass when the OS provides it; ultra-thin material + hairline
-    /// stroke + soft shadow as the visually-equivalent fallback.
-    @ViewBuilder
+    /// Full-width anchored bar (owner 2026-08-31): mostly-solid, slightly
+    /// glassy, flush with the screen's sides and bottom — no floating capsule
+    /// gaps.  `.bar` is the system chrome material; a hairline divider marks
+    /// the top edge and the material extends under the home indicator.
     func glassBarBackground() -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: Capsule())
-        } else {
-            self
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(.primary.opacity(0.08)))
-                .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        self.background {
+            Rectangle()
+                .fill(.bar)
+                .overlay(alignment: .top) { Divider() }
+                .ignoresSafeArea(edges: .bottom)
         }
     }
 }

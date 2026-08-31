@@ -50,7 +50,6 @@ public struct SettingsRootView: View {
                     SecuritySection(settings: env.settings)
                     AboutSection(host: model.resolvedHostDisplay)
                 }
-                .tabBarScrollClearance()
                 .navigationTitle(AppTab.settings.title)
                 // Inline (centered compact) title — avoid large left-aligned title at rest.
                 .navigationBarTitleDisplayMode(.inline)

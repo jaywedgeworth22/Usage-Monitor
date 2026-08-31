@@ -27,7 +27,6 @@ public struct AgentsRootView: View {
                 content
             }
             .listStyle(.insetGrouped)
-            .tabBarScrollClearance()
             .navigationTitle("Coding Agents")
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {

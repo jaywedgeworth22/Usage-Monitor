@@ -2239,6 +2239,16 @@ export interface ProjectBudgetStatusResponse {
     percentUsed: number | null;
     overBudget: boolean;
     warning: boolean;
+    // Global-budget snapshot, forwarded from computeBudgetStatus's summary.
+    // The dashboard (src/app/page.tsx) has parsed these from /api/budget-status
+    // since 146c9ca0, but this route never sent them — the hero fell back to
+    // the provider-plan sum on every first paint.  Bearer-token clients (iOS,
+    // widgets) also get their only global-budget read through this payload.
+    globalMonthlyBudgetUsd: number | null;
+    suggestedGlobalBudgetUsd: number | null;
+    effectiveGlobalBudgetUsd: number | null;
+    globalBudgetSource: "override" | "suggested" | "none";
+    projectBudgetCount: number;
   };
 }
 
@@ -2554,6 +2564,11 @@ async function computeProjectBudgetStatusUncached(now: Date): Promise<ProjectBud
       percentUsed: totalBudgetUsd > 0 ? budgetedSpentUsd / totalBudgetUsd : null,
       overBudget: projectStatuses.some((p) => p.status === "exceeded"),
       warning: projectStatuses.some((p) => p.status === "warning"),
+      globalMonthlyBudgetUsd: providerStatus.summary.globalMonthlyBudgetUsd,
+      suggestedGlobalBudgetUsd: providerStatus.summary.suggestedGlobalBudgetUsd,
+      effectiveGlobalBudgetUsd: providerStatus.summary.effectiveGlobalBudgetUsd,
+      globalBudgetSource: providerStatus.summary.globalBudgetSource,
+      projectBudgetCount: providerStatus.summary.projectBudgetCount,
     },
   };
 }
