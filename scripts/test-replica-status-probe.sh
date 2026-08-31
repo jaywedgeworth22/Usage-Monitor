@@ -37,18 +37,29 @@ if grep -nE 'docker exec.*LITESTREAM_S3_' "$COOLIFY_PROBE" >/dev/null; then
 fi
 grep -q '\-\-env-file' "$COOLIFY_PROBE" || fail "coolify probe missing docker exec --env-file"
 
-# In-container verdict must win over host credential-missing fallback —
-# but only when heartbeat exits 0. A cred-less `docker exec --once` writes
-# replica_credentials_missing and must still reach --env-file fallback.
-grep -q 'status_mtime_before' "$COOLIFY_PROBE" || fail "coolify probe missing mtime guard"
-grep -q 'in-container heartbeat verdict' "$COOLIFY_PROBE" \
-  || fail "coolify probe missing in-container verdict preference"
-grep -q 'hb_rc' "$COOLIFY_PROBE" || fail "coolify probe missing heartbeat exit-code gate"
-if grep -nE 'run_in_container_heartbeat \|\| true' "$COOLIFY_PROBE" >/dev/null; then
-  fail "coolify probe still ignores heartbeat exit code"
+# Cost efficiency (2026-08-31): the in-container `docker exec ... --once`
+# heartbeat attempt always fails on this infra (docker exec never carries
+# the Infisical-injected env) and is short-circuited — the probe must go
+# straight to the host env-file LTX fallback, and must query only levels 0
+# and 9 (not the redundant 1/2/3 mid-tier compaction levels), to hold the
+# call count at 2/tick instead of 5/tick.
+if grep -nE 'run_in_container_heartbeat' "$COOLIFY_PROBE" >/dev/null; then
+  fail "coolify probe still attempts the always-failing in-container heartbeat"
 fi
-if ! grep -n 'replica_credentials_missing' "$COOLIFY_PROBE" | grep -q 'host fallback'; then
-  fail "coolify probe must not treat replica_credentials_missing as a skip"
+if grep -vE '^\s*#' "$COOLIFY_PROBE" | grep -nE 'docker exec.*replica-status-heartbeat\.sh' >/dev/null; then
+  fail "coolify probe still execs replica-status-heartbeat.sh in-container"
+fi
+grep -q 'for level in (0, 9)' "$COOLIFY_PROBE" \
+  || fail "coolify probe must query exactly levels 0 and 9"
+if grep -nE 'for level in \(0, 1, 2, 3, 9\)' "$COOLIFY_PROBE" >/dev/null; then
+  fail "coolify probe still scans all five levels per tick"
+fi
+
+# Timer cadence: widened 10min -> 30min alongside the level trim (2026-08-31).
+TIMER="$ROOT/deploy/coolify/usage-monitor-replica-status.timer"
+grep -q 'OnUnitActiveSec=30min' "$TIMER" || fail "timer missing 30min cadence"
+if grep -nE 'OnUnitInactiveSec=10min' "$TIMER" >/dev/null; then
+  fail "timer still on the old 10min cadence"
 fi
 
 # Fixture-driven classify / snapshot behavior.

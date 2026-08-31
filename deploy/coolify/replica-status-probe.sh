@@ -2,8 +2,8 @@
 # Coolify/Hetzner host probe: prove Litestream replica freshness for Usage Monitor.
 #
 # Install on fleet-hetzner-nbg1 as /usr/local/sbin/usage-monitor-replica-status
-# and drive with a 10-minute systemd timer. Writes into the Coolify volume that
-# is mounted at /data inside the app container so Next.js can read the verdict
+# and drive with a systemd timer. Writes into the Coolify volume that is
+# mounted at /data inside the app container so Next.js can read the verdict
 # at LITESTREAM_REPLICA_STATUS_PATH (default /data/.litestream-replica-status.json).
 #
 # Why not reuse deploy/oracle/replica-status-probe.sh?
@@ -16,6 +16,22 @@
 # Secret safety: never pass LITESTREAM_S3_* (or any replica credential) on
 # docker exec argv — systemd journals capture argv. Host fallback injects env
 # via a mode-0600 --env-file that is deleted immediately after exec.
+#
+# Cost efficiency (2026-08-31): this probe used to try an in-container
+# `docker exec ... replica-status-heartbeat.sh --once` first and only fall
+# back to the host env-file path when that failed. On this infra it always
+# fails — Coolify injects the Infisical secrets into the entrypoint process's
+# environment only, and a bare `docker exec` never inherits that, so the
+# in-container attempt burned a docker-exec + bash spawn on every tick for a
+# guaranteed `replica_credentials_missing`. That attempt is removed; we go
+# straight to the host env-file LTX fallback below. The fallback itself was
+# also trimmed from 5 `litestream ltx -level {0,1,2,3,9}` LIST calls per tick
+# to 2 (`-level 0` and `-level 9` only) — level 0 proves continuous
+# replication is alive and level 9 proves a snapshot exists, which is the
+# same freshness verdict the mid-tier compaction levels (1-3) would give,
+# just via a coarser (and here, redundant) view. Paired with widening the
+# timer cadence 10min -> 30min, this cuts the ~720 Backblaze Class C list
+# calls/day this probe drove down to ~96/day.
 set -euo pipefail
 umask 022
 export LC_ALL=C
@@ -69,11 +85,6 @@ write_status_host() {
   mv -f "${temporary}" "${status_file}"
 }
 
-status_mtime_epoch() {
-  local path="$1"
-  stat -c '%Y' "${path}" 2>/dev/null || stat -f '%m' "${path}" 2>/dev/null || echo 0
-}
-
 CONTAINER="$(find_container || true)"
 STATUS_FILE="$(volume_status_path || true)"
 
@@ -86,39 +97,12 @@ if [[ -z "${STATUS_FILE}" ]]; then
   exit 1
 fi
 
-status_checked_at_before="$(jq -r '.checkedAt // empty' "${STATUS_FILE}" 2>/dev/null || true)"
-status_mtime_before="$(status_mtime_epoch "${STATUS_FILE}")"
-
-run_in_container_heartbeat() {
-  docker exec "${CONTAINER}" bash /app/scripts/replica-status-heartbeat.sh --once 2>/dev/null
-}
-
-# Prefer a cred-equipped in-container heartbeat (the looping child of
-# start-with-litestream, which inherits Infisical).  `docker exec --once`
-# does not — Coolify injects secrets into the process tree only, so that
-# path writes replica_credentials_missing and must not skip the host
-# --env-file fallback.  Trust the --once write only when it exits 0
-# (healthy, snapshot_only, age-exceeded, or an intentional R2 pause).
-hb_rc=0
-run_in_container_heartbeat || hb_rc=$?
-status_mtime_after="$(status_mtime_epoch "${STATUS_FILE}")"
-status_checked_at_after="$(jq -r '.checkedAt // empty' "${STATUS_FILE}" 2>/dev/null || true)"
-
-if [[ "${hb_rc}" -eq 0 && -f "${STATUS_FILE}" ]] \
-  && { (( status_mtime_after > status_mtime_before )) || [[ -n "${status_checked_at_after}" && "${status_checked_at_after}" != "${status_checked_at_before}" ]]; }; then
-  if jq -e '.checkedAt != null and .checkedAt != ""' "${STATUS_FILE}" >/dev/null 2>&1; then
-    ok="$(jq -r '.ok' "${STATUS_FILE}")"
-    reason="$(jq -r '.reason // "null"' "${STATUS_FILE}")"
-    if [[ "${reason}" == "replica_credentials_missing" ]]; then
-      log "in-container heartbeat wrote replica_credentials_missing (docker exec has no Infisical env); using host fallback"
-    else
-      log "in-container heartbeat verdict ok=${ok} reason=${reason} → ${STATUS_FILE}"
-      exit 0
-    fi
-  fi
-fi
-
-log "in-container heartbeat did not refresh ${STATUS_FILE}; using host env-file LTX fallback on ${CONTAINER}"
+# No in-container heartbeat attempt here (short-circuited, see header
+# comment) — a bare `docker exec` on this infra never carries the
+# Infisical-injected LITESTREAM_S3_* env, so it would always fail with
+# replica_credentials_missing before listing anything. Go straight to the
+# host env-file LTX fallback, which supplies that env itself.
+log "using host env-file LTX fallback on ${CONTAINER}"
 
 run_ltx_via_process_env() {
   python3 - <<'PY' "${CONTAINER}" "${MAX_LTX_AGE_SECONDS}"
@@ -234,7 +218,11 @@ try:
     saw_timeout = False
     saw_error = False
 
-    for level in (0, 1, 2, 3, 9):
+    # Only the continuous tip (0) and the snapshot level (9) — see the
+    # cost-efficiency header comment. Levels 1-3 are coarser compactions of
+    # the same continuous stream and would only ever match or lag level 0,
+    # never add a freshness signal level 0 doesn't already give.
+    for level in (0, 9):
         try:
             proc = subprocess.run(
                 [
