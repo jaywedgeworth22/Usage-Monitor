@@ -3,9 +3,11 @@
 Namecheap API client & CLI for AI Agents and fleet operations.
 Allows querying account balances, listing domains, checking availability, and viewing DNS records.
 
-The Namecheap account username is "simplewithus" — it is the default for both ApiUser
-and UserName (override with $NAMECHEAP_API_USER or --user).  A wrong username makes the
-API return error 1011102 "API Key is invalid", even when the key itself is fine.
+The account username (sent as both ApiUser and UserName) is resolved from
+$NAMECHEAP_API_USER or ~/.secrets/global-api-keys, exactly like the API key — it is
+never hardcoded here (this repo is public; account details live in the private
+fleet-ops ATTACK-MAP.md).  A wrong username makes the API return error 1011102
+"API Key is invalid", even when the key itself is fine.
 
 Usage:
   python3 scripts/namecheap.py balances
@@ -23,18 +25,26 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 
-def get_api_key():
-    key = os.environ.get("NAMECHEAP_API_KEY")
-    if key:
-        return key.strip().strip("\"'")
+def _read_secret(name):
+    val = os.environ.get(name)
+    if val:
+        return val.strip().strip("\"'")
 
     secrets_path = os.path.expanduser("~/.secrets/global-api-keys")
     if os.path.exists(secrets_path):
         with open(secrets_path) as f:
             for line in f:
-                if line.startswith("NAMECHEAP_API_KEY="):
+                if line.startswith(name + "="):
                     return line.split("=", 1)[1].strip().strip("\"'")
     return None
+
+
+def get_api_key():
+    return _read_secret("NAMECHEAP_API_KEY")
+
+
+def get_api_user():
+    return _read_secret("NAMECHEAP_API_USER")
 
 
 def get_public_ip():
@@ -58,7 +68,9 @@ def call_namecheap(command, params=None, api_user=None, api_key=None, client_ip=
         raise ValueError("NAMECHEAP_API_KEY not found in environment or ~/.secrets/global-api-keys")
 
     if not api_user:
-        api_user = os.environ.get("NAMECHEAP_API_USER", "simplewithus")
+        api_user = get_api_user()
+    if not api_user:
+        raise ValueError("NAMECHEAP_API_USER not found in environment or ~/.secrets/global-api-keys")
 
     if not client_ip:
         client_ip = get_public_ip()
@@ -212,7 +224,7 @@ def cmd_dns(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Namecheap API CLI for Agents & Fleet Operations")
-    parser.add_argument("--user", default=None, help="Namecheap username (default: $NAMECHEAP_API_USER or simplewithus)")
+    parser.add_argument("--user", default=None, help="Namecheap username (default: $NAMECHEAP_API_USER or ~/.secrets/global-api-keys)")
     parser.add_argument("--ip", default=None, help="Whitelisted client IP (default: auto-detected public IP)")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
 
