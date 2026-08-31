@@ -3,6 +3,10 @@
 Namecheap API client & CLI for AI Agents and fleet operations.
 Allows querying account balances, listing domains, checking availability, and viewing DNS records.
 
+The Namecheap account username is "simplewithus" — it is the default for both ApiUser
+and UserName (override with $NAMECHEAP_API_USER or --user).  A wrong username makes the
+API return error 1011102 "API Key is invalid", even when the key itself is fine.
+
 Usage:
   python3 scripts/namecheap.py balances
   python3 scripts/namecheap.py domains
@@ -54,7 +58,7 @@ def call_namecheap(command, params=None, api_user=None, api_key=None, client_ip=
         raise ValueError("NAMECHEAP_API_KEY not found in environment or ~/.secrets/global-api-keys")
 
     if not api_user:
-        api_user = os.environ.get("NAMECHEAP_API_USER", "jaywedgeworth")
+        api_user = os.environ.get("NAMECHEAP_API_USER", "simplewithus")
 
     if not client_ip:
         client_ip = get_public_ip()
@@ -208,7 +212,7 @@ def cmd_dns(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Namecheap API CLI for Agents & Fleet Operations")
-    parser.add_argument("--user", default=None, help="Namecheap username (default: $NAMECHEAP_API_USER or jaywedgeworth)")
+    parser.add_argument("--user", default=None, help="Namecheap username (default: $NAMECHEAP_API_USER or simplewithus)")
     parser.add_argument("--ip", default=None, help="Whitelisted client IP (default: auto-detected public IP)")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
 
