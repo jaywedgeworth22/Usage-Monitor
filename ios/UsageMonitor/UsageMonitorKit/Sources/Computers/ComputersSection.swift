@@ -146,7 +146,9 @@ struct ComputersSection: View {
                 }
             }
 
-            let rows = mac.processRows
+            // Owner (2026-08-31): not-enabled services are noise on this tab —
+            // show only processes that are actually expected to run.
+            let rows = mac.processRows.filter { !isNotEnabledStatus($0.status) }
             if !rows.isEmpty {
                 Text("Local Services")
                     .font(Theme.Typography.captionEmphasis)
@@ -154,7 +156,7 @@ struct ComputersSection: View {
                     .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 2, trailing: 20))
                     .accessibilityAddTraits(.isHeader)
                 ForEach(rows, id: \.name) { row in
-                    let name = shortProcessName(row.name)
+                    let name = displayProcessName(row.name)
                     let statusText = processLabel(row.status)
                     LabeledContent(name) {
                         StatusBadge(
@@ -259,6 +261,24 @@ struct ComputersSection: View {
 
     private func shortProcessName(_ name: String) -> String {
         name.replacingOccurrences(of: "com.jay.", with: "").replacingOccurrences(of: "com.jays.", with: "")
+    }
+
+    /// Pretty names for the fixed process keys the Mac watchdog reports.
+    private static let processDisplayNames: [String: String] = [
+        "docker": "Docker",
+        "orbstack": "OrbStack",
+        "ollama": "Ollama",
+        "litestream": "Litestream",
+    ]
+
+    private func displayProcessName(_ name: String) -> String {
+        let short = shortProcessName(name)
+        return Self.processDisplayNames[short.lowercased()] ?? short
+    }
+
+    private func isNotEnabledStatus(_ status: String) -> Bool {
+        let s = status.lowercased()
+        return s == "not_enabled" || s == "not-enabled" || s == "disabled"
     }
 
     private func isIgnoredStatus(_ status: String) -> Bool {

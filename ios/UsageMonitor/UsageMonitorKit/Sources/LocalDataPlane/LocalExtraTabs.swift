@@ -55,18 +55,8 @@ struct LocalFleetTab: View {
                         StatusBadge(syncVal, status: isDemo ? .ok : .neutral, systemImage: isDemo ? "checkmark.circle.fill" : "circle")
                     }
                     .copyableRow(label: "agent-sync", value: syncVal)
-                    LabeledContent("docker") {
-                        StatusBadge("Not Enabled", status: .neutral, systemImage: "circle")
-                    }
-                    .copyableRow(label: "docker", value: "Not Enabled")
-                    LabeledContent("litestream") {
-                        StatusBadge("Not Enabled", status: .neutral, systemImage: "circle")
-                    }
-                    .copyableRow(label: "litestream", value: "Not Enabled")
-                    LabeledContent("ollama") {
-                        StatusBadge("Not Enabled", status: .neutral, systemImage: "circle")
-                    }
-                    .copyableRow(label: "ollama", value: "Not Enabled")
+                    // Not-enabled services are intentionally not listed
+                    // (owner 2026-08-31: no flags/rows for disabled processes).
                 } header: {
                     Text("Local Services")
                 }

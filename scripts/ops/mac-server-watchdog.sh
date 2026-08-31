@@ -77,7 +77,11 @@ check_process() {
 
 OLLAMA_STATUS="$(check_process "ollama" "true")"
 LITESTREAM_STATUS="$(check_process "litestream" "true")"
-DOCKER_STATUS="$(check_process "(Docker|OrbStack|orbstack)" "true")"
+# OrbStack and Docker Desktop are distinct runtimes — report them separately so
+# the app can label the one actually in use (owner 2026-08-31: "docker" read
+# wrong when the runtime is OrbStack).
+ORBSTACK_STATUS="$(check_process "(OrbStack|orbstack)" "true")"
+DOCKER_STATUS="$(check_process "Docker" "true")"
 AGENT_SYNC_STATUS="$(check_process "agent-sync" "false")"
 
 # Coding agent live execution checks
@@ -128,6 +132,7 @@ PAYLOAD="$(jq -n \
   --argjson uptimeSeconds "${UPTIME_SEC:-0}" \
   --arg ollama "$OLLAMA_STATUS" \
   --arg litestream "$LITESTREAM_STATUS" \
+  --arg orbstack "$ORBSTACK_STATUS" \
   --arg docker "$DOCKER_STATUS" \
   --arg agentSync "$AGENT_SYNC_STATUS" \
   --arg claudeAgent "$CLAUDE_STATUS" \
@@ -152,6 +157,7 @@ PAYLOAD="$(jq -n \
     processes: {
       ollama: $ollama,
       litestream: $litestream,
+      orbstack: $orbstack,
       docker: $docker,
       "agent-sync": $agentSync
     },
