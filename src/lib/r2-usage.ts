@@ -266,7 +266,7 @@ let liveS3ListCache: {
 } | null = null;
 let r2ProductStatusCache = new Map<
   string,
-  { atMs: number; status: "enabled" | "disabled" }
+  { atMs: number; status: "enabled" | "disabled"; bucketNames: string[] | null }
 >();
 
 function getFlagDir(): string {
@@ -1192,18 +1192,50 @@ export type R2ProductStatus = "enabled" | "disabled" | "unknown";
  * REST ListBuckets is Class A.  Call only when GraphQL storage would trip the
  * guard (or for the retired `old` slot).  Cache the verdict for 24h.
  */
-export async function probeR2ProductStatus(
+export interface R2BucketInventory {
+  status: R2ProductStatus;
+  /** Live bucket names from REST ListBuckets, or null when unknown/unlistable. */
+  bucketNames: string[] | null;
+}
+
+/** Bucket names from a Cloudflare REST ListBuckets payload, or null if unparseable. */
+export function parseR2BucketNames(payload: unknown): string[] | null {
+  const root = payload as {
+    result?: { buckets?: Array<{ name?: unknown }> } | Array<{ name?: unknown }>;
+    buckets?: Array<{ name?: unknown }>;
+  };
+  const list = Array.isArray(root.result)
+    ? root.result
+    : Array.isArray(root.result?.buckets)
+      ? root.result.buckets
+      : Array.isArray(root.buckets)
+        ? root.buckets
+        : null;
+  if (!list) return null;
+  const names: string[] = [];
+  for (const entry of list) {
+    if (typeof entry?.name === "string" && entry.name.length > 0) {
+      names.push(entry.name);
+    }
+  }
+  return names;
+}
+
+export async function probeR2BucketInventory(
   credentials: R2UsageCredentials,
   fetchImpl: typeof fetch = fetch,
   now: Date = new Date(),
-  cache: Map<string, { atMs: number; status: "enabled" | "disabled" }> = r2ProductStatusCache
-): Promise<R2ProductStatus> {
+  cache: Map<
+    string,
+    { atMs: number; status: "enabled" | "disabled"; bucketNames: string[] | null }
+  > = r2ProductStatusCache
+): Promise<R2BucketInventory> {
   const cached = cache.get(credentials.accountId);
   if (
     cached &&
     now.getTime() - cached.atMs < R2_PRODUCT_STATUS_CACHE_TTL_MS
   ) {
-    return cached.status;
+    return { status: cached.status, bucketNames: cached.bucketNames };
   }
 
   const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(credentials.accountId)}/r2/buckets`;
@@ -1220,19 +1252,40 @@ export async function probeR2ProductStatus(
       payload = { errors: [{ message: text.slice(0, 200) }] };
     }
     if (isR2ProductDisabledPayload(payload)) {
-      cache.set(credentials.accountId, { atMs: now.getTime(), status: "disabled" });
-      return "disabled";
+      cache.set(credentials.accountId, {
+        atMs: now.getTime(),
+        status: "disabled",
+        bucketNames: null,
+      });
+      return { status: "disabled", bucketNames: null };
     }
     if (res.ok) {
-      cache.set(credentials.accountId, { atMs: now.getTime(), status: "enabled" });
-      return "enabled";
+      const bucketNames = parseR2BucketNames(payload);
+      cache.set(credentials.accountId, {
+        atMs: now.getTime(),
+        status: "enabled",
+        bucketNames,
+      });
+      return { status: "enabled", bucketNames };
     }
     // 403/10000 = token cannot list.  Do not treat that as disabled — UM's
     // JAY token GraphQL-reads Usage.Jays.Services but REST-lists 403.
-    return "unknown";
+    return { status: "unknown", bucketNames: null };
   } catch {
-    return "unknown";
+    return { status: "unknown", bucketNames: null };
   }
+}
+
+export async function probeR2ProductStatus(
+  credentials: R2UsageCredentials,
+  fetchImpl: typeof fetch = fetch,
+  now: Date = new Date(),
+  cache: Map<
+    string,
+    { atMs: number; status: "enabled" | "disabled"; bucketNames: string[] | null }
+  > = r2ProductStatusCache
+): Promise<R2ProductStatus> {
+  return (await probeR2BucketInventory(credentials, fetchImpl, now, cache)).status;
 }
 
 function r2NotEnabledSnapshot(
@@ -2074,6 +2127,12 @@ export interface R2FleetAccountSnapshot {
   overallOnTrackToExceed70Pct: boolean;
   metricsSource: R2MetricsSource | "unconfigured";
   buckets: Array<{ bucketName: string; bytes: number }>;
+  /**
+   * Buckets GraphQL still reports for this month but REST ListBuckets says no
+   * longer exist — excluded from `currentBytes`/`buckets` (deleted buckets
+   * linger in month-window analytics until the UTC month rolls over).
+   */
+  ghostBuckets?: string[];
   /** True only for the Usage Monitor (Jay) account when this host's kill flag is set. */
   autoDisabled?: boolean;
   litestreamUsesR2?: boolean;
@@ -2239,7 +2298,7 @@ export async function fetchR2FleetSummary(
           );
         }
       }
-      const assessment = assessR2Usage(
+      let assessment = assessR2Usage(
         overlaid.billingBytes,
         metrics.classAOps,
         metrics.classBOps,
@@ -2260,15 +2319,52 @@ export async function fetchR2FleetSummary(
       // (Jay Old 2026-08-15: 116 GiB, REST 10042).  ListBuckets is Class A,
       // so only confirm when storage would trip the guard or this is the
       // retired `old` slot.
+      let ghostBuckets: string[] | undefined;
       const storageWouldTrip = assessment.storage.onTrackToExceed;
       if (storageWouldTrip || slot.id === "old") {
-        const product = await probeR2ProductStatus(
+        const inventory = await probeR2BucketInventory(
           { accountId: cfg.accountId, apiToken: cfg.apiToken },
           fetchImpl,
           now
         );
-        if (product === "disabled") {
+        if (inventory.status === "disabled") {
           return r2NotEnabledSnapshot(slot.id, slot.label, cfg.accountId);
+        }
+        // A DELETED bucket keeps its month-window GraphQL row until the UTC
+        // month rolls over (usage-monitor-bucket 2026-08: 15 GiB ghost weeks
+        // after deletion).  Drop non-existent buckets from the CURRENT
+        // snapshot; GB-month stays untouched — the bucket's earlier residency
+        // this month really does bill.
+        if (inventory.status === "enabled" && inventory.bucketNames) {
+          const liveNames = new Set(inventory.bucketNames);
+          const ghosts = overlaid.buckets.filter(
+            (b) => !liveNames.has(b.bucketName)
+          );
+          if (ghosts.length > 0) {
+            ghostBuckets = ghosts.map((b) => b.bucketName);
+            const kept = overlaid.buckets.filter((b) =>
+              liveNames.has(b.bucketName)
+            );
+            const keptBytes = kept.reduce((sum, b) => sum + b.bytes, 0);
+            overlaid = { ...overlaid, buckets: kept, currentBytes: keptBytes };
+            assessment = assessR2Usage(
+              resolveBillingStorageBytes(keptBytes, metrics.gbMonthBytes),
+              metrics.classAOps,
+              metrics.classBOps,
+              DEFAULT_R2_FREE_TIER_LIMITS,
+              now,
+              {
+                metricsSource: overlaid.metricsSource,
+                buckets: kept,
+                currentBytes: keptBytes,
+                gbMonthBytes: metrics.gbMonthBytes,
+                monthPeakBytes: metrics.monthPeakBytes,
+                monthPeakDate: metrics.monthPeakDate,
+                previousWeekGbMonthBytes: metrics.previousWeekGbMonthBytes,
+                previousWeekPeakBytes: metrics.previousWeekPeakBytes,
+              }
+            );
+          }
         }
       }
       return {
@@ -2286,6 +2382,7 @@ export async function fetchR2FleetSummary(
           bucketName: b.bucketName,
           bytes: b.bytes,
         })),
+        ghostBuckets,
         autoDisabled: slot.id === "um" ? isR2AutoDisabled() : undefined,
         litestreamUsesR2:
           slot.id === "um" ? isLitestreamR2Endpoint() : undefined,

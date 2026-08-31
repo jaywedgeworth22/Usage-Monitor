@@ -33,6 +33,7 @@ import {
   resolveBillingStorageBytes,
   summarizeR2DailyStorage,
   formatFleetR2DigestLines,
+  parseR2BucketNames,
   planLtxTipPrune,
   DEFAULT_R2_FREE_TIER_LIMITS,
   R2_DISABLED_FLAG_FILENAME,
@@ -941,6 +942,151 @@ describe("R2 usage monitoring & auto-disable", () => {
     expect(mockFetch.mock.calls.every((call) => String(call[0]).includes("graphql"))).toBe(
       true
     );
+  });
+
+  it("parses bucket names from both Cloudflare ListBuckets payload shapes", () => {
+    expect(
+      parseR2BucketNames({
+        result: { buckets: [{ name: "a" }, { name: "b" }] },
+      })
+    ).toEqual(["a", "b"]);
+    expect(parseR2BucketNames({ result: [{ name: "solo" }] })).toEqual(["solo"]);
+    expect(parseR2BucketNames({ buckets: [{ name: "x" }] })).toEqual(["x"]);
+    expect(parseR2BucketNames({ errors: [{ code: 10000 }] })).toBeNull();
+    expect(parseR2BucketNames("garbage")).toBeNull();
+  });
+
+  // Regression: usage-monitor-bucket was deleted mid-August 2026, but its
+  // GraphQL month-window row (15 GiB) kept the fleet card at 154% of the free
+  // tier for the rest of the month.  When ListBuckets confirms a bucket no
+  // longer exists, it must drop out of the CURRENT snapshot (GB-month billing
+  // history is separate and untouched).
+  it("drops deleted ghost buckets from the current snapshot when ListBuckets confirms", async () => {
+    const now = new Date("2026-08-31T12:00:00.000Z");
+    const ghostBytes = 15 * 1024 * 1024 * 1024;
+    const liveBytes = 500 * 1024 * 1024;
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("/r2/buckets")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              success: true,
+              result: { buckets: [{ name: "usage-monitor-prod-v3" }] },
+            }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            data: {
+              viewer: {
+                accounts: [
+                  {
+                    r2OperationsAdaptiveGroups: [],
+                    r2StorageAdaptiveGroups: [
+                      {
+                        max: { payloadSize: liveBytes, metadataSize: 0, objectCount: 2 },
+                        dimensions: {
+                          datetime: now.toISOString(),
+                          bucketName: "usage-monitor-prod-v3",
+                        },
+                      },
+                    ],
+                    r2StorageByBucket: [
+                      {
+                        max: { payloadSize: ghostBytes, metadataSize: 0, objectCount: 4 },
+                        dimensions: { bucketName: "usage-monitor-bucket" },
+                      },
+                      {
+                        max: { payloadSize: liveBytes, metadataSize: 0, objectCount: 2 },
+                        dimensions: { bucketName: "usage-monitor-prod-v3" },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          }),
+      };
+    });
+
+    const summary = await fetchR2FleetSummary(
+      mockFetch as unknown as typeof fetch,
+      now,
+      {
+        R2_USAGE_ACCOUNT_ID: "acct-um-ghost-12345678",
+        R2_USAGE_API_TOKEN: "um-token",
+      }
+    );
+    const um = summary.accounts.find((a) => a.id === "um");
+    expect(um?.status).toBe("ok");
+    expect(um?.ghostBuckets).toEqual(["usage-monitor-bucket"]);
+    expect(um?.currentBytes).toBe(liveBytes);
+    expect(um?.storage?.actual).toBe(liveBytes);
+    expect(um?.buckets?.map((b) => b.bucketName)).toEqual(["usage-monitor-prod-v3"]);
+    expect(um?.overallOnTrackToExceed70Pct).toBe(false);
+    expect(summary.anyOnTrackToExceed).toBe(false);
+  });
+
+  it("keeps existing buckets intact when ListBuckets confirms they are live", async () => {
+    const now = new Date("2026-08-31T12:00:00.000Z");
+    const bigBytes = 9 * 1024 * 1024 * 1024;
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      if (String(url).includes("/r2/buckets")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              success: true,
+              result: { buckets: [{ name: "socratic-trade-bucket" }] },
+            }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            data: {
+              viewer: {
+                accounts: [
+                  {
+                    r2OperationsAdaptiveGroups: [],
+                    r2StorageAdaptiveGroups: [
+                      {
+                        max: { payloadSize: bigBytes, metadataSize: 0, objectCount: 90 },
+                        dimensions: {
+                          datetime: now.toISOString(),
+                          bucketName: "socratic-trade-bucket",
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          }),
+      };
+    });
+
+    const summary = await fetchR2FleetSummary(
+      mockFetch as unknown as typeof fetch,
+      now,
+      {
+        CLOUDFLARE_ST_ACCOUNT_ID: "acct-st-live-12345678",
+        CLOUDFLARE_ST_API_TOKEN: "st-token",
+      }
+    );
+    const st = summary.accounts.find((a) => a.id === "st");
+    expect(st?.status).toBe("ok");
+    expect(st?.ghostBuckets).toBeUndefined();
+    expect(st?.storage?.actual).toBe(bigBytes);
+    expect(st?.overallOnTrackToExceed70Pct).toBe(true);
   });
 
   it("enforces R2 auto-disable when emergency flag or env is set", () => {
