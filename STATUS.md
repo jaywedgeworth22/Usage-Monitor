@@ -1,4 +1,25 @@
-## Current (2026-08-27 CLAUDE — Litestream B2 multipart fix)
+## Current (2026-08-31 CLAUDE — /api/health r2Weekly + replica-status probe cost trim)
+
+`/api/health` now exposes `checks.storage.r2Weekly` (`{ok, key, ageSeconds,
+staleness, reason}`, backed by the existing `getR2WeeklyArchiveStatus`), matching
+the shape Socratic.Trade and Congress.Trade already publish so peer-fleet parsers
+and external monitors can read this app's weekly archive freshness off its public
+health path.  Separately, the host systemd timer `usage-monitor-replica-status`
+(driving ~720 Backblaze Class C LIST calls/day) was trimmed: dropped the
+in-container `docker exec --once` heartbeat attempt (always failed on Coolify --
+`docker exec` never carries the Infisical-injected env, so it was pure overhead),
+replaced the unconditional `{0,1,2,3,9}` LTX-level scan with an adaptive
+level-0-first escalation (1 call/tick steady state, up to 5 only when level 0 is
+briefly empty -- a fixed `{0,9}`-only design was drafted first and caught as wrong
+by code review before merge, since litestream's brief L0 retention can leave a
+real tip sitting at L1-L3), and widened the timer cadence 10min -> 30min --
+combined, ~720/day -> roughly 48-96/day.  Full verify gate green (lint/tsc/2338
+tests/build + all `test:*` scripts, including a clean `test:apple-projects` native
+iOS/Safari build and a new functional self-test for the escalation logic).
+Rollout:
+`docs/rollouts/2026-08-31-health-r2weekly-probe-efficiency.md`.
+
+## Previous (2026-08-27 CLAUDE — Litestream B2 multipart fix)
 
 L1 compaction against Backblaze B2 was wedged in a retry storm — 119 "compaction
 failed" errors in ~2h (checksum mismatch ~part 14, whole multipart restarted every

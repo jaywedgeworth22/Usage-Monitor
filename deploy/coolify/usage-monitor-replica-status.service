@@ -10,8 +10,8 @@ After=docker.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/usage-monitor-replica-status
-# Worst case is five 70-second per-level LTX listings plus overhead; stay
-# comfortably under the 10-minute timer cadence.
+# Worst case is two 70-second per-level LTX listings (levels 0 and 9) plus
+# overhead; stay comfortably under the 30-minute timer cadence.
 TimeoutStartSec=480
 
 [Install]

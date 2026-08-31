@@ -1051,6 +1051,49 @@ export function getR2WeeklyArchiveStatus(): R2WeeklyArchiveStatus | null {
   }
 }
 
+/** Public `/api/health` view of the weekly R2 archive — see getPublicR2WeeklyHealth. */
+export interface PublicR2WeeklyHealth {
+  ok: boolean;
+  key: string | null;
+  ageSeconds: number | null;
+  /** "fresh" when ok; "stale" when a receipt exists but failed/aged out; "unknown" with no receipt at all. */
+  staleness: "fresh" | "stale" | "unknown";
+  reason: string | null;
+}
+
+/**
+ * Fleet-standard `checks.storage.r2Weekly` shape for the unauthenticated
+ * `/api/health` endpoint — mirrors Socratic.Trade and Congress.Trade so a
+ * single probe (fleet-backup-status.ts's peer parser, an uptime monitor, a
+ * human) reads the same fields off any app's public health path.
+ *
+ * `ok` requires the archive job's own `ok:true` AND `completedAt` inside the
+ * 8-day freshness window (delegated entirely to getR2WeeklyArchiveStatus, the
+ * same logic the session-gated operations card already relies on). A missing
+ * or unreadable receipt collapses to a single `reason: "no_receipt"` — the
+ * internal `archive_status_unreadable` / never-run distinction is operator
+ * detail that a public unauthenticated endpoint does not need to expose.
+ */
+export function getPublicR2WeeklyHealth(): PublicR2WeeklyHealth {
+  const status = getR2WeeklyArchiveStatus();
+  if (status === null || status.reason === "archive_status_unreadable") {
+    return {
+      ok: false,
+      key: status?.key ?? null,
+      ageSeconds: status?.ageSeconds ?? null,
+      staleness: "unknown",
+      reason: "no_receipt",
+    };
+  }
+  return {
+    ok: status.ok,
+    key: status.key,
+    ageSeconds: status.ageSeconds,
+    staleness: status.ok ? "fresh" : "stale",
+    reason: status.reason,
+  };
+}
+
 /**
  * Historic Cloudflare R2 status. Does not call Cloudflare (ready path stays
  * cheap/public); uses env + kill flag only. Full free-tier numbers remain on
