@@ -264,7 +264,7 @@ usage — no special-casing. Idempotent by `(subscriptionId, periodStart)` hash 
 unresolved-issue counts from Sentry's REST API when `SENTRY_READ_TOKEN` (+ optional `SENTRY_ORG`,
 default `jays-services`) are set; `{ configured: false }` otherwise, and the dashboard card
 (`src/components/SentryHealthCard.tsx`) renders nothing in that case. Tracked projects are a fixed
-list in `src/lib/sentry-health.ts` (`socratic-trade`, `congress-trade`, `fleet-infra`).
+list in `src/lib/sentry-health.ts` (`socratic-trade`, `congress-trade`, `fleet-infra`, `dealdex`, `botfleet`, `autorotate`, `contactlogo`).
 `SENTRY_READ_TOKEN` is never sent to the client. This is the "errors/health stay in Sentry" half of
 the owner's goal split — the OTLP route above is the "usage metrics land here" half.
 
