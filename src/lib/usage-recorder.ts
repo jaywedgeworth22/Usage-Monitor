@@ -688,6 +688,29 @@ export interface UsagePollingSchedulerTickDependencies {
   markTickCompleted?: typeof markSchedulerTickCompleted;
 }
 
+const SENTRY_CRON_MONITOR_SLUG = "usage-monitor-scheduler";
+
+async function recordSentryCronHeartbeat(status: "ok" | "error"): Promise<void> {
+  try {
+    const mod = (await import("@sentry/nextjs")) as typeof import("@sentry/nextjs") & {
+      default?: typeof import("@sentry/nextjs");
+    };
+    const captureCheckIn = mod.captureCheckIn ?? mod.default?.captureCheckIn;
+    if (typeof captureCheckIn !== "function") return;
+    captureCheckIn(
+      { monitorSlug: SENTRY_CRON_MONITOR_SLUG, status },
+      {
+        schedule: { type: "interval", value: 1, unit: "minute" },
+        checkinMargin: 5,
+        maxRuntime: 10,
+        timezone: "UTC",
+      }
+    );
+  } catch {
+    // Sentry cron check-in is best-effort and non-fatal
+  }
+}
+
 export async function runUsagePollingSchedulerTick(
   dependencies: UsagePollingSchedulerTickDependencies = {}
 ): Promise<void> {
@@ -718,8 +741,10 @@ export async function runUsagePollingSchedulerTick(
       cloudflareLegacyHandoff:
         maintenance.subscriptionAdoption.cloudflareLegacyHandoff,
     });
+    void recordSentryCronHeartbeat("ok");
   } catch (error) {
     markTickCompleted(false, null);
+    void recordSentryCronHeartbeat("error");
     console.error("[usage-scheduler] tick failed", error);
   }
 }
