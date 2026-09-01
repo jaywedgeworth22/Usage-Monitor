@@ -17,5 +17,14 @@ if (dsn) {
     environment: nonEmptyEnv(process.env.SENTRY_ENVIRONMENT),
     tracesSampleRate: parseTracesSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE),
     enableLogs: true,
+    tracePropagationTargets: [
+      "localhost",
+      /^https:\/\/([\w-]+\.)?jays\.services/,
+      /^https:\/\/([\w-]+\.)?socratictrade\.com/,
+      /^https:\/\/([\w-]+\.)?congress\.trade/,
+    ],
+    integrations: [
+      Sentry.nodeRuntimeMetricsIntegration(),
+    ],
   });
 }

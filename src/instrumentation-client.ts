@@ -45,6 +45,12 @@ if (dsn) {
       process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
     ),
     enableLogs: true,
+    tracePropagationTargets: [
+      "localhost",
+      /^https:\/\/([\w-]+\.)?jays\.services/,
+      /^https:\/\/([\w-]+\.)?socratictrade\.com/,
+      /^https:\/\/([\w-]+\.)?congress\.trade/,
+    ],
     replaysSessionSampleRate: !replayDisabled ? replaySessionSampleRate : 0,
     replaysOnErrorSampleRate: !replayDisabled ? replayErrorSampleRate : 0,
     integrations: !replayDisabled
