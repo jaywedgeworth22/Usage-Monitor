@@ -41,15 +41,24 @@ describe("sentry-health", () => {
             ? "congress-trade"
             : urlStr.includes("dealdex")
               ? "dealdex"
-              : "fleet-infra";
+              : urlStr.includes("botfleet")
+                ? "botfleet"
+                : urlStr.includes("autorotate")
+                  ? "autorotate"
+                  : urlStr.includes("contactlogo")
+                    ? "contactlogo"
+                    : "fleet-infra";
       const bodies: Record<string, unknown[]> = {
         "usage-monitor": [{ id: "9" }],
         "socratic-trade": [{ id: "1" }, { id: "2" }],
         "congress-trade": [],
         "fleet-infra": [{ id: "3" }],
         "dealdex": [],
+        "botfleet": [],
+        "autorotate": [],
+        "contactlogo": [],
       };
-      return new Response(JSON.stringify(bodies[projectSlug]), {
+      return new Response(JSON.stringify(bodies[projectSlug] || []), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
@@ -59,7 +68,7 @@ describe("sentry-health", () => {
     expect(result.configured).toBe(true);
     if (!result.configured) throw new Error("expected configured result");
     expect(result.org).toBe("jays-services");
-    expect(result.projects).toHaveLength(5);
+    expect(result.projects).toHaveLength(8);
 
     const bySlug = new Map(result.projects.map((p) => [p.projectSlug, p]));
     expect(bySlug.get("usage-monitor")!.unresolvedCount).toBe(1);
@@ -68,6 +77,9 @@ describe("sentry-health", () => {
     expect(bySlug.get("congress-trade")!.unresolvedCount).toBe(0);
     expect(bySlug.get("fleet-infra")!.unresolvedCount).toBe(1);
     expect(bySlug.get("dealdex")!.unresolvedCount).toBe(0);
+    expect(bySlug.get("botfleet")!.unresolvedCount).toBe(0);
+    expect(bySlug.get("autorotate")!.unresolvedCount).toBe(0);
+    expect(bySlug.get("contactlogo")!.unresolvedCount).toBe(0);
     for (const project of result.projects) {
       expect(project.issuesUrl).toContain("sentry.io");
       expect(project.error).toBeUndefined();
@@ -89,7 +101,7 @@ describe("sentry-health", () => {
     const result = await fetchSentryHealth();
     expect(result.configured).toBe(true);
     if (!result.configured) throw new Error("expected configured result");
-    expect(result.projects).toHaveLength(5);
+    expect(result.projects).toHaveLength(8);
     const selfProject = result.projects[0];
     expect(selfProject.projectSlug).toBe("usage-monitor-prod");
     expect(selfProject.displayName).toBe("Usage Monitor (this app)");
@@ -107,7 +119,7 @@ describe("sentry-health", () => {
     const result = await fetchSentryHealth();
     expect(result.configured).toBe(true);
     if (!result.configured) throw new Error("expected configured result");
-    expect(result.projects).toHaveLength(4);
+    expect(result.projects).toHaveLength(7);
     expect(
       result.projects.filter((p) => p.projectSlug === "fleet-infra")
     ).toHaveLength(1);

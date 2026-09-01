@@ -50,6 +50,9 @@ const TRACKED_FLEET_PROJECTS = [
   { slug: "congress-trade", displayName: "Congress Trade" },
   { slug: "fleet-infra", displayName: "Fleet Infra" },
   { slug: "dealdex", displayName: "DealDex" },
+  { slug: "botfleet", displayName: "BotFleet" },
+  { slug: "autorotate", displayName: "Autorotate" },
+  { slug: "contactlogo", displayName: "ContactLogo" },
 ];
 
 function trackedProjects(): Array<{ slug: string; displayName: string }> {
