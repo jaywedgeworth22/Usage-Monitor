@@ -1,4 +1,40 @@
-## Current (2026-08-31 CLAUDE — CI verify-job drift: three offline `test:*` scripts)
+## Current (2026-08-31 CLAUDE — CI verify drift #4: `test:r2-archive` + the main-guard bug that hid it)
+
+`test:r2-archive` was the fifteenth and last `npm run verify` gate with no step in
+`.github/workflows/ci.yml` — the fourth instance of the drift class #1381 fixed,
+and the one flagged there as out of scope.  It left the weekly R2
+disaster-recovery archive (SigV4 signer, prune allowlist, verify-before-delete
+ordering contract, failure classifier) with no CI coverage at all.
+
+It could not simply be wired.  On clean `origin/main` the script printed
+`18 passed, 0 failed` and still exited 1.  `scripts/ops/r2-weekly-archive.mjs`
+detected its CLI entrypoint with
+`process.argv[1].endsWith("r2-weekly-archive.mjs")`, and
+`"test-r2-weekly-archive.mjs"` satisfies that suffix — so importing the module
+from the test made it believe it was the CLI, run a real `runArchive()` against
+the ambient environment, and set `process.exitCode = 1`.  It was the only
+bare-filename main guard in `scripts/`; it now compares `import.meta.url` via
+`pathToFileURL`, the idiom the other five collector scripts already use.
+
+That also corrects the record.
+`docs/rollouts/2026-08-12-pagerduty-alert-correctness.md:158` read the exit 1 as
+the test needing live `R2_ARCHIVE_*` credentials and writing to `/data/`, which is
+why it sat outside CI for three weeks.  The test needs neither — the
+accidentally-triggered archive run was the only thing that did.  And on any host
+where those variables ARE present (the production container, or an operator shell
+with the Infisical environment loaded), running the test would have snapshotted
+the real database, PUT to the live `usage-monitor-prod-v3` bucket, and DELETEd
+superseded generations.  That hazard is closed.
+
+Proven rather than asserted: under `env -i` with a throwaway `HOME`, exit 1
+before and exit 0 after, with no archive run; the CLI entrypoint re-verified via
+both the relative path Coolify's scheduled task uses and an absolute path.  The
+drift audit now reports `15 gates in verify; missing from CI: none`, so the class
+is closed.  `test:apple-projects` fails on this Mac only (`iOS 26.5 is not
+installed`) and runs on hosted `macos-latest`; every other gate is green.
+Rollout: `docs/rollouts/2026-08-31-ci-verify-drift-r2-archive.md`.
+
+## Previous (2026-08-31 CLAUDE — CI verify-job drift: three offline `test:*` scripts)
 
 `package.json`'s `verify` script runs fourteen gates; the `verify` job in
 `.github/workflows/ci.yml` ran eleven.  `test:session-token-collectors`,
