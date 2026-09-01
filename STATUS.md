@@ -25,6 +25,32 @@ latent, not firing: the four launchd-registered collectors already used the
 correct idiom.  Rollout:
 `docs/rollouts/2026-08-31-collector-main-guard-hardening.md`.
 
+## Previous (2026-08-31 CLAUDE — stale `UM_CI_RUNNER` comments in five workflows)
+
+Found while wiring the CI verify-drift steps in #1381.  `ci.yml`'s `verify` job
+carried a ten-line comment describing a self-hosted-runner offload gated on a
+`UM_CI_RUNNER` repo variable, with a fallback runbook, directly above a `runs-on:`
+line reading a literal `ubuntu-latest`.  The comment did not describe a stale
+option — it described a control that does not exist.  `bbf540a0` (#834,
+2026-07-29, owner-authored "ci: migrate to hosted ubuntu-latest runners") replaced
+the `${{ (github.actor != 'dependabot[bot]' && vars.UM_CI_RUNNER) || 'ubuntu-latest' }}`
+expression with a literal in all five workflows and changed no comments, so
+`ci.yml`, `security.yml`, `codeql.yml`, `uptime-monitor.yml`, and
+`effort-issues-sync.yml` all went on documenting a deleted feature.
+`vars.UM_CI_RUNNER` is read nowhere in the repo: setting it does nothing, and the
+documented emergency fallback (`gh variable set UM_CI_RUNNER --body ""`) would
+silently fail to fail over.  Worse, the comments invite reintroducing the retired
+self-hosted runners — `codeql.yml` instructs the reader to "revert this line" for
+a line that no longer exists, and `uptime-monitor.yml` frames moving its 5-minute
+cron off hosted as "the main saving."  Fixed as comments and docs only: **no
+`runs-on:` value was touched**, so CI routing is byte-identical to `main`.  The
+durable half is in `AGENTS.md` — every `verify` gate needs a matching `ci.yml`
+step in the same PR (with an audit one-liner), fleet CI is GitHub-hosted only, and
+trust the `runs-on:` value over any comment describing runner routing.  The
+effort-log row asserting "UM_CI_RUNNER gating on main" was corrected in place per
+protocol rather than rewritten.  Rollout:
+`docs/rollouts/2026-08-31-stale-um-ci-runner-comments.md`.
+
 ## Previous (2026-08-31 CLAUDE — CI verify drift #4: `test:r2-archive` + the main-guard bug that hid it)
 
 `test:r2-archive` was the fifteenth and last `npm run verify` gate with no step in

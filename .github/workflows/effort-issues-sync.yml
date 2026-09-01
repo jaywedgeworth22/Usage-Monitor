@@ -40,8 +40,8 @@ permissions:
 
 jobs:
   sync:
-    # Self-hosted CI with hosted fallback; dependabot forced hosted. See ci.yml
-    # for the full rationale/runbook. Clear UM_CI_RUNNER for instant fallback.
+    # Runs on GitHub-hosted ubuntu-latest, deliberately.  See ci.yml's verify
+    # job for the full history.  Do not reintroduce a self-hosted label here.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
