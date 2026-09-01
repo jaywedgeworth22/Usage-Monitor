@@ -29,7 +29,8 @@ try {
 const dsn = nonEmptyEnv(process.env.NEXT_PUBLIC_SENTRY_DSN);
 
 if (dsn) {
-  const replayDisabled = process.env.NEXT_PUBLIC_SENTRY_REPLAY_ENABLED === "false";
+  const replayRaw = process.env.NEXT_PUBLIC_SENTRY_REPLAY_ENABLED?.trim();
+  const replayDisabled = replayRaw ? /^(false|0|off|no)$/i.test(replayRaw) : false;
   const replaySessionSampleRate = Number(
     process.env.NEXT_PUBLIC_SENTRY_REPLAY_SESSION_SAMPLE_RATE ?? "0.1"
   );
@@ -43,6 +44,7 @@ if (dsn) {
     tracesSampleRate: parseTracesSampleRate(
       process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
     ),
+    enableLogs: true,
     replaysSessionSampleRate: !replayDisabled ? replaySessionSampleRate : 0,
     replaysOnErrorSampleRate: !replayDisabled ? replayErrorSampleRate : 0,
     integrations: !replayDisabled
