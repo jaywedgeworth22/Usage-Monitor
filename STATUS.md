@@ -1,4 +1,31 @@
-## Current (2026-08-31 CLAUDE — CI verify drift #4: `test:r2-archive` + the main-guard bug that hid it)
+## Current (2026-08-31 CLAUDE — collector main-guard hardening)
+
+#1383 fixed a bare-filename main guard in `scripts/ops/r2-weekly-archive.mjs` and
+called it the only one in `scripts/`.  True as written, so rather than take it on
+faith — my own offline reasoning in #1381 leaned on `fleet-usage-collector.mjs`'s
+guard being sound — I audited every entrypoint guard in the repo.  Four idioms
+are in use; seven scripts use the correct one and three did not.
+`claude-usage-collector.mjs`, `fleet-usage-collector.mjs`, and
+`antigravity-session-collector.mjs` used `import.meta.url.endsWith(process.argv[1])`.
+`import.meta.url` percent-encodes the path and `process.argv[1]` does not, so on
+any checkout whose path contains a space, `#`, `?` or `%` the guard evaluates
+false — and this fleet has such paths (`~/Code/Agentic Trading`).  The failure is
+silent: the CLI body is skipped, nothing is collected, and the process exits 0, so
+a LaunchAgent reports success forever while telemetry quietly stops arriving, in
+the app whose whole purpose is not missing usage telemetry.
+`scripts/com.jays.fleet-usage-collector.plist.example` exists to schedule exactly
+that script.  Proven end-to-end from a spaced-path copy: zero output and exit 0
+before, collector runs after.  This is the opposite direction from #1383 (too
+strict rather than too loose) with the same root cause — comparing path fragments
+instead of resolved URLs.  All three now use the `pathToFileURL` equality idiom,
+and a repo-wide guard audit was added to `test-session-token-collectors.mjs`,
+already a CI gate since #1381 so it costs no new CI time; a negative test proves
+the audit catches a reintroduction rather than merely passing.  Blast radius is
+latent, not firing: the four launchd-registered collectors already used the
+correct idiom.  Rollout:
+`docs/rollouts/2026-08-31-collector-main-guard-hardening.md`.
+
+## Previous (2026-08-31 CLAUDE — CI verify drift #4: `test:r2-archive` + the main-guard bug that hid it)
 
 `test:r2-archive` was the fifteenth and last `npm run verify` gate with no step in
 `.github/workflows/ci.yml` — the fourth instance of the drift class #1381 fixed,
