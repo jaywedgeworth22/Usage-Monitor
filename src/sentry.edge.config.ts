@@ -12,5 +12,6 @@ if (dsn) {
     dsn,
     environment: nonEmptyEnv(process.env.SENTRY_ENVIRONMENT),
     tracesSampleRate: parseTracesSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE),
+    enableLogs: true,
   });
 }

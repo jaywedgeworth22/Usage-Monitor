@@ -1,11 +1,9 @@
 // Read-only Sentry fleet-health summary for the dashboard's Sentry card.
 //
 // Goal split (owner-decided, see docs/rollouts and AGENTS.md): USAGE METRICS
-// (tokens/cost/sessions) land in THIS app via the OTLP ingest route since
-// Sentry discontinued metrics ingestion; ERRORS/HEALTH stay in Sentry, which
-// this app already has no visibility into otherwise. This module is a thin,
-// best-effort read of Sentry's REST API so the dashboard can show "how many
-// open issues does each project have" without duplicating Sentry's own UI.
+// (tokens/cost/sessions) land in THIS app via the OTLP ingest route while
+// application health & errors stay in Sentry, which this app monitors via Sentry's
+// REST API to show "how many open issues does each project have".
 //
 // Conditional by design: entirely absent (returns null, no fetch attempted)
 // unless BOTH SENTRY_READ_TOKEN and SENTRY_ORG are configured. SENTRY_ORG
