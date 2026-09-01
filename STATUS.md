@@ -1,4 +1,26 @@
-## Current (2026-08-31 CLAUDE — /api/health r2Weekly + replica-status probe cost trim)
+## Current (2026-08-31 CLAUDE — CI verify-job drift: three offline `test:*` scripts)
+
+`package.json`'s `verify` script runs fourteen gates; the `verify` job in
+`.github/workflows/ci.yml` ran eleven.  `test:session-token-collectors`,
+`test:cf-token-map`, and `test:replica-status-probe` were in `npm run verify`
+with no CI step at all, so a regression in `scripts/replica-status-heartbeat.sh`,
+`deploy/coolify/replica-status-probe.sh`, `scripts/cf-token-map.sh`, or the
+session-token-collector parsers passed CI green while a local `npm run verify`
+would have caught it — the same drift class this workflow's own
+`test:receipt-inbox-worker` comment describes fixing once already.  All three
+scripts were read end-to-end and confirmed network- and secret-free before
+wiring: the collector test is inline JSONL fixtures whose one import keeps its
+network POST behind a main guard, the cf-token-map test only `bash -n`s and greps
+`cf-token-map.sh` (it never invokes it, so no Infisical or Cloudflare call and no
+CI-secret gating), and the replica-probe test mocks `subprocess.run` and points
+`LITESTREAM_BIN` at a throwaway script.  Demonstrated, not just asserted, by
+re-running all three under `env -i` with a throwaway `HOME` — all exit 0.
+Additive workflow-only change; no runtime, deploy, or product impact.  Flagged
+but deliberately not fixed here: `test:r2-archive` is a fourth instance of the
+same drift and needs a follow-up.  Rollout:
+`docs/rollouts/2026-08-31-ci-verify-drift-three-offline-tests.md`.
+
+## Previous (2026-08-31 CLAUDE — /api/health r2Weekly + replica-status probe cost trim)
 
 `/api/health` now exposes `checks.storage.r2Weekly` (`{ok, key, ageSeconds,
 staleness, reason}`, backed by the existing `getR2WeeklyArchiveStatus`), matching

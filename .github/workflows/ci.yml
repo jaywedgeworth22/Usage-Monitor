@@ -279,6 +279,38 @@ jobs:
       - name: Test Antigravity collector parsing
         run: npm run test:antigravity-collector
 
+      # The next three were in `npm run verify` but missing from CI -- the same
+      # drift class the receipt-inbox-worker comment above describes fixing
+      # once already. All three are fully offline (no secrets, no network):
+      #
+      #  * session-token-collectors: pure parser fixtures over inline JSONL
+      #    strings. It imports scripts/fleet-usage-collector.mjs, whose network
+      #    POST sits behind an `import.meta.url` / `process.argv[1]` main
+      #    guard, and the Codex ~/.codex path assertions are string math on
+      #    join() -- nothing is read off disk. Its one dependency is the pinned
+      #    @jaywedgeworth22/congress-trading-shared schema from `npm ci`, which
+      #    is the point: it catches a v2 wire-schema break at the collector.
+      #  * cf-token-map: `bash -n` plus greps over scripts/cf-token-map.sh. It
+      #    asserts that script's value-blind properties (never echoes $VAL, no
+      #    client secret on argv, auth header written only to a 0600 temp
+      #    file), so it never invokes the script and never reaches Infisical or
+      #    Cloudflare.
+      #  * replica-status-probe: `bash -n` + greps over the heartbeat and the
+      #    Coolify probe, a python3 self-test that execs the probe's level
+      #    escalation against a mocked subprocess.run, and the heartbeat's own
+      #    --self-test against a mock litestream binary in a mktemp dir. No B2
+      #    or Litestream credentials are read. Needs python3 and jq, both
+      #    preinstalled on ubuntu-latest (the heartbeat self-test skips green
+      #    without jq, so a runner image change degrades rather than breaks).
+      - name: Test session token collectors
+        run: npm run test:session-token-collectors
+
+      - name: Test CF token map
+        run: npm run test:cf-token-map
+
+      - name: Test replica-status probe
+        run: npm run test:replica-status-probe
+
       - name: Audit high-severity dependencies
         run: npm audit --audit-level=high
 
