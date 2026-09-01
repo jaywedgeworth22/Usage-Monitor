@@ -93,6 +93,8 @@ export async function register() {
     console.warn(
       "[usage-scheduler] disabled by USAGE_SCHEDULER_ENABLED=false"
     );
+    const { logSchedulerOutcome } = await import("./lib/sentry-ops");
+    void logSchedulerOutcome("disabled", { reason: "USAGE_SCHEDULER_ENABLED=false" });
     return;
   }
   const { startUsagePollingScheduler } = await import("@/lib/usage-recorder");

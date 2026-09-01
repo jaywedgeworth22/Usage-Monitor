@@ -1,4 +1,18 @@
-## Current (2026-08-31 AG — Sentry observability expansion)
+## Current (2026-09-01 GROK — Sentry fleet adoption leftovers)
+
+Client Replay was default-on in code but producing zero sessions because
+`NEXT_PUBLIC_SENTRY_DSN` is inlined at build and was missing from the Coolify
+build-time env (server `SENTRY_DSN` via Infisical still produced 230k spans).
+Dockerfile now ARG/ENV that public DSN.  Replay stays 100% on error / 10%
+session with `maskAllText`/`blockAllMedia` (admin app, not ST opt-in).
+`usage-monitor-scheduler` check-ins were firing; the monitor advertised a
+1-minute cadence against a 15-minute in-process tick, which Sentry scored as
+`missed` (maxRuntime 10 was not the failure).  Sparse `Sentry.logger` +
+Application Metrics (`scheduler.tick`, `ingest.failed`) for health outcomes;
+token/cost stays in this app.  Rollout:
+`docs/rollouts/2026-09-01-sentry-fleet-adoption.md`.
+
+## Prior (2026-08-31 AG — Sentry observability expansion)
 
 Expands Sentry observability in Usage-Monitor utilizing the fleet's $5,000 credit sponsored tier: enabled masked Session Replay by default on web client (`replaysOnErrorSampleRate: 1.0`, `replaysSessionSampleRate: 0.1`) with complete text and media redaction, raised default trace sampling to 0.2 across server/edge/client, added `dealdex` to tracked fleet projects on the dashboard Sentry health card, and verified inert behavior when Sentry env vars are absent. Rollout: `docs/rollouts/2026-08-31-sentry-observability-expansion.md`.
 

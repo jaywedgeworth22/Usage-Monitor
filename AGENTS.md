@@ -267,6 +267,14 @@ default `jays-services`) are set; `{ configured: false }` otherwise, and the das
 list in `src/lib/sentry-health.ts` (`socratic-trade`, `congress-trade`, `fleet-infra`, `dealdex`, `botfleet`, `autorotate`, `contactlogo`).
 `SENTRY_READ_TOKEN` is never sent to the client. This is the "errors/health stay in Sentry" half of
 the owner's goal split — the OTLP route above is the "usage metrics land here" half.
+Sentry Application Metrics shipped in 2026 (the old "discontinued metrics ingestion" note is
+stale). Token/cost time series still stay in this app. App-health counters such as
+`scheduler.tick` and `ingest.failed` may emit to Sentry Metrics. Browser Replay is default-on
+for this admin app (100% on error, 10% session, `maskAllText`/`blockAllMedia`) unless
+`NEXT_PUBLIC_SENTRY_REPLAY_ENABLED` is an explicit falsy. `NEXT_PUBLIC_SENTRY_DSN` must be a
+Coolify **build-time** env (Next inlines it; runtime Infisical inject cannot reach the client
+bundle). The in-process scheduler ticks every 15 minutes; the Sentry cron monitor
+`usage-monitor-scheduler` must use that same interval (do not upsert a 1-minute schedule).
 
 ## Datadog (logs + APM + RUM)
 

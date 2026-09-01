@@ -12,6 +12,12 @@ RUN npm ci
 
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# Next inlines NEXT_PUBLIC_* at `npm run build`.  Coolify must pass this as a
+# build-time env (is_buildtime=true); runtime Infisical inject cannot reach the
+# client bundle.  ARG is required for Dockerfile builds — host env is not
+# visible inside RUN without it.
+ARG NEXT_PUBLIC_SENTRY_DSN=""
+ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
 # FETCH_LITESTREAM_REQUIRED: this image runs with replication configured, so a
 # missing binary is a broken image, not a degraded one — start-with-litestream.sh
 # fails closed and the container crash-loops. Without this the fetch only warned,

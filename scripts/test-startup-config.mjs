@@ -70,6 +70,15 @@ try {
   // that could never succeed — and stayed unfixable, because the bad image is
   // cached against the commit SHA. Keep the build fatal.
   const dockerfileSource = readFileSync(join(repoRoot, "Dockerfile"), "utf8");
+  if (
+    !/ARG NEXT_PUBLIC_SENTRY_DSN=""/.test(dockerfileSource) ||
+    !/ENV NEXT_PUBLIC_SENTRY_DSN=\$NEXT_PUBLIC_SENTRY_DSN/.test(dockerfileSource)
+  ) {
+    throw new Error(
+      "Dockerfile must ARG+ENV NEXT_PUBLIC_SENTRY_DSN before npm run build so Coolify " +
+        "build-time env actually reaches the Next client bundle"
+    );
+  }
   if (!/FETCH_LITESTREAM_REQUIRED=true\s+bash\s+scripts\/fetch-litestream\.sh/.test(dockerfileSource)) {
     throw new Error(
       "Dockerfile must run fetch-litestream.sh with FETCH_LITESTREAM_REQUIRED=true so a " +

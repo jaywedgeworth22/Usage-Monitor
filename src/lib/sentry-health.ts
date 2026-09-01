@@ -5,6 +5,12 @@
 // application health & errors stay in Sentry, which this app monitors via Sentry's
 // REST API to show "how many open issues does each project have".
 //
+// Sentry Application Metrics shipped in 2026 — the old "Sentry discontinued
+// metrics ingestion" comment is stale.  Token/cost time series still stay here.
+// App-health counters (`scheduler.tick`, `ingest.failed`) may emit to Sentry
+// Metrics so they jump to the enclosing trace.  Do not move money/usage series
+// into Sentry.
+//
 // Conditional by design: entirely absent (returns null, no fetch attempted)
 // unless BOTH SENTRY_READ_TOKEN and SENTRY_ORG are configured. SENTRY_ORG
 // defaults to "jays-services" per the task spec but can be overridden.
