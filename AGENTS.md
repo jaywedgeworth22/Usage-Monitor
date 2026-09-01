@@ -390,6 +390,30 @@ required whenever `LITESTREAM_REQUIRED=true` or `NODE_ENV=production` — a bare
 npm run verify   # eslint, tsc, vitest, migration/backup/startup checks, build
 ```
 
+**Every gate in the `verify` script needs a matching step in `.github/workflows/ci.yml`,
+in the same PR.**  A `test:*` script that is in `npm run verify` but has no CI step gates
+nothing: it passes locally and a regression merges green.  This has now happened four
+times -- `test:receipt-inbox-worker` (fixed once, and the fix's own comment says so),
+then `test:session-token-collectors`, `test:cf-token-map`, and `test:replica-status-probe`
+(#1381).  Before adding to the `verify` chain, check the script is offline (no network, no
+secrets) so it can run on a hosted runner; if it genuinely needs credentials, gate the CI
+step behind repo secrets the way the other secret-dependent steps are gated.  Quick audit:
+
+```bash
+node -e "const p=require('./package.json'),ci=require('fs').readFileSync('.github/workflows/ci.yml','utf8');\
+for(const s of p.scripts.verify.split('&&').map(x=>x.trim()))\
+  if(s!=='npm test'&&!ci.includes(s))console.log('MISSING from ci.yml:',s)"
+```
+
+**Fleet CI is GitHub-hosted only (2026-07-29, owner-directed).**  Every workflow runs on
+`ubuntu-latest` (iOS on `macos-latest`); the self-hosted Oracle/Coolify Actions runners are
+retired.  Do not add a `[self-hosted, ...]` label or reintroduce the dormant
+`vars.UM_CI_RUNNER` gate.  That variable was removed from all five workflows by `bbf540a0`
+(#834) but its explanatory comments were left behind for over a month, so the files
+described a runner-offload feature that did not exist and offered a fallback runbook that
+did nothing.  If you find a comment describing runner routing, trust the `runs-on:` value,
+not the comment.
+
 Deploys: Coolify/GitHub on Hetzner (`167.233.254.55`). Legacy Oracle
 `usage-monitor-auto-deploy.timer` docs remain in `deploy/oracle/README.md` for
 history; prefer Coolify + `DEPLOY.md` / fleet `COOLIFY.md`.

@@ -159,15 +159,19 @@ jobs:
       !cancelled() &&
       (github.event_name != 'schedule' ||
       needs.schedule-gate.outputs.should_run != '0')
-    # Self-hosted CI with automatic hosted fallback (fleet runner-offload).
-    # Resolves to the runner label in the repo variable UM_CI_RUNNER when it is
-    # set (e.g. usage-ci), otherwise to 'ubuntu-latest'. Dependabot PRs are
-    # forced back to hosted runners: their third-party install/build scripts
-    # must never run beside production containers and a repo-scoped runner PAT
-    # on the shared self-hosted box. While UM_CI_RUNNER is unset this workflow
-    # behaves exactly as before (hosted).
-    # Runbook — clearing the variable is an instant, global hosted fallback:
-    #   gh variable set UM_CI_RUNNER --repo jaywedgeworth22/Usage-Monitor --body ""
+    # GitHub-hosted, deliberately and permanently. Fleet CI is hosted-only as
+    # of 2026-07-29 (bbf540a0 / #834, owner-authored); the self-hosted
+    # Oracle/Coolify Actions runners are retired.
+    #
+    # This comment used to describe a `UM_CI_RUNNER` repo-variable gate --
+    # `${{ (github.actor != 'dependabot[bot]' && vars.UM_CI_RUNNER) || 'ubuntu-latest' }}`
+    # -- landed dormant in #583. #834 removed that expression from all five
+    # workflows and left every comment behind, so for over a month five files
+    # documented a live runner-offload feature that no longer existed, and
+    # handed the reader a fallback runbook (`gh variable set UM_CI_RUNNER
+    # --body ""`) that could not do anything: the variable is read nowhere.
+    # Setting it has no effect. Do not reintroduce a self-hosted label or that
+    # expression without an explicit owner directive reversing the retirement.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
