@@ -38,6 +38,11 @@ import { withInternalUsageWriteAdmission } from "@/lib/ingest-admission";
 import { redactProviderRawData } from "@/lib/data-privacy";
 import { budgetPollingPaused } from "@/lib/budget-controls";
 import { isDecommissionedProviderName } from "@/lib/provider-definitions";
+import {
+  logSchedulerDegraded,
+  logSchedulerOutcome,
+  recordSentryCronHeartbeat,
+} from "@/lib/sentry-ops";
 const DEFAULT_PROVIDER_TIMEOUT_MS = 90_000;
 const providerAttemptTokens = new Map<string, symbol>();
 
@@ -659,7 +664,7 @@ export async function fetchAllDueProviders(): Promise<FetchAllProvidersResult> {
   }
 }
 
-const POLL_INTERVAL_MS = 15 * 60 * 1000; // matches the old external cron's */15 schedule exactly - don't change the cadence, only where it runs
+export const POLL_INTERVAL_MS = 15 * 60 * 1000; // matches the old external cron's */15 schedule exactly - don't change the cadence, only where it runs. Sentry cron monitor config in sentry-ops.ts must stay in lockstep.
 let schedulerStarted = false;
 
 // The first tick does real work immediately (provider polling + retention
@@ -686,29 +691,6 @@ export interface UsagePollingSchedulerTickDependencies {
   runMaintenance?: typeof runUsageMaintenance;
   markTickStarted?: typeof markSchedulerTickStarted;
   markTickCompleted?: typeof markSchedulerTickCompleted;
-}
-
-const SENTRY_CRON_MONITOR_SLUG = "usage-monitor-scheduler";
-
-async function recordSentryCronHeartbeat(status: "ok" | "error"): Promise<void> {
-  try {
-    const mod = (await import("@sentry/nextjs")) as typeof import("@sentry/nextjs") & {
-      default?: typeof import("@sentry/nextjs");
-    };
-    const captureCheckIn = mod.captureCheckIn ?? mod.default?.captureCheckIn;
-    if (typeof captureCheckIn !== "function") return;
-    captureCheckIn(
-      { monitorSlug: SENTRY_CRON_MONITOR_SLUG, status },
-      {
-        schedule: { type: "interval", value: 1, unit: "minute" },
-        checkinMargin: 5,
-        maxRuntime: 10,
-        timezone: "UTC",
-      }
-    );
-  } catch {
-    // Sentry cron check-in is best-effort and non-fatal
-  }
 }
 
 export async function runUsagePollingSchedulerTick(
@@ -742,9 +724,28 @@ export async function runUsagePollingSchedulerTick(
         maintenance.subscriptionAdoption.cloudflareLegacyHandoff,
     });
     void recordSentryCronHeartbeat("ok");
+    void logSchedulerOutcome("ok", {
+      total: result.total,
+      successes: result.successes,
+      failures: result.failures,
+      skipped: result.skipped,
+      providerFetchDegraded,
+    });
+    if (providerFetchDegraded) {
+      void logSchedulerDegraded({
+        total: result.total,
+        successes: result.successes,
+        failures: result.failures,
+        skipped: result.skipped,
+        tickBudgetExceeded: result.tickBudgetExceeded === true,
+      });
+    }
   } catch (error) {
     markTickCompleted(false, null);
     void recordSentryCronHeartbeat("error");
+    void logSchedulerOutcome("error", {
+      reason: error instanceof Error ? error.name : "unknown",
+    });
     console.error("[usage-scheduler] tick failed", error);
   }
 }

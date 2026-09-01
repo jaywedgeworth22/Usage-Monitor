@@ -29,6 +29,10 @@ try {
 const dsn = nonEmptyEnv(process.env.NEXT_PUBLIC_SENTRY_DSN);
 
 if (dsn) {
+  // Admin-only app: Replay is ON unless NEXT_PUBLIC_SENTRY_REPLAY_ENABLED is
+  // an explicit falsy ("false"/"0"/"off"/"no").  Defaults: 100% on error,
+  // 10% of sessions (within the 5–10% band).  Keep maskAllText/blockAllMedia.
+  // Do not copy Socratic.Trade's opt-in flag here.
   const replayRaw = process.env.NEXT_PUBLIC_SENTRY_REPLAY_ENABLED?.trim();
   const replayDisabled = replayRaw ? /^(false|0|off|no)$/i.test(replayRaw) : false;
   const replaySessionSampleRate = Number(
