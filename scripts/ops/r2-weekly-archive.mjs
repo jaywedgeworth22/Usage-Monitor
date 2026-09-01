@@ -50,6 +50,7 @@ import {
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { createGzip, gunzipSync } from "node:zlib";
 import { pipeline } from "node:stream/promises";
@@ -387,7 +388,19 @@ export function classifyFailure(error) {
   return "archive_failed";
 }
 
-const isMain = process.argv[1] && process.argv[1].endsWith("r2-weekly-archive.mjs");
+// Entrypoint detection must compare the RESOLVED module URL, not a filename
+// suffix. `"test-r2-weekly-archive.mjs".endsWith("r2-weekly-archive.mjs")` is
+// true, so the old suffix check fired while `scripts/test-r2-weekly-archive.mjs`
+// was running: importing this module ran a real archive against the ambient
+// environment, and its missing-credentials failure set `process.exitCode = 1` on
+// a test process whose own assertions had all passed. That is why the test
+// reported "18 passed, 0 failed" and still exited 1, and why it was read as
+// needing live R2 credentials (docs/rollouts/2026-08-12-pagerduty-alert-
+// correctness.md) and left out of CI. On a host where R2_ARCHIVE_* IS set it was
+// worse than a bad exit code: the test would have archived and pruned the live
+// bucket. This is the idiom the rest of scripts/ already uses.
+const isMain =
+  Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   try {
     await runArchive({ argv: process.argv.slice(2) });
