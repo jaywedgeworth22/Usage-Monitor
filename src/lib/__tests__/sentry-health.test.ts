@@ -39,12 +39,15 @@ describe("sentry-health", () => {
           ? "socratic-trade"
           : urlStr.includes("congress-trade")
             ? "congress-trade"
-            : "fleet-infra";
+            : urlStr.includes("dealdex")
+              ? "dealdex"
+              : "fleet-infra";
       const bodies: Record<string, unknown[]> = {
         "usage-monitor": [{ id: "9" }],
         "socratic-trade": [{ id: "1" }, { id: "2" }],
         "congress-trade": [],
         "fleet-infra": [{ id: "3" }],
+        "dealdex": [],
       };
       return new Response(JSON.stringify(bodies[projectSlug]), {
         status: 200,
@@ -56,7 +59,7 @@ describe("sentry-health", () => {
     expect(result.configured).toBe(true);
     if (!result.configured) throw new Error("expected configured result");
     expect(result.org).toBe("jays-services");
-    expect(result.projects).toHaveLength(4);
+    expect(result.projects).toHaveLength(5);
 
     const bySlug = new Map(result.projects.map((p) => [p.projectSlug, p]));
     expect(bySlug.get("usage-monitor")!.unresolvedCount).toBe(1);
@@ -64,6 +67,7 @@ describe("sentry-health", () => {
     expect(bySlug.get("socratic-trade")!.unresolvedCount).toBe(2);
     expect(bySlug.get("congress-trade")!.unresolvedCount).toBe(0);
     expect(bySlug.get("fleet-infra")!.unresolvedCount).toBe(1);
+    expect(bySlug.get("dealdex")!.unresolvedCount).toBe(0);
     for (const project of result.projects) {
       expect(project.issuesUrl).toContain("sentry.io");
       expect(project.error).toBeUndefined();
@@ -85,7 +89,7 @@ describe("sentry-health", () => {
     const result = await fetchSentryHealth();
     expect(result.configured).toBe(true);
     if (!result.configured) throw new Error("expected configured result");
-    expect(result.projects).toHaveLength(4);
+    expect(result.projects).toHaveLength(5);
     const selfProject = result.projects[0];
     expect(selfProject.projectSlug).toBe("usage-monitor-prod");
     expect(selfProject.displayName).toBe("Usage Monitor (this app)");
@@ -103,7 +107,7 @@ describe("sentry-health", () => {
     const result = await fetchSentryHealth();
     expect(result.configured).toBe(true);
     if (!result.configured) throw new Error("expected configured result");
-    expect(result.projects).toHaveLength(3);
+    expect(result.projects).toHaveLength(4);
     expect(
       result.projects.filter((p) => p.projectSlug === "fleet-infra")
     ).toHaveLength(1);

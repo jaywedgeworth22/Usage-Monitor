@@ -29,15 +29,29 @@ try {
 const dsn = nonEmptyEnv(process.env.NEXT_PUBLIC_SENTRY_DSN);
 
 if (dsn) {
+  const replayDisabled = process.env.NEXT_PUBLIC_SENTRY_REPLAY_ENABLED === "false";
+  const replaySessionSampleRate = Number(
+    process.env.NEXT_PUBLIC_SENTRY_REPLAY_SESSION_SAMPLE_RATE ?? "0.1"
+  );
+  const replayErrorSampleRate = Number(
+    process.env.NEXT_PUBLIC_SENTRY_REPLAY_ERROR_SAMPLE_RATE ?? "1.0"
+  );
+
   Sentry.init({
     dsn,
     environment: nonEmptyEnv(process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT),
     tracesSampleRate: parseTracesSampleRate(
       process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
     ),
+    replaysSessionSampleRate: !replayDisabled ? replaySessionSampleRate : 0,
+    replaysOnErrorSampleRate: !replayDisabled ? replayErrorSampleRate : 0,
+    integrations: !replayDisabled
+      ? [Sentry.replayIntegration({ maskAllText: true, blockAllMedia: true })]
+      : [],
   });
 }
 
 // Instruments client-side router navigations. Harmless when init never ran
 // (Sentry no-ops without a client).
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
+

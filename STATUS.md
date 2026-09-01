@@ -1,4 +1,8 @@
-## Current (2026-08-31 CLAUDE — collector main-guard hardening)
+## Current (2026-08-31 AG — Sentry observability expansion)
+
+Expands Sentry observability in Usage-Monitor utilizing the fleet's $5,000 credit sponsored tier: enabled masked Session Replay by default on web client (`replaysOnErrorSampleRate: 1.0`, `replaysSessionSampleRate: 0.1`) with complete text and media redaction, raised default trace sampling to 0.2 across server/edge/client, added `dealdex` to tracked fleet projects on the dashboard Sentry health card, and verified inert behavior when Sentry env vars are absent. Rollout: `docs/rollouts/2026-08-31-sentry-observability-expansion.md`.
+
+## Prior (2026-08-31 CLAUDE — collector main-guard hardening)
 
 #1383 fixed a bare-filename main guard in `scripts/ops/r2-weekly-archive.mjs` and
 called it the only one in `scripts/`.  True as written, so rather than take it on

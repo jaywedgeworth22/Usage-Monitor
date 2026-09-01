@@ -49,6 +49,7 @@ const TRACKED_FLEET_PROJECTS = [
   { slug: "socratic-trade", displayName: "Socratic Trade" },
   { slug: "congress-trade", displayName: "Congress Trade" },
   { slug: "fleet-infra", displayName: "Fleet Infra" },
+  { slug: "dealdex", displayName: "DealDex" },
 ];
 
 function trackedProjects(): Array<{ slug: string; displayName: string }> {
