@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { UsageTelemetryV2BatchSchema } from "@jaywedgeworth22/congress-trading-shared";
 import { fleetIngestJobs } from "./fleet-usage-collector.mjs";
 import {
@@ -564,5 +566,46 @@ for (const job of fleetJobs) {
   );
 }
 assert(fleetIngestJobs({ quotaEvents: [], sessionResults: {} }).length === 0, "empty jobs");
+
+// Main-guard idiom audit.  A collector's entrypoint guard decides whether the
+// CLI body runs at all, so getting it wrong fails in the worst possible shape:
+// silent, exit 0, no output, and a LaunchAgent that reports success forever
+// while telemetry quietly stops arriving.
+//
+// Two forms have bitten this repo already:
+//   * `process.argv[1].endsWith("<bare-filename>.mjs")` -- fired while the TEST
+//     file was running, because "test-r2-weekly-archive.mjs" ends with
+//     "r2-weekly-archive.mjs"; importing the module ran a real archive against
+//     the ambient environment (fixed in #1383).
+//   * `import.meta.url.endsWith(process.argv[1])` -- `import.meta.url`
+//     percent-encodes the path and `process.argv[1]` does not, so it is FALSE
+//     for any checkout whose path contains a space, #, ? or %.  This fleet has
+//     such paths.
+//
+// The correct idiom, used by the rest of scripts/, compares resolved URLs:
+//   import.meta.url === pathToFileURL(process.argv[1]).href
+const scriptsDir = fileURLToPath(new URL(".", import.meta.url));
+const guardOffenders = [];
+for (const entry of readdirSync(scriptsDir, { recursive: true, withFileTypes: true })) {
+  if (!entry.isFile() || !entry.name.endsWith(".mjs")) continue;
+  const file = join(entry.parentPath ?? entry.path ?? scriptsDir, entry.name);
+  // Skip this file: the patterns below are the audit's own regex literals.
+  if (file === fileURLToPath(import.meta.url)) continue;
+  for (const [i, line] of readFileSync(file, "utf8").split("\n").entries()) {
+    // Skip comments -- the fixes themselves quote the bad idiom to explain it.
+    const code = line.trim();
+    if (code.startsWith("//") || code.startsWith("*") || code.startsWith("/*")) continue;
+    if (/import\.meta\.url\.endsWith\s*\(/.test(code)) {
+      guardOffenders.push(`${file}:${i + 1} import.meta.url.endsWith(...)`);
+    }
+    if (/process\.argv\[1\]\s*\.endsWith\s*\(/.test(code)) {
+      guardOffenders.push(`${file}:${i + 1} process.argv[1].endsWith(...)`);
+    }
+  }
+}
+assert(
+  guardOffenders.length === 0,
+  `fragile main guard(s) -- use import.meta.url === pathToFileURL(process.argv[1]).href:\n  ${guardOffenders.join("\n  ")}`
+);
 
 console.log("ok session-token-collectors");
