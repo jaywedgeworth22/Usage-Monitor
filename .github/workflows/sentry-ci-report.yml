@@ -84,6 +84,7 @@ on:
       - Production Deploy Verification
       - Security
       - Shared package pin check
+      - Sentry Deploy
     types: [completed]
 
 permissions:
