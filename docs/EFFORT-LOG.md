@@ -112,6 +112,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+| In Progress | Vendor ios-fleet ship-testflight (dSYM/Size Analysis/SENTRY_DSN inject) + pin + ios-ship SENTRY_* | GROK | 2026-09-01 | grok/sentry-dsym |
 - **2026-09-01 — GROK — IN PR #1394 (auto-merge armed) — Add sentry-ci-report.yml so CI failures report to Sentry `fleet-infra` (branch `grok/sentry-ci-report`, worktree `~/apps/usage-grok-sentry-ci`, board `83b8f820`, claimed: Mon, Sep 1, 2026).**  Fingerprint `[ci-failure, usage-monitor, workflow]`.  Needs repo secret `SENTRY_FLEET_DSN`.
 - **2026-08-21 — CURSOR — IN PR #1307 — Ledger email corrections (branch `cursor/ledger-email-corrections-c163`).**  Live voids applied: Massive/FMP/Anthropic/Kimi August seed cash is now $0.  Those four rows are `considering`.  Namecheap `$1.18` ingested from Gmail order `#211025634`.  iCloud still unread (no IMAP).  Keepout: iOS TestFlight/update-prompt lanes.
 - **2026-08-21 — CURSOR — iOS first-launch update prompt (fleet) — IN PROGRESS (branch `cursor/ios-update-prompt-9992`, worktree `~/apps/usage-cursor-ios-update`).**  Client + Local.  TestFlight opens TestFlight; App Store opens the App Store.  Manifest `jaywedgeworth22/ios-app-versions`.
