@@ -11,7 +11,7 @@ export type EnvMap = Record<string, string | undefined>;
 
 export const DEFAULT_DD_SERVICE = "usage-monitor";
 export const DEFAULT_DD_SITE = "us5.datadoghq.com";
-export const DEFAULT_DD_ENV = "prod";
+export const DEFAULT_DD_ENV = "production";
 export const DEFAULT_DD_AGENT_HOST = "127.0.0.1";
 export const DEFAULT_DD_TRACE_AGENT_PORT = 8126;
 export const PRODUCTION_TRACE_SAMPLE_RATE = 0.2;
@@ -95,6 +95,15 @@ export type DatadogReadiness = {
 export function nonEmptyEnv(raw: string | undefined): string | undefined {
   const trimmed = raw?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+/** Map Coolify/handoff `prod` onto Datadog `production` so dashboards do not split. */
+export function canonicalizeDatadogEnv(raw: string | undefined): string | undefined {
+  const trimmed = nonEmptyEnv(raw);
+  if (!trimmed) return undefined;
+  const lower = trimmed.toLowerCase();
+  if (lower === "prod" || lower === "production") return "production";
+  return trimmed;
 }
 
 export function isTruthyEnv(raw: string | undefined): boolean {
@@ -257,7 +266,7 @@ export function resolveDatadogServerConfig(
     enabled: true,
     required,
     service: nonEmptyEnv(env.DD_SERVICE) ?? DEFAULT_DD_SERVICE,
-    env: nonEmptyEnv(env.DD_ENV) ?? DEFAULT_DD_ENV,
+    env: canonicalizeDatadogEnv(env.DD_ENV) ?? DEFAULT_DD_ENV,
     version: resolveDatadogVersion(env),
     hostname: nonEmptyEnv(env.DD_AGENT_HOST) ?? DEFAULT_DD_AGENT_HOST,
     port: parseTraceAgentPort(env.DD_TRACE_AGENT_PORT, DEFAULT_DD_TRACE_AGENT_PORT),
@@ -317,8 +326,8 @@ export function resolveDatadogRumConfig(
       nonEmptyEnv(env.DD_SERVICE) ??
       DEFAULT_DD_SERVICE,
     env:
-      nonEmptyEnv(env.NEXT_PUBLIC_DD_ENV) ??
-      nonEmptyEnv(env.DD_ENV) ??
+      canonicalizeDatadogEnv(env.NEXT_PUBLIC_DD_ENV) ??
+      canonicalizeDatadogEnv(env.DD_ENV) ??
       DEFAULT_DD_ENV,
     version,
     sessionSampleRate: 100,
