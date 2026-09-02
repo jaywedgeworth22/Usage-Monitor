@@ -469,6 +469,18 @@ to ask. After each coherent finished unit: commit → push → `gh pr create` (o
 merge when CI is green. A remote branch with no PR is unfinished. Canonical:
 `/Users/jay/apps/AGENT-SYNC.md` "Always commit + land finished work".
 
+## Never wait and watch for PRs to merge / Idle-polling forbidden (Owner ruling 2026-09-01 — ALL seats)
+
+**Never passively wait, watch, or loop-poll for PRs to merge or CI checks to pass.**
+Sitting and watching PRs or polling CI in a loop wastes valuable agent tokens, context window, time, and money/quota.  Almost invariably, when PRs are left to sit, they get blocked by merge conflicts, outdated branches, failing CI checks, or unaddressed review comments.
+
+**Binding rules:**
+1. **Actively Drive PRs to Completion**: Proactively inspect mergeability, conflicts, CI checks, and review comments.
+2. **Resolve Conflicts & Outdated Branches Immediately**: If a branch is outdated or has merge conflicts with `main`, merge/rebase `main` into the branch, resolve conflicts locally, verify tests/build pass, and push immediately.
+3. **Resolve Review Comments & CI Failures Directly**: Fix failing checks or review comments at the root cause and push updates.
+4. **Merge & Deploy Promptly**: As soon as checks pass and the unit is verified, merge the PR to `main` (auto-deploying to production).
+5. **No Idle-Watching Loops**: Never run `sleep` loops, polling timers, or idle watch loops waiting for a PR.  Conclude the turn cleanly or work on actionable tasks.
+
 ## Fleet docs (start here)
 
 | What | Live / repo path | GitHub |

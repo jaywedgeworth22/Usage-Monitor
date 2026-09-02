@@ -19,6 +19,10 @@ struct DashboardContentView: View {
     var projectRollup: ProjectBudgetsRollup? = nil
     /// Jump to the Projects tab for project budget detail.
     var onOpenProjects: (() -> Void)? = nil
+    /// Timeframe selected for charts & telemetry (defaults to nil in isolated previews).
+    var timeframe: TimeframeOption? = nil
+    /// Callback when user picks a new timeframe.
+    var onSelectTimeframe: ((TimeframeOption) -> Void)? = nil
 
     private let columns = [
         GridItem(.flexible(), spacing: Theme.Spacing.md),
@@ -26,6 +30,13 @@ struct DashboardContentView: View {
     ]
 
     var body: some View {
+        if let timeframe, let onSelectTimeframe {
+            OverviewTopTimeframeBar(
+                selection: timeframe,
+                onSelect: onSelectTimeframe
+            )
+        }
+
         DashboardHeroCard(data: data, onManageBudgets: onManageBudgets)
 
         if let rollup = projectRollup, rollup.budgetedCount + rollup.unbudgetedCount > 0 {
@@ -384,6 +395,33 @@ private struct AttentionCard: View {
         case .warning: return "Approaching its monthly budget."
         default: return nil
         }
+    }
+}
+
+/// A clean top timeframe bar on Overview letting users switch rolling/month windows immediately.
+private struct OverviewTopTimeframeBar: View {
+    let selection: TimeframeOption
+    let onSelect: (TimeframeOption) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            HStack {
+                Label("Chart Range", systemImage: "calendar")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                Spacer()
+                Text("Budgets stay MTD")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.tertiaryText)
+            }
+
+            ChartRangeControl(
+                selection: selection,
+                onSelect: onSelect
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dsCard()
     }
 }
 

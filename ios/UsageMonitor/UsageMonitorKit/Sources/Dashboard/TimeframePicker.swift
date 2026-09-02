@@ -21,6 +21,7 @@ public struct TimeframePicker: View {
         ("Past 30 days",   .rolling(days: 30)),
         ("Past 90 days",   .rolling(days: 90)),
         ("Past 180 days",  .rolling(days: 180)),
+        ("Past 12 months", .rolling(days: 365)),
         ("All time",       .rolling(days: 3650)),
     ]
 

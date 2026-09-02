@@ -127,7 +127,16 @@ public struct DashboardRootView: View {
                 // the sheet itself.
                 onManageBudgets: { showBudgetSheet = true },
                 projectRollup: ProjectBudgetsRollup(projects: store.projects),
-                onOpenProjects: { env?.openProjects() }
+                onOpenProjects: { env?.openProjects() },
+                timeframe: portfolioHistoryStore.timeframe,
+                onSelectTimeframe: { option in
+                    Task {
+                        await portfolioHistoryStore.selectTimeframe(
+                            option,
+                            using: env?.apiClient
+                        )
+                    }
+                }
             )
 
             PortfolioHistorySection(

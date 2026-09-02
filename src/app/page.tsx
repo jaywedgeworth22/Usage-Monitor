@@ -490,6 +490,15 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Top timeframe selection */}
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5 dark:border-gray-700 dark:bg-gray-800">
+        <HistoryWindowControl
+          value={timeframe as TimeframeOption}
+          onChange={(next) => setTimeframe(next)}
+          className="w-full"
+        />
+      </div>
+
       <div id="spend" className="scroll-mt-20 space-y-4">
         <DashboardHero
           totalCost={totalCost}
