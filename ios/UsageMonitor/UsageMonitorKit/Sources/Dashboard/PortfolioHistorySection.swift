@@ -109,30 +109,49 @@ struct PortfolioHistorySection: View {
     }
 }
 
-/// Compact chart-range control: This month / 7d / 30d / 90d + More (menu).
-struct ChartRangeControl: View {
-    let selection: TimeframeOption
-    var isBusy: Bool = false
-    let onSelect: (TimeframeOption) -> Void
+/// Compact chart-range control: This month / 30d / 90d / 180d / 12m + More (menu).
+public struct ChartRangeControl: View {
+    public let selection: TimeframeOption
+    public var isBusy: Bool = false
+    public let onSelect: (TimeframeOption) -> Void
+
+    public init(
+        selection: TimeframeOption,
+        isBusy: Bool = false,
+        onSelect: @escaping (TimeframeOption) -> Void
+    ) {
+        self.selection = selection
+        self.isBusy = isBusy
+        self.onSelect = onSelect
+    }
 
     private let primary: [(label: String, option: TimeframeOption)] = [
         ("This month", .currentMonth),
-        ("7d", .rolling(days: 7)),
         ("30d", .rolling(days: 30)),
         ("90d", .rolling(days: 90)),
+        ("180d", .rolling(days: 180)),
+        ("12m", .rolling(days: 365)),
     ]
 
     private var moreOptions: [TimeframeOption] {
-        [.rolling(days: 1), .rolling(days: 180), .rolling(days: 3650)]
-            + TimeframeOption.recentMonths(count: 6).filter { $0 != .currentMonth }
-            + TimeframeOption.recentYears(count: 2)
+        [
+            .rolling(days: 1),
+            .rolling(days: 7),
+            .rolling(days: 30),
+            .rolling(days: 90),
+            .rolling(days: 180),
+            .rolling(days: 365),
+            .rolling(days: 3650),
+        ]
+            + TimeframeOption.recentMonths(count: 13).filter { $0 != .currentMonth }
+            + TimeframeOption.recentYears(count: 3)
     }
 
     private var primaryContainsSelection: Bool {
         primary.contains { $0.option == selection }
     }
 
-    var body: some View {
+    public var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Theme.Spacing.xs) {
                 ForEach(primary, id: \.option) { item in
@@ -142,15 +161,58 @@ struct ChartRangeControl: View {
                     }
                 }
                 Menu {
-                    ForEach(moreOptions, id: \.self) { option in
-                        Button {
-                            Haptics.selection()
-                            onSelect(option)
-                        } label: {
-                            if selection == option {
-                                Label(option.displayLabel, systemImage: "checkmark")
-                            } else {
-                                Text(option.displayLabel)
+                    Section("Rolling") {
+                        ForEach([
+                            TimeframeOption.rolling(days: 1),
+                            .rolling(days: 7),
+                            .rolling(days: 30),
+                            .rolling(days: 90),
+                            .rolling(days: 180),
+                            .rolling(days: 365),
+                            .rolling(days: 3650),
+                        ], id: \.self) { option in
+                            Button {
+                                Haptics.selection()
+                                onSelect(option)
+                            } label: {
+                                if selection == option {
+                                    Label(option.displayLabel, systemImage: "checkmark")
+                                } else {
+                                    Text(option.displayLabel)
+                                }
+                            }
+                        }
+                    }
+
+                    Section("Calendar Months") {
+                        ForEach(TimeframeOption.recentMonths(count: 13), id: \.self) { option in
+                            Button {
+                                Haptics.selection()
+                                onSelect(option)
+                            } label: {
+                                if selection == option {
+                                    Label(
+                                        option == .currentMonth ? "\(option.displayLabel) (this month)" : option.displayLabel,
+                                        systemImage: "checkmark"
+                                    )
+                                } else {
+                                    Text(option == .currentMonth ? "\(option.displayLabel) (this month)" : option.displayLabel)
+                                }
+                            }
+                        }
+                    }
+
+                    Section("Calendar Years") {
+                        ForEach(TimeframeOption.recentYears(count: 3), id: \.self) { option in
+                            Button {
+                                Haptics.selection()
+                                onSelect(option)
+                            } label: {
+                                if selection == option {
+                                    Label(option.displayLabel, systemImage: "checkmark")
+                                } else {
+                                    Text(option.displayLabel)
+                                }
                             }
                         }
                     }
@@ -190,7 +252,11 @@ struct ChartRangeControl: View {
     private var shortMoreLabel: String {
         switch selection {
         case .rolling(let d) where d == 1: return "24h"
+        case .rolling(let d) where d == 7: return "7d"
+        case .rolling(let d) where d == 30: return "30d"
+        case .rolling(let d) where d == 90: return "90d"
         case .rolling(let d) where d == 180: return "180d"
+        case .rolling(let d) where d == 365: return "12m"
         case .rolling: return "All"
         case .calendarMonth, .calendarYear: return selection.displayLabel
         }

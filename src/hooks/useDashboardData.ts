@@ -20,6 +20,7 @@ export type TimeframeOption =
   | "30d"
   | "90d"
   | "180d"
+  | "365d"
   | "all"
   | `month:${string}`  // e.g. "month:2026-08" — calendar month
   | `year:${string}`;  // e.g. "year:2026" — calendar year
@@ -105,6 +106,8 @@ export function timeframeDisplayLabel(tf: TimeframeOption): string {
       return "Past 90 days";
     case "180d":
       return "Past 180 days";
+    case "365d":
+      return "Past 12 months";
     case "all":
       return "All time";
   }
@@ -144,6 +147,8 @@ export function timeframeShortLabel(tf: TimeframeOption): string {
       return "90d";
     case "180d":
       return "180d";
+    case "365d":
+      return "12m";
     case "all":
       return "All";
   }
@@ -170,9 +175,9 @@ export function isCurrentCalendarMonth(tf: TimeframeOption): boolean {
   return isCalendarMonth(tf) && tf === currentMonthToken();
 }
 
-/** True when `tf` is one of the four primary chips (This month / 7d / 30d / 90d). */
+/** True when `tf` is one of the primary chips (This month / 30d / 90d / 180d / 365d / 7d). */
 export function isPrimaryHistoryChip(tf: TimeframeOption): boolean {
-  if (tf === "7d" || tf === "30d" || tf === "90d") return true;
+  if (tf === "30d" || tf === "90d" || tf === "180d" || tf === "365d" || tf === "7d") return true;
   return isCurrentCalendarMonth(tf);
 }
 
@@ -252,6 +257,8 @@ export function timeframeToDays(tf: TimeframeOption): number {
       return 90;
     case "180d":
       return 180;
+    case "365d":
+      return 365;
     case "all":
       return 3650;
     default:
