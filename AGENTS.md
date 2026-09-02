@@ -580,3 +580,6 @@ can look right).  In a **file** (read as source, never through that renderer),
 literal two ASCII spaces stays correct — do not switch file content to NBSP or
 `&nbsp;`.
 
+## Fleet recall
+
+Search `fleet-agents` before re-deriving a lesson (`recall "<topic>"` or MCP `recall_search`).  Contribute every reusable lesson at closeout (`recall contribute "…" --category lesson --app usage-monitor`).  Cloud seats: https://agents.jays.services/mcp .  Do not dump chat logs into the corpus.  Canonical: ai-fleet-coordinator/docs/RAG-FLEET-INFRA.md.
