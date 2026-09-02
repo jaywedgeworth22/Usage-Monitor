@@ -73,7 +73,7 @@ describe("datadog-options", () => {
       enabled: true,
       required: true,
       service: "usage-monitor",
-      env: "prod",
+      env: "production",
       site: "us5.datadoghq.com",
       hostname: "172.17.0.1",
       port: 8126,
@@ -82,6 +82,17 @@ describe("datadog-options", () => {
       logInjection: true,
       runtimeMetrics: true,
     });
+  });
+
+  it("canonicalizes Coolify DD_ENV=prod to production", () => {
+    const server = resolveDatadogServerConfig({
+      NODE_ENV: "production",
+      DD_SERVICE: "usage-monitor",
+      DD_ENV: "prod",
+      DD_SITE: "us5.datadoghq.com",
+      DD_AGENT_HOST: "127.0.0.1",
+    });
+    expect(server.env).toBe("production");
   });
 
   it("honors an explicit throwaway opt-out even in production", () => {
