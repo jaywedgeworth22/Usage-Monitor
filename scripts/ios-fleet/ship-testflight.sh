@@ -2,11 +2,11 @@
 # ship-testflight.sh - Archive + upload an iOS app to TestFlight without Xcode UI.
 #
 # Usage:
-#   bash /Users/jay/apps/ios-fleet/ship-testflight.sh <socratic|congress|usage|usage-local> [options]
+#   bash /Users/jay/apps/ios-fleet/ship-testflight.sh <socratic|congress|usage|usage-local|dealdex|autorotate|autorotate-mac|contactlogo|contactlogo-mac|botfleet|botfleet-mac> [options]
 #
 # Options:
 #   --repo-root PATH   Repo root (default: cwd)
-#   --build N          Force CURRENT_PROJECT_VERSION (default: same as MARKETING)
+#   --build N          Force CURRENT_PROJECT_VERSION (default: UTC YYYYMMDDHHMM)
 #   --version X.Y.Z    Force MARKETING_VERSION (optional)
 #   --export-only      Build IPA only; do not upload
 #   --upload-only IPA  Skip archive; upload an existing IPA via ASC API key
@@ -21,9 +21,9 @@
 #
 # Version numbering (owner directive 2026-08-12, revised same day):
 #   MARKETING_VERSION       = 1.0.<seq>          +1 on EVERY rebuild
-#   CURRENT_PROJECT_VERSION = 1.0.<seq>          same as MARKETING_VERSION
-# App Store Connect renders "<marketing> (<build>)", so a ship now shows
-# "1.0.8 (1.0.8)". Both fields increment together on every rebuild.
+#   CURRENT_PROJECT_VERSION = <UTC YYYYMMDDHHMM> when the build was cut
+# App Store Connect renders "<marketing> (<build>)", so a ship shows
+# "1.0.8 (202609012215)". Marketing +1 every rebuild; build is the cut time.
 # The sequence is max(local cache, App Store Connect, project.pbxproj) + 1, so a
 # lost or reset local counter cannot silently reuse a shipped version.
 #
@@ -623,6 +623,13 @@ done
 
 [[ -n "$APP_KEY" ]] || die "app key required (e.g. socratic, congress, usage, usage-local, dealdex, autorotate, autorotate-mac, contactlogo, contactlogo-mac, botfleet, botfleet-mac)"
 [[ -f "$APPS_JSON" ]] || die "missing apps registry: $APPS_JSON"
+
+# Validate APP_KEY against apps.json before requiring Xcode tools so --help-adjacent
+# and CI unit tests can reject unknown keys on Linux runners without xcodebuild.
+_EARLY_BUNDLE="$(json_get "$APP_KEY" bundleId)"
+_EARLY_SCHEME="$(json_get "$APP_KEY" scheme)"
+_EARLY_PROJECT="$(json_get "$APP_KEY" projectRel)"
+[[ -n "$_EARLY_BUNDLE" && -n "$_EARLY_SCHEME" && -n "$_EARLY_PROJECT" ]] || die "unknown app key or incomplete registry: $APP_KEY"
 
 # Prefer stable Xcode.app over Xcode-beta for TestFlight / ASC compatibility.
 # Beta toolchains + beta macOS stamp BuildMachineOSBuild that App Store review
