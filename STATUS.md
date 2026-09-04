@@ -1,4 +1,14 @@
-## Current (2026-09-04 GROK — Quota windows API)
+## Current (2026-09-04 GROK — Litestream product compaction L1-only)
+
+`litestream.yml` now sets a single top-level `levels:` entry (`interval: 30s`)
+before `dbs:`, matching Socratic.Trade.  `MaxLevel() == 1`, so L2/L3 monitors
+never start.  Snapshot stays 24h.  Replica `sync-interval` / `part-size: 10MB`
+/ `concurrency: 2` and backup health checks stay.  Housekeeper already held
+live L2/L3 off via overlay; this keeps the next image bake L1-only.  Push+PR
+only this session — do not merge, do not bounce Coolify.  Rollout:
+`docs/rollouts/2026-09-04-litestream-l1-only.md`.
+
+## Prior (2026-09-04 GROK — Quota windows API)
 
 `GET /api/quota-windows` (session or `USAGE_READ_TOKEN`) returns latest remaining
 percent, reset time, and `skipModelTypes` for BotFleet.  The Mac collector still
