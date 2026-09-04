@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import type { AgentsOverviewResponse, AgentPlatformStatus } from "@/lib/agents-overview";
+import type { AgentsOverviewResponse } from "@/lib/agents-overview";
+
+const SENTENCE_GAP = "\u00a0 ";
 
 export function AgentsDashboard() {
   const [data, setData] = useState<AgentsOverviewResponse | null>(null);
@@ -141,7 +143,7 @@ export function AgentsDashboard() {
                 {formatCurrency(data.summary.totalApiEquivalentCostUsd)}
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
-                Subscription seats: {formatCurrency(data.summary.totalSubscriptionCostUsd)}
+                Billed seats this window: {formatCurrency(data.summary.totalSubscriptionCostUsd)}
               </div>
             </div>
 
@@ -253,8 +255,13 @@ export function AgentsDashboard() {
                           <div className="font-bold text-foreground mt-0.5">{formatCurrency(platform.estimatedCostUsd)}</div>
                         </div>
                         <div>
-                          <div className="text-[10px] text-muted-foreground">Seat Cost</div>
-                          <div className="font-bold text-foreground mt-0.5">${platform.monthlySeatCostUsd}/mo</div>
+                          <div className="text-[10px] text-muted-foreground">Seat</div>
+                          <div className="font-bold text-foreground mt-0.5">
+                            {formatCurrency(platform.monthlySeatCostUsd)}/mo
+                          </div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5 truncate" title={platform.seatPlanName}>
+                            {platform.seatPlanName}
+                          </div>
                         </div>
                       </div>
 
@@ -292,6 +299,17 @@ export function AgentsDashboard() {
                         </div>
                       )}
                     </div>
+
+                    {platform.seatPlanNote ? (
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        {platform.seatPlanNote.replace(/\.  /g, `.${SENTENCE_GAP}`)}
+                      </p>
+                    ) : platform.billedMonthlySeatCostUsd + 0.5 < platform.monthlySeatCostUsd ? (
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        Promo billed {formatCurrency(platform.billedMonthlySeatCostUsd)} this month.
+                        {SENTENCE_GAP}List price is {formatCurrency(platform.monthlySeatCostUsd)}.
+                      </p>
+                    ) : null}
 
                     {/* Data Capability Footnote */}
                     <div className="mt-3.5 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">

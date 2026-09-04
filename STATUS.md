@@ -1,4 +1,12 @@
-## Current (2026-09-01 GROK — Sentry fleet adoption leftovers)
+## Current (2026-09-03 GROK — Agent seat plans + Codex lookback)
+
+`/agents` was labeling Claude as a $20 seat and Grok as SuperGrok $30.
+Catalog is now Claude Max 20x $200 and SuperGrok Heavy $300 (promo billed
+$100).  Codex collector default `since` was UTC month start, so September
+ticks dropped June–August session JSONL.  Default lookback is 180 days.
+Rollout: `docs/rollouts/2026-09-03-agent-seat-plans.md`.
+
+## Prior (2026-09-01 GROK — Sentry fleet adoption leftovers)
 
 Client Replay was default-on in code but producing zero sessions because
 `NEXT_PUBLIC_SENTRY_DSN` is inlined at build and was missing from the Coolify

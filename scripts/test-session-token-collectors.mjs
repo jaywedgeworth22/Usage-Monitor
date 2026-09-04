@@ -22,7 +22,9 @@ import {
   splitInclusiveCache,
 } from "./lib/session-token-collectors.mjs";
 import {
+  DEFAULT_COLLECTOR_LOOKBACK_DAYS,
   codexSessionKeyFor,
+  parseCollectorArgs,
   sessionKeyFor,
 } from "./lib/run-session-token-collector.mjs";
 
@@ -165,6 +167,22 @@ assert(
     800 + 1300,
   "codex replay does not double last_token_usage"
 );
+
+assert(DEFAULT_COLLECTOR_LOOKBACK_DAYS === 180, "default collector lookback days");
+const defaultArgs = parseCollectorArgs(["node", "codex-usage-collector.mjs"]);
+const defaultAgeMs = Date.now() - defaultArgs.since.getTime();
+const dayMs = 86_400_000;
+assert(
+  defaultAgeMs > 170 * dayMs && defaultAgeMs < 190 * dayMs,
+  `default since is ~180d, not UTC month start (${defaultArgs.since.toISOString()})`
+);
+const sevenDayArgs = parseCollectorArgs(["node", "x", "--days", "7"]);
+assert(
+  Math.abs(Date.now() - sevenDayArgs.since.getTime() - 7 * dayMs) < 5_000,
+  "--days 7"
+);
+const sinceArgs = parseCollectorArgs(["node", "x", "--since", "2026-06-15T00:00:00.000Z"]);
+assert(sinceArgs.since.toISOString() === "2026-06-15T00:00:00.000Z", "--since ISO");
 
 const codexHome = "/Users/jay/.codex";
 const rolloutName =

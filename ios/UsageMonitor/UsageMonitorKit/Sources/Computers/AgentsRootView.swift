@@ -192,9 +192,17 @@ public struct AgentsRootView: View {
                         )
                     }
                     .copyableRow(label: "\(platform.name) Status", value: statusStr)
-                    let seatStr = "$\(Int(platform.monthlySeatCostUsd))/mo"
+                    let seatName = platform.seatPlanName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    let listSeat = "$\(Int(platform.monthlySeatCostUsd.rounded()))/mo"
+                    let seatStr = seatName.isEmpty ? listSeat : "\(seatName) · \(listSeat)"
                     LabeledContent("Seat Cost", value: seatStr)
                         .copyableRow(label: "\(platform.name) Seat Cost", value: seatStr)
+                    if let billed = platform.billedMonthlySeatCostUsd,
+                       billed + 0.5 < platform.monthlySeatCostUsd {
+                        let billedStr = "$\(Int(billed.rounded()))/mo billed (list \(listSeat))"
+                        LabeledContent("Billed This Month", value: billedStr)
+                            .copyableRow(label: "\(platform.name) Billed Seat", value: billedStr)
+                    }
                     let pTokensStr = formatTokens(platform.totalTokens)
                     LabeledContent("Tokens Processed", value: pTokensStr)
                         .copyableRow(label: "\(platform.name) Tokens", value: pTokensStr)
