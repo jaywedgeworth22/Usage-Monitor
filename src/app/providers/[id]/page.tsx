@@ -5,7 +5,11 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import UsageChart from "@/components/UsageChart";
 import BalanceBadge from "@/components/BalanceBadge";
-import type { ExternalBillingRecord } from "@/components/ExternalBillingDetails";
+import ExternalBillingDetails, {
+  type ExternalBillingRecord,
+} from "@/components/ExternalBillingDetails";
+import { SentryUsageTable } from "@/components/SentryUsageCard";
+import type { SentryCategoryTotal } from "@/lib/sentry-usage-categories";
 import ProviderIntegrationInfo, { publicConfigFieldNames } from "@/components/ProviderIntegrationInfo";
 import PaidServicesPanel from "@/components/PaidServicesPanel";
 import type { SubscriptionRow } from "@/components/SubscriptionsPanel";
@@ -106,6 +110,10 @@ interface Provider {
   linkedFixedDedupeUsd?: number;
   fixedCostConflict?: boolean;
   externalBilling?: ExternalBillingRecord[];
+  sentryUsage?: {
+    byCategory: SentryCategoryTotal[];
+    billingCost: false;
+  } | null;
   latestSnapshot?: {
     balance: number | null;
     totalCost: number | null;
@@ -418,6 +426,27 @@ export default function ProviderDetailPage() {
         subscriptions={subscriptions}
         variant="provider"
       />
+
+      {provider.sentryUsage && (
+        <section className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+          <div className="border-b border-gray-100 px-4 py-3 sm:px-6 dark:border-gray-700">
+            <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+              Sentry Usage
+            </h2>
+            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              Month-to-date accepted and rate-limited counts.&nbsp; Not invoice spend or prepaid credits.
+            </p>
+          </div>
+          <SentryUsageTable rows={provider.sentryUsage.byCategory} />
+        </section>
+      )}
+
+      {provider.externalBilling && provider.externalBilling.length > 0 && (
+        <ExternalBillingDetails
+          records={provider.externalBilling}
+          refreshIntervalMin={provider.refreshIntervalMin}
+        />
+      )}
 
       {/* Summary stats */}
       <div
