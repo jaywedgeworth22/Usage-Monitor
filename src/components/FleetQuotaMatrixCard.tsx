@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Gauge, Zap, Clock, AlertCircle } from "lucide-react";
+import { Gauge, Zap, Clock } from "lucide-react";
 
 const SENTENCE_GAP = "\u00a0 ";
 
@@ -10,11 +10,13 @@ interface QuotaBucket {
   label: string;
   modelGroup: string;
   logoSrc: string;
-  window: "5h" | "weekly" | "daily" | "monthly";
-  creditsRemaining: number;
+  window: "5h" | "weekly" | "daily" | "monthly" | "unknown";
+  creditsRemaining: number | null;
   limit: number;
   resetAt: string | null;
   occurredAt: string;
+  remainingUnknown: boolean;
+  status: "available" | "near_cap" | "exhausted" | "unknown";
 }
 
 function formatCountdown(resetAtStr: string | null, nowMs: number): string {
@@ -38,11 +40,25 @@ function formatCountdown(resetAtStr: string | null, nowMs: number): string {
   return `Resets in ${minutes}m`;
 }
 
-function quotaTone(percent: number): {
+function quotaTone(status: QuotaBucket["status"], percent: number | null): {
   bar: string;
   badge: string;
   label: string;
 } {
+  if (status === "unknown" || percent == null) {
+    return {
+      bar: "bg-gray-300 dark:bg-gray-600",
+      badge: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+      label: "Not reported",
+    };
+  }
+  if (status === "exhausted" || percent <= 0) {
+    return {
+      bar: "bg-rose-500",
+      badge: "bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300",
+      label: "Exhausted",
+    };
+  }
   if (percent >= 50) {
     return {
       bar: "bg-emerald-500",
@@ -81,48 +97,47 @@ export default function FleetQuotaMatrixCard() {
     let unmounted = false;
     const fetchQuota = async () => {
       try {
-        const res = await fetch("/api/usage-events?raw=1&metricType=quota&limit=50", {
-          cache: "no-store",
-        });
+        const res = await fetch("/api/quota-windows", { cache: "no-store" });
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data.events) && data.events.length > 0) {
-            // Deduplicate by bucketId or label, keeping latest event
-            const seen = new Set<string>();
-            const extracted: QuotaBucket[] = [];
-            for (const ev of data.events) {
-              const meta = (ev.metadata || {}) as Record<string, unknown>;
-              const bucketId = String(meta.bucketId || ev.idempotencyKey || ev.id);
-              if (seen.has(bucketId)) continue;
-              seen.add(bucketId);
-
-              const group = String(meta.modelGroup || ev.provider || "Gemini Models");
-              const logo = group.toLowerCase().includes("gemini")
+          if (Array.isArray(data.windows)) {
+            const extracted: QuotaBucket[] = data.windows.map((win: {
+              modelId?: string | null;
+              label: string;
+              provider?: string;
+              window?: string | null;
+              remainingPercent?: number | null;
+              remainingUnknown?: boolean;
+              resetAt?: string | null;
+              occurredAt: string;
+              status?: QuotaBucket["status"];
+            }) => {
+              const group = String(win.provider || win.label || "quota");
+              const logo = group.toLowerCase().includes("gemini") || win.label.toLowerCase().includes("gemini")
                 ? "/logos/gemini.svg"
-                : group.toLowerCase().includes("claude")
+                : group.toLowerCase().includes("claude") || win.label.toLowerCase().includes("claude")
                 ? "/logos/claude.svg"
                 : group.toLowerCase().includes("grok")
                 ? "/logos/grok.svg"
                 : "/logos/openai.svg";
-
-              const rawCredits = Number(ev.credits ?? ev.quantity ?? 100);
-              const limit = Number(ev.limit ?? 100);
-
-              extracted.push({
-                id: bucketId,
-                label: String(meta.label || ev.service || "Model Quota"),
+              const remainingUnknown = win.remainingUnknown === true || win.remainingPercent == null;
+              return {
+                id: win.modelId || win.label,
+                label: win.label,
                 modelGroup: group,
                 logoSrc: logo,
-                window: (meta.quotaWindow as "5h" | "weekly" | "daily" | "monthly") || "weekly",
-                creditsRemaining: rawCredits,
-                limit,
-                resetAt: typeof meta.resetAt === "string" ? meta.resetAt : null,
-                occurredAt: ev.occurredAt,
-              });
-            }
-            if (!unmounted && extracted.length > 0) {
-              setBuckets(extracted);
-            }
+                window: win.window === "5h" || win.window === "weekly" || win.window === "daily" || win.window === "monthly"
+                  ? win.window
+                  : "unknown",
+                creditsRemaining: remainingUnknown ? null : win.remainingPercent ?? null,
+                limit: 100,
+                resetAt: win.resetAt ?? null,
+                occurredAt: win.occurredAt,
+                remainingUnknown,
+                status: win.status ?? (remainingUnknown ? "unknown" : "available"),
+              };
+            });
+            if (!unmounted) setBuckets(extracted);
           }
         }
       } catch {
@@ -135,53 +150,7 @@ export default function FleetQuotaMatrixCard() {
     fetchQuota();
   }, []);
 
-  // Baseline starter buckets representing current sliding windows if initial telemetry is synchronizing
-  const displayBuckets: QuotaBucket[] = buckets.length > 0 ? buckets : [
-    {
-      id: "gemini-5h",
-      label: "Gemini 3.7 / 3.6 Flash (5-Hour Window)",
-      modelGroup: "Google Gemini",
-      logoSrc: "/logos/gemini.svg",
-      window: "5h",
-      creditsRemaining: 69.93,
-      limit: 100,
-      resetAt: new Date(Date.now() + 4 * 3600 * 1000 + 15 * 60 * 1000).toISOString(),
-      occurredAt: new Date().toISOString(),
-    },
-    {
-      id: "gemini-weekly",
-      label: "Gemini Models (7-Day Rolling Pool)",
-      modelGroup: "Google Gemini",
-      logoSrc: "/logos/gemini.svg",
-      window: "weekly",
-      creditsRemaining: 68.88,
-      limit: 100,
-      resetAt: new Date(Date.now() + 5 * 86400 * 1000 + 8 * 3600 * 1000).toISOString(),
-      occurredAt: new Date().toISOString(),
-    },
-    {
-      id: "3p-5h",
-      label: "Claude 3.7 & GPT-4o 3P Models (5-Hour Window)",
-      modelGroup: "Anthropic Claude",
-      logoSrc: "/logos/claude.svg",
-      window: "5h",
-      creditsRemaining: 100.0,
-      limit: 100,
-      resetAt: new Date(Date.now() + 5 * 3600 * 1000).toISOString(),
-      occurredAt: new Date().toISOString(),
-    },
-    {
-      id: "3p-weekly",
-      label: "Claude and GPT models (7-Day Pool)",
-      modelGroup: "Anthropic & OpenAI",
-      logoSrc: "/logos/claude.svg",
-      window: "weekly",
-      creditsRemaining: 31.96,
-      limit: 100,
-      resetAt: new Date(Date.now() + 5 * 86400 * 1000 + 11 * 3600 * 1000).toISOString(),
-      occurredAt: new Date().toISOString(),
-    },
-  ];
+  const displayBuckets: QuotaBucket[] = buckets;
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm">
@@ -205,13 +174,21 @@ export default function FleetQuotaMatrixCard() {
       </div>
 
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+        {loading && displayBuckets.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400 col-span-full">
+            Loading remaining quota…
+          </p>
+        ) : null}
+        {!loading && displayBuckets.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400 col-span-full">
+            Quota remaining is not reported yet.{SENTENCE_GAP}The Mac collector
+            reads <code>antigravity-usage quota --json</code> and posts it here.
+          </p>
+        ) : null}
         {displayBuckets.map((bucket) => {
           // Normalize remaining percentage against limit
-          const percent =
-            bucket.limit > 0
-              ? (bucket.creditsRemaining / bucket.limit) * 100
-              : bucket.creditsRemaining;
-          const tone = quotaTone(percent);
+          const percent = bucket.remainingUnknown ? null : bucket.creditsRemaining;
+          const tone = quotaTone(bucket.status, percent);
           const countdown = formatCountdown(bucket.resetAt, nowMs);
 
           return (
@@ -247,7 +224,7 @@ export default function FleetQuotaMatrixCard() {
                 <div className="mt-4">
                   <div className="flex justify-between items-baseline text-xs mb-1.5">
                     <span className="font-semibold text-gray-900 dark:text-gray-100">
-                      {percent.toFixed(1)}% remaining
+                      {percent == null ? "Remaining not reported" : `${percent.toFixed(1)}% remaining`}
                     </span>
                     <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1 font-mono text-[11px]">
                       <Clock className="h-3 w-3" />
@@ -257,7 +234,7 @@ export default function FleetQuotaMatrixCard() {
                   <div className="w-full h-2.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                     <div
                       className={`h-full ${tone.bar} transition-all duration-500 rounded-full`}
-                      style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+                      style={{ width: `${percent == null ? 0 : Math.min(100, Math.max(0, percent))}%` }}
                     />
                   </div>
                 </div>
