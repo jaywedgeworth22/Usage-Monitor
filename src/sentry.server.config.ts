@@ -17,5 +17,10 @@ if (dsn) {
     environment: nonEmptyEnv(process.env.SENTRY_ENVIRONMENT),
     tracesSampleRate: parseTracesSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE),
     enableLogs: true,
+    profileSessionSampleRate: parseTracesSampleRate(
+      process.env.SENTRY_PROFILE_SESSION_SAMPLE_RATE ?? "1"
+    ),
+    profileLifecycle: "trace",
+    integrations: [Sentry.nodeRuntimeMetricsIntegration()],
   });
 }
