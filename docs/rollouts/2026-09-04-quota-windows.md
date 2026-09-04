@@ -5,8 +5,13 @@ BotFleet needs a machine-readable skip list so it does not use a model that
 is already exhausted.
 
 **Do not:** vendor GPL onWatch, reinstall EasyCLIProxyAPI as a live proxy, or
-scrape consumer OAuth from Coolify.  LiteLLM (installed, unused) is a request
-gateway; it does not read Claude/Codex/Antigravity subscription 5h/7d bars.
+scrape consumer OAuth from Coolify.  LiteLLM 1.99.0 is installed and idle; it
+only meters traffic routed through its proxy and does not read Claude / Codex /
+Antigravity subscription 5h/7d remaining.  EasyCLIProxyAPI leftovers were not
+found; do not reinstall it (it intercepts CLIs).  `.gitleaksignore` ignores
+one fingerprint from the first quota-routing commit: `generic-api-key` matched
+`seriesKey` plus a model id in collector tests.  HEAD already splits that
+string.  The ignore file is only so PR history does not fail Security.
 
 **What landed**
 
