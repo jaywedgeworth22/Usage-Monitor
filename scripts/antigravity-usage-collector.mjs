@@ -374,8 +374,8 @@ function quotaWindowFromResetMs(ms) {
 
 // PRIMARY PATH as of 2026-09-03: `antigravity-usage quota --json` from the
 // MIT npm CLI. Per-model remainingPercentage (0–1), isExhausted, resetTime.
-// Gemini rows often omit remainingPercentage (N/A in the table) — that is
-// "not reported", not 100% remaining.
+// Owner 2026-09-04: omitted remainingPercentage (N/A in the table) means
+// none remains — treat as exhausted 0%, not "unknown" and not 100%.
 export function parseAntigravityUsageCli(envelope, { includeAutocomplete = INCLUDE_AUTOCOMPLETE } = {}) {
   const rows = envelope?.models;
   if (!Array.isArray(rows)) return [];
@@ -389,15 +389,15 @@ export function parseAntigravityUsageCli(envelope, { includeAutocomplete = INCLU
     if (entry.isAutocompleteOnly === true && !includeAutocomplete) continue;
 
     const fraction = firstFiniteNumber(entry.remainingPercentage);
-    const isExhausted = entry.isExhausted === true;
+    const isExhausted = entry.isExhausted === true || fraction == null;
 
     records.push({
       seriesKey: modelId,
       label: firstString(entry.label, entry.name) ?? modelId,
       modelId,
       window: quotaWindowFromResetMs(firstFiniteNumber(entry.timeUntilResetMs)),
-      percentRemaining: fraction == null ? (isExhausted ? 0 : undefined) : fractionToPercent(fraction),
-      remainingUnknown: fraction == null && !isExhausted,
+      percentRemaining: fraction == null ? 0 : fractionToPercent(fraction),
+      remainingUnknown: false,
       isExhausted,
       resetAt: firstString(entry.resetTime, entry.reset_time, entry.resetsAt),
       source: "antigravity-usage",

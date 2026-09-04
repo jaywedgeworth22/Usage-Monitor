@@ -90,7 +90,9 @@ export function quotaStatus(input: {
   if (input.isExhausted || (input.remainingPercent != null && input.remainingPercent <= 0)) {
     return "exhausted";
   }
-  if (input.remainingUnknown || input.remainingPercent == null) return "unknown";
+  // antigravity-usage prints N/A when remainingPercentage is omitted.
+  // Owner 2026-09-04: that means none remains.
+  if (input.remainingUnknown || input.remainingPercent == null) return "exhausted";
   if (input.remainingPercent < 20) return "near_cap";
   return "available";
 }
@@ -123,13 +125,13 @@ export function projectQuotaWindows(
     if (latest.has(series)) continue;
 
     const limit = typeof event.limit === "number" && event.limit > 0 ? event.limit : 100;
-    const remainingUnknown = asBoolean(meta.remainingUnknown) || event.credits == null;
-    const remainingPercent =
-      remainingUnknown || event.credits == null
-        ? null
-        : Math.round((event.credits / limit) * 10_000) / 100;
+    const omitted = asBoolean(meta.remainingUnknown) || event.credits == null;
+    const remainingPercent = omitted
+      ? 0
+      : Math.round((Number(event.credits) / limit) * 10_000) / 100;
     const isExhausted =
-      asBoolean(meta.isExhausted) || (remainingPercent != null && remainingPercent <= 0);
+      asBoolean(meta.isExhausted) || omitted || remainingPercent <= 0;
+    const remainingUnknown = false;
     const status = quotaStatus({ remainingPercent, remainingUnknown, isExhausted });
     latest.set(series, {
       id: series,
