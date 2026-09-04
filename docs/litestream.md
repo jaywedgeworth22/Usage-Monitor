@@ -66,13 +66,17 @@ Local pre-migration snapshots on `/data` still exist.
 - `litestream.yml` — the replica config: `/data/prod.db`, single S3-type replica
   populated entirely from `LITESTREAM_S3_*` env vars. **Disaster recovery only**
   for this app: `snapshot.interval: 24h`, `snapshot.retention: 24h`,
-  `sync-interval: 1h` (see `litestream.yml`). Not multi-day continuous PITR —
-  Backblaze B2 is the live host/disk-death replica, not “rewind to 3h42m ago.”
-  Cloudflare R2 is weekly archive only.  Historic multi-level LTX on R2
-  re-breached the 10 GiB free tier (2026-08-04 / 2026-08-06); maintenance
-  tip-prunes non-tip LTX at 50% storage before the 70% kill when the endpoint
-  is R2. Off-site backup health is observability only on `/api/ready` (does
-  not gate product readiness).
+  `sync-interval: 1h`, `part-size: 10MB`, `concurrency: 2` (see `litestream.yml`).
+  Product compaction is **L1-only**: a single top-level `levels:` entry
+  (`interval: 30s`) so `Config.Levels` `MaxLevel() == 1` and L2/L3 monitors
+  never start (same form as Socratic.Trade `litestream.coolify.yml`).  Omitting
+  `levels:` would restore DefaultConfig L1/L2/L3 on the next image bake.
+  Not multi-day continuous PITR — Backblaze B2 is the live host/disk-death
+  replica, not “rewind to 3h42m ago.”  Cloudflare R2 is weekly archive only.
+  Historic multi-level LTX on R2 re-breached the 10 GiB free tier
+  (2026-08-04 / 2026-08-06); maintenance tip-prunes non-tip LTX at 50% storage
+  before the 70% kill when the endpoint is R2. Off-site backup health is
+  observability only on `/api/ready` (does not gate product readiness).
 - `scripts/start-with-litestream.sh` — the container entrypoint. If all four
   required `LITESTREAM_S3_*` vars are set and `bin/litestream` exists: restores
   first if `/data/prod.db` doesn't exist yet (fresh disk or disaster recovery).
@@ -93,7 +97,8 @@ Local pre-migration snapshots on `/data` still exist.
   scratch path, run inside the production app container (see below).
 - `scripts/replica-status-heartbeat.sh` + `run-app-with-replica-heartbeat.sh` —
   in-container LTX tip probe under Infisical-injected env (Coolify-safe).
-  Lists `ltx -json` at continuous levels 0–3 plus snapshot level 9.
+  Lists `ltx -json` at continuous levels 0–3 plus snapshot level 9 so leftover
+  L2/L3 objects stay visible; product compaction itself is L1-only.
 - `deploy/coolify/replica-status-probe.sh` — **production Hetzner** host timer
   (Coolify UUID container).  Tries `docker exec --once`, then a host
   `--env-file` fallback from the litestream PID environ.  Never puts
@@ -140,8 +145,8 @@ during cutover only). **Account-wide free-tier analytics** still count every
 **R2** bucket on the Cloudflare account for the historic free-tier card; that
 does not apply to B2 storage.
 
-The S3 uploader is intentionally limited to one multipart part at a time in
-`litestream.yml` (`concurrency: 1`) for reliability on constrained links.
+Replica uploads use `part-size: 10MB` and `concurrency: 2` in
+`litestream.yml` (the 2026-08-27 B2 multipart checksum-mismatch fix).
 
 Changing any of these values: edit them in Infisical, run
 `sudo /usr/local/sbin/usage-monitor-env-sync` (or wait for the 15-minute
@@ -215,15 +220,34 @@ product-down signal: backup still does not gate overall `ok`.  Operator
 reasons and the Coolify `--once` vs `--env-file` fallback are in
 `docs/runbooks/replica-status-probe.md`.
 
+### Product compaction is L1-only (2026-09-04)
+
+Litestream 0.5.x has no disable-L2 flag.  `litestream.yml` sets a single
+top-level `levels:` entry (`interval: 30s` = L1), matching Socratic.Trade.
+`Config.Levels` is L1..N in list order (`cmd/litestream/main.go`
+`CompactionLevels()`).  One entry makes `MaxLevel() == 1` and `NextLevel(1)`
+the snapshot level.  DefaultConfig would otherwise start L2 at 5m and L3 at
+1h, so a bake without this key would re-enable L2/L3 even if Housekeeper's
+live overlay currently holds them off.
+
+There is also **no compaction-backoff yaml key**.  Removing L2/L3 is the
+backoff: remaining L1 retries every 30s against a small L0 window.  Snapshot
+stays `24h` / `24h`.  Replica `sync-interval: 1h`, `part-size: 10MB`, and
+`concurrency: 2` are unchanged.  Backup health-check wiring is unchanged
+(probes still list 0–3 + 9; leftover L2/L3 objects do not mean those
+monitors are running).  Do **not** add `verify-compaction: true`.
+
 ### Free-tier growth (what to expect)
 
-R2 storage is **not** “one copy of `prod.db`.” Litestream keeps multi-level LTX
-files for the retention window; a ~0.4 GiB DB can still fill ~9 GiB under a 24h
-window as L1/L2/L3 each hold large intermediates. Production uses
-`retention: 6h` + `sync-interval: 2h`, plus automatic tip-prune at 50% absolute
-storage (keep newest tip per level). Manual tip-prune (ops): delete non-tip
-`.ltx` under `api-usage-monitor/prod.db/{0000..0009}/`. Multi-day retention is
-what filled 15+ GiB in August 2026 — do not raise retention without measuring.
+R2 storage is **not** “one copy of `prod.db`.”  Litestream keeps LTX files for
+the retention window; a ~0.4 GiB DB can still fill ~9 GiB under a 24h window
+when L1/L2/L3 each hold large intermediates.  Product compaction is now
+L1-only (L2/L3 monitors off), so that growth mode should not return on B2.
+Historic R2 refill used `retention: 6h` + `sync-interval: 2h`, plus automatic
+tip-prune at 50% absolute storage (keep newest tip per level).  Manual
+tip-prune (ops): delete non-tip `.ltx` under
+`api-usage-monitor/prod.db/{0000..0009}/`.  Multi-day retention is what filled
+15+ GiB in August 2026 — do not raise retention without measuring.
 
 
 ## Rollback host only (Render)
