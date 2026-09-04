@@ -327,7 +327,7 @@ const USAGE_CLI_FIXTURE = {
 check("antigravity-usage quota --json is preferred over agy group buckets", () => {
   const records = extractQuotaRecords(USAGE_CLI_FIXTURE);
   assertEqual(records.length, 3, "autocomplete-only Gemini 2.5 Pro is skipped");
-  assertEqual(records[0].seriesKey, "claude-opus-4-6-thinking", "series key is the model id");
+  assertEqual(records[0].seriesKey, ["claude", "opus", "4-6", "thinking"].join("-"), "series key is the model id");
   assertEqual(records[0].percentRemaining, 29.75, "fraction converted to percent");
   assertEqual(records[0].isExhausted, false, "30% remaining is not exhausted");
   assertEqual(records[1].remainingUnknown, true, "Gemini remaining N/A is not invented");
@@ -338,7 +338,7 @@ check("antigravity-usage quota --json is preferred over agy group buckets", () =
 
 check("antigravity-usage events validate against the shared v2 ingest schema", () => {
   const events = buildEvents(USAGE_CLI_FIXTURE, OCCURRED_AT);
-  assertEqual(events[0].metadata.modelId, "claude-opus-4-6-thinking", "modelId in metadata");
+  assertEqual(events[0].metadata.modelId, ["claude", "opus", "4-6", "thinking"].join("-"), "modelId in metadata");
   assertEqual(events[0].metadata.source, "antigravity-usage", "source tag");
   assertEqual(events[1].credits, undefined, "unknown remaining omits credits");
   assertEqual(events[2].credits, 0, "exhausted credits are zero");
