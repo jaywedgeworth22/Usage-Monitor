@@ -6,8 +6,8 @@ Monitors — Accepted and Rate Limited.  Optional `stats-summary` is a companion
 only.  There is no public Sentry API for prepaid credit, remaining sponsored
 balance, reserved quota, PAYG, or invoices, so `balance` / `credits` /
 `totalCost` stay null and `billingCost` stays false.  The Health card is still
-open issues only.  Push+PR only this session — do not merge, do not bounce
-Coolify.  Research:
+open issues only.  PR #1418 (`aefe2e95`).  Push+PR only this session — do not
+merge, do not bounce Coolify.  Research:
 `docs/research/2026-09-04-sentry-usage-api-coverage.md`.
 
 ## Prior (2026-09-04 GROK — Litestream product compaction L1-only)
