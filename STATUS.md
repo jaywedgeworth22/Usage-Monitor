@@ -1,4 +1,12 @@
-## Current (2026-09-03 GROK — Agent seat plans + Codex lookback)
+## Current (2026-09-04 GROK — Quota windows API)
+
+`GET /api/quota-windows` (session or `USAGE_READ_TOKEN`) returns latest remaining
+percent, reset time, and `skipModelTypes` for BotFleet.  The Mac collector still
+reads `agy /usage` group bars and now also `antigravity-usage --json` per-model
+rows when that CLI is installed.  The Fleet Quota Matrix no longer invents demo
+buckets.  Rollout: `docs/rollouts/2026-09-04-quota-windows.md`.
+
+## Prior (2026-09-03 GROK — Agent seat plans + Codex lookback)
 
 `/agents` window chips are `5h` / `24h` / `7d` / `30d` / `All Time` on one
 line with real gaps.  Seat cash comes from receipts.  Codex plan is observed

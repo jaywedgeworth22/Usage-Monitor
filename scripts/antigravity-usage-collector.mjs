@@ -60,13 +60,17 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { hostname } from "node:os";
+import { existsSync } from "node:fs";
+import { homedir, hostname } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const DEBUG = process.argv.includes("--debug");
 
 const CLI_BIN = process.env.ANTIGRAVITY_CLI_BIN || "agy";
+const USAGE_CLI_BIN = process.env.ANTIGRAVITY_USAGE_BIN || "";
+const INCLUDE_AUTOCOMPLETE = process.argv.includes("--all-models");
 const PRODUCER_ID = process.env.ANTIGRAVITY_PRODUCER_ID || "antigravity-cli";
 const INGEST_URL =
   process.env.USAGE_MONITOR_INGEST_URL ||
@@ -90,16 +94,48 @@ function fail(message, code = 1) {
 // tick lost to an overlap is not worth a retry loop.
 const CLI_TIMEOUT_MS = 90_000;
 
+function findAntigravityUsageBin() {
+  if (USAGE_CLI_BIN && existsSync(USAGE_CLI_BIN)) return USAGE_CLI_BIN;
+  const home = process.env.HOME || homedir();
+  const candidates = [
+    join(home, ".local", "bin", "antigravity-usage"),
+    "/opt/homebrew/bin/antigravity-usage",
+    "/usr/local/bin/antigravity-usage",
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return "antigravity-usage";
+}
+
+function runQuotaCli(bin, args) {
+  return execFileSync(bin, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: CLI_TIMEOUT_MS,
+    env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "" },
+  });
+}
+
 function runAntigravityCli() {
+  const usageBin = findAntigravityUsageBin();
   try {
-    return execFileSync(
-      CLI_BIN,
-      ["-p", "/usage", "--output-format", "json"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: CLI_TIMEOUT_MS }
-    );
+    const raw = runQuotaCli(usageBin, ["quota", "--json", "--refresh"]);
+    return { source: "antigravity-usage", raw };
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      log(
+        `"${usageBin} quota --json" failed (${error.stderr?.toString().trim() || error.message}); falling back to agy /usage`
+      );
+    }
+  }
+
+  try {
+    const raw = runQuotaCli(CLI_BIN, ["-p", "/usage", "--output-format", "json"]);
+    return { source: "agy", raw };
   } catch (error) {
     if (error.code === "ENOENT") {
-      fail(`"${CLI_BIN}" is not installed or not on PATH.`, 127);
+      fail(`Neither antigravity-usage nor "${CLI_BIN}" is installed or on PATH.`, 127);
     }
     if (error.code === "ETIMEDOUT") {
       fail(
@@ -107,8 +143,7 @@ function runAntigravityCli() {
           "A healthy call takes about 10s, so this usually means another `agy` " +
           "invocation was running at the same time and this one fell into the " +
           "interactive login flow with nowhere to prompt. Re-run it on its own; " +
-          "if it still hangs, run `agy -p \"/usage\"` in a terminal to check the " +
-          "session is still authenticated."
+          "if it still hangs, run `antigravity-usage quota --json` in a terminal."
       );
     }
     fail(
@@ -330,7 +365,54 @@ function parseUsageResponseObject(raw) {
   return records;
 }
 
+function quotaWindowFromResetMs(ms) {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return undefined;
+  if (ms <= 6 * 3600 * 1000) return "5h";
+  if (ms <= 36 * 3600 * 1000) return "daily";
+  return "weekly";
+}
+
+// PRIMARY PATH as of 2026-09-03: `antigravity-usage quota --json` from the
+// MIT npm CLI. Per-model remainingPercentage (0–1), isExhausted, resetTime.
+// Gemini rows often omit remainingPercentage (N/A in the table) — that is
+// "not reported", not 100% remaining.
+export function parseAntigravityUsageCli(envelope, { includeAutocomplete = INCLUDE_AUTOCOMPLETE } = {}) {
+  const rows = envelope?.models;
+  if (!Array.isArray(rows)) return [];
+  if (!rows.some((row) => row && typeof row.modelId === "string")) return [];
+
+  const records = [];
+  for (const entry of rows) {
+    if (!entry || typeof entry !== "object") continue;
+    const modelId = firstString(entry.modelId, entry.id);
+    if (!modelId) continue;
+    if (entry.isAutocompleteOnly === true && !includeAutocomplete) continue;
+
+    const fraction = firstFiniteNumber(entry.remainingPercentage);
+    const isExhausted = entry.isExhausted === true;
+
+    records.push({
+      seriesKey: modelId,
+      label: firstString(entry.label, entry.name) ?? modelId,
+      modelId,
+      window: quotaWindowFromResetMs(firstFiniteNumber(entry.timeUntilResetMs)),
+      percentRemaining: fraction == null ? (isExhausted ? 0 : undefined) : fractionToPercent(fraction),
+      remainingUnknown: fraction == null && !isExhausted,
+      isExhausted,
+      resetAt: firstString(entry.resetTime, entry.reset_time, entry.resetsAt),
+      source: "antigravity-usage",
+    });
+  }
+  return records;
+}
+
 export function extractQuotaRecords(envelope, { debug = DEBUG } = {}) {
+  const fromUsageCli = parseAntigravityUsageCli(envelope);
+  if (fromUsageCli.length > 0) {
+    if (debug) log(`read ${fromUsageCli.length} model(s) from antigravity-usage quota --json`);
+    return fromUsageCli;
+  }
+
   if (typeof envelope?.status === "string" && envelope.status !== "SUCCESS") {
     fail(
       `agy reported a non-success status: ${envelope.status}` +
@@ -399,8 +481,12 @@ export function toTelemetryEvent(record, occurredAtIso) {
   const metadata = {};
   if (record.group) metadata.modelGroup = record.group;
   if (record.bucketId) metadata.bucketId = record.bucketId;
+  if (record.modelId) metadata.modelId = record.modelId;
   if (record.window) metadata.quotaWindow = record.window;
   if (record.resetAt) metadata.resetAt = record.resetAt;
+  if (record.source) metadata.source = record.source;
+  if (record.isExhausted != null) metadata.isExhausted = record.isExhausted;
+  if (record.remainingUnknown) metadata.remainingUnknown = true;
   if (!hasAbsolute) {
     metadata.scale = "percent_0_100";
     const percentUsed =
@@ -453,6 +539,14 @@ export function buildEvents(envelope, occurredAtIso, options = {}) {
   return records.map((record) => toTelemetryEvent(record, occurredAtIso));
 }
 
+export function extractAntigravityUsageModels(payload) {
+  return parseAntigravityUsageCli(payload, { includeAutocomplete: true });
+}
+
+export function buildPerModelEvents(payload, occurredAtIso) {
+  return buildEvents(payload, occurredAtIso);
+}
+
 async function postBatch(events, ingestToken) {
   const body = JSON.stringify({
     schemaVersion: 2,
@@ -498,17 +592,16 @@ async function main() {
     );
   }
 
-  const raw = runAntigravityCli();
-  if (DEBUG) log(`raw CLI output:\n${raw}`);
+  const { source, raw } = runAntigravityCli();
+  if (DEBUG) log(`raw CLI output (${source}):\n${raw}`);
 
   let parsedJson;
   try {
     parsedJson = JSON.parse(raw);
   } catch {
     fail(
-      "Could not parse CLI output as JSON. Run with --debug to see the raw " +
-        "output and confirm this Antigravity CLI version supports " +
-        "`-p \"/usage\" --output-format json` (added in agy v1.1.8+)."
+      "Could not parse CLI output as JSON. Prefer `antigravity-usage quota --json`. " +
+        "The agy fallback is `-p \"/usage\" --output-format json` (agy v1.1.8+)."
     );
   }
 
