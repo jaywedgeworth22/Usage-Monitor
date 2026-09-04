@@ -177,7 +177,7 @@ describe("OperationsOverview cards", () => {
         fetchedAt: "2026-08-10T23:50:00.000Z",
       },
     }));
-    expect(fleetHtml).toContain("Coolify fleet");
+    expect(fleetHtml).toContain("Coolify Fleet");
     expect(fleetHtml).toContain("1 up");
     expect(fleetHtml).toContain("host.jays.services");
   });

@@ -642,8 +642,8 @@ export function SocraticInfrastructureCard({ data }: { data: SocraticInfrastruct
               {data.dependencyCount != null ? ` (${data.dependencyCount} total)` : ""}
             </p>
             <p className="mt-1 text-gray-500 dark:text-gray-400">
-              Pinecone {data.pineconeConfigured === null ? "unknown" : data.pineconeConfigured ? "configured" : "off"}
-              {data.ragEmbedProvider ? ` · embed ${data.ragEmbedProvider}` : ""}
+              {/* Vector store: Qdrant is the active store (Pinecone retired from the health card per owner 2026-09-04). */}
+              {data.ragEmbedProvider ? `Embed ${data.ragEmbedProvider}` : "Vector store: Qdrant"}
               {data.openrouterCreditsOk === null
                 ? ""
                 : data.openrouterCreditsOk
@@ -1081,7 +1081,7 @@ export function CoolifyFleetCard({ data }: { data: CoolifyFleetSummary }) {
         <div className="flex min-w-0 items-start gap-3">
           <span className="rounded-lg bg-sky-50 p-2 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300" aria-hidden="true"><Cloud className="h-4 w-4" /></span>
           <div className="min-w-0">
-            <h3 id="coolify-fleet-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">Coolify fleet</h3>
+            <h3 id="coolify-fleet-heading" className="text-sm font-semibold text-gray-900 dark:text-gray-100">Coolify Fleet</h3>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{summary}</p>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Last checked <time suppressHydrationWarning dateTime={data.fetchedAt} title={data.fetchedAt}>{relativeTime(data.fetchedAt)}</time>

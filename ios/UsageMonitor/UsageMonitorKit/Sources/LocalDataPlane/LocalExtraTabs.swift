@@ -383,10 +383,12 @@ struct LocalExportButton: View {
             if isExporting {
                 ProgressView()
             } else {
-                Label("Export data (no secrets)", systemImage: "square.and.arrow.up")
+                Label("Export Data (No Secrets)", systemImage: "square.and.arrow.up")
             }
         }
         .disabled(isExporting)
+        .contentShape(Rectangle())
+        .frame(minHeight: 44)
         .sheet(isPresented: Binding(
             get: { shareURL != nil },
             set: { if !$0 { shareURL = nil } }
@@ -418,37 +420,52 @@ struct LocalExportButton: View {
     }
 }
 
-struct LocalImportButton: View {
-    @Bindable var model: LocalAppModel
-    @State private var showImporter = false
-    @State private var mode: LocalImportMode = .merge
-    @State private var message: String?
-    @State private var isImporting = false
+/// Shared state for the import flow so the picker and the action button can
+/// each become their own List row — a single VStack collapsed into one List
+/// row used to swallow the button's tap region (owner 2026-09-04: "very hard
+/// to be able to select it and I'm not sure I even can at all").
+@MainActor
+@Observable
+final class LocalImportState {
+    var mode: LocalImportMode = .merge
+    var isImporting: Bool = false
+    var message: String? = nil
+    var isImportError: Bool = false
+    var showImporter: Bool = false
+}
+
+struct LocalImportModePicker: View {
+    @Bindable var state: LocalImportState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            Picker("Import mode", selection: $mode) {
-                Text("Merge (skip existing)").tag(LocalImportMode.merge)
-                Text("Replace all data").tag(LocalImportMode.replace)
-            }
-            Button {
-                showImporter = true
-            } label: {
-                if isImporting {
-                    ProgressView()
-                } else {
-                    Label("Import export package…", systemImage: "square.and.arrow.down")
-                }
-            }
-            .disabled(isImporting)
-            if let message {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(Theme.Colors.secondaryText)
+        Picker("Import Mode", selection: $state.mode) {
+            Text("Merge (Skip Existing)").tag(LocalImportMode.merge)
+            Text("Replace All Data").tag(LocalImportMode.replace)
+        }
+    }
+}
+
+struct LocalImportButton: View {
+    @Bindable var model: LocalAppModel
+    @Bindable var state: LocalImportState
+
+    var body: some View {
+        Button {
+            state.showImporter = true
+        } label: {
+            if state.isImporting {
+                ProgressView()
+            } else {
+                Label("Import Export Package", systemImage: "square.and.arrow.down")
             }
         }
+        .disabled(state.isImporting)
+        // Force a full-width tap region: a Button collapsed into a List row
+        // otherwise loses the bottom half of its hit area to the row chrome.
+        .contentShape(Rectangle())
+        .frame(minHeight: 44)
         .fileImporter(
-            isPresented: $showImporter,
+            isPresented: $state.showImporter,
             allowedContentTypes: [.json],
             allowsMultipleSelection: false
         ) { result in
@@ -457,21 +474,35 @@ struct LocalImportButton: View {
     }
 
     private func handle(_ result: Result<[URL], Error>) async {
-        isImporting = true
-        defer { isImporting = false }
+        state.isImporting = true
+        defer { state.isImporting = false }
         do {
             let urls = try result.get()
             guard let url = urls.first else { return }
             let access = url.startAccessingSecurityScopedResource()
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             let data = try Data(contentsOf: url)
-            let r = try await model.importPackage(data: data, mode: mode)
-            message =
+            let r = try await model.importPackage(data: data, mode: state.mode)
+            state.isImportError = false
+            state.message =
                 "Imported \(r.providers) providers, \(r.subscriptions) fees, \(r.charges) charges, \(r.snapshots) snapshots"
                 + (r.skipped > 0 ? " (\(r.skipped) skipped)" : "")
                 + ". Re-enter API keys."
         } catch {
-            message = error.localizedDescription
+            state.isImportError = true
+            state.message = error.localizedDescription
+        }
+    }
+}
+
+struct LocalImportMessage: View {
+    @Bindable var state: LocalImportState
+
+    var body: some View {
+        if let message = state.message {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(state.isImportError ? Theme.Colors.danger : Theme.Colors.secondaryText)
         }
     }
 }

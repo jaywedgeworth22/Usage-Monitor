@@ -45,7 +45,10 @@ struct PortfolioHistorySection: View {
                         .tint(Theme.Colors.accent)
                 }
             }
-        } else if store.state.isInitialLoading || store.isReloading && store.summary == nil {
+        } else if store.state.isInitialLoading {
+            // Only the first cold load gets a skeleton; reloads keep the prior
+            // summary on screen (dimmed + spinner) so the user never sees a
+            // blank card just because they picked a new range.
             SkeletonBlock(height: 72, radius: Theme.Radius.md)
                 .accessibilityLabel("Loading usage history for \(store.timeframe.displayLabel)")
         } else if let error = store.state.error {
@@ -152,101 +155,113 @@ public struct ChartRangeControl: View {
     }
 
     public var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Theme.Spacing.xs) {
-                ForEach(primary, id: \.option) { item in
-                    chip(label: item.label, selected: selection == item.option) {
-                        Haptics.selection()
-                        onSelect(item.option)
+        HStack(spacing: Theme.Spacing.sm) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.Spacing.xs) {
+                    ForEach(primary, id: \.option) { item in
+                        chip(label: item.label, selected: selection == item.option) {
+                            Haptics.selection()
+                            onSelect(item.option)
+                        }
                     }
-                }
-                Menu {
-                    Section("Rolling") {
-                        ForEach([
-                            TimeframeOption.rolling(days: 1),
-                            .rolling(days: 7),
-                            .rolling(days: 30),
-                            .rolling(days: 90),
-                            .rolling(days: 180),
-                            .rolling(days: 365),
-                            .rolling(days: 3650),
-                        ], id: \.self) { option in
-                            Button {
-                                Haptics.selection()
-                                onSelect(option)
-                            } label: {
-                                if selection == option {
-                                    Label(option.displayLabel, systemImage: "checkmark")
-                                } else {
-                                    Text(option.displayLabel)
+                    Menu {
+                        Section("Rolling") {
+                            ForEach([
+                                TimeframeOption.rolling(days: 1),
+                                .rolling(days: 7),
+                                .rolling(days: 30),
+                                .rolling(days: 90),
+                                .rolling(days: 180),
+                                .rolling(days: 365),
+                                .rolling(days: 3650),
+                            ], id: \.self) { option in
+                                Button {
+                                    Haptics.selection()
+                                    onSelect(option)
+                                } label: {
+                                    if selection == option {
+                                        Label(option.displayLabel, systemImage: "checkmark")
+                                    } else {
+                                        Text(option.displayLabel)
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    Section("Calendar Months") {
-                        ForEach(TimeframeOption.recentMonths(count: 13), id: \.self) { option in
-                            Button {
-                                Haptics.selection()
-                                onSelect(option)
-                            } label: {
-                                if selection == option {
-                                    Label(
-                                        option == .currentMonth ? "\(option.displayLabel) (this month)" : option.displayLabel,
-                                        systemImage: "checkmark"
-                                    )
-                                } else {
-                                    Text(option == .currentMonth ? "\(option.displayLabel) (this month)" : option.displayLabel)
+                        Section("Calendar Months") {
+                            ForEach(TimeframeOption.recentMonths(count: 13), id: \.self) { option in
+                                Button {
+                                    Haptics.selection()
+                                    onSelect(option)
+                                } label: {
+                                    if selection == option {
+                                        Label(
+                                            option == .currentMonth ? "\(option.displayLabel) (this month)" : option.displayLabel,
+                                            systemImage: "checkmark"
+                                        )
+                                    } else {
+                                        Text(option == .currentMonth ? "\(option.displayLabel) (this month)" : option.displayLabel)
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    Section("Calendar Years") {
-                        ForEach(TimeframeOption.recentYears(count: 3), id: \.self) { option in
-                            Button {
-                                Haptics.selection()
-                                onSelect(option)
-                            } label: {
-                                if selection == option {
-                                    Label(option.displayLabel, systemImage: "checkmark")
-                                } else {
-                                    Text(option.displayLabel)
+                        Section("Calendar Years") {
+                            ForEach(TimeframeOption.recentYears(count: 3), id: \.self) { option in
+                                Button {
+                                    Haptics.selection()
+                                    onSelect(option)
+                                } label: {
+                                    if selection == option {
+                                        Label(option.displayLabel, systemImage: "checkmark")
+                                    } else {
+                                        Text(option.displayLabel)
+                                    }
                                 }
                             }
                         }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(primaryContainsSelection ? "More" : shortMoreLabel)
+                                .font(Theme.Typography.caption.weight(.semibold))
+                            Image(systemName: "chevron.down")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .padding(.horizontal, Theme.Spacing.sm)
+                        .padding(.vertical, Theme.Spacing.xs)
+                        .background(
+                            primaryContainsSelection
+                                ? Theme.Colors.fill
+                                : Theme.Colors.accentSoft,
+                            in: Capsule()
+                        )
+                        .foregroundStyle(
+                            primaryContainsSelection
+                                ? Theme.Colors.primaryText
+                                : Theme.Colors.accent
+                        )
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(primaryContainsSelection ? "More" : shortMoreLabel)
-                            .font(Theme.Typography.caption.weight(.semibold))
-                        Image(systemName: "chevron.down")
-                            .font(.caption2.weight(.semibold))
-                    }
-                    .padding(.horizontal, Theme.Spacing.sm)
-                    .padding(.vertical, Theme.Spacing.xs)
-                    .background(
-                        primaryContainsSelection
-                            ? Theme.Colors.fill
-                            : Theme.Colors.accentSoft,
-                        in: Capsule()
-                    )
-                    .foregroundStyle(
-                        primaryContainsSelection
-                            ? Theme.Colors.primaryText
-                            : Theme.Colors.accent
-                    )
+                    .disabled(isBusy)
+                    .accessibilityLabel("More chart ranges")
+                    .accessibilityValue(primaryContainsSelection ? "More" : selection.displayLabel)
                 }
-                .disabled(isBusy)
-                .accessibilityLabel("More chart ranges")
-                .accessibilityValue(primaryContainsSelection ? "More" : selection.displayLabel)
+            }
+            .disabled(isBusy)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Chart range")
+            .accessibilityValue(selection.displayLabel)
+            .accessibilityHint("Changes usage history only. Budgets stay month-to-date.")
+            // Spinner to the right of the chips so the user sees progress
+            // while a new range is loading (was previously invisible: the
+            // whole card just blanked for several seconds — owner 2026-09-04).
+            if isBusy {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("Loading \(selection.displayLabel)")
+                    .transition(.opacity)
             }
         }
-        .disabled(isBusy)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Chart range")
-        .accessibilityValue(selection.displayLabel)
-        .accessibilityHint("Changes usage history only. Budgets stay month-to-date.")
+        .animation(.easeInOut(duration: 0.15), value: isBusy)
     }
 
     private var shortMoreLabel: String {
