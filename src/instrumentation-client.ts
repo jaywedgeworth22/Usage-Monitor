@@ -41,6 +41,8 @@ if (dsn) {
   const replayErrorSampleRate = Number(
     process.env.NEXT_PUBLIC_SENTRY_REPLAY_ERROR_SAMPLE_RATE ?? "1.0"
   );
+  const feedbackRaw = process.env.NEXT_PUBLIC_SENTRY_FEEDBACK_ENABLED?.trim();
+  const feedbackDisabled = feedbackRaw ? /^(false|0|off|no)$/i.test(feedbackRaw) : false;
 
   Sentry.init({
     dsn,
@@ -51,9 +53,23 @@ if (dsn) {
     enableLogs: true,
     replaysSessionSampleRate: !replayDisabled ? replaySessionSampleRate : 0,
     replaysOnErrorSampleRate: !replayDisabled ? replayErrorSampleRate : 0,
-    integrations: !replayDisabled
-      ? [Sentry.replayIntegration({ maskAllText: true, blockAllMedia: true })]
-      : [],
+    integrations: [
+      ...(!replayDisabled
+        ? [Sentry.replayIntegration({ maskAllText: true, blockAllMedia: true })]
+        : []),
+      ...(!feedbackDisabled
+        ? [
+            Sentry.feedbackIntegration({
+              colorScheme: "light",
+              autoInject: true,
+              showBranding: false,
+              buttonLabel: "Report a problem",
+              submitButtonLabel: "Send",
+              formTitle: "Report a problem",
+            }),
+          ]
+        : []),
+    ],
   });
 }
 
