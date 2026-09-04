@@ -2,11 +2,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { computeAgentsOverview } from "../agents-overview";
 import * as retention from "../data-retention";
+import { getLatestMacHealth } from "@/lib/mac-health";
+
+vi.mock("@/lib/mac-health", () => ({
+  getLatestMacHealth: vi.fn(),
+}));
+
+const mockedMacHealth = vi.mocked(getLatestMacHealth);
+
+function emptyGroupBy() {
+  vi.spyOn(prisma.externalUsageEvent as any, "groupBy").mockResolvedValue([] as any);
+  vi.spyOn(prisma.externalUsageEventDailyRollup as any, "groupBy").mockResolvedValue(
+    [] as any,
+  );
+}
 
 describe("agents-overview", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(prisma.subscription as any, "findMany").mockResolvedValue([]);
+    mockedMacHealth.mockResolvedValue({
+      ok: false,
+      status: "offline",
+      lastHeartbeatAt: null,
+      secondsSinceHeartbeat: null,
+      mac: null,
+    });
   });
 
   afterEach(() => {
@@ -70,14 +91,20 @@ describe("agents-overview", () => {
     expect(claudePlatform?.monthlySeatCostUsd).toBe(200);
     expect(claudePlatform?.billedMonthlySeatCostUsd).toBe(200);
     expect(claudePlatform?.seatPlanName).toBe("Claude Max 20x");
+    expect(claudePlatform?.usageIsReliable).toBe(true);
+    expect(claudePlatform?.telemetryAccuracy).toBe("reported");
     const codexPlatform = result.platforms.find((p) => p.id === "openai-codex");
     expect(codexPlatform).toBeDefined();
     expect(codexPlatform?.totalTokens).toBe(50_000);
     expect(codexPlatform?.monthlySeatCostUsd).toBe(200);
+    expect(codexPlatform?.usageIsReliable).toBe(true);
     const grokPlatform = result.platforms.find((p) => p.id === "grok-build");
     expect(grokPlatform?.monthlySeatCostUsd).toBe(300);
     expect(grokPlatform?.billedMonthlySeatCostUsd).toBe(100);
     expect(grokPlatform?.seatPlanName).toBe("SuperGrok Heavy");
+    const antigravity = result.platforms.find((p) => p.id === "antigravity-cli");
+    expect(antigravity?.monthlySeatCostUsd).toBe(70);
+    expect(antigravity?.listMonthlySeatCostUsd).toBe(100);
   });
 
   it("uses rollups only for days before the raw-event cutoff", async () => {
@@ -107,8 +134,8 @@ describe("agents-overview", () => {
     );
 
     const result = await computeAgentsOverview(3650);
-    const codexPlatform = result.platforms.find((p) => p.id === "openai-codex");
-    expect(codexPlatform?.totalTokens).toBe(50_000);
+    const codexFromRollup = result.platforms.find((p) => p.id === "openai-codex");
+    expect(codexFromRollup?.totalTokens).toBe(50_000);
   });
 
   it("reconciles 5h burn cost with max(reported, derived) instead of sum", async () => {
@@ -145,5 +172,83 @@ describe("agents-overview", () => {
     expect(result.burn5h.tokens5h).toBe(100_000);
     // Derived for 100k input tokens on claude-3-7-sonnet is $0.30; reported is $0.50. Max is 0.50.
     expect(result.burn5h.costEstimate5hUsd).toBe(0.5);
+  });
+
+  it("uses $70 net Antigravity seat cost and never treats its estimates as usage", async () => {
+    vi.spyOn(prisma.externalUsageEvent as any, "groupBy").mockImplementation(async (args: any) => {
+      if (args.where?.metricType === "usage") {
+        return [
+          {
+            sourceApp: "antigravity-cli",
+            provider: "google",
+            keyRef: "gemini-3.7-flash",
+            label: "token:input",
+            _sum: { quantity: 8_000 },
+          },
+          {
+            sourceApp: "claude-code",
+            provider: "anthropic",
+            keyRef: "claude-sonnet",
+            label: "input_tokens",
+            _sum: { quantity: 100_000 },
+          },
+        ] as any;
+      }
+      return [] as any;
+    });
+    vi.spyOn(prisma.externalUsageEventDailyRollup as any, "groupBy").mockResolvedValue([] as any);
+
+    const result = await computeAgentsOverview(30);
+    const antigravity = result.platforms.find((p) => p.id === "antigravity-cli");
+    expect(antigravity).toBeDefined();
+    expect(antigravity?.monthlySeatCostUsd).toBe(70);
+    expect(antigravity?.listMonthlySeatCostUsd).toBe(100);
+    expect(antigravity?.bundledOffsetUsd).toBe(30);
+    expect(antigravity?.bundledOffsetLabel).toBe("Google One");
+    expect(antigravity?.seatCostNote).toContain("$70 net for the AI");
+    expect(antigravity?.usageIsReliable).toBe(false);
+    expect(antigravity?.telemetryAccuracy).toBe("unavailable");
+    expect(antigravity?.telemetryAccuracyLabel).toBe("not reported");
+    expect(antigravity?.totalTokens).toBe(0);
+    expect(antigravity?.modelsUsed).toEqual([]);
+    expect(result.summary.totalTokens).toBe(100_000);
+    expect(result.summary.telemetryIncomplete).toBe(true);
+    expect(result.summary.unreliablePlatformIds).toContain("antigravity-cli");
+    expect(result.summary.telemetryIncompleteNote).toContain("Antigravity");
+  });
+
+  it("labels a running session seat with no events as not reported", async () => {
+    mockedMacHealth.mockResolvedValue({
+      ok: true,
+      status: "online",
+      lastHeartbeatAt: "2026-09-03T12:00:00.000Z",
+      secondsSinceHeartbeat: 10,
+      mac: {
+        hostname: "jays.services",
+        cpuUsagePct: 10,
+        memoryUsagePct: 20,
+        diskUsagePct: 30,
+        uptimeSeconds: 1000,
+        lastHeartbeatAt: "2026-09-03T12:00:00.000Z",
+        agentProcesses: { "grok-build": "running" },
+      },
+    } as any);
+    emptyGroupBy();
+
+    const result = await computeAgentsOverview(30);
+    const grok = result.platforms.find((p) => p.id === "grok-build");
+    expect(grok?.isRunningOnMac).toBe(true);
+    expect(grok?.usageIsReliable).toBe(false);
+    expect(grok?.telemetryAccuracyLabel).toBe("not reported");
+    expect(grok?.telemetryAccuracyNote).toContain("not confirmed as zero usage");
+  });
+
+  it("always marks Cursor usage as not reported", async () => {
+    emptyGroupBy();
+    const result = await computeAgentsOverview(30);
+    const cursor = result.platforms.find((p) => p.id === "cursor-agent");
+    expect(cursor?.usageIsReliable).toBe(false);
+    expect(cursor?.telemetryAccuracy).toBe("unavailable");
+    expect(cursor?.totalTokens).toBe(0);
   });
 });

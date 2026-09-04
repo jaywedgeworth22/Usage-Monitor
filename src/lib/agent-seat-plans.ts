@@ -67,8 +67,11 @@ export const AGENT_SEAT_CATALOG: Record<AgentPlatformId, AgentSeatCatalogEntry> 
     billedNote: "Promo billed $100 for one more month.  List price is $300.",
   },
   "antigravity-cli": {
-    planName: "Antigravity",
-    listMonthlyUsd: 20,
+    planName: "Google AI Ultra",
+    listMonthlyUsd: 100,
+    billedMonthlyUsd: 70,
+    billedNote:
+      "$100/mo Google AI Ultra.  $30 of that was already Google One, so $70 net for the AI.",
   },
   "github-copilot": {
     planName: "GitHub Copilot",

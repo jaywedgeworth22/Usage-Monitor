@@ -4,7 +4,17 @@
 Catalog is now Claude Max 20x $200 and SuperGrok Heavy $300 (promo billed
 $100).  Codex collector default `since` was UTC month start, so September
 ticks dropped June–August session JSONL.  Default lookback is 180 days.
-Rollout: `docs/rollouts/2026-09-03-agent-seat-plans.md`.
+Keeps the Antigravity $70-net / not-reported honesty from
+`grok/antigravity-seat-telemetry-honesty`.  Rollout:
+`docs/rollouts/2026-09-03-agent-seat-plans.md`.
+
+## Prior (2026-09-03 GROK — Antigravity $70 net + honest missing telemetry)
+
+Antigravity seat is $100 Google AI Ultra minus $30 already spent on Google
+One, so **$70 net for the AI**.  The Agents tab no longer treats missing or
+character-estimate feeds as little/no usage.  Every platform whose number is
+not accurate says **not reported**.  Web + iOS.  Rollout:
+`docs/rollouts/2026-09-03-antigravity-seat-telemetry-honesty.md`.
 
 ## Prior (2026-09-01 GROK — Sentry fleet adoption leftovers)
 

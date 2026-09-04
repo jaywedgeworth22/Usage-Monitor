@@ -2,8 +2,17 @@
 
 import React, { useEffect, useState } from "react";
 import type { AgentsOverviewResponse } from "@/lib/agents-overview";
+import {
+  formatAgentMoneyValue,
+  formatAgentSeatPrimary,
+  formatAgentTokenValue,
+} from "@/lib/agent-telemetry-accuracy";
 
 const SENTENCE_GAP = "\u00a0 ";
+
+function withSentenceGaps(text: string): string {
+  return text.replace(/ {2,}/g, SENTENCE_GAP);
+}
 
 export function AgentsDashboard() {
   const [data, setData] = useState<AgentsOverviewResponse | null>(null);
@@ -57,7 +66,8 @@ export function AgentsDashboard() {
             <span>AI Coding Agents</span>
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Live local process execution, model token telemetry, quota burn windows, and PAYG API-equivalent cost savings.
+            Live Mac process status, token telemetry when a seat reports it, and PAYG API-equivalent cost.
+            {SENTENCE_GAP}Seats without accurate telemetry say so instead of showing zero usage.
           </p>
         </div>
 
@@ -87,6 +97,16 @@ export function AgentsDashboard() {
         </div>
       ) : data ? (
         <>
+          {data.summary.telemetryIncomplete && data.summary.telemetryIncompleteNote ? (
+            <div
+              role="status"
+              className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+            >
+              <p className="font-semibold">Telemetry Not Accurate</p>
+              <p className="mt-1">{withSentenceGaps(data.summary.telemetryIncompleteNote)}</p>
+            </div>
+          ) : null}
+
           {/* Key Metrics Hero */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Live Agents Online */}
@@ -129,7 +149,16 @@ export function AgentsDashboard() {
                 {formatTokens(data.summary.totalTokens)}
               </div>
               <div className="mt-1 text-xs text-muted-foreground truncate">
-                Top Model: <span className="font-mono text-foreground font-medium">{data.summary.topModel || "None"}</span>
+                {data.summary.telemetryIncomplete
+                  ? "Incomplete — some seats are not reporting"
+                  : (
+                    <>
+                      Top Model:{" "}
+                      <span className="font-mono text-foreground font-medium">
+                        {data.summary.topModel || "None"}
+                      </span>
+                    </>
+                  )}
               </div>
             </div>
 
@@ -200,7 +229,9 @@ export function AgentsDashboard() {
             <h2 className="text-base font-bold text-foreground mb-3 flex items-center justify-between">
               <span>Agentic Coding Platforms</span>
               <span className="text-xs font-normal text-muted-foreground">
-                Showing live status & telemetry for all {data.platforms.length} seats
+                {data.summary.telemetryIncomplete
+                  ? "Usage numbers are omitted when telemetry is not accurate"
+                  : `Showing live status and telemetry for all ${data.platforms.length} seats`}
               </span>
             </h2>
 
@@ -245,25 +276,45 @@ export function AgentsDashboard() {
                       </div>
 
                       {/* Stats Overview */}
+                      {!platform.usageIsReliable ? (
+                        <div
+                          role="status"
+                          className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+                        >
+                          <span className="font-semibold">not reported.</span>
+                          {SENTENCE_GAP}
+                          {withSentenceGaps(platform.telemetryAccuracyNote)}
+                        </div>
+                      ) : null}
+
                       <div className="mt-3.5 grid grid-cols-3 gap-2 rounded-lg bg-muted/40 p-2.5 text-center text-xs">
                         <div>
                           <div className="text-[10px] text-muted-foreground">Tokens</div>
-                          <div className="font-bold text-foreground mt-0.5">{formatTokens(platform.totalTokens)}</div>
+                          <div className="font-bold text-foreground mt-0.5">
+                            {formatAgentTokenValue(platform, formatTokens)}
+                          </div>
                         </div>
                         <div>
                           <div className="text-[10px] text-muted-foreground">PAYG Value</div>
-                          <div className="font-bold text-foreground mt-0.5">{formatCurrency(platform.estimatedCostUsd)}</div>
+                          <div className="font-bold text-foreground mt-0.5">
+                            {formatAgentMoneyValue(platform, platform.estimatedCostUsd, formatCurrency)}
+                          </div>
                         </div>
                         <div>
-                          <div className="text-[10px] text-muted-foreground">Seat</div>
+                          <div className="text-[10px] text-muted-foreground">Seat Cost</div>
                           <div className="font-bold text-foreground mt-0.5">
-                            {formatCurrency(platform.monthlySeatCostUsd)}/mo
+                            {formatAgentSeatPrimary(platform)}
                           </div>
                           <div className="text-[10px] text-muted-foreground mt-0.5 truncate" title={platform.seatPlanName}>
                             {platform.seatPlanName}
                           </div>
                         </div>
                       </div>
+                      {platform.seatCostNote ? (
+                        <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+                          {withSentenceGaps(platform.seatCostNote)}
+                        </p>
+                      ) : null}
 
                       {/* Model Usage Breakdown */}
                       {platform.modelsUsed.length > 0 && (
@@ -300,24 +351,19 @@ export function AgentsDashboard() {
                       )}
                     </div>
 
-                    {platform.seatPlanNote ? (
-                      <p className="mt-2 text-[11px] text-muted-foreground">
-                        {platform.seatPlanNote.replace(/\.  /g, `.${SENTENCE_GAP}`)}
-                      </p>
-                    ) : platform.billedMonthlySeatCostUsd + 0.5 < platform.monthlySeatCostUsd ? (
-                      <p className="mt-2 text-[11px] text-muted-foreground">
-                        Promo billed {formatCurrency(platform.billedMonthlySeatCostUsd)} this month.
-                        {SENTENCE_GAP}List price is {formatCurrency(platform.monthlySeatCostUsd)}.
-                      </p>
-                    ) : null}
-
                     {/* Data Capability Footnote */}
-                    <div className="mt-3.5 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between">
-                      <span className="truncate pr-2" title={platform.notes}>
+                    <div className="mt-3.5 pt-2.5 border-t border-border/50 text-[11px] text-muted-foreground flex items-center justify-between gap-2">
+                      <span className="truncate pr-2" title={platform.telemetryAccuracyNote}>
                         ℹ️ {platform.dataCapability}
                       </span>
-                      <span className="capitalize font-mono text-[10px] bg-muted/60 px-1.5 py-0.5 rounded flex-shrink-0">
-                        {platform.fidelityTier.replace(/_/g, " ")}
+                      <span
+                        className={`capitalize font-mono text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${
+                          platform.usageIsReliable
+                            ? "bg-muted/60"
+                            : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200"
+                        }`}
+                      >
+                        {platform.telemetryAccuracyLabel}
                       </span>
                     </div>
                   </div>

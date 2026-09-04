@@ -139,6 +139,15 @@ public struct AgentsRootView: View {
             let tokensStr = formatTokens(data.summary.totalTokens)
             LabeledContent("Total Tokens", value: tokensStr)
                 .copyableRow(label: "Total Tokens", value: tokensStr)
+            if data.summary.telemetryIncomplete == true {
+                Text(data.summary.telemetryIncompleteNote ?? "Some seats are not reporting usage.")
+                    .font(Theme.Typography.caption)
+                    .foregroundStyle(Theme.Colors.warning)
+                    .copyableRow(
+                        label: "Telemetry Accuracy",
+                        value: data.summary.telemetryIncompleteNote ?? "Some seats are not reporting usage."
+                    )
+            }
             let paygStr = formatCurrency(data.summary.totalApiEquivalentCostUsd)
             LabeledContent("PAYG Value", value: paygStr)
                 .copyableRow(label: "PAYG Value", value: paygStr)
@@ -152,7 +161,9 @@ public struct AgentsRootView: View {
         } header: {
             Text("Fleet Summary · \(data.windowLabel)")
         } footer: {
-            Text("API Equivalent compares token volume with direct LiteLLM catalog list rates.")
+            Text(data.summary.telemetryIncomplete == true
+                 ? "Token totals omit seats that are not reporting usage.  This is not zero use."
+                 : "API Equivalent compares token volume with direct LiteLLM catalog list rates.")
         }
     }
 
@@ -193,30 +204,48 @@ public struct AgentsRootView: View {
                     }
                     .copyableRow(label: "\(platform.name) Status", value: statusStr)
                     let seatName = platform.seatPlanName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    let listSeat = "$\(Int(platform.monthlySeatCostUsd.rounded()))/mo"
-                    let seatStr = seatName.isEmpty ? listSeat : "\(seatName) · \(listSeat)"
+                    let seatStr = seatName.isEmpty
+                        ? platform.seatCostDisplay
+                        : "\(seatName) · \(platform.seatCostDisplay)"
                     LabeledContent("Seat Cost", value: seatStr)
                         .copyableRow(label: "\(platform.name) Seat Cost", value: seatStr)
                     if let billed = platform.billedMonthlySeatCostUsd,
-                       billed + 0.5 < platform.monthlySeatCostUsd {
-                        let billedStr = "$\(Int(billed.rounded()))/mo billed (list \(listSeat))"
+                       billed + 0.5 < (platform.listMonthlySeatCostUsd ?? platform.monthlySeatCostUsd) {
+                        let billedStr = "$\(Int(billed.rounded()))/mo billed"
                         LabeledContent("Billed This Month", value: billedStr)
                             .copyableRow(label: "\(platform.name) Billed Seat", value: billedStr)
                     }
-                    let pTokensStr = formatTokens(platform.totalTokens)
+                    if let seatNote = platform.seatCostNote, !seatNote.isEmpty {
+                        Text(seatNote)
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    if !platform.reportsUsage {
+                        StatusBadge(
+                            platform.telemetryAccuracyLabel ?? "not reported",
+                            status: .warning,
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        Text(platform.telemetryAccuracyNote ?? "Usage is not reported.  This is not zero usage.")
+                            .font(Theme.Typography.caption)
+                            .foregroundStyle(Theme.Colors.warning)
+                    }
+                    let pTokensStr = platform.reportsUsage ? formatTokens(platform.totalTokens) : "not reported"
                     LabeledContent("Tokens Processed", value: pTokensStr)
                         .copyableRow(label: "\(platform.name) Tokens", value: pTokensStr)
-                    let pPaygStr = formatCurrency(platform.estimatedCostUsd)
+                    let pPaygStr = platform.reportsUsage ? formatCurrency(platform.estimatedCostUsd) : "not reported"
                     LabeledContent("PAYG Value", value: pPaygStr)
                         .copyableRow(label: "\(platform.name) PAYG Value", value: pPaygStr)
-                    let pSavingsStr = "+\(formatCurrency(platform.netSavingsUsd))"
+                    let pSavingsStr = platform.reportsUsage
+                        ? "+\(formatCurrency(platform.netSavingsUsd))"
+                        : "not reported"
                     LabeledContent("Net Savings") {
                         Text(pSavingsStr)
-                            .foregroundStyle(Theme.Colors.success)
+                            .foregroundStyle(platform.reportsUsage ? Theme.Colors.success : Theme.Colors.warning)
                     }
                     .copyableRow(label: "\(platform.name) Net Savings", value: pSavingsStr)
 
-                    if !platform.modelsUsed.isEmpty {
+                    if platform.reportsUsage && !platform.modelsUsed.isEmpty {
                         ForEach(platform.modelsUsed) { model in
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
@@ -243,7 +272,7 @@ public struct AgentsRootView: View {
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
                 } footer: {
-                    Text("ℹ️ \(platform.dataCapability)")
+                    Text(platform.telemetryAccuracyNote ?? platform.dataCapability)
                 }
             }
         }
