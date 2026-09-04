@@ -1,4 +1,12 @@
-## Current (2026-09-01 GROK — Sentry fleet adoption leftovers)
+## Current (2026-09-03 GROK — Antigravity $70 net + honest missing telemetry)
+
+Antigravity seat is $100 Google AI Ultra minus $30 already spent on Google
+One, so **$70 net for the AI**.  The Agents tab no longer treats missing or
+character-estimate feeds as little/no usage.  Every platform whose number is
+not accurate says **not reported**.  Web + iOS.  Rollout:
+`docs/rollouts/2026-09-03-antigravity-seat-telemetry-honesty.md`.
+
+## Prior (2026-09-01 GROK — Sentry fleet adoption leftovers)
 
 Client Replay was default-on in code but producing zero sessions because
 `NEXT_PUBLIC_SENTRY_DSN` is inlined at build and was missing from the Coolify
