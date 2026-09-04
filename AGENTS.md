@@ -51,8 +51,9 @@ but contribute zero to `persisted`; never derive it from `activeEvents.length`.
 - `POST /api/ingest/usage` — Bearer `USAGE_INGEST_TOKEN` (or `x-usage-ingest-token`). Writes `ExternalUsageEvent`.
 - `GET /api/quota-windows` — dashboard session cookie OR Bearer `USAGE_READ_TOKEN`.
   Latest remaining-% windows from Mac collectors (`metricType=quota`).  BotFleet
-  polls this to skip exhausted model types until `resetAt`.  Skip is only when
-  remaining is 0 or `isExhausted`; near-cap (≤20%) is display-only.
+  polls this to skip exhausted model types until `resetAt`.  Skip is when
+  remaining is 0, `isExhausted`, or `antigravity-usage` N/A remaining (none
+  remains).  Near-cap (≤20%) is display-only.
 - `GET /api/budget-status` — dashboard session cookie OR Bearer `USAGE_READ_TOKEN`
   (required in production; falls back to `USAGE_INGEST_TOKEN` only outside
   production or with the explicit break-glass flag — see "Env vars").

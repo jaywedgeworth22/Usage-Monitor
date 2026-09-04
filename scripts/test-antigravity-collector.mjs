@@ -248,7 +248,8 @@ check("antigravity-usage per-model JSON becomes quota events", () => {
   assertEqual(opus.metadata.source, "antigravity-usage", "source tag");
   const gemini = events.find((e) => e.metadata.modelId === "gemini-3-flash");
   assert(gemini, "gemini event present even without remainingPercentage");
-  assertEqual(gemini.credits, undefined, "no fake remaining when the CLI omitted it");
+  assertEqual(gemini.credits, 0, "N/A remaining is none remains");
+  assertEqual(gemini.metadata.isExhausted, true, "N/A remaining is exhausted");
 });
 
 // The collector posts straight to prod, so the batch it builds has to satisfy
@@ -330,8 +331,9 @@ check("antigravity-usage quota --json is preferred over agy group buckets", () =
   assertEqual(records[0].seriesKey, ["claude", "opus", "4-6", "thinking"].join("-"), "series key is the model id");
   assertEqual(records[0].percentRemaining, 29.75, "fraction converted to percent");
   assertEqual(records[0].isExhausted, false, "30% remaining is not exhausted");
-  assertEqual(records[1].remainingUnknown, true, "Gemini remaining N/A is not invented");
-  assertEqual(records[1].percentRemaining, undefined, "no fake 100%");
+  assertEqual(records[1].remainingUnknown, false, "N/A remaining is not unknown");
+  assertEqual(records[1].percentRemaining, 0, "N/A remaining is none remains");
+  assertEqual(records[1].isExhausted, true, "N/A remaining is exhausted");
   assertEqual(records[2].isExhausted, true, "isExhausted true is a hit");
   assertEqual(records[2].percentRemaining, 0, "exhausted models store 0 remaining");
 });
@@ -340,7 +342,7 @@ check("antigravity-usage events validate against the shared v2 ingest schema", (
   const events = buildEvents(USAGE_CLI_FIXTURE, OCCURRED_AT);
   assertEqual(events[0].metadata.modelId, ["claude", "opus", "4-6", "thinking"].join("-"), "modelId in metadata");
   assertEqual(events[0].metadata.source, "antigravity-usage", "source tag");
-  assertEqual(events[1].credits, undefined, "unknown remaining omits credits");
+  assertEqual(events[1].credits, 0, "N/A remaining stores 0 credits");
   assertEqual(events[2].credits, 0, "exhausted credits are zero");
   const result = UsageTelemetryV2BatchSchema.safeParse({
     schemaVersion: 2,

@@ -12,9 +12,9 @@ describe("quotaStatus", () => {
     );
   });
 
-  it("does not invent Gemini remaining", () => {
+  it("treats omitted remaining (N/A) as exhausted", () => {
     expect(quotaStatus({ remainingPercent: null, remainingUnknown: true, isExhausted: false })).toBe(
-      "unknown",
+      "exhausted",
     );
   });
 
@@ -55,13 +55,14 @@ describe("projectQuotaWindows", () => {
         },
       },
     ]);
-    expect(result.skipModelTypes).toEqual([
-      { instanceId: "antigravity", model: "claude-opus-4-6-thinking" },
+    expect(result.skipModelTypes.map((row) => row.model).sort()).toEqual([
+      "claude-opus-4-6-thinking",
+      "gemini-3.1-pro-high",
     ]);
     const gemini = result.windows.find((row) => row.modelId === "gemini-3.1-pro-high");
-    expect(gemini?.status).toBe("unknown");
-    expect(gemini?.skip).toBe(false);
-    expect(gemini?.remainingUnknown).toBe(true);
+    expect(gemini?.status).toBe("exhausted");
+    expect(gemini?.skip).toBe(true);
+    expect(gemini?.remainingPercent).toBe(0);
   });
 
   it("keeps the latest event per series", () => {
