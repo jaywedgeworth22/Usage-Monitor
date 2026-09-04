@@ -26,6 +26,10 @@ import {
   postUsageBatches,
 } from "./lib/session-token-collectors.mjs";
 import {
+  observedPlanEvent,
+  readCodexObservedPlan,
+} from "./lib/codex-observed-plan.mjs";
+import {
   codexSessionKeyFor,
   expandHome,
   parseCollectorArgs,
@@ -78,6 +82,16 @@ async function main() {
   }
   const events = await collectCodexEvents({ since: args.since });
   log(`parsed ${events.length} token event(s) since ${args.since.toISOString()}`);
+  const observed = await readCodexObservedPlan(join(expandHome(process.env.CODEX_HOME || join(homedir(), ".codex")), "auth.json"));
+  if (observed?.planType) {
+    events.push(
+      observedPlanEvent({
+        planType: observed.planType,
+        occurredAtIso: new Date().toISOString(),
+      })
+    );
+    log(`observed chatgpt_plan_type=${observed.planType}`);
+  }
   if (DEBUG) {
     const models = new Set(events.map((e) => e.producerKeyRef).filter(Boolean));
     log(`models: ${[...models].join(", ") || "(none)"}`);

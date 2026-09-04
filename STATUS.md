@@ -1,12 +1,10 @@
 ## Current (2026-09-03 GROK — Agent seat plans + Codex lookback)
 
-`/agents` was labeling Claude as a $20 seat and Grok as SuperGrok $30.
-Catalog is now Claude Max 20x $200 and SuperGrok Heavy $300 (promo billed
-$100).  Codex collector default `since` was UTC month start, so September
-ticks dropped June–August session JSONL.  Default lookback is 180 days.
-Keeps the Antigravity $70-net / not-reported honesty from
-`grok/antigravity-seat-telemetry-honesty`.  Rollout:
-`docs/rollouts/2026-09-03-agent-seat-plans.md`.
+`/agents` window chips are `5h` / `24h` / `7d` / `30d` / `All Time` on one
+line with real gaps.  Seat cash comes from receipts.  Codex plan is observed
+from the local login JWT (Plus $20), not a guessed Pro $200.  Copilot is
+not billed.  Cursor Ultra is included with SuperGrok Heavy.  MiniMax waits
+on a receipt.  Rollout: `docs/rollouts/2026-09-03-agent-seat-plans.md`.
 
 ## Prior (2026-09-03 GROK — Antigravity $70 net + honest missing telemetry)
 

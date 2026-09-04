@@ -27,6 +27,10 @@ import {
   parseCollectorArgs,
   sessionKeyFor,
 } from "./lib/run-session-token-collector.mjs";
+import {
+  observedPlanEvent,
+  planTypeFromCodexAuth,
+} from "./lib/codex-observed-plan.mjs";
 
 function assert(cond, message) {
   if (!cond) {
@@ -167,6 +171,37 @@ assert(
     800 + 1300,
   "codex replay does not double last_token_usage"
 );
+
+function fakeJwt(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `eyJhbGciOiJub25lIn0.${body}.sig`;
+}
+const observedPlus = planTypeFromCodexAuth({
+  tokens: {
+    id_token: fakeJwt({
+      "https://api.openai.com/auth": { chatgpt_plan_type: "plus" },
+    }),
+  },
+});
+assert(observedPlus === "plus", `codex observed plan ${observedPlus}`);
+assert(planTypeFromCodexAuth({ tokens: {} }) === null, "missing id_token is not a plan");
+const planEvent = observedPlanEvent({
+  planType: "plus",
+  occurredAtIso: "2026-09-03T12:00:00.000Z",
+});
+assert(planEvent.label === "observed-plan", "observed-plan label");
+assert(planEvent.producerKeyRef === "plus", "observed-plan key");
+assert(planEvent.metricType === "quota_sync", "observed-plan metric");
+assert(
+  !JSON.stringify(planEvent).includes("eyJ"),
+  "observed-plan event must not include a JWT"
+);
+UsageTelemetryV2BatchSchema.parse({
+  schemaVersion: 2,
+  producerId: CODEX_PRODUCER_ID,
+  producerInstanceId: "test-host",
+  events: [planEvent],
+});
 
 assert(DEFAULT_COLLECTOR_LOOKBACK_DAYS === 180, "default collector lookback days");
 const defaultArgs = parseCollectorArgs(["node", "codex-usage-collector.mjs"]);

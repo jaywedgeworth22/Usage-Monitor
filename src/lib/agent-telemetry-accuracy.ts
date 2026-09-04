@@ -119,6 +119,7 @@ export function formatAgentSeatPrimary(platform: {
   monthlySeatCostUsd: number;
   bundledOffsetUsd: number | null;
 }): string {
+  if (!(platform.monthlySeatCostUsd > 0)) return "Not billed";
   if (platform.bundledOffsetUsd != null && platform.bundledOffsetUsd > 0) {
     return `$${platform.monthlySeatCostUsd}/mo net`;
   }

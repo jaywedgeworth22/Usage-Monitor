@@ -1,15 +1,12 @@
 import { normalizeMonthlyUsd, type SubscriptionInterval } from "@/lib/subscriptions";
 
 /**
- * Fleet coding-seat list prices shown on /agents.
- *
- * These are consumer subscription SKUs (Claude Max, ChatGPT Pro, SuperGrok
- * Heavy), not API prepaid.  Hardcoded Pro $20 / SuperGrok $30 defaults made
- * the dashboard claim the owner was on the cheap tier.  Owner correction
- * 2026-09-03: Claude Max 20x $200, SuperGrok Heavy $300 list (promo billed
- * $100 for one more month), ChatGPT Pro $200 for the Codex CLI window we
- * backfill.  Active Subscription rows may raise billed/list; they must not
- * pull a Max/Heavy seat back down to a leftover Pro $20 / SuperGrok $30 row.
+ * Coding-seat cash comes from receipts / active Subscription rows, not from
+ * a guessed catalog.  Observed login claims (Codex JWT chatgpt_plan_type)
+ * name the SKU.  Public list prices for that SKU are labels, not billed cash,
+ * until a receipt lands.  Owner 2026-09-03: do not invent ChatGPT Pro $200
+ * when login says Plus; Copilot is unpaid; Cursor Ultra is included with
+ * SuperGrok Heavy; MiniMax waits on a receipt.
  */
 
 export type AgentPlatformId =
@@ -18,14 +15,23 @@ export type AgentPlatformId =
   | "cursor-agent"
   | "grok-build"
   | "antigravity-cli"
-  | "github-copilot";
+  | "github-copilot"
+  | "minimax-code";
+
+export type AgentSeatSource =
+  | "receipt"
+  | "observed"
+  | "included"
+  | "catalog"
+  | "unknown";
 
 export interface AgentSeatCatalogEntry {
   planName: string;
   listMonthlyUsd: number;
-  /** Cash billed this month when a promo differs from list. */
   billedMonthlyUsd?: number;
   billedNote?: string;
+  /** $0 cash; list price is a perk of another seat. */
+  includedWith?: string;
 }
 
 export interface AgentSeatSubscriptionInput {
@@ -39,13 +45,28 @@ export interface AgentSeatSubscriptionInput {
   providerDisplayName: string;
 }
 
+export interface ObservedAgentPlan {
+  planType: string;
+}
+
 export interface ResolvedAgentSeat {
   planName: string;
   listMonthlyUsd: number;
   billedMonthlyUsd: number;
-  source: "catalog" | "subscription";
+  source: AgentSeatSource;
   note: string | null;
 }
+
+/** Public ChatGPT SKU list prices.  Used only after login names the SKU. */
+export const CHATGPT_SKU_LIST: Record<string, { planName: string; listMonthlyUsd: number }> = {
+  free: { planName: "ChatGPT Free", listMonthlyUsd: 0 },
+  go: { planName: "ChatGPT Go", listMonthlyUsd: 8 },
+  plus: { planName: "ChatGPT Plus", listMonthlyUsd: 20 },
+  pro: { planName: "ChatGPT Pro", listMonthlyUsd: 200 },
+  team: { planName: "ChatGPT Team", listMonthlyUsd: 25 },
+  business: { planName: "ChatGPT Business", listMonthlyUsd: 25 },
+  enterprise: { planName: "ChatGPT Enterprise", listMonthlyUsd: 0 },
+};
 
 export const AGENT_SEAT_CATALOG: Record<AgentPlatformId, AgentSeatCatalogEntry> = {
   "claude-code": {
@@ -53,12 +74,17 @@ export const AGENT_SEAT_CATALOG: Record<AgentPlatformId, AgentSeatCatalogEntry> 
     listMonthlyUsd: 200,
   },
   "openai-codex": {
-    planName: "ChatGPT Pro",
-    listMonthlyUsd: 200,
+    planName: "ChatGPT",
+    listMonthlyUsd: 0,
+    billedNote: "ChatGPT plan is observed from Codex login.  Billed cash waits on a receipt.",
   },
   "cursor-agent": {
-    planName: "Cursor Pro",
-    listMonthlyUsd: 20,
+    planName: "Cursor Ultra",
+    listMonthlyUsd: 200,
+    billedMonthlyUsd: 0,
+    includedWith: "SuperGrok Heavy",
+    billedNote:
+      "Cursor Ultra (list $200) is included with SuperGrok Heavy.  Not billed separately.",
   },
   "grok-build": {
     planName: "SuperGrok Heavy",
@@ -74,8 +100,16 @@ export const AGENT_SEAT_CATALOG: Record<AgentPlatformId, AgentSeatCatalogEntry> 
       "$100/mo Google AI Ultra.  $30 of that was already Google One, so $70 net for the AI.",
   },
   "github-copilot": {
-    planName: "GitHub Copilot",
-    listMonthlyUsd: 19,
+    planName: "Not billed",
+    listMonthlyUsd: 0,
+    billedMonthlyUsd: 0,
+    billedNote: "No GitHub Copilot subscription.",
+  },
+  "minimax-code": {
+    planName: "MiniMax Code",
+    listMonthlyUsd: 0,
+    billedMonthlyUsd: 0,
+    billedNote: "MiniMax Code billed cash waits on a receipt.",
   },
 };
 
@@ -83,7 +117,7 @@ const PLATFORM_MATCHERS: Record<AgentPlatformId, (haystack: string) => boolean> 
   "claude-code": (h) => /\banthropic\b|\bclaude\b/.test(h),
   "openai-codex": (h) =>
     /\bcodex\b|\bchatgpt\b/.test(h) ||
-    (/\bopenai\b/.test(h) && /\b(plus|pro|team|enterprise)\b/.test(h)),
+    (/\bopenai\b/.test(h) && /\b(plus|pro|team|enterprise|go)\b/.test(h)),
   "cursor-agent": (h) => /\bcursor\b/.test(h),
   "grok-build": (h) =>
     /\bsupergrok\b/.test(h) ||
@@ -91,10 +125,20 @@ const PLATFORM_MATCHERS: Record<AgentPlatformId, (haystack: string) => boolean> 
     (/\bxai\b/.test(h) && /\b(super|heavy|plus|premium)\b/.test(h)),
   "antigravity-cli": (h) => /\bantigravity\b/.test(h),
   "github-copilot": (h) => /\bcopilot\b/.test(h),
+  "minimax-code": (h) => /\bminimax\b/.test(h),
 };
 
 export function isAgentPlatformId(value: string): value is AgentPlatformId {
   return Object.prototype.hasOwnProperty.call(AGENT_SEAT_CATALOG, value);
+}
+
+export function chatgptSkuForPlanType(planType: string | null | undefined): {
+  planName: string;
+  listMonthlyUsd: number;
+} | null {
+  if (!planType) return null;
+  const key = planType.trim().toLowerCase();
+  return CHATGPT_SKU_LIST[key] ?? null;
 }
 
 function haystackFor(sub: AgentSeatSubscriptionInput): string {
@@ -104,7 +148,7 @@ function haystackFor(sub: AgentSeatSubscriptionInput): string {
 function monthlyFromSub(sub: AgentSeatSubscriptionInput): number | null {
   if (sub.status.trim().toLowerCase() !== "active") return null;
   if ((sub.currency ?? "USD").trim().toUpperCase() !== "USD") return null;
-  if (!Number.isFinite(sub.costUsd) || sub.costUsd <= 0) return null;
+  if (!Number.isFinite(sub.costUsd) || sub.costUsd < 0) return null;
   const interval = sub.interval.trim().toLowerCase();
   if (
     interval !== "weekly" &&
@@ -119,24 +163,24 @@ function monthlyFromSub(sub: AgentSeatSubscriptionInput): number | null {
     interval as SubscriptionInterval,
     sub.intervalCount
   );
-  return Number.isFinite(monthly) && monthly > 0 ? monthly : null;
+  return Number.isFinite(monthly) && monthly >= 0 ? monthly : null;
 }
 
 /**
- * Catalog list/billed first.  An active matching subscription may raise the
- * billed or list amount.  A leftover cheap-tier row (Pro $20, SuperGrok $30)
- * cannot understate a Max/Heavy catalog seat.
+ * Receipt / active Subscription wins for billed cash, including a $20 Plus
+ * row.  Observed Codex login names the ChatGPT SKU.  Catalog is only a
+ * fallback for seats the owner already confirmed (Claude Max, SuperGrok
+ * Heavy, Antigravity Ultra) or for $0 / included perks.
  */
 export function resolveAgentSeat(
   platformId: AgentPlatformId,
-  subscriptions: readonly AgentSeatSubscriptionInput[]
+  subscriptions: readonly AgentSeatSubscriptionInput[],
+  observed: ObservedAgentPlan | null = null
 ): ResolvedAgentSeat {
   const catalog = AGENT_SEAT_CATALOG[platformId];
-  const list = catalog.listMonthlyUsd;
-  const catalogBilled = catalog.billedMonthlyUsd ?? list;
   const matcher = PLATFORM_MATCHERS[platformId];
 
-  let bestMonthly = 0;
+  let bestMonthly = -1;
   let bestName: string | null = null;
   for (const sub of subscriptions) {
     const monthly = monthlyFromSub(sub);
@@ -148,28 +192,68 @@ export function resolveAgentSeat(
     }
   }
 
-  const raiseFloor = catalogBilled * 0.8;
-  if (bestMonthly + 1e-9 >= raiseFloor) {
-    const nextList = Math.max(list, bestMonthly);
-    const nextBilled = Math.max(catalogBilled, bestMonthly);
+  if (bestMonthly >= 0) {
+    const list = Math.max(catalog.listMonthlyUsd, bestMonthly);
     return {
       planName: bestName || catalog.planName,
-      listMonthlyUsd: nextList,
-      billedMonthlyUsd: nextBilled >= nextList ? nextList : bestMonthly,
-      source: "subscription",
+      listMonthlyUsd: list,
+      billedMonthlyUsd: bestMonthly,
+      source: "receipt",
       note:
-        nextBilled + 0.5 < nextList
+        bestMonthly + 0.5 < list
           ? catalog.billedNote ??
-            `Promo billed $${Math.round(bestMonthly)} this month.  List price is $${Math.round(nextList)}.`
+            `Receipt billed $${Math.round(bestMonthly)} this month.  List price is $${Math.round(list)}.`
           : null,
     };
   }
 
+  if (catalog.includedWith) {
+    return {
+      planName: catalog.planName,
+      listMonthlyUsd: catalog.listMonthlyUsd,
+      billedMonthlyUsd: 0,
+      source: "included",
+      note: catalog.billedNote ?? `Included with ${catalog.includedWith}.  Not billed separately.`,
+    };
+  }
+
+  if (platformId === "openai-codex") {
+    const sku = chatgptSkuForPlanType(observed?.planType);
+    if (sku) {
+      return {
+        planName: sku.planName,
+        listMonthlyUsd: sku.listMonthlyUsd,
+        billedMonthlyUsd: sku.listMonthlyUsd,
+        source: "observed",
+        note: `Observed ${sku.planName} from Codex login.  Confirm billed cash with a receipt.`,
+      };
+    }
+    return {
+      planName: catalog.planName,
+      listMonthlyUsd: 0,
+      billedMonthlyUsd: 0,
+      source: "unknown",
+      note: catalog.billedNote ?? null,
+    };
+  }
+
+  if (catalog.listMonthlyUsd <= 0 && (catalog.billedMonthlyUsd ?? 0) <= 0) {
+    return {
+      planName: catalog.planName,
+      listMonthlyUsd: 0,
+      billedMonthlyUsd: 0,
+      source: "unknown",
+      note: catalog.billedNote ?? null,
+    };
+  }
+
+  const list = catalog.listMonthlyUsd;
+  const billed = catalog.billedMonthlyUsd ?? list;
   return {
     planName: catalog.planName,
     listMonthlyUsd: list,
-    billedMonthlyUsd: catalogBilled,
+    billedMonthlyUsd: billed,
     source: "catalog",
-    note: catalogBilled + 0.5 < list ? catalog.billedNote ?? null : null,
+    note: billed + 0.5 < list ? catalog.billedNote ?? null : catalog.billedNote ?? null,
   };
 }

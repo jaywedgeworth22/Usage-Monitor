@@ -11,13 +11,17 @@ Two spaces between sentences in this file.
 
 ## What landed
 
-- Catalog list prices for `/agents` (and the iOS Agents tab via the same API):
-  Claude Max 20x $200, ChatGPT Pro $200, SuperGrok Heavy $300 list / $100
-  billed, Cursor Pro $20, Antigravity $20, Copilot $19.
-- Active `Subscription` rows may raise billed/list.  Leftover Pro $20 /
-  SuperGrok $30 rows cannot pull a Max/Heavy seat back down.
-- Seat Cost shows the plan name and list price.  Promo billed cash is a
-  footnote.  ROI uses billed, not list.
+- Agents window chips are compact `5h` / `24h` / `7d` / `30d` / `All Time`,
+  each on one line, with `gap-4` between them.
+- Seat **cash** comes from receipts / active Subscriptions.  Codex **plan
+  name** is observed from the local Codex login JWT (`chatgpt_plan_type`),
+  which is Plus $20, not a guessed Pro $200.  Copilot is not billed.  Cursor
+  Ultra (list $200) is included with SuperGrok Heavy.  MiniMax Code waits on
+  a receipt.  Claude Max 20x and SuperGrok Heavy stay as owner-confirmed
+  fallbacks until a receipt lands.
+- EasyCLIProxyAPI-style consumer OAuth (chatgpt.com backend usage, unofficial
+  Claude/xAI quota) is **not** called from Usage Monitor servers.  Local
+  login claims and receipts are the supported path.
 - `computeAgentsOverview` uses the same raw-event / daily-rollup split as
   `summarizeExternalUsageEvents` so a backfill cannot double-count the same
   days.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  chatgptSkuForPlanType,
   resolveAgentSeat,
   type AgentSeatSubscriptionInput,
 } from "../agent-seat-plans";
@@ -19,32 +20,93 @@ function sub(
   };
 }
 
+describe("chatgptSkuForPlanType", () => {
+  it("maps Codex login plus to ChatGPT Plus $20, not Pro $200", () => {
+    expect(chatgptSkuForPlanType("plus")).toEqual({
+      planName: "ChatGPT Plus",
+      listMonthlyUsd: 20,
+    });
+    expect(chatgptSkuForPlanType("pro")?.listMonthlyUsd).toBe(200);
+  });
+});
+
 describe("resolveAgentSeat", () => {
-  it("uses Claude Max 20x $200, not Pro $20, when no subscription matches", () => {
+  it("uses an observed Codex Plus login instead of guessing Pro $200", () => {
+    const seat = resolveAgentSeat("openai-codex", [], { planType: "plus" });
+    expect(seat.planName).toBe("ChatGPT Plus");
+    expect(seat.listMonthlyUsd).toBe(20);
+    expect(seat.billedMonthlyUsd).toBe(20);
+    expect(seat.source).toBe("observed");
+    expect(seat.note).toMatch(/receipt/i);
+  });
+
+  it("lets a Plus $20 receipt win for Codex", () => {
+    const seat = resolveAgentSeat(
+      "openai-codex",
+      [
+        sub({
+          name: "ChatGPT Plus",
+          costUsd: 20,
+          providerName: "openai",
+          providerDisplayName: "ChatGPT",
+        }),
+      ],
+      { planType: "pro" }
+    );
+    expect(seat.source).toBe("receipt");
+    expect(seat.billedMonthlyUsd).toBe(20);
+    expect(seat.planName).toBe("ChatGPT Plus");
+  });
+
+  it("does not invent a Codex plan when login has not been observed", () => {
+    const seat = resolveAgentSeat("openai-codex", []);
+    expect(seat.billedMonthlyUsd).toBe(0);
+    expect(seat.source).toBe("unknown");
+  });
+
+  it("marks Copilot as not billed", () => {
+    const seat = resolveAgentSeat("github-copilot", []);
+    expect(seat.billedMonthlyUsd).toBe(0);
+    expect(seat.planName).toBe("Not billed");
+  });
+
+  it("treats Cursor Ultra as included with SuperGrok Heavy, not a $20 or $200 cash seat", () => {
+    const seat = resolveAgentSeat("cursor-agent", []);
+    expect(seat.source).toBe("included");
+    expect(seat.billedMonthlyUsd).toBe(0);
+    expect(seat.listMonthlyUsd).toBe(200);
+    expect(seat.planName).toBe("Cursor Ultra");
+    expect(seat.note).toMatch(/SuperGrok Heavy/);
+  });
+
+  it("leaves MiniMax at $0 until a receipt lands", () => {
+    const unknown = resolveAgentSeat("minimax-code", []);
+    expect(unknown.billedMonthlyUsd).toBe(0);
+    expect(unknown.source).toBe("unknown");
+    const receipt = resolveAgentSeat("minimax-code", [
+      sub({
+        name: "MiniMax Code Medium",
+        costUsd: 58,
+        providerName: "minimax",
+        providerDisplayName: "MiniMax",
+      }),
+    ]);
+    expect(receipt.source).toBe("receipt");
+    expect(receipt.billedMonthlyUsd).toBe(58);
+  });
+
+  it("keeps Claude Max 20x catalog until a receipt says otherwise", () => {
     const seat = resolveAgentSeat("claude-code", []);
     expect(seat.planName).toBe("Claude Max 20x");
     expect(seat.listMonthlyUsd).toBe(200);
-    expect(seat.billedMonthlyUsd).toBe(200);
     expect(seat.source).toBe("catalog");
   });
 
-  it("ignores a leftover Claude Pro $20 row so the Max catalog is not understated", () => {
-    const seat = resolveAgentSeat("claude-code", [
-      sub({ name: "Claude Pro", costUsd: 20, status: "active" }),
-    ]);
-    expect(seat.listMonthlyUsd).toBe(200);
-    expect(seat.billedMonthlyUsd).toBe(200);
-    expect(seat.planName).toBe("Claude Max 20x");
-    expect(seat.source).toBe("catalog");
-  });
-
-  it("adopts an active Claude Max $200 subscription name", () => {
+  it("adopts an active Claude Max $200 receipt", () => {
     const seat = resolveAgentSeat("claude-code", [
       sub({ name: "Claude Max 20x", costUsd: 200 }),
     ]);
-    expect(seat.source).toBe("subscription");
-    expect(seat.planName).toBe("Claude Max 20x");
-    expect(seat.listMonthlyUsd).toBe(200);
+    expect(seat.source).toBe("receipt");
     expect(seat.billedMonthlyUsd).toBe(200);
   });
 
@@ -54,95 +116,5 @@ describe("resolveAgentSeat", () => {
     expect(seat.listMonthlyUsd).toBe(300);
     expect(seat.billedMonthlyUsd).toBe(100);
     expect(seat.note).toMatch(/\$100/);
-    expect(seat.source).toBe("catalog");
-  });
-
-  it("ignores a SuperGrok $30 row so Heavy is not shown as the $30 plan", () => {
-    const seat = resolveAgentSeat("grok-build", [
-      sub({
-        name: "SuperGrok",
-        costUsd: 30,
-        providerName: "xai",
-        providerDisplayName: "xAI (Grok)",
-      }),
-    ]);
-    expect(seat.listMonthlyUsd).toBe(300);
-    expect(seat.billedMonthlyUsd).toBe(100);
-    expect(seat.planName).toBe("SuperGrok Heavy");
-    expect(seat.source).toBe("catalog");
-  });
-
-  it("keeps Heavy list $300 when an active promo subscription bills $100", () => {
-    const seat = resolveAgentSeat("grok-build", [
-      sub({
-        name: "SuperGrok Heavy",
-        costUsd: 100,
-        providerName: "xai",
-        providerDisplayName: "xAI",
-      }),
-    ]);
-    expect(seat.source).toBe("subscription");
-    expect(seat.listMonthlyUsd).toBe(300);
-    expect(seat.billedMonthlyUsd).toBe(100);
-    expect(seat.planName).toBe("SuperGrok Heavy");
-  });
-
-  it("raises billed and list when the live Heavy subscription is the full $300", () => {
-    const seat = resolveAgentSeat("grok-build", [
-      sub({
-        name: "SuperGrok Heavy",
-        costUsd: 300,
-        providerName: "xai",
-        providerDisplayName: "xAI",
-      }),
-    ]);
-    expect(seat.listMonthlyUsd).toBe(300);
-    expect(seat.billedMonthlyUsd).toBe(300);
-    expect(seat.note).toBeNull();
-  });
-
-  it("does not treat xAI API prepaid as the SuperGrok seat", () => {
-    const seat = resolveAgentSeat("grok-build", [
-      sub({
-        name: "API prepaid credits",
-        costUsd: 500,
-        providerName: "xai",
-        providerDisplayName: "xAI API",
-      }),
-    ]);
-    expect(seat.source).toBe("catalog");
-    expect(seat.listMonthlyUsd).toBe(300);
-  });
-
-  it("uses ChatGPT Pro $200 for Codex rather than Plus $20", () => {
-    const cheap = resolveAgentSeat("openai-codex", [
-      sub({
-        name: "ChatGPT Plus",
-        costUsd: 20,
-        providerName: "openai",
-        providerDisplayName: "OpenAI",
-      }),
-    ]);
-    expect(cheap.listMonthlyUsd).toBe(200);
-    expect(cheap.planName).toBe("ChatGPT Pro");
-
-    const pro = resolveAgentSeat("openai-codex", [
-      sub({
-        name: "ChatGPT Pro",
-        costUsd: 200,
-        providerName: "openai",
-        providerDisplayName: "ChatGPT",
-      }),
-    ]);
-    expect(pro.source).toBe("subscription");
-    expect(pro.listMonthlyUsd).toBe(200);
-  });
-
-  it("ignores considering and paused rows", () => {
-    const seat = resolveAgentSeat("claude-code", [
-      sub({ name: "Claude Max 20x", costUsd: 200, status: "considering" }),
-      sub({ name: "Claude Max 20x", costUsd: 200, status: "paused" }),
-    ]);
-    expect(seat.source).toBe("catalog");
   });
 });

@@ -2,6 +2,7 @@ import {
   AGENT_SEAT_CATALOG,
   isAgentPlatformId,
   resolveAgentSeat,
+  type AgentSeatSource,
   type AgentSeatSubscriptionInput,
 } from "@/lib/agent-seat-plans";
 import { getExternalEventRawCutoff, startOfUtcDay } from "@/lib/data-retention";
@@ -65,7 +66,10 @@ export const AGENT_PLATFORMS: readonly AgentPlatformMeta[] = [
     fidelityTier: "process_only",
     tokenTelemetryKind: "none",
     notes: "Cursor keeps usage local to its IDE client and does not expose an unauthenticated local token ledger.  Process status is live.  Usage is not reported.",
-    defaultMonthlySeatCostUsd: AGENT_SEAT_CATALOG["cursor-agent"].listMonthlyUsd,
+    defaultMonthlySeatCostUsd: 0,
+    listMonthlySeatCostUsd: AGENT_SEAT_CATALOG["cursor-agent"].listMonthlyUsd,
+    bundledOffsetUsd: AGENT_SEAT_CATALOG["cursor-agent"].listMonthlyUsd,
+    bundledOffsetLabel: "SuperGrok Heavy",
     unavailableReason:
       "Cursor does not expose a local token ledger.  Process status is live.  Usage is not reported.",
   },
@@ -106,7 +110,20 @@ export const AGENT_PLATFORMS: readonly AgentPlatformMeta[] = [
     fidelityTier: "session_jsonl",
     tokenTelemetryKind: "session_jsonl",
     notes: "Ingests session.shutdown modelMetrics from ~/.copilot/session-state/ with inclusive cache token splitting.",
-    defaultMonthlySeatCostUsd: AGENT_SEAT_CATALOG["github-copilot"].listMonthlyUsd,
+    defaultMonthlySeatCostUsd: 0,
+  },
+  {
+    id: "minimax-code",
+    name: "MiniMax Code",
+    provider: "MiniMax",
+    description: "MiniMax Code CLI / agent seat.",
+    dataCapability: "Receipt-backed seat. Token telemetry is not wired yet.",
+    fidelityTier: "unavailable",
+    tokenTelemetryKind: "none",
+    notes: "MiniMax Code billed cash waits on a receipt.  Token telemetry is not reported yet.",
+    defaultMonthlySeatCostUsd: 0,
+    unavailableReason:
+      "MiniMax Code has no token collector yet.  This is not zero usage.",
   },
 ];
 
@@ -133,7 +150,7 @@ export interface AgentPlatformStatus {
   billedMonthlySeatCostUsd: number;
   seatPlanName: string;
   seatPlanNote: string | null;
-  seatPlanSource: "catalog" | "subscription";
+  seatPlanSource: AgentSeatSource;
   listMonthlySeatCostUsd: number;
   bundledOffsetUsd: number | null;
   bundledOffsetLabel: string | null;
@@ -246,6 +263,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     rollupCostGroups,
     earliestEvent,
     subscriptionRows,
+    observedCodexPlan,
   ] = await Promise.all([
     getLatestMacHealth().catch(() => null),
     prisma.externalUsageEvent.groupBy({
@@ -328,7 +346,21 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
         provider: { select: { name: true, displayName: true } },
       },
     }),
+    prisma.externalUsageEvent.findFirst({
+      where: {
+        sourceApp: "openai-codex",
+        metricType: "quota_sync",
+        label: "observed-plan",
+      },
+      orderBy: { occurredAt: "desc" },
+      select: { keyRef: true },
+    }),
   ]);
+
+  const observedByPlatform: Partial<Record<string, { planType: string }>> = {};
+  if (observedCodexPlan?.keyRef?.trim()) {
+    observedByPlatform["openai-codex"] = { planType: observedCodexPlan.keyRef.trim() };
+  }
 
   const seatSubscriptions: AgentSeatSubscriptionInput[] = subscriptionRows.map((row) => ({
     status: row.status,
@@ -506,7 +538,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     const reportedCost = reportedCostByPlatform.get(appKey) || 0;
     const estimatedCost = Math.max(platformApiCost, reportedCost);
     const seat = isAgentPlatformId(meta.id)
-      ? resolveAgentSeat(meta.id, seatSubscriptions)
+      ? resolveAgentSeat(meta.id, seatSubscriptions, observedByPlatform[meta.id] ?? null)
       : {
           planName: `${meta.name} seat`,
           listMonthlyUsd: meta.listMonthlySeatCostUsd ?? meta.defaultMonthlySeatCostUsd,

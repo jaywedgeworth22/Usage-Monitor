@@ -177,6 +177,7 @@ public struct AgentPlatformStatus: Codable, Hashable, Sendable, Identifiable {
     public var reportsUsage: Bool { usageIsReliable ?? true }
 
     public var seatCostDisplay: String {
+        if monthlySeatCostUsd <= 0 { return "Not billed" }
         let net = Int(monthlySeatCostUsd.rounded())
         if let bundled = bundledOffsetUsd, bundled > 0 {
             return "$\(net)/mo net"

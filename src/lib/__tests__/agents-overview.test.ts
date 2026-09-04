@@ -21,6 +21,7 @@ describe("agents-overview", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(prisma.subscription as any, "findMany").mockResolvedValue([]);
+    vi.spyOn(prisma.externalUsageEvent as any, "findFirst").mockResolvedValue(null);
     mockedMacHealth.mockResolvedValue({
       ok: false,
       status: "offline",
@@ -77,11 +78,15 @@ describe("agents-overview", () => {
     const rollupSpy = vi
       .spyOn(prisma.externalUsageEventDailyRollup as any, "groupBy")
       .mockResolvedValue([] as any);
+    vi.spyOn(prisma.externalUsageEvent as any, "findFirst").mockImplementation(async (args: any) => {
+      if (args?.where?.label === "observed-plan") return { keyRef: "plus" };
+      return null;
+    });
 
     const result = await computeAgentsOverview(30);
     expect(result.ok).toBe(true);
     expect(result.summary.totalTokens).toBe(170_000);
-    expect(result.platforms).toHaveLength(6);
+    expect(result.platforms.length).toBe(7);
     // 30-day window sits inside the raw-event retention window, so rollups
     // must not be queried (they would double-count the same days).
     expect(rollupSpy).not.toHaveBeenCalled();
@@ -96,7 +101,8 @@ describe("agents-overview", () => {
     const codexPlatform = result.platforms.find((p) => p.id === "openai-codex");
     expect(codexPlatform).toBeDefined();
     expect(codexPlatform?.totalTokens).toBe(50_000);
-    expect(codexPlatform?.monthlySeatCostUsd).toBe(200);
+    expect(codexPlatform?.monthlySeatCostUsd).toBe(20);
+    expect(codexPlatform?.seatPlanName).toBe("ChatGPT Plus");
     expect(codexPlatform?.usageIsReliable).toBe(true);
     const grokPlatform = result.platforms.find((p) => p.id === "grok-build");
     expect(grokPlatform?.monthlySeatCostUsd).toBe(300);
@@ -105,6 +111,13 @@ describe("agents-overview", () => {
     const antigravity = result.platforms.find((p) => p.id === "antigravity-cli");
     expect(antigravity?.monthlySeatCostUsd).toBe(70);
     expect(antigravity?.listMonthlySeatCostUsd).toBe(100);
+    const copilot = result.platforms.find((p) => p.id === "github-copilot");
+    expect(copilot?.billedMonthlySeatCostUsd).toBe(0);
+    const cursor = result.platforms.find((p) => p.id === "cursor-agent");
+    expect(cursor?.billedMonthlySeatCostUsd).toBe(0);
+    expect(cursor?.listMonthlySeatCostUsd).toBe(200);
+    const minimax = result.platforms.find((p) => p.id === "minimax-code");
+    expect(minimax?.billedMonthlySeatCostUsd).toBe(0);
   });
 
   it("uses rollups only for days before the raw-event cutoff", async () => {
@@ -112,8 +125,9 @@ describe("agents-overview", () => {
       new Date("2026-08-01T00:00:00.000Z")
     );
     vi.spyOn(prisma.externalUsageEvent as any, "groupBy").mockResolvedValue([] as any);
-    vi.spyOn(prisma.externalUsageEvent as any, "findFirst").mockResolvedValue({
-      occurredAt: new Date("2026-06-15T00:00:00.000Z"),
+    vi.spyOn(prisma.externalUsageEvent as any, "findFirst").mockImplementation(async (args: any) => {
+      if (args?.where?.label === "observed-plan") return { keyRef: "plus" };
+      return { occurredAt: new Date("2026-06-15T00:00:00.000Z") };
     });
     vi.spyOn(prisma.externalUsageEventDailyRollup as any, "groupBy").mockImplementation(
       async (args: any) => {
