@@ -84,6 +84,10 @@ public struct AgentPlatformStatus: Codable, Hashable, Sendable, Identifiable {
     public var fidelityTier: String
     public var notes: String
     public var monthlySeatCostUsd: Double
+    public var billedMonthlySeatCostUsd: Double?
+    public var seatPlanName: String?
+    public var seatPlanNote: String?
+    public var seatPlanSource: String?
     public var listMonthlySeatCostUsd: Double?
     public var bundledOffsetUsd: Double?
     public var bundledOffsetLabel: String?
@@ -113,6 +117,10 @@ public struct AgentPlatformStatus: Codable, Hashable, Sendable, Identifiable {
         fidelityTier: String,
         notes: String,
         monthlySeatCostUsd: Double,
+        billedMonthlySeatCostUsd: Double? = nil,
+        seatPlanName: String? = nil,
+        seatPlanNote: String? = nil,
+        seatPlanSource: String? = nil,
         listMonthlySeatCostUsd: Double? = nil,
         bundledOffsetUsd: Double? = nil,
         bundledOffsetLabel: String? = nil,
@@ -141,6 +149,10 @@ public struct AgentPlatformStatus: Codable, Hashable, Sendable, Identifiable {
         self.fidelityTier = fidelityTier
         self.notes = notes
         self.monthlySeatCostUsd = monthlySeatCostUsd
+        self.billedMonthlySeatCostUsd = billedMonthlySeatCostUsd
+        self.seatPlanName = seatPlanName
+        self.seatPlanNote = seatPlanNote
+        self.seatPlanSource = seatPlanSource
         self.listMonthlySeatCostUsd = listMonthlySeatCostUsd
         self.bundledOffsetUsd = bundledOffsetUsd
         self.bundledOffsetLabel = bundledOffsetLabel
@@ -165,6 +177,7 @@ public struct AgentPlatformStatus: Codable, Hashable, Sendable, Identifiable {
     public var reportsUsage: Bool { usageIsReliable ?? true }
 
     public var seatCostDisplay: String {
+        if monthlySeatCostUsd <= 0 { return "Not billed" }
         let net = Int(monthlySeatCostUsd.rounded())
         if let bundled = bundledOffsetUsd, bundled > 0 {
             return "$\(net)/mo net"
@@ -262,7 +275,9 @@ public struct AgentsOverviewResponse: Codable, Hashable, Sendable {
                 dataCapability: "Full OTLP Telemetry & Ingest",
                 fidelityTier: "full_telemetry",
                 notes: "Detailed token and cost analytics via OTLP metrics stream.",
-                monthlySeatCostUsd: 20.0,
+                monthlySeatCostUsd: 200.0,
+                billedMonthlySeatCostUsd: 200.0,
+                seatPlanName: "Claude Max 20x",
                 totalTokens: 28_400_000,
                 inputTokens: 18_200_000,
                 outputTokens: 4_200_000,
@@ -311,7 +326,10 @@ public struct AgentsOverviewResponse: Codable, Hashable, Sendable {
                 dataCapability: "Live Process & Pushed Telemetry",
                 fidelityTier: "pushed_ingest",
                 notes: "Token telemetry captured via xAI push adapter.",
-                monthlySeatCostUsd: 20.0,
+                monthlySeatCostUsd: 300.0,
+                billedMonthlySeatCostUsd: 100.0,
+                seatPlanName: "SuperGrok Heavy",
+                seatPlanNote: "Promo billed $100 for one more month.  List price is $300.",
                 totalTokens: 5_900_000,
                 inputTokens: 4_500_000,
                 outputTokens: 1_400_000,

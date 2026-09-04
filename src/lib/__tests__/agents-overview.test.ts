@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { computeAgentsOverview } from "../agents-overview";
+import * as retention from "../data-retention";
 import { getLatestMacHealth } from "@/lib/mac-health";
 
 vi.mock("@/lib/mac-health", () => ({
@@ -19,6 +20,8 @@ function emptyGroupBy() {
 describe("agents-overview", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(prisma.subscription as any, "findMany").mockResolvedValue([]);
+    vi.spyOn(prisma.externalUsageEvent as any, "findFirst").mockResolvedValue(null);
     mockedMacHealth.mockResolvedValue({
       ok: false,
       status: "offline",
@@ -32,7 +35,7 @@ describe("agents-overview", () => {
     vi.restoreAllMocks();
   });
 
-  it("computes agent overview with model distribution, rollups, and seat costs", async () => {
+  it("computes agent overview with Max/Heavy seat costs from the catalog", async () => {
     vi.spyOn(prisma.externalUsageEvent as any, "groupBy").mockImplementation(async (args: any) => {
       if (args.where?.metricType === "usage") {
         return [
@@ -50,6 +53,13 @@ describe("agents-overview", () => {
             label: "output_tokens",
             _sum: { quantity: 20_000 },
           },
+          {
+            sourceApp: "openai-codex",
+            provider: "openai",
+            keyRef: "o3-mini",
+            label: "input_tokens",
+            _sum: { quantity: 50_000 },
+          },
         ] as any;
       }
       if (args.where?.metricType === "cost") {
@@ -65,44 +75,81 @@ describe("agents-overview", () => {
       return [] as any;
     });
 
-    vi.spyOn(prisma.externalUsageEventDailyRollup as any, "groupBy").mockImplementation(async (args: any) => {
-      if (args.where?.metricType === "usage") {
-        return [
-          {
-            sourceApp: "openai-codex",
-            provider: "openai",
-            keyRef: "o3-mini",
-            label: "input_tokens",
-            _sum: { totalQuantity: 50_000 },
-          },
-        ] as any;
-      }
-      if (args.where?.metricType === "cost") {
-        return [
-          {
-            sourceApp: "openai-codex",
-            provider: "openai",
-            keyRef: "o3-mini",
-            _sum: { totalCostUsd: 0.15 },
-          },
-        ] as any;
-      }
-      return [] as any;
+    const rollupSpy = vi
+      .spyOn(prisma.externalUsageEventDailyRollup as any, "groupBy")
+      .mockResolvedValue([] as any);
+    vi.spyOn(prisma.externalUsageEvent as any, "findFirst").mockImplementation(async (args: any) => {
+      if (args?.where?.label === "observed-plan") return { keyRef: "plus" };
+      return null;
     });
 
     const result = await computeAgentsOverview(30);
     expect(result.ok).toBe(true);
     expect(result.summary.totalTokens).toBe(170_000);
-    expect(result.platforms).toHaveLength(6);
+    expect(result.platforms.length).toBe(7);
+    // 30-day window sits inside the raw-event retention window, so rollups
+    // must not be queried (they would double-count the same days).
+    expect(rollupSpy).not.toHaveBeenCalled();
     const claudePlatform = result.platforms.find((p) => p.id === "claude-code");
     expect(claudePlatform).toBeDefined();
     expect(claudePlatform?.totalTokens).toBe(120_000);
+    expect(claudePlatform?.monthlySeatCostUsd).toBe(200);
+    expect(claudePlatform?.billedMonthlySeatCostUsd).toBe(200);
+    expect(claudePlatform?.seatPlanName).toBe("Claude Max 20x");
     expect(claudePlatform?.usageIsReliable).toBe(true);
     expect(claudePlatform?.telemetryAccuracy).toBe("reported");
     const codexPlatform = result.platforms.find((p) => p.id === "openai-codex");
     expect(codexPlatform).toBeDefined();
     expect(codexPlatform?.totalTokens).toBe(50_000);
+    expect(codexPlatform?.monthlySeatCostUsd).toBe(20);
+    expect(codexPlatform?.seatPlanName).toBe("ChatGPT Plus");
     expect(codexPlatform?.usageIsReliable).toBe(true);
+    const grokPlatform = result.platforms.find((p) => p.id === "grok-build");
+    expect(grokPlatform?.monthlySeatCostUsd).toBe(300);
+    expect(grokPlatform?.billedMonthlySeatCostUsd).toBe(100);
+    expect(grokPlatform?.seatPlanName).toBe("SuperGrok Heavy");
+    const antigravity = result.platforms.find((p) => p.id === "antigravity-cli");
+    expect(antigravity?.monthlySeatCostUsd).toBe(70);
+    expect(antigravity?.listMonthlySeatCostUsd).toBe(100);
+    const copilot = result.platforms.find((p) => p.id === "github-copilot");
+    expect(copilot?.billedMonthlySeatCostUsd).toBe(0);
+    const cursor = result.platforms.find((p) => p.id === "cursor-agent");
+    expect(cursor?.billedMonthlySeatCostUsd).toBe(0);
+    expect(cursor?.listMonthlySeatCostUsd).toBe(200);
+    const minimax = result.platforms.find((p) => p.id === "minimax-code");
+    expect(minimax?.billedMonthlySeatCostUsd).toBe(0);
+  });
+
+  it("uses rollups only for days before the raw-event cutoff", async () => {
+    vi.spyOn(retention, "getExternalEventRawCutoff").mockReturnValue(
+      new Date("2026-08-01T00:00:00.000Z")
+    );
+    vi.spyOn(prisma.externalUsageEvent as any, "groupBy").mockResolvedValue([] as any);
+    vi.spyOn(prisma.externalUsageEvent as any, "findFirst").mockImplementation(async (args: any) => {
+      if (args?.where?.label === "observed-plan") return { keyRef: "plus" };
+      return { occurredAt: new Date("2026-06-15T00:00:00.000Z") };
+    });
+    vi.spyOn(prisma.externalUsageEventDailyRollup as any, "groupBy").mockImplementation(
+      async (args: any) => {
+        expect(args.where.day.lt.getTime()).toBe(new Date("2026-08-01T00:00:00.000Z").getTime());
+        if (args.where?.metricType === "usage") {
+          return [
+            {
+              sourceApp: "openai-codex",
+              provider: "openai",
+              keyRef: "o3-mini",
+              label: "input_tokens",
+              _sum: { totalQuantity: 50_000 },
+            },
+          ] as any;
+        }
+        return [] as any;
+      }
+    );
+
+    const result = await computeAgentsOverview(3650);
+    const codexFromRollup = result.platforms.find((p) => p.id === "openai-codex");
+    expect(codexFromRollup?.totalTokens).toBe(50_000);
   });
 
   it("reconciles 5h burn cost with max(reported, derived) instead of sum", async () => {

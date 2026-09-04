@@ -96,6 +96,12 @@ describe("agent-telemetry-accuracy", () => {
         bundledOffsetUsd: null,
       }),
     ).toBe("$20/mo");
+    expect(
+      formatAgentSeatPrimary({
+        monthlySeatCostUsd: 0,
+        bundledOffsetUsd: 200,
+      }),
+    ).toBe("Not billed");
   });
 
   it("names omitted seats in the incomplete-totals note", () => {

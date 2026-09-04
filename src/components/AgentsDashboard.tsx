@@ -7,6 +7,7 @@ import {
   formatAgentSeatPrimary,
   formatAgentTokenValue,
 } from "@/lib/agent-telemetry-accuracy";
+import { AGENT_WINDOW_CHIPS, type AgentWindowId } from "@/lib/agent-window-chips";
 
 const SENTENCE_GAP = "\u00a0 ";
 
@@ -17,7 +18,7 @@ function withSentenceGaps(text: string): string {
 export function AgentsDashboard() {
   const [data, setData] = useState<AgentsOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [windowParam, setWindowParam] = useState<"5h" | "24h" | "7d" | "30d" | "all">("30d");
+  const [windowParam, setWindowParam] = useState<AgentWindowId>("30d");
   const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
 
   useEffect(() => {
@@ -71,19 +72,20 @@ export function AgentsDashboard() {
           </p>
         </div>
 
-        {/* Time Window Switcher */}
-        <div className="inline-flex rounded-lg bg-muted p-1 text-xs font-medium self-start sm:self-auto">
-          {(["5h", "24h", "7d", "30d", "all"] as const).map((w) => (
+        {/* Compact 5h / 7d / 30d chips.  All Time stays on one line.  gap-4 is
+            four spaces of separation so the labels do not crowd or wrap. */}
+        <div className="flex flex-nowrap items-center gap-4 self-start sm:self-auto shrink-0 overflow-x-auto text-xs font-medium">
+          {AGENT_WINDOW_CHIPS.map((chip) => (
             <button
-              key={w}
-              onClick={() => setWindowParam(w)}
-              className={`rounded-md px-3 py-1.5 transition-colors ${
-                windowParam === w
-                  ? "bg-background text-foreground shadow-sm font-semibold"
+              key={chip.id}
+              onClick={() => setWindowParam(chip.id)}
+              className={`whitespace-nowrap shrink-0 rounded-md px-3 py-1.5 transition-colors ${
+                windowParam === chip.id
+                  ? "bg-muted text-foreground shadow-sm font-semibold"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {w === "5h" ? "5 Hours" : w === "24h" ? "24h" : w === "7d" ? "7 Days" : w === "30d" ? "30 Days" : "All Time"}
+              {chip.label}
             </button>
           ))}
         </div>
@@ -172,7 +174,7 @@ export function AgentsDashboard() {
                 {formatCurrency(data.summary.totalApiEquivalentCostUsd)}
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
-                Subscription seats: {formatCurrency(data.summary.totalSubscriptionCostUsd)}
+                Billed seats this window: {formatCurrency(data.summary.totalSubscriptionCostUsd)}
               </div>
             </div>
 
@@ -304,6 +306,9 @@ export function AgentsDashboard() {
                           <div className="text-[10px] text-muted-foreground">Seat Cost</div>
                           <div className="font-bold text-foreground mt-0.5">
                             {formatAgentSeatPrimary(platform)}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5 truncate" title={platform.seatPlanName}>
+                            {platform.seatPlanName}
                           </div>
                         </div>
                       </div>

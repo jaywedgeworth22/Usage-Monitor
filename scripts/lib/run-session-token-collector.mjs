@@ -2,6 +2,10 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
 
+/** Default lookback when LaunchAgents omit --days/--since.  UTC month-start
+ *  dropped June–August Codex sessions on 1 September (owner 2026-09-03). */
+export const DEFAULT_COLLECTOR_LOOKBACK_DAYS = 180;
+
 export function parseCollectorArgs(argv) {
   const dryRun = argv.includes("--dry-run");
   const debug = argv.includes("--debug");
@@ -21,8 +25,7 @@ export function parseCollectorArgs(argv) {
   } else if (Number.isFinite(days) && days > 0) {
     since = new Date(Date.now() - days * 86_400_000);
   } else {
-    const now = new Date();
-    since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    since = new Date(Date.now() - DEFAULT_COLLECTOR_LOOKBACK_DAYS * 86_400_000);
   }
   if (Number.isNaN(since.getTime())) {
     throw new Error(`Invalid --since ${sinceIso}`);

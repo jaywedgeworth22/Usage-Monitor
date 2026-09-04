@@ -1,4 +1,12 @@
-## Current (2026-09-03 GROK — Antigravity $70 net + honest missing telemetry)
+## Current (2026-09-03 GROK — Agent seat plans + Codex lookback)
+
+`/agents` window chips are `5h` / `24h` / `7d` / `30d` / `All Time` on one
+line with real gaps.  Seat cash comes from receipts.  Codex plan is observed
+from the local login JWT (Plus $20), not a guessed Pro $200.  Copilot is
+not billed.  Cursor Ultra is included with SuperGrok Heavy.  MiniMax waits
+on a receipt.  Rollout: `docs/rollouts/2026-09-03-agent-seat-plans.md`.
+
+## Prior (2026-09-03 GROK — Antigravity $70 net + honest missing telemetry)
 
 Antigravity seat is $100 Google AI Ultra minus $30 already spent on Google
 One, so **$70 net for the AI**.  The Agents tab no longer treats missing or

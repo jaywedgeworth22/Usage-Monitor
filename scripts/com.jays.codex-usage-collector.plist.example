@@ -7,8 +7,10 @@
   Antigravity collector: copy to ~/Library/LaunchAgents, replace
   ABSOLUTE/PATH placeholders, infisical login once, then bootstrap.
 
-  StartInterval 900 = 15 minutes.  On-demand: run the node script with
-  --dry-run first.
+  StartInterval 900 = 15 minutes.  Default lookback is 180 days (not UTC
+  month start) so a 1-September tick still re-ingests June–August sessions.
+  On-demand: run the node script with --dry-run first, or --days 400 to
+  backfill.
 
   Uninstall:
     launchctl bootout gui/$(id -u)/com.jays.codex-usage-collector
