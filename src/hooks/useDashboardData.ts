@@ -353,7 +353,7 @@ const AUTO_REFRESH_INTERVAL_MS = 60_000;
 const FOCUS_REFRESH_THROTTLE_MS = 15_000;
 
 export function useDashboardData() {
-  const [timeframe, setTimeframe] = useState<TimeframeOption>(currentMonthToken());
+  const [timeframe, setTimeframe] = useState<TimeframeOption>("30d");
   const [providers, setProviders] = useState<any[]>([]);
   const [usageSummary, setUsageSummary] = useState<ExternalUsageSummary | null>(null);
   const [projects, setProjects] = useState<ProjectBudgetStatus[]>([]);
