@@ -1,11 +1,15 @@
 // Read-only Sentry fleet-health summary for the dashboard's Sentry card.
 //
 // Goal split (owner-decided, see docs/rollouts and AGENTS.md): USAGE METRICS
-// (tokens/cost/sessions) land in THIS app via the OTLP ingest route since
-// Sentry discontinued metrics ingestion; ERRORS/HEALTH stay in Sentry, which
-// this app already has no visibility into otherwise. This module is a thin,
-// best-effort read of Sentry's REST API so the dashboard can show "how many
-// open issues does each project have" without duplicating Sentry's own UI.
+// (tokens/cost/sessions) land in THIS app via the OTLP ingest route while
+// application health & errors stay in Sentry, which this app monitors via Sentry's
+// REST API to show "how many open issues does each project have".
+//
+// Sentry Application Metrics shipped in 2026 — the old "Sentry discontinued
+// metrics ingestion" comment is stale.  Token/cost time series still stay here.
+// App-health counters (`scheduler.tick`, `ingest.failed`) may emit to Sentry
+// Metrics so they jump to the enclosing trace.  Do not move money/usage series
+// into Sentry.
 //
 // Conditional by design: entirely absent (returns null, no fetch attempted)
 // unless BOTH SENTRY_READ_TOKEN and SENTRY_ORG are configured. SENTRY_ORG
@@ -20,12 +24,15 @@ export interface SentryProjectHealth {
   unresolvedCount: number;
   hasMore: boolean;
   issuesUrl: string;
+  dashboardUrl?: string;
+  datadogUrl?: string;
   error?: string;
 }
 
 export interface SentryHealthSummary {
   configured: true;
   org: string;
+  fleetDashboardUrl?: string;
   projects: SentryProjectHealth[];
   fetchedAt: string;
 }
@@ -35,6 +42,26 @@ export interface SentryHealthUnconfigured {
 }
 
 const DEFAULT_ORG = "jays-services";
+
+const SENTRY_DASHBOARDS: Record<string, string> = {
+  "fleet-overview": "https://jays-services.sentry.io/dashboard/9920702/",
+  "congress-trade": "https://jays-services.sentry.io/dashboard/9920703/",
+  "socratic-trade": "https://jays-services.sentry.io/dashboard/9920704/",
+  "usage-monitor": "https://jays-services.sentry.io/dashboard/9920705/",
+  "dealdex": "https://jays-services.sentry.io/dashboard/9920706/",
+  "botfleet": "https://jays-services.sentry.io/dashboard/9920707/",
+  "autorotate": "https://jays-services.sentry.io/dashboard/9920708/",
+  "fleet-infra": "https://jays-services.sentry.io/dashboard/9920709/",
+};
+
+const DATADOG_SERVICES: Record<string, string> = {
+  "congress-trade": "https://app.us5.datadoghq.com/apm/service/congress-trade",
+  "socratic-trade": "https://app.us5.datadoghq.com/apm/service/socratic-trade",
+  "usage-monitor": "https://app.us5.datadoghq.com/apm/service/usage-monitor",
+  "dealdex": "https://app.us5.datadoghq.com/apm/service/dealdex",
+  "botfleet": "https://app.us5.datadoghq.com/apm/service/botfleet",
+  "fleet-infra": "https://app.us5.datadoghq.com/apm/service/fleet-infra",
+};
 
 // The three sibling projects named in the task spec, plus this app itself
 // (review finding O4d: now that the app reports its own errors to Sentry,
@@ -49,6 +76,10 @@ const TRACKED_FLEET_PROJECTS = [
   { slug: "socratic-trade", displayName: "Socratic Trade" },
   { slug: "congress-trade", displayName: "Congress Trade" },
   { slug: "fleet-infra", displayName: "Fleet Infra" },
+  { slug: "dealdex", displayName: "DealDex" },
+  { slug: "botfleet", displayName: "BotFleet" },
+  { slug: "autorotate", displayName: "Autorotate" },
+  { slug: "contactlogo", displayName: "ContactLogo" },
 ];
 
 function trackedProjects(): Array<{ slug: string; displayName: string }> {
@@ -67,7 +98,12 @@ function trackedProjects(): Array<{ slug: string; displayName: string }> {
 }
 
 function sentryConfig(): { token: string; org: string } | undefined {
-  const token = process.env.SENTRY_READ_TOKEN?.trim();
+  const token = (
+    process.env.SENTRY_READ_TOKEN ||
+    process.env.SENTRY_AUTH_TOKEN_FULLSCOPE ||
+    process.env.SENTRY_ADMIN ||
+    process.env.SENTRY_AUTH_TOKEN
+  )?.trim();
   if (!token) return undefined;
   const org = process.env.SENTRY_ORG?.trim() || DEFAULT_ORG;
   return { token, org };
@@ -93,6 +129,9 @@ async function fetchProjectHealth(
   project: { slug: string; displayName: string }
 ): Promise<SentryProjectHealth> {
   const issuesUrl = `https://sentry.io/organizations/${org}/issues/?project=${project.slug}&query=is%3Aunresolved`;
+  const dashboardUrl = SENTRY_DASHBOARDS[project.slug];
+  const datadogUrl = DATADOG_SERVICES[project.slug];
+
   try {
     const res = await fetch(
       `https://sentry.io/api/0/projects/${org}/${project.slug}/issues/?query=is%3Aunresolved&statsPeriod=14d&limit=100`,
@@ -111,6 +150,8 @@ async function fetchProjectHealth(
         unresolvedCount: 0,
         hasMore: false,
         issuesUrl,
+        dashboardUrl,
+        datadogUrl,
         error: `HTTP ${res.status}`,
       };
     }
@@ -123,6 +164,8 @@ async function fetchProjectHealth(
       unresolvedCount: count,
       hasMore: linkHeaderHasNext(res.headers.get("link")),
       issuesUrl,
+      dashboardUrl,
+      datadogUrl,
     };
   } catch (error) {
     return {
@@ -131,6 +174,8 @@ async function fetchProjectHealth(
       unresolvedCount: 0,
       hasMore: false,
       issuesUrl,
+      dashboardUrl,
+      datadogUrl,
       error: error instanceof Error ? error.message : "Failed to reach Sentry",
     };
   }
@@ -154,6 +199,7 @@ export async function fetchSentryHealth(): Promise<SentryHealthSummary | SentryH
   return {
     configured: true,
     org: config.org,
+    fleetDashboardUrl: SENTRY_DASHBOARDS["fleet-overview"],
     projects,
     fetchedAt: new Date().toISOString(),
   };

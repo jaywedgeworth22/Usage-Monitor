@@ -8,6 +8,8 @@ import ApiEquivalentCostCard from "@/components/ApiEquivalentCostCard";
 import LlmBurnCard from "@/components/LlmBurnCard";
 import ProjectsPanel, { type ProjectBudgetStatus } from "@/components/ProjectsPanel";
 import SentryHealthCard from "@/components/SentryHealthCard";
+import SentryUsageCard from "@/components/SentryUsageCard";
+import DatadogUsageCard from "@/components/DatadogUsageCard";
 import type { SubscriptionRow } from "@/components/SubscriptionsPanel";
 import type { ChartFamilySlice } from "@/components/DashboardCharts";
 
@@ -103,6 +105,8 @@ export default function DashboardPortfolioSection({
             </div>
             <div className="space-y-8">
               <SentryHealthCard />
+              <SentryUsageCard />
+              <DatadogUsageCard />
             </div>
           </div>
 

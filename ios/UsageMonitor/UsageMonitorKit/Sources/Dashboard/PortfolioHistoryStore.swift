@@ -12,8 +12,13 @@ import Networking
 @MainActor
 @Observable
 public final class PortfolioHistoryStore {
+    /// Default chart range for a cold launch.  Owner preference 2026-09-04:
+    /// "Past 30 days" is the new web + iOS default; "This month" is preserved
+    /// for budget math (which this store does NOT touch).
+    public static let defaultTimeframe: TimeframeOption = .rolling(days: 30)
+
     public private(set) var state: LoadState<UsageEventsSummary> = .idle
-    public private(set) var timeframe: TimeframeOption = .currentMonth
+    public private(set) var timeframe: TimeframeOption = PortfolioHistoryStore.defaultTimeframe
     public private(set) var requiresSession = false
     public private(set) var lastError: APIError?
     public private(set) var isReloading = false
@@ -24,7 +29,7 @@ public final class PortfolioHistoryStore {
 
     public func reset() {
         state = .idle
-        timeframe = .currentMonth
+        timeframe = PortfolioHistoryStore.defaultTimeframe
         requiresSession = false
         lastError = nil
         isReloading = false
@@ -48,12 +53,15 @@ public final class PortfolioHistoryStore {
     }
 
     private func fetch(using client: APIClient, isRangeChange: Bool) async {
+        // Range changes (and the first load) KEEP the prior summary on screen
+        // so the user always sees what they were just looking at, dimmed with
+        // a small spinner, instead of a blank skeleton.  Owner 2026-09-04:
+        // "change the time period seems to do nothing" — the skeleton was
+        // making the change feel like no progress was happening.
         let previous = state.value
-        if previous != nil && isRangeChange {
+        if previous != nil {
             isReloading = true
-            // Clear so the total/caption cannot look stuck on the prior window.
-            state = .loading
-        } else if state.value == nil {
+        } else {
             state = .loading
         }
         defer { isReloading = false }

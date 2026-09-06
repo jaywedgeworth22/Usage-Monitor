@@ -15,6 +15,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 import {
   ANTIGRAVITY_PRODUCER_ID,
@@ -269,6 +270,13 @@ async function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
+// Entrypoint detection compares the RESOLVED module URL, not a suffix.
+// `import.meta.url` percent-encodes the path while `process.argv[1]` does not,
+// so `.endsWith(process.argv[1])` is FALSE for any checkout whose path contains
+// a space (or #, ?, %) -- and this fleet has such paths. The failure is silent:
+// the CLI body is skipped, nothing is collected, and the process exits 0, so a
+// LaunchAgent reports success forever while telemetry quietly stops arriving.
+// This is the idiom the other collectors in scripts/ already use.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => fail(error instanceof Error ? error.message : String(error)));
 }

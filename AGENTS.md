@@ -49,6 +49,11 @@ but contribute zero to `persisted`; never derive it from `activeEvents.length`.
 ## Endpoints (App B integration)
 
 - `POST /api/ingest/usage` — Bearer `USAGE_INGEST_TOKEN` (or `x-usage-ingest-token`). Writes `ExternalUsageEvent`.
+- `GET /api/quota-windows` — dashboard session cookie OR Bearer `USAGE_READ_TOKEN`.
+  Latest remaining-% windows from Mac collectors (`metricType=quota`).  BotFleet
+  polls this to skip exhausted model types until `resetAt`.  Skip is when
+  remaining is 0, `isExhausted`, or `antigravity-usage` N/A remaining (none
+  remains).  Near-cap (≤20%) is display-only.
 - `GET /api/budget-status` — dashboard session cookie OR Bearer `USAGE_READ_TOKEN`
   (required in production; falls back to `USAGE_INGEST_TOKEN` only outside
   production or with the explicit break-glass flag — see "Env vars").
@@ -264,9 +269,17 @@ usage — no special-casing. Idempotent by `(subscriptionId, periodStart)` hash 
 unresolved-issue counts from Sentry's REST API when `SENTRY_READ_TOKEN` (+ optional `SENTRY_ORG`,
 default `jays-services`) are set; `{ configured: false }` otherwise, and the dashboard card
 (`src/components/SentryHealthCard.tsx`) renders nothing in that case. Tracked projects are a fixed
-list in `src/lib/sentry-health.ts` (`socratic-trade`, `congress-trade`, `fleet-infra`).
+list in `src/lib/sentry-health.ts` (`socratic-trade`, `congress-trade`, `fleet-infra`, `dealdex`, `botfleet`, `autorotate`, `contactlogo`).
 `SENTRY_READ_TOKEN` is never sent to the client. This is the "errors/health stay in Sentry" half of
 the owner's goal split — the OTLP route above is the "usage metrics land here" half.
+Sentry Application Metrics shipped in 2026 (the old "discontinued metrics ingestion" note is
+stale). Token/cost time series still stay in this app. App-health counters such as
+`scheduler.tick` and `ingest.failed` may emit to Sentry Metrics. Browser Replay is default-on
+for this admin app (100% on error, 10% session, `maskAllText`/`blockAllMedia`) unless
+`NEXT_PUBLIC_SENTRY_REPLAY_ENABLED` is an explicit falsy. `NEXT_PUBLIC_SENTRY_DSN` must be a
+Coolify **build-time** env (Next inlines it; runtime Infisical inject cannot reach the client
+bundle). The in-process scheduler ticks every 15 minutes; the Sentry cron monitor
+`usage-monitor-scheduler` must use that same interval (do not upsert a 1-minute schedule).
 
 ## Datadog (logs + APM + RUM)
 
@@ -390,6 +403,30 @@ required whenever `LITESTREAM_REQUIRED=true` or `NODE_ENV=production` — a bare
 npm run verify   # eslint, tsc, vitest, migration/backup/startup checks, build
 ```
 
+**Every gate in the `verify` script needs a matching step in `.github/workflows/ci.yml`,
+in the same PR.**  A `test:*` script that is in `npm run verify` but has no CI step gates
+nothing: it passes locally and a regression merges green.  This has now happened four
+times -- `test:receipt-inbox-worker` (fixed once, and the fix's own comment says so),
+then `test:session-token-collectors`, `test:cf-token-map`, and `test:replica-status-probe`
+(#1381).  Before adding to the `verify` chain, check the script is offline (no network, no
+secrets) so it can run on a hosted runner; if it genuinely needs credentials, gate the CI
+step behind repo secrets the way the other secret-dependent steps are gated.  Quick audit:
+
+```bash
+node -e "const p=require('./package.json'),ci=require('fs').readFileSync('.github/workflows/ci.yml','utf8');\
+for(const s of p.scripts.verify.split('&&').map(x=>x.trim()))\
+  if(s!=='npm test'&&!ci.includes(s))console.log('MISSING from ci.yml:',s)"
+```
+
+**Fleet CI is GitHub-hosted only (2026-07-29, owner-directed).**  Every workflow runs on
+`ubuntu-latest` (iOS on `macos-latest`); the self-hosted Oracle/Coolify Actions runners are
+retired.  Do not add a `[self-hosted, ...]` label or reintroduce the dormant
+`vars.UM_CI_RUNNER` gate.  That variable was removed from all five workflows by `bbf540a0`
+(#834) but its explanatory comments were left behind for over a month, so the files
+described a runner-offload feature that did not exist and offered a fallback runbook that
+did nothing.  If you find a comment describing runner routing, trust the `runs-on:` value,
+not the comment.
+
 Deploys: Coolify/GitHub on Hetzner (`167.233.254.55`). Legacy Oracle
 `usage-monitor-auto-deploy.timer` docs remain in `deploy/oracle/README.md` for
 history; prefer Coolify + `DEPLOY.md` / fleet `COOLIFY.md`.
@@ -436,6 +473,18 @@ Effort-log protocol (standardized all apps): `/Users/jay/apps/EFFORT-LOG-PROTOCO
 to ask. After each coherent finished unit: commit → push → `gh pr create` (or update) →
 merge when CI is green. A remote branch with no PR is unfinished. Canonical:
 `/Users/jay/apps/AGENT-SYNC.md` "Always commit + land finished work".
+
+## Never wait and watch for PRs to merge / Idle-polling forbidden (Owner ruling 2026-09-01 — ALL seats)
+
+**Never passively wait, watch, or loop-poll for PRs to merge or CI checks to pass.**
+Sitting and watching PRs or polling CI in a loop wastes valuable agent tokens, context window, time, and money/quota.  Almost invariably, when PRs are left to sit, they get blocked by merge conflicts, outdated branches, failing CI checks, or unaddressed review comments.
+
+**Binding rules:**
+1. **Actively Drive PRs to Completion**: Proactively inspect mergeability, conflicts, CI checks, and review comments.
+2. **Resolve Conflicts & Outdated Branches Immediately**: If a branch is outdated or has merge conflicts with `main`, merge/rebase `main` into the branch, resolve conflicts locally, verify tests/build pass, and push immediately.
+3. **Resolve Review Comments & CI Failures Directly**: Fix failing checks or review comments at the root cause and push updates.
+4. **Merge & Deploy Promptly**: As soon as checks pass and the unit is verified, merge the PR to `main` (auto-deploying to production).
+5. **No Idle-Watching Loops**: Never run `sleep` loops, polling timers, or idle watch loops waiting for a PR.  Conclude the turn cleanly or work on actionable tasks.
 
 ## Fleet docs (start here)
 
@@ -548,3 +597,6 @@ can look right).  In a **file** (read as source, never through that renderer),
 literal two ASCII spaces stays correct — do not switch file content to NBSP or
 `&nbsp;`.
 
+## Fleet recall
+
+Search `fleet-agents` before re-deriving a lesson (`recall "<topic>"` or MCP `recall_search`).  Contribute every reusable lesson at closeout (`recall contribute "…" --category lesson --app usage-monitor`).  Cloud seats: https://agents.jays.services/mcp .  Do not dump chat logs into the corpus.  Canonical: ai-fleet-coordinator/docs/RAG-FLEET-INFRA.md.

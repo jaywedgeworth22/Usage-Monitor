@@ -34,6 +34,8 @@ export const isPublicPath = (pathname: string) => {
     "/api/apns",
     "/api/settings",
     "/api/budget-status",
+    // Self-authenticates (session OR USAGE_READ_TOKEN) for BotFleet skip-model.
+    "/api/quota-windows",
     "/api/health",
     "/api/ready",
     // Public OpenRouter money probe for a dedicated UptimeRobot keyword monitor
@@ -56,6 +58,9 @@ export const isPublicPath = (pathname: string) => {
     // Agents overview aggregator (live agent runs, token counts, quota burn,
     // API-equivalent cost comparison). Self-authenticates via session or USAGE_READ_TOKEN.
     "/api/agents-overview",
+    // Remaining-quota windows for BotFleet skip-model. Same dual-auth as
+    // budget-status / agents-overview.
+    "/api/quota-windows",
     // Unlisted Apple Calendar subscribe URL; the route checks BILLS_CALENDAR_TOKEN.
     "/api/bills.ics",
     // Public RUM/browser-log config.  Returns only public intake fields.

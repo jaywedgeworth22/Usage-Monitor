@@ -16,6 +16,9 @@ public struct LocalRootView: View {
     @State private var showWipeConfirmation = false
     @State private var pathProviders = NavigationPath()
     @State private var providersFilter: LocalProviderFilter = .all
+    /// Shared state for the import-mode picker + action button so the two
+    /// stay in sync while remaining independent List rows.
+    @State private var importState = LocalImportState()
 
     /// Caller must supply a main-actor `AppSettings` (e.g. `@State` from the app
     /// entry). No default `AppSettings()` here — its `@MainActor` init cannot run
@@ -287,7 +290,12 @@ public struct LocalRootView: View {
                 }
                 Section("Backup") {
                     LocalExportButton(model: model)
-                    LocalImportButton(model: model)
+                    // Each import-flow piece is its own Section row so iOS
+                    // does not collapse the Picker + Button into a single
+                    // hit-tested row.  See LocalImportState doc.
+                    LocalImportModePicker(state: importState)
+                    LocalImportButton(model: model, state: importState)
+                    LocalImportMessage(state: importState)
                     LocalKeysImportButton(model: model)
                     Text("A backup restores cards, budgets, and fees — never API keys.  After import, open each provider and tap Connect Account, or use Import Keys for a key file from your Mac.")
                         .font(.caption)

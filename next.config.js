@@ -14,6 +14,7 @@ const nextConfig = {
     "@datadog/native-appsec",
     "@datadog/native-iast-taint-tracking",
     "@datadog/wasm-js-rewriter",
+    "@sentry/profiling-node",
   ],
   poweredByHeader: false,
   async redirects() {

@@ -29,15 +29,51 @@ try {
 const dsn = nonEmptyEnv(process.env.NEXT_PUBLIC_SENTRY_DSN);
 
 if (dsn) {
+  // Admin-only app: Replay is ON unless NEXT_PUBLIC_SENTRY_REPLAY_ENABLED is
+  // an explicit falsy ("false"/"0"/"off"/"no").  Defaults: 100% on error,
+  // 10% of sessions (within the 5–10% band).  Keep maskAllText/blockAllMedia.
+  // Do not copy Socratic.Trade's opt-in flag here.
+  const replayRaw = process.env.NEXT_PUBLIC_SENTRY_REPLAY_ENABLED?.trim();
+  const replayDisabled = replayRaw ? /^(false|0|off|no)$/i.test(replayRaw) : false;
+  const replaySessionSampleRate = Number(
+    process.env.NEXT_PUBLIC_SENTRY_REPLAY_SESSION_SAMPLE_RATE ?? "0.1"
+  );
+  const replayErrorSampleRate = Number(
+    process.env.NEXT_PUBLIC_SENTRY_REPLAY_ERROR_SAMPLE_RATE ?? "1.0"
+  );
+  const feedbackRaw = process.env.NEXT_PUBLIC_SENTRY_FEEDBACK_ENABLED?.trim();
+  const feedbackDisabled = feedbackRaw ? /^(false|0|off|no)$/i.test(feedbackRaw) : false;
+
   Sentry.init({
     dsn,
     environment: nonEmptyEnv(process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT),
     tracesSampleRate: parseTracesSampleRate(
       process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
     ),
+    enableLogs: true,
+    replaysSessionSampleRate: !replayDisabled ? replaySessionSampleRate : 0,
+    replaysOnErrorSampleRate: !replayDisabled ? replayErrorSampleRate : 0,
+    integrations: [
+      ...(!replayDisabled
+        ? [Sentry.replayIntegration({ maskAllText: true, blockAllMedia: true })]
+        : []),
+      ...(!feedbackDisabled
+        ? [
+            Sentry.feedbackIntegration({
+              colorScheme: "light",
+              autoInject: true,
+              showBranding: false,
+              buttonLabel: "Report a problem",
+              submitButtonLabel: "Send",
+              formTitle: "Report a problem",
+            }),
+          ]
+        : []),
+    ],
   });
 }
 
 // Instruments client-side router navigations. Harmless when init never ran
 // (Sentry no-ops without a client).
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
+

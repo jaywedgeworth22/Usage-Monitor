@@ -447,6 +447,11 @@ export async function POST(request: NextRequest) {
       "[ingest/usage] unhandled failure:",
       error instanceof Error ? error.message : error
     );
+    const { logIngestFailed } = await import("@/lib/sentry-ops");
+    void logIngestFailed({
+      reason: error instanceof Error ? error.name : "unknown",
+      route: "ingest/usage",
+    });
     return respondError(500, "internal_error", "Internal error", {
       retryAfterSeconds: 30,
     });

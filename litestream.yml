@@ -29,6 +29,27 @@ snapshot:
   # B2 is not free-tier–capped like R2; 24h retention is enough for DR.
   retention: 24h
 
+# Product compaction is L0 + bounded L1 + 24h snapshots.  L2 and L3 are OFF.
+#
+# Litestream 0.5.x (this repo pins 0.5.13) has no disable-L2 flag.
+# cmd/litestream/main.go Config.Levels is L1..N in list order
+# (CompactionLevels() prepends L0).  DefaultConfig() otherwise starts
+# monitors at 30s / 5m / 1h.  One entry here is how 0.5.x turns L2/L3
+# off: MaxLevel() becomes 1 and NextLevel(1) is the snapshot level.
+# Housekeeper already applied this live via a volume overlay; baking it
+# here keeps the next image L1-only instead of restoring DefaultConfig.
+# Mirror Socratic.Trade litestream.coolify.yml.  Do NOT add a second or
+# third item unless L2/L3 are intentionally product-on again.
+#
+# There is also no compaction-backoff yaml key.  store.go
+# monitorCompactionLevel retries on the level interval with no
+# exponential delay.  Removing L2/L3 is the backoff.  Remaining L1
+# retries every 30s against a small L0 window.
+#
+# Do NOT add verify-compaction: true (ListObjects after every compact).
+levels:
+  - interval: 30s
+
 dbs:
   - path: /data/prod.db
     replica:

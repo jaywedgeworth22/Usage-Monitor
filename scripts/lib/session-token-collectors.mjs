@@ -632,7 +632,36 @@ export async function postUsageBatches({
   let received = 0;
   let persisted = 0;
   let rejected = 0;
-  for (const batch of chunkEvents(events)) {
+  const batches = chunkEvents(events);
+  for (let i = 0; i < batches.length; i += 1) {
+    const batch = batches[i];
+    const parsed = await postUsageBatchWithRetry({
+      ingestUrl,
+      ingestToken,
+      body: bodyFor(batch),
+      log,
+    });
+    received += Number(parsed?.received ?? batch.length);
+    persisted += Number(parsed?.persisted ?? 0);
+    rejected += Number(parsed?.rejected ?? 0);
+    // Authenticated ingest allows 10 req / 1s.  A 400-day backfill is 100+
+    // batches; blasting them trips 429 and aborts the rest of history.
+    if (i < batches.length - 1) {
+      await sleep(120);
+    }
+  }
+  return { received, persisted, rejected };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function postUsageBatchWithRetry({ ingestUrl, ingestToken, body, log }) {
+  const maxAttempts = 8;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const response = await fetch(ingestUrl, {
       method: "POST",
       headers: {
@@ -640,7 +669,7 @@ export async function postUsageBatches({
         "x-usage-telemetry-version": "2",
         authorization: `Bearer ${ingestToken}`,
       },
-      body: JSON.stringify(bodyFor(batch)),
+      body: JSON.stringify(body),
     });
     const text = await response.text();
     let parsed;
@@ -649,16 +678,26 @@ export async function postUsageBatches({
     } catch {
       parsed = null;
     }
-    if (!response.ok && response.status !== 202) {
-      throw new Error(
-        `Ingest rejected the batch (HTTP ${response.status}): ${
-          parsed ? JSON.stringify(parsed) : text
-        }`
+    if (response.status === 429 || response.status === 503) {
+      const retryAfter = Number(parsed?.error?.retryAfterSeconds);
+      const waitMs = Math.min(
+        60_000,
+        (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 2) * 1000
       );
+      log(
+        `ingest HTTP ${response.status} (attempt ${attempt}/${maxAttempts}); retry in ${waitMs}ms`
+      );
+      if (attempt === maxAttempts) {
+        throw new Error(`Ingest rejected the batch (HTTP ${response.status}) after ${maxAttempts} attempts`);
+      }
+      await sleep(waitMs);
+      continue;
     }
-    received += Number(parsed?.received ?? batch.length);
-    persisted += Number(parsed?.persisted ?? 0);
-    rejected += Number(parsed?.rejected ?? 0);
+    if (!response.ok && response.status !== 202) {
+      const detail = parsed?.error?.code ? parsed.error.code : `HTTP ${response.status}`;
+      throw new Error(`Ingest rejected the batch (${detail})`);
+    }
+    return parsed;
   }
-  return { received, persisted, rejected };
+  throw new Error("Ingest retry loop exhausted");
 }

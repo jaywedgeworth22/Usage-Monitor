@@ -1,7 +1,22 @@
-import { prisma } from "@/lib/prisma";
+import {
+  AGENT_SEAT_CATALOG,
+  isAgentPlatformId,
+  resolveAgentSeat,
+  type AgentSeatSource,
+  type AgentSeatSubscriptionInput,
+} from "@/lib/agent-seat-plans";
+import { getExternalEventRawCutoff, startOfUtcDay } from "@/lib/data-retention";
 import { getLatestMacHealth } from "@/lib/mac-health";
+import { prisma } from "@/lib/prisma";
 import { deriveTokenCostUsd, getModelPricing } from "@/lib/pricing/model-pricing";
 import { SUBSCRIPTION_ANALYTICS_SOURCE_APPS } from "@/lib/subscription-analytics";
+import {
+  isReliableTokenTelemetryKind,
+  resolveTelemetryAccuracy,
+  telemetryIncompleteNoteFor,
+  type TelemetryAccuracy,
+  type TokenTelemetryKind,
+} from "@/lib/agent-telemetry-accuracy";
 
 export interface AgentPlatformMeta {
   id: string;
@@ -9,9 +24,14 @@ export interface AgentPlatformMeta {
   provider: string;
   description: string;
   dataCapability: string;
-  fidelityTier: "realtime_otlp" | "session_jsonl" | "process_only";
+  fidelityTier: "realtime_otlp" | "session_jsonl" | "process_only" | "unavailable";
+  tokenTelemetryKind: TokenTelemetryKind;
   notes: string;
   defaultMonthlySeatCostUsd: number;
+  listMonthlySeatCostUsd?: number;
+  bundledOffsetUsd?: number;
+  bundledOffsetLabel?: string;
+  unavailableReason?: string;
 }
 
 export const AGENT_PLATFORMS: readonly AgentPlatformMeta[] = [
@@ -22,8 +42,9 @@ export const AGENT_PLATFORMS: readonly AgentPlatformMeta[] = [
     description: "Claude Code CLI, Claude Desktop, and Monet multi-agent sync.",
     dataCapability: "Full real-time OTLP telemetry (/api/otlp/v1/metrics)",
     fidelityTier: "realtime_otlp",
+    tokenTelemetryKind: "otlp",
     notes: "Native OTLP metrics stream reports per-turn tokens (input, output, cache-read, cache-creation) and cost estimates directly from Claude processes.",
-    defaultMonthlySeatCostUsd: 20,
+    defaultMonthlySeatCostUsd: AGENT_SEAT_CATALOG["claude-code"].listMonthlyUsd,
   },
   {
     id: "openai-codex",
@@ -32,18 +53,25 @@ export const AGENT_PLATFORMS: readonly AgentPlatformMeta[] = [
     description: "Codex CLI & autonomous coding cloud agent.",
     dataCapability: "Incremental session JSONL delta parsing",
     fidelityTier: "session_jsonl",
+    tokenTelemetryKind: "session_jsonl",
     notes: "Ingests token usage snapshots from ~/.codex/sessions/**/*.jsonl. Deduplicates consecutive token_count replays automatically.",
-    defaultMonthlySeatCostUsd: 20,
+    defaultMonthlySeatCostUsd: AGENT_SEAT_CATALOG["openai-codex"].listMonthlyUsd,
   },
   {
     id: "cursor-agent",
     name: "Cursor",
     provider: "Cursor",
     description: "Cursor AI editor & background agent process.",
-    dataCapability: "Live process detection & seat tracking",
+    dataCapability: "Live process detection. Token telemetry is not available.",
     fidelityTier: "process_only",
-    notes: "Cursor keeps usage local to its IDE client and does not currently expose an unauthenticated local token ledger. Monitored via Mac process health and subscription allocation.",
-    defaultMonthlySeatCostUsd: 20,
+    tokenTelemetryKind: "none",
+    notes: "Cursor keeps usage local to its IDE client and does not expose an unauthenticated local token ledger.  Process status is live.  Usage is not reported.",
+    defaultMonthlySeatCostUsd: 0,
+    listMonthlySeatCostUsd: AGENT_SEAT_CATALOG["cursor-agent"].listMonthlyUsd,
+    bundledOffsetUsd: AGENT_SEAT_CATALOG["cursor-agent"].listMonthlyUsd,
+    bundledOffsetLabel: "SuperGrok Heavy",
+    unavailableReason:
+      "Cursor does not expose a local token ledger.  Process status is live.  Usage is not reported.",
   },
   {
     id: "grok-build",
@@ -52,18 +80,26 @@ export const AGENT_PLATFORMS: readonly AgentPlatformMeta[] = [
     description: "Grok CLI, Grok Leader PM2 service, and Grok ACP agent.",
     dataCapability: "Turn-completed token & costUsdTicks parsing",
     fidelityTier: "session_jsonl",
+    tokenTelemetryKind: "session_jsonl",
     notes: "Ingests turn_completed events from ~/.grok/sessions/**/updates.jsonl with model breakdown and high-precision cost ticks.",
-    defaultMonthlySeatCostUsd: 30,
+    defaultMonthlySeatCostUsd: AGENT_SEAT_CATALOG["grok-build"].listMonthlyUsd,
   },
   {
     id: "antigravity-cli",
     name: "Antigravity",
     provider: "Google",
     description: "Antigravity pair-programming agent & agy-acp PM2 service.",
-    dataCapability: "Session transcript & token stream parsing",
-    fidelityTier: "session_jsonl",
-    notes: "Ingests agentic steps from ~/.gemini/antigravity/ with model pricing derived against the LiteLLM Gemini catalog.",
-    defaultMonthlySeatCostUsd: 20,
+    dataCapability: "Quota windows from agy /usage only. Token telemetry is not available.",
+    fidelityTier: "unavailable",
+    tokenTelemetryKind: "character_estimate",
+    notes:
+      "Google Antigravity does not expose token telemetry.  Local transcript character estimates are not usage and must not be read as burn.  Seat is $100/mo Google AI Ultra; $30 of that was already Google One, so $70 net for the AI.",
+    defaultMonthlySeatCostUsd: AGENT_SEAT_CATALOG["antigravity-cli"].billedMonthlyUsd ?? 70,
+    listMonthlySeatCostUsd: AGENT_SEAT_CATALOG["antigravity-cli"].listMonthlyUsd,
+    bundledOffsetUsd: 30,
+    bundledOffsetLabel: "Google One",
+    unavailableReason:
+      "Antigravity does not expose token telemetry.  Local transcript character estimates are not usage.  This is not zero use.",
   },
   {
     id: "github-copilot",
@@ -72,10 +108,34 @@ export const AGENT_PLATFORMS: readonly AgentPlatformMeta[] = [
     description: "GitHub Copilot CLI & IDE assistant.",
     dataCapability: "Session shutdown modelMetrics delta parsing",
     fidelityTier: "session_jsonl",
+    tokenTelemetryKind: "session_jsonl",
     notes: "Ingests session.shutdown modelMetrics from ~/.copilot/session-state/ with inclusive cache token splitting.",
-    defaultMonthlySeatCostUsd: 19,
+    defaultMonthlySeatCostUsd: 0,
+  },
+  {
+    id: "minimax-code",
+    name: "MiniMax Code",
+    provider: "MiniMax",
+    description: "MiniMax Code CLI / agent seat.",
+    dataCapability: "Receipt-backed seat. Token telemetry is not wired yet.",
+    fidelityTier: "unavailable",
+    tokenTelemetryKind: "none",
+    notes: "MiniMax Code billed cash waits on a receipt.  Token telemetry is not reported yet.",
+    defaultMonthlySeatCostUsd: 0,
+    unavailableReason:
+      "MiniMax Code has no token collector yet.  This is not zero usage.",
   },
 ];
+
+const TOKEN_TELEMETRY_KIND_BY_APP = new Map(
+  AGENT_PLATFORMS.map((meta) => [meta.id, meta.tokenTelemetryKind] as const),
+);
+
+export function isReliableTokenSourceApp(sourceApp: string): boolean {
+  const kind = TOKEN_TELEMETRY_KIND_BY_APP.get(sourceApp.trim().toLowerCase());
+  if (!kind) return true;
+  return isReliableTokenTelemetryKind(kind);
+}
 
 export interface AgentPlatformStatus {
   id: string;
@@ -84,9 +144,21 @@ export interface AgentPlatformStatus {
   isRunningOnMac: boolean;
   macStatus: "running" | "idle" | "stopped" | "unknown";
   dataCapability: string;
-  fidelityTier: "realtime_otlp" | "session_jsonl" | "process_only";
+  fidelityTier: "realtime_otlp" | "session_jsonl" | "process_only" | "unavailable";
   notes: string;
   monthlySeatCostUsd: number;
+  billedMonthlySeatCostUsd: number;
+  seatPlanName: string;
+  seatPlanNote: string | null;
+  seatPlanSource: AgentSeatSource;
+  listMonthlySeatCostUsd: number;
+  bundledOffsetUsd: number | null;
+  bundledOffsetLabel: string | null;
+  seatCostNote: string | null;
+  telemetryAccuracy: TelemetryAccuracy;
+  telemetryAccuracyLabel: string;
+  telemetryAccuracyNote: string;
+  usageIsReliable: boolean;
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
@@ -120,6 +192,9 @@ export interface AgentsOverviewResponse {
     totalNetSavingsUsd: number;
     savingsMultiplier: number;
     topModel: string | null;
+    telemetryIncomplete: boolean;
+    telemetryIncompleteNote: string | null;
+    unreliablePlatformIds: string[];
   };
   burn5h: {
     tokens5h: number;
@@ -160,6 +235,24 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     { sourceApp: { in: seatsFilter } },
   ];
 
+  // Same split as summarizeExternalUsageEvents: raw events from the retention
+  // cutoff forward, daily rollups only for days before that cutoff.  Adding
+  // both for the same days double-counted tokens after a collector backfill.
+  const rawCutoff = getExternalEventRawCutoff(now);
+  const rawSince = since > rawCutoff ? since : rawCutoff;
+  const queryRollups = since < rawCutoff;
+  const rollupDayGte = startOfUtcDay(since);
+
+  const emptyRollup = Promise.resolve(
+    [] as Array<{
+      sourceApp: string;
+      provider: string;
+      keyRef: string | null;
+      label?: string | null;
+      _sum: { totalQuantity?: number | null; totalCostUsd?: number | null };
+    }>
+  );
+
   const [
     macHealth,
     tokenGroups,
@@ -169,6 +262,8 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     rollupTokenGroups,
     rollupCostGroups,
     earliestEvent,
+    subscriptionRows,
+    observedCodexPlan,
   ] = await Promise.all([
     getLatestMacHealth().catch(() => null),
     prisma.externalUsageEvent.groupBy({
@@ -177,7 +272,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
         OR: eventWhereOr,
         metricType: "usage",
         unit: "token",
-        occurredAt: { gte: since },
+        occurredAt: { gte: rawSince },
       },
       _sum: { quantity: true },
     }),
@@ -186,7 +281,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       where: {
         OR: eventWhereOr,
         metricType: "cost",
-        occurredAt: { gte: since },
+        occurredAt: { gte: rawSince },
       },
       _sum: { costUsd: true },
     }),
@@ -209,25 +304,29 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       },
       _sum: { costUsd: true },
     }),
-    prisma.externalUsageEventDailyRollup.groupBy({
-      by: ["sourceApp", "provider", "keyRef", "label"],
-      where: {
-        OR: eventWhereOr,
-        metricType: "usage",
-        unit: "token",
-        day: { gte: since },
-      },
-      _sum: { totalQuantity: true },
-    }),
-    prisma.externalUsageEventDailyRollup.groupBy({
-      by: ["sourceApp", "provider", "keyRef"],
-      where: {
-        OR: eventWhereOr,
-        metricType: "cost",
-        day: { gte: since },
-      },
-      _sum: { totalCostUsd: true },
-    }),
+    queryRollups
+      ? prisma.externalUsageEventDailyRollup.groupBy({
+          by: ["sourceApp", "provider", "keyRef", "label"],
+          where: {
+            OR: eventWhereOr,
+            metricType: "usage",
+            unit: "token",
+            day: { gte: rollupDayGte, lt: rawCutoff },
+          },
+          _sum: { totalQuantity: true },
+        })
+      : emptyRollup,
+    queryRollups
+      ? prisma.externalUsageEventDailyRollup.groupBy({
+          by: ["sourceApp", "provider", "keyRef"],
+          where: {
+            OR: eventWhereOr,
+            metricType: "cost",
+            day: { gte: rollupDayGte, lt: rawCutoff },
+          },
+          _sum: { totalCostUsd: true },
+        })
+      : emptyRollup,
     windowDays > 30
       ? prisma.externalUsageEvent.findFirst({
           where: { OR: eventWhereOr },
@@ -235,7 +334,44 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
           select: { occurredAt: true },
         })
       : null,
+    prisma.subscription.findMany({
+      where: { currency: "USD" },
+      select: {
+        status: true,
+        name: true,
+        costUsd: true,
+        currency: true,
+        interval: true,
+        intervalCount: true,
+        provider: { select: { name: true, displayName: true } },
+      },
+    }),
+    prisma.externalUsageEvent.findFirst({
+      where: {
+        sourceApp: "openai-codex",
+        metricType: "quota_sync",
+        label: "observed-plan",
+      },
+      orderBy: { occurredAt: "desc" },
+      select: { keyRef: true },
+    }),
   ]);
+
+  const observedByPlatform: Partial<Record<string, { planType: string }>> = {};
+  if (observedCodexPlan?.keyRef?.trim()) {
+    observedByPlatform["openai-codex"] = { planType: observedCodexPlan.keyRef.trim() };
+  }
+
+  const seatSubscriptions: AgentSeatSubscriptionInput[] = subscriptionRows.map((row) => ({
+    status: row.status,
+    name: row.name,
+    costUsd: row.costUsd,
+    currency: row.currency,
+    interval: row.interval,
+    intervalCount: row.intervalCount,
+    providerName: row.provider.name,
+    providerDisplayName: row.provider.displayName,
+  }));
 
   const agentProcesses = macHealth?.mac?.agentProcesses || {};
   const macProcesses = macHealth?.mac?.processes || {};
@@ -254,11 +390,13 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
   const reportedCostByPlatform = new Map<string, number>();
 
   for (const row of costGroups) {
+    if (!isReliableTokenSourceApp(row.sourceApp)) continue;
     const app = row.sourceApp.toLowerCase();
     const current = reportedCostByPlatform.get(app) || 0;
     reportedCostByPlatform.set(app, current + (row._sum.costUsd || 0));
   }
   for (const row of rollupCostGroups) {
+    if (!isReliableTokenSourceApp(row.sourceApp)) continue;
     const app = row.sourceApp.toLowerCase();
     const current = reportedCostByPlatform.get(app) || 0;
     reportedCostByPlatform.set(app, current + (row._sum.totalCostUsd || 0));
@@ -285,6 +423,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
   ];
 
   for (const group of allTokenRows) {
+    if (!isReliableTokenSourceApp(group.sourceApp)) continue;
     const app = group.sourceApp.toLowerCase();
     const model = group.keyRef || "unknown-model";
     const qty = Math.max(0, group.quantity || 0);
@@ -398,11 +537,43 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
 
     const reportedCost = reportedCostByPlatform.get(appKey) || 0;
     const estimatedCost = Math.max(platformApiCost, reportedCost);
-    const monthlySeat = meta.defaultMonthlySeatCostUsd;
-    const proratedSubscriptionCost = (monthlySeat / 30) * Math.min(windowDays, effectiveDays);
-    const netSavings = Math.max(0, estimatedCost - proratedSubscriptionCost);
+    const seat = isAgentPlatformId(meta.id)
+      ? resolveAgentSeat(meta.id, seatSubscriptions, observedByPlatform[meta.id] ?? null)
+      : {
+          planName: `${meta.name} seat`,
+          listMonthlyUsd: meta.listMonthlySeatCostUsd ?? meta.defaultMonthlySeatCostUsd,
+          billedMonthlyUsd: meta.defaultMonthlySeatCostUsd,
+          source: "catalog" as const,
+          note: null,
+        };
+    const bundledOffset = meta.bundledOffsetUsd ?? null;
+    const bundledOffsetLabel = meta.bundledOffsetLabel ?? null;
+    const listSeat = Math.max(seat.listMonthlyUsd, meta.listMonthlySeatCostUsd ?? 0);
+    const billedSeat = seat.billedMonthlyUsd;
+    const monthlySeat =
+      bundledOffset != null && bundledOffset > 0 ? billedSeat : listSeat;
+    const seatCostNote =
+      bundledOffset != null && bundledOffset > 0
+        ? `$${listSeat}/mo plan.  $${bundledOffset} of that was already ${bundledOffsetLabel ?? "bundled"}, so $${monthlySeat} net for the AI.`
+        : seat.note;
+    const proratedSubscriptionCost =
+      (billedSeat / 30) * Math.min(windowDays, effectiveDays);
 
-    totalApiEquivalentCost += estimatedCost;
+    const accuracy = resolveTelemetryAccuracy({
+      name: meta.name,
+      tokenTelemetryKind: meta.tokenTelemetryKind,
+      totalTokens: platformTotalTokens,
+      isRunningOnMac: Boolean(isRunning),
+      unavailableReason: meta.unavailableReason,
+    });
+
+    const displayTokens = accuracy.usageIsReliable ? platformTotalTokens : 0;
+    const displayApiCost = accuracy.usageIsReliable ? platformApiCost : 0;
+    const displayReported = accuracy.usageIsReliable ? reportedCost : 0;
+    const displayEstimated = accuracy.usageIsReliable ? estimatedCost : 0;
+    const netSavings = Math.max(0, displayEstimated - proratedSubscriptionCost);
+
+    totalApiEquivalentCost += displayEstimated;
     totalSubscriptionCost += proratedSubscriptionCost;
 
     return {
@@ -414,17 +585,29 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       dataCapability: meta.dataCapability,
       fidelityTier: meta.fidelityTier,
       notes: meta.notes,
-      monthlySeatCostUsd: meta.defaultMonthlySeatCostUsd,
-      totalTokens: platformTotalTokens,
-      inputTokens: platformInput,
-      outputTokens: platformOutput,
-      cacheReadTokens: platformCacheRead,
-      cacheCreationTokens: platformCacheCreation,
-      apiEquivalentCostUsd: Number(platformApiCost.toFixed(2)),
-      reportedCostUsd: Number(reportedCost.toFixed(2)),
-      estimatedCostUsd: Number(estimatedCost.toFixed(2)),
+      monthlySeatCostUsd: monthlySeat,
+      billedMonthlySeatCostUsd: billedSeat,
+      seatPlanName: seat.planName,
+      seatPlanNote: seat.note,
+      seatPlanSource: seat.source,
+      listMonthlySeatCostUsd: listSeat,
+      bundledOffsetUsd: bundledOffset,
+      bundledOffsetLabel,
+      seatCostNote,
+      telemetryAccuracy: accuracy.accuracy,
+      telemetryAccuracyLabel: accuracy.label,
+      telemetryAccuracyNote: accuracy.note,
+      usageIsReliable: accuracy.usageIsReliable,
+      totalTokens: displayTokens,
+      inputTokens: accuracy.usageIsReliable ? platformInput : 0,
+      outputTokens: accuracy.usageIsReliable ? platformOutput : 0,
+      cacheReadTokens: accuracy.usageIsReliable ? platformCacheRead : 0,
+      cacheCreationTokens: accuracy.usageIsReliable ? platformCacheCreation : 0,
+      apiEquivalentCostUsd: Number(displayApiCost.toFixed(2)),
+      reportedCostUsd: Number(displayReported.toFixed(2)),
+      estimatedCostUsd: Number(displayEstimated.toFixed(2)),
       netSavingsUsd: Number(netSavings.toFixed(2)),
-      modelsUsed,
+      modelsUsed: accuracy.usageIsReliable ? modelsUsed : [],
     };
   });
 
@@ -441,6 +624,10 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
   const topModel = modelDistribution[0]?.model || null;
   const totalNetSavings = Math.max(0, totalApiEquivalentCost - totalSubscriptionCost);
   const savingsMultiplier = totalSubscriptionCost > 0 ? totalApiEquivalentCost / totalSubscriptionCost : 1;
+  const unreliablePlatforms = platforms.filter((p) => !p.usageIsReliable);
+  const telemetryIncompleteNote = telemetryIncompleteNoteFor(
+    unreliablePlatforms.map((p) => p.name),
+  );
 
   // 5-hour rolling burn numbers
   let tokens5h = 0;
@@ -448,6 +635,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
   let reportedCost5hUsd = 0;
 
   for (const g of token5hGroups) {
+    if (!isReliableTokenSourceApp(g.sourceApp)) continue;
     const qty = Math.max(0, g._sum.quantity || 0);
     tokens5h += qty;
     const model = g.keyRef || "";
@@ -459,6 +647,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
   }
 
   for (const g of cost5hGroups) {
+    if (!isReliableTokenSourceApp(g.sourceApp)) continue;
     const cost = Math.max(0, g._sum.costUsd || 0);
     reportedCost5hUsd += cost;
   }
@@ -483,6 +672,9 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       totalNetSavingsUsd: Number(totalNetSavings.toFixed(2)),
       savingsMultiplier: Number(savingsMultiplier.toFixed(1)),
       topModel,
+      telemetryIncomplete: unreliablePlatforms.length > 0,
+      telemetryIncompleteNote,
+      unreliablePlatformIds: unreliablePlatforms.map((p) => p.id),
     },
     burn5h: {
       tokens5h,

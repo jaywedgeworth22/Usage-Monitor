@@ -15,7 +15,12 @@ if (dsn) {
   Sentry.init({
     dsn,
     environment: nonEmptyEnv(process.env.SENTRY_ENVIRONMENT),
-    // Default 0: errors only, no performance tracing volume unless opted in.
     tracesSampleRate: parseTracesSampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE),
+    enableLogs: true,
+    profileSessionSampleRate: parseTracesSampleRate(
+      process.env.SENTRY_PROFILE_SESSION_SAMPLE_RATE ?? "1"
+    ),
+    profileLifecycle: "trace",
+    integrations: [Sentry.nodeRuntimeMetricsIntegration()],
   });
 }

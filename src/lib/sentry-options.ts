@@ -7,12 +7,11 @@
 
 /**
  * Parses SENTRY_TRACES_SAMPLE_RATE (or its NEXT_PUBLIC_ client twin).
- * Defaults to 0 (error monitoring only, no performance tracing) so enabling
- * the DSN alone never generates tracing volume. Non-numeric, negative, or
- * missing values all fall back to 0; values above 1 are clamped to 1.
+ * Defaults to 0.2 (20% baseline distributed tracing) when omitted.
+ * Non-numeric or negative values fall back to 0; values above 1 are clamped to 1.
  */
 export function parseTracesSampleRate(raw: string | undefined): number {
-  if (!raw) return 0;
+  if (raw === undefined || raw === null || raw.trim() === "") return 0.2;
   const parsed = Number.parseFloat(raw);
   if (!Number.isFinite(parsed) || parsed < 0) return 0;
   return Math.min(parsed, 1);
