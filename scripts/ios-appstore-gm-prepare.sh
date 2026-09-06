@@ -29,20 +29,19 @@ SECRETS_DIR="${HOME}/.secrets"
 mkdir -p "$SECRETS_DIR"
 chmod 700 "$SECRETS_DIR"
 
-KEY_PATH="${SECRETS_DIR}/AuthKey.p8"
-# The p8 body is a GitHub secret.  Write it without echoing.
-printf '%s\n' "$ASC_KEY_P8" > "$KEY_PATH"
-chmod 600 "$KEY_PATH"
-
-# Xcode 26.6 archive looks for AuthKey_<id>.p8 here.  altool already does.
-# UM 1.0.15 failed when only ~/.secrets/AuthKey.p8 existed.
+# Write the p8 under the Xcode 26.6 / altool standard name AuthKey_<id>.p8.
+# CI 34039065969 passed Infisical load but xcodebuild bearer-auth failed when
+# ASC_KEY_PATH pointed at the generic AuthKey.p8 alias.
 ASC_KEY_STD_DIR="${HOME}/.appstoreconnect/private_keys"
-mkdir -p "$ASC_KEY_STD_DIR"
-chmod 700 "$ASC_KEY_STD_DIR"
-ASC_KEY_STD="${ASC_KEY_STD_DIR}/AuthKey_${ASC_KEY_ID}.p8"
-if [[ ! -e "$ASC_KEY_STD" ]]; then
-  ln -sf "$KEY_PATH" "$ASC_KEY_STD"
-fi
+mkdir -p "$ASC_KEY_STD_DIR" "$SECRETS_DIR"
+chmod 700 "$ASC_KEY_STD_DIR" "$SECRETS_DIR"
+KEY_PATH="${ASC_KEY_STD_DIR}/AuthKey_${ASC_KEY_ID}.p8"
+# Normalize CRLF / trailing spaces; keep a single trailing newline.
+printf '%s' "$ASC_KEY_P8" | tr -d '\r' | sed -e 's/[[:space:]]*$//' > "$KEY_PATH"
+printf '\n' >> "$KEY_PATH"
+chmod 600 "$KEY_PATH"
+# Compatibility alias some older scripts still open.
+ln -sfn "$KEY_PATH" "${SECRETS_DIR}/AuthKey.p8"
 
 ENV_PATH="${SECRETS_DIR}/appstore-connect.env"
 {
