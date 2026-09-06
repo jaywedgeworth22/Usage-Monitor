@@ -985,6 +985,15 @@ ensure_tf_ready() {
 
 acquire_archive_lock
 log "archiving..."
+# Usage Client: project defaults CODE_SIGN_IDENTITY=iPhone Developer, which
+# makes Xcode ask ASC for IOS_APP_DEVELOPMENT profiles.  On GH-hosted runners
+# that path bearer-fails even with a valid AuthKey_<id>.p8 (runs 34039065969,
+# 34067392006).  Clearing identity lets Automatic pick Distribution for archive.
+ARCHIVE_IDENTITY_FLAGS=()
+if [[ "${APP_KEY}" == "usage" ]]; then
+  ARCHIVE_IDENTITY_FLAGS+=(CODE_SIGN_IDENTITY=)
+fi
+
 set +e
 if [[ "$PLATFORM" == "macOS" ]]; then
   ARCHIVE_PLATFORM_FLAGS=(-destination "generic/platform=macOS")
@@ -1011,6 +1020,7 @@ xcodebuild archive \
   ${ASC_AUTH_FLAGS[@]:+"${ASC_AUTH_FLAGS[@]}"} \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   CODE_SIGN_STYLE=Automatic \
+  ${ARCHIVE_IDENTITY_FLAGS[@]:+"${ARCHIVE_IDENTITY_FLAGS[@]}"} \
   MARKETING_VERSION="$MARKETING" \
   CURRENT_PROJECT_VERSION="$BUILD_NUM" \
   ${SENTRY_DSN_FLAGS[@]:+"${SENTRY_DSN_FLAGS[@]}"} \
