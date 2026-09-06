@@ -173,6 +173,17 @@ but deliberately not fixed here: `test:r2-archive` is a fourth instance of the
 same drift and needs a follow-up.  Rollout:
 `docs/rollouts/2026-08-31-ci-verify-drift-three-offline-tests.md`.
 
+## Prior (2026-08-31 GROK — top-to-bottom full-stack audit)
+
+Read-only team audit of web (all viewports), iOS Client+Local, backend ingest,
+money path, security, and ops.  Report: `docs/audits/2026-08-31-full-stack-audit.md`.
+No product code changes.  Highest remaining clusters: `USAGE_READ_TOKEN` can
+`PUT /api/settings` and list full APNs tokens; Hetzner/Backblaze catalog estimates
+are written as cash `totalCost`; weekly R2 still uses host `/tmp`; Agents dashboard
+uses undefined Tailwind tokens; Coolify still has no in-repo deploy gate
+(board `d0f5f1db`).  Daily-rollups bearer exclusion is **already in middleware**;
+`AGENTS.md` was stale and is corrected here.  Board `da6edf84`.
+
 ## Previous (2026-08-31 CLAUDE — /api/health r2Weekly + replica-status probe cost trim)
 
 `/api/health` now exposes `checks.storage.r2Weekly` (`{ok, key, ageSeconds,

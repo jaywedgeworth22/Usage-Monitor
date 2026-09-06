@@ -70,10 +70,10 @@ but contribute zero to `persisted`; never derive it from `activeEvents.length`.
 - `GET /api/export/daily-rollups` — dashboard session cookie OR the same
   `isUsageReadAuthorized` scheme. Exports `ExternalUsageEventDailyRollup` rows as JSON
   (default) or CSV (`format=csv`), bounded by inclusive UTC `from`/`to` day params
-  (default: last 30 days; max 92; 10k row cap with a `truncated` flag). NOTE: unlike
-  `/api/subscriptions`, this route is not yet excluded from the dashboard-session
-  middleware, so dashboard-session access works but bearer-token access additionally
-  needs a one-line `isPublicPath` exclusion in `src/middleware.ts`.
+  (default: last 30 days; max 92; 10k row cap with a `truncated` flag).  Middleware
+  `isPublicPath` excludes this route (and `/api/workspace/export`) so a bearer
+  `USAGE_READ_TOKEN` reaches the route's own dual-auth check instead of 401ing at
+  the session gate.  Confirmed 2026-08-31 full-stack audit.
 
 Push-primary providers (Anthropic, Voyage, Robinhood) have blind poll adapters — their usage/cost
 arrives only via `ExternalUsageEvent`. For them to appear in `/api/budget-status` with a budget,
