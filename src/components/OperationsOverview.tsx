@@ -587,11 +587,36 @@ export function R2FleetCard({ data }: { data: R2FleetSummary | null }) {
   );
 }
 
+/**
+ * Runtime & services detail row: embed provider (if the ST health payload
+ * reported one) plus OpenRouter credit state.  Returns null — render
+ * nothing — when neither has data, rather than fabricating a status line.
+ *
+ * Pinecone was dropped from this card (retired per owner 2026-09-04) and
+ * there is no live Qdrant/vector-store health field in this payload to take
+ * its place — qdrant-st's real status is Coolify-resource data and already
+ * surfaces on the Coolify Fleet card, not duplicated here.
+ */
+export function socraticVectorStoreLine(
+  data: Pick<SocraticInfrastructureSummary, "ragEmbedProvider" | "openrouterCreditsOk">
+): string | null {
+  const parts = [
+    data.ragEmbedProvider ? `Embed ${data.ragEmbedProvider}` : null,
+    data.openrouterCreditsOk === null
+      ? null
+      : data.openrouterCreditsOk
+        ? "OpenRouter credits ok"
+        : "OpenRouter credits low",
+  ].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 export function SocraticInfrastructureCard({ data }: { data: SocraticInfrastructureSummary }) {
   const [expanded, setExpanded] = useState(false);
   const scheduler = data.schedulerAgeSeconds === null ? "scheduler unavailable" : `scheduler ${Math.round(data.schedulerAgeSeconds)}s ago`;
   const uptime = formatUptime(data.processUptimeSeconds);
   const depTotal = data.dependencyCount ?? data.failedDependencies.length;
+  const vectorStoreLine = socraticVectorStoreLine(data);
   return (
     <section aria-labelledby="socratic-infrastructure-heading" className="rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
       <div className="flex items-start justify-between gap-4 px-5 py-4">
@@ -641,15 +666,9 @@ export function SocraticInfrastructureCard({ data }: { data: SocraticInfrastruct
               Dependencies: {data.failedDependencies.length > 0 ? data.failedDependencies.join(", ") : "none failed"}
               {data.dependencyCount != null ? ` (${data.dependencyCount} total)` : ""}
             </p>
-            <p className="mt-1 text-gray-500 dark:text-gray-400">
-              {/* Vector store: Qdrant is the active store (Pinecone retired from the health card per owner 2026-09-04). */}
-              {data.ragEmbedProvider ? `Embed ${data.ragEmbedProvider}` : "Vector store: Qdrant"}
-              {data.openrouterCreditsOk === null
-                ? ""
-                : data.openrouterCreditsOk
-                  ? " · OpenRouter credits ok"
-                  : " · OpenRouter credits low"}
-            </p>
+            {vectorStoreLine && (
+              <p className="mt-1 text-gray-500 dark:text-gray-400">{vectorStoreLine}</p>
+            )}
             <a href={data.adminUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex min-h-11 items-center font-medium text-blue-600 hover:underline dark:text-blue-300">Open full Socratic admin panel</a>
           </div>
         </div>

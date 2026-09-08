@@ -19,17 +19,36 @@ public final class PortfolioHistoryStore {
 
     public private(set) var state: LoadState<UsageEventsSummary> = .idle
     public private(set) var timeframe: TimeframeOption = PortfolioHistoryStore.defaultTimeframe
+    /// The timeframe that `state`'s currently-visible summary actually belongs
+    /// to.  Kept distinct from `timeframe` (which flips the instant a chip is
+    /// tapped, so the chip row highlights immediately) so the caption never
+    /// claims numbers for a range that hasn't loaded yet — see
+    /// `summaryTimeframe` usage in `PortfolioHistorySection`.
+    public private(set) var summaryTimeframe: TimeframeOption = PortfolioHistoryStore.defaultTimeframe
     public private(set) var requiresSession = false
     public private(set) var lastError: APIError?
     public private(set) var isReloading = false
+
+    // `fetch()` is called from unstructured `Task { await store... }` sites
+    // (chip taps in DashboardRootView) that are never cancelled, so two
+    // fetches can be in flight together — e.g. a fast double chip-tap, or a
+    // reset() (sign-out / account switch) firing mid-fetch.  Without a
+    // guard, whichever network call happens to complete LAST wins, which can
+    // be the stale one, clobbering `state`/`summaryTimeframe` with old data
+    // after something newer already landed.  `fetchGeneration` makes each
+    // `fetch()` call check, right before every mutation, that it is still
+    // the most recent one; a superseded call is a no-op from that point on.
+    private var fetchGeneration = 0
 
     public init() {}
 
     public var summary: UsageEventsSummary? { state.value }
 
     public func reset() {
+        fetchGeneration += 1
         state = .idle
         timeframe = PortfolioHistoryStore.defaultTimeframe
+        summaryTimeframe = PortfolioHistoryStore.defaultTimeframe
         requiresSession = false
         lastError = nil
         isReloading = false
@@ -42,38 +61,58 @@ public final class PortfolioHistoryStore {
     }
 
     public func refresh(using client: APIClient) async {
-        await fetch(using: client, isRangeChange: false)
+        await fetch(using: client)
     }
 
     public func selectTimeframe(_ option: TimeframeOption, using client: APIClient?) async {
         guard option != timeframe else { return }
         timeframe = option
         guard let client else { return }
-        await fetch(using: client, isRangeChange: true)
+        await fetch(using: client)
     }
 
-    private func fetch(using client: APIClient, isRangeChange: Bool) async {
+    private func fetch(using client: APIClient) async {
         // Range changes (and the first load) KEEP the prior summary on screen
         // so the user always sees what they were just looking at, dimmed with
         // a small spinner, instead of a blank skeleton.  Owner 2026-09-04:
         // "change the time period seems to do nothing" — the skeleton was
         // making the change feel like no progress was happening.
+        //
+        // `timeframe` may already point at the NEW range by the time this
+        // runs (selectTimeframe flips it synchronously so the chip highlights
+        // right away), so capture the range this particular fetch is actually
+        // for and only stamp it onto `summaryTimeframe` once its data lands.
+        // Otherwise the caption would show the new range's label next to the
+        // old range's numbers until the fetch completes.
+        let requestedTimeframe = timeframe
         let previous = state.value
+        fetchGeneration += 1
+        let generation = fetchGeneration
         if previous != nil {
             isReloading = true
         } else {
             state = .loading
         }
-        defer { isReloading = false }
+        // Only the fetch that is STILL the most recent one when it finishes
+        // may clear the spinner — an already-superseded fetch's completion
+        // must not stomp on the newer fetch's `isReloading = true`.
+        defer {
+            if generation == fetchGeneration {
+                isReloading = false
+            }
+        }
 
         do {
             let summary = try await client.usageEventsSummary(
-                queryItems: timeframe.usageEventsQueryItems
+                queryItems: requestedTimeframe.usageEventsQueryItems
             )
+            guard generation == fetchGeneration else { return }
             state = .loaded(summary)
+            summaryTimeframe = requestedTimeframe
             requiresSession = false
             lastError = nil
         } catch let error as APIError {
+            guard generation == fetchGeneration else { return }
             if case .unauthorized = error {
                 requiresSession = true
                 state = .idle
@@ -81,12 +120,16 @@ public final class PortfolioHistoryStore {
                 return
             }
             if let previous {
+                // Still showing `previous`, which belongs to the range already
+                // recorded in `summaryTimeframe` — leave it untouched so the
+                // caption keeps matching what's on screen.
                 state = .loaded(previous)
                 lastError = error
             } else {
                 state = .failed(error)
             }
         } catch {
+            guard generation == fetchGeneration else { return }
             let transport = APIError.transport(error.localizedDescription)
             if let previous {
                 state = .loaded(previous)
