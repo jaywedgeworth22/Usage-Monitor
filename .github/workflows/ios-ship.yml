@@ -214,6 +214,8 @@ jobs:
       # No --force-ship. Standing rate limit is DEFAULT_MIN_INTERVAL_SEC=3600.
       - name: Ship UsageMonitor to TestFlight
         if: steps.gate.outputs.should_ship == '1'
+        env:
+          IOS_TF_RELEASE_NOTES: "1"  # Jay 2026-09-08: publish ASC What to Test
         run: bash "$GITHUB_WORKSPACE/scripts/ios-ship-testflight.sh"
 
       # LocalUsageMonitor stays skipped. Do not add a TestFlight upload step
