@@ -109,6 +109,17 @@ _CRON_SCHEDULES_FOLDED = {name.casefold(): expr for name, expr in CRON_SCHEDULES
 DEFAULT_CHECKIN_MARGIN = 15
 CHECKIN_MARGIN_OVERRIDES = {
     "CI": 480,  # was 15; see comment above (worst observed gap 384min + buffer)
+    # FLEET-INFRA-CB (2026-09-08): "iOS TestFlight ship (Mac runner)" runs on
+    # its own 13,43 * * * * cron, but GitHub's schedule dispatcher is
+    # measurably late for it too -- 15/40 of the most recent scheduled runs
+    # landed more than 15min after their nominal minute (range 1.2-29.5min,
+    # median 9.5min), even though every one of those runs succeeded.  The
+    # default 15min margin flagged ~40% of healthy ticks as "missed",
+    # flapping this monitor between ok and a regressed Sentry issue
+    # (count 322) since the monitor's creation.  40min clears the observed
+    # worst case with headroom while still catching a real outage well
+    # inside an hour.
+    "iOS TestFlight ship (Mac runner)": 40,  # was 15; see comment above
 }
 _CHECKIN_MARGINS_FOLDED = {name.casefold(): margin for name, margin in CHECKIN_MARGIN_OVERRIDES.items()}
 
@@ -338,6 +349,15 @@ def main() -> int:
                     "checkin_margin": checkin_margin,
                     "max_runtime": 60,
                     "timezone": "UTC",
+                    # FLEET-INFRA-CB (2026-09-08): require two consecutive
+                    # missed check-ins (not one) before opening/reopening the
+                    # Sentry issue, and one ok check-in to close it again, so
+                    # a single slow-but-successful tick can no longer flap
+                    # the issue the way it did (count 322) under a tight
+                    # margin.  Applies to every monitor this reporter
+                    # upserts, not just the one that surfaced the problem.
+                    "failure_issue_threshold": 2,
+                    "recovery_threshold": 1,
                 },
             }
             send_envelope(envelope_url, auth_header, "check_in", checkin_payload)
