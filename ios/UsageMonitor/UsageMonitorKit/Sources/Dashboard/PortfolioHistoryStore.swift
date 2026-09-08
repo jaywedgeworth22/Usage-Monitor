@@ -29,11 +29,23 @@ public final class PortfolioHistoryStore {
     public private(set) var lastError: APIError?
     public private(set) var isReloading = false
 
+    // `fetch()` is called from unstructured `Task { await store... }` sites
+    // (chip taps in DashboardRootView) that are never cancelled, so two
+    // fetches can be in flight together — e.g. a fast double chip-tap, or a
+    // reset() (sign-out / account switch) firing mid-fetch.  Without a
+    // guard, whichever network call happens to complete LAST wins, which can
+    // be the stale one, clobbering `state`/`summaryTimeframe` with old data
+    // after something newer already landed.  `fetchGeneration` makes each
+    // `fetch()` call check, right before every mutation, that it is still
+    // the most recent one; a superseded call is a no-op from that point on.
+    private var fetchGeneration = 0
+
     public init() {}
 
     public var summary: UsageEventsSummary? { state.value }
 
     public func reset() {
+        fetchGeneration += 1
         state = .idle
         timeframe = PortfolioHistoryStore.defaultTimeframe
         summaryTimeframe = PortfolioHistoryStore.defaultTimeframe
@@ -74,22 +86,33 @@ public final class PortfolioHistoryStore {
         // old range's numbers until the fetch completes.
         let requestedTimeframe = timeframe
         let previous = state.value
+        fetchGeneration += 1
+        let generation = fetchGeneration
         if previous != nil {
             isReloading = true
         } else {
             state = .loading
         }
-        defer { isReloading = false }
+        // Only the fetch that is STILL the most recent one when it finishes
+        // may clear the spinner — an already-superseded fetch's completion
+        // must not stomp on the newer fetch's `isReloading = true`.
+        defer {
+            if generation == fetchGeneration {
+                isReloading = false
+            }
+        }
 
         do {
             let summary = try await client.usageEventsSummary(
                 queryItems: requestedTimeframe.usageEventsQueryItems
             )
+            guard generation == fetchGeneration else { return }
             state = .loaded(summary)
             summaryTimeframe = requestedTimeframe
             requiresSession = false
             lastError = nil
         } catch let error as APIError {
+            guard generation == fetchGeneration else { return }
             if case .unauthorized = error {
                 requiresSession = true
                 state = .idle
@@ -106,6 +129,7 @@ public final class PortfolioHistoryStore {
                 state = .failed(error)
             }
         } catch {
+            guard generation == fetchGeneration else { return }
             let transport = APIError.transport(error.localizedDescription)
             if let previous {
                 state = .loaded(previous)
