@@ -77,7 +77,14 @@ struct PortfolioHistorySection: View {
                     ProgressView().controlSize(.small)
                 }
             }
-            Text("\(store.timeframe.displayLabel) · \(summary.groupCount) group\(summary.groupCount == 1 ? "" : "s")")
+            // `summaryTimeframe`, not `timeframe`: the chip row already
+            // highlights the newly-picked range, but the numbers below still
+            // belong to whatever range last finished loading.  Captioning
+            // with `timeframe` here would label the OLD numbers with the
+            // NEW range while the reload is in flight.
+            Text(store.isReloading
+                ? "\(store.summaryTimeframe.displayLabel) · updating…"
+                : "\(store.summaryTimeframe.displayLabel) · \(summary.groupCount) group\(summary.groupCount == 1 ? "" : "s")")
                 .font(Theme.Typography.caption)
                 .foregroundStyle(Theme.Colors.secondaryText)
 
@@ -107,7 +114,7 @@ struct PortfolioHistorySection: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "Usage history \(store.timeframe.displayLabel), \(CurrencyFormat.usd(summary.totalCostUsd))"
+            "Usage history \(store.summaryTimeframe.displayLabel), \(CurrencyFormat.usd(summary.totalCostUsd))"
         )
     }
 }
