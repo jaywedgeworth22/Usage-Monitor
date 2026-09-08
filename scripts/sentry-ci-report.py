@@ -90,6 +90,28 @@ CRON_SCHEDULES = {
 #      (a real issue in fleet-infra), not just to the job log.
 _CRON_SCHEDULES_FOLDED = {name.casefold(): expr for name, expr in CRON_SCHEDULES.items()}
 
+# Sentry Crons `checkin_margin` (minutes late a check-in may arrive before the
+# monitor opens a "missed" incident), per workflow.  Falls back to
+# DEFAULT_CHECKIN_MARGIN for any workflow not listed here.
+#
+# "CI" is overridden because GitHub's own schedule dispatcher — not this repo,
+# not Sentry — stopped honoring the hourly `41 * * * *` trigger on 2026-08-27:
+# median gap between scheduled CI runs was ~58min for the two weeks before
+# that date and has stayed in the 3-6h range every day since (worst observed
+# in the week of 2026-09-08: 384min).  Every run that DOES fire still
+# succeeds — this is dispatch latency on GitHub's side, not a broken job — so
+# ci-usage-monitor-ci was paging on nearly every tick for something no fix in
+# this repo can change.  180min of buffer above the worst observed gap
+# absorbs that platform-side jitter while still catching a genuine outage
+# (CI silently dead for the better part of a day).  Re-tighten this once
+# GitHub's scheduled-dispatch cadence for this workflow recovers to roughly
+# hourly again — see FLEET-INFRA-CA / board c630ceed.
+DEFAULT_CHECKIN_MARGIN = 15
+CHECKIN_MARGIN_OVERRIDES = {
+    "CI": 480,  # was 15; see comment above (worst observed gap 384min + buffer)
+}
+_CHECKIN_MARGINS_FOLDED = {name.casefold(): margin for name, margin in CHECKIN_MARGIN_OVERRIDES.items()}
+
 # Where the observed workflows live, resolved from this file rather than the
 # process CWD so the guard works regardless of how the script is invoked.
 WORKFLOWS_DIR = Path(__file__).resolve().parent.parent / ".github" / "workflows"
@@ -306,13 +328,14 @@ def main() -> int:
         else:
             checkin_status = "ok" if conclusion == "success" else "error"
             monitor_slug = f"ci-{APP}-{slugify(workflow_name)}"
+            checkin_margin = _CHECKIN_MARGINS_FOLDED.get(workflow_name.casefold(), DEFAULT_CHECKIN_MARGIN)
             checkin_payload = {
                 "check_in_id": uuid.uuid4().hex,
                 "monitor_slug": monitor_slug,
                 "status": checkin_status,
                 "monitor_config": {
                     "schedule": {"type": "crontab", "value": cron_expr},
-                    "checkin_margin": 15,
+                    "checkin_margin": checkin_margin,
                     "max_runtime": 60,
                     "timezone": "UTC",
                 },
