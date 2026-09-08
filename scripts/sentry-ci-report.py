@@ -110,18 +110,44 @@ DEFAULT_CHECKIN_MARGIN = 15
 CHECKIN_MARGIN_OVERRIDES = {
     "CI": 480,  # was 15; see comment above (worst observed gap 384min + buffer)
     # FLEET-INFRA-CB (2026-09-08): "iOS TestFlight ship (Mac runner)" runs on
-    # its own 13,43 * * * * cron, but GitHub's schedule dispatcher is
-    # measurably late for it too -- 15/40 of the most recent scheduled runs
-    # landed more than 15min after their nominal minute (range 1.2-29.5min,
-    # median 9.5min), even though every one of those runs succeeded.  The
-    # default 15min margin flagged ~40% of healthy ticks as "missed",
-    # flapping this monitor between ok and a regressed Sentry issue
-    # (count 322) since the monitor's creation.  40min clears the observed
-    # worst case with headroom while still catching a real outage well
-    # inside an hour.
-    "iOS TestFlight ship (Mac runner)": 40,  # was 15; see comment above
+    # its own 13,43 * * * * cron, and the check-in this reporter sends only
+    # fires once the whole workflow_run completes -- not when it starts.
+    # Two latency sources stack before that check-in ever reaches Sentry:
+    #  1. GitHub's schedule dispatch itself: 15/40 of the most recent
+    #     scheduled runs landed more than 15min after their nominal minute
+    #     (range 1.2-29.5min, median 9.5min), even though every one of those
+    #     runs succeeded.
+    #  2. The job's own worst-case runtime: ios-ship.yml documents up to
+    #     ~30min waiting for the archive lock plus ~15min polling ASC
+    #     (scripts/ios-fleet/ship-testflight.sh, scripts/ios-fleet/asc-api.mjs)
+    #     on a tick that actually ships, on top of the archive/upload itself.
+    # The default 15min margin only accounted for neither and flagged ~40%
+    # of healthy ticks as "missed", flapping this monitor between ok and a
+    # regressed Sentry issue (count 322) since the monitor's creation.
+    # 90min clears (1)+(2) with headroom while still catching a real,
+    # multi-cycle outage inside a few hours -- a real single-run failure is
+    # already caught immediately and separately by the error-event path
+    # above (ALERT_CONCLUSIONS), which does not depend on this margin at
+    # all, so widening this only affects "did the schedule silently stop
+    # firing," not "did a run fail."
+    "iOS TestFlight ship (Mac runner)": 90,  # was 15; see comment above
 }
 _CHECKIN_MARGINS_FOLDED = {name.casefold(): margin for name, margin in CHECKIN_MARGIN_OVERRIDES.items()}
+
+# Sentry Crons flap-debounce (failure_issue_threshold / recovery_threshold),
+# per workflow.  Deliberately NOT a blanket default: these gate how many
+# consecutive missed/ok check-ins Sentry needs before opening or closing an
+# issue, and every OTHER scheduled workflow here (CI, CodeQL, Effort Issues
+# Sync, Weekly Model Pricing Audit, Security, Shared package pin check) is
+# fine with Sentry's own default of alerting on the first miss -- CodeQL and
+# the two weekly jobs in particular must not need to miss TWO consecutive
+# weekly runs (~2 weeks) before anyone finds out, which is what a blanket
+# failure_issue_threshold: 2 would have done to them.  Scoped to exactly the
+# one monitor (FLEET-INFRA-CB) that was actually flapping.
+FLAP_DEBOUNCE_OVERRIDES = {
+    "iOS TestFlight ship (Mac runner)": {"failure_issue_threshold": 2, "recovery_threshold": 1},
+}
+_FLAP_DEBOUNCE_FOLDED = {name.casefold(): cfg for name, cfg in FLAP_DEBOUNCE_OVERRIDES.items()}
 
 # Where the observed workflows live, resolved from this file rather than the
 # process CWD so the guard works regardless of how the script is invoked.
@@ -340,25 +366,30 @@ def main() -> int:
             checkin_status = "ok" if conclusion == "success" else "error"
             monitor_slug = f"ci-{APP}-{slugify(workflow_name)}"
             checkin_margin = _CHECKIN_MARGINS_FOLDED.get(workflow_name.casefold(), DEFAULT_CHECKIN_MARGIN)
+            monitor_config = {
+                "schedule": {"type": "crontab", "value": cron_expr},
+                "checkin_margin": checkin_margin,
+                "max_runtime": 60,
+                "timezone": "UTC",
+            }
+            # FLEET-INFRA-CB (2026-09-08): only for workflows in
+            # FLAP_DEBOUNCE_OVERRIDES -- require N consecutive missed
+            # check-ins before opening/reopening the Sentry issue, and one ok
+            # check-in to close it again, so a single slow-but-successful
+            # tick can no longer flap the issue the way it did (count 322)
+            # under a tight margin.  Every workflow NOT listed keeps Sentry's
+            # own default (alert on the first miss) -- a blanket threshold
+            # here would have meant CodeQL / Security / Shared package pin
+            # check / Weekly Model Pricing Audit each needed to miss TWO
+            # consecutive WEEKLY runs (~2 weeks) before anyone found out.
+            flap_debounce = _FLAP_DEBOUNCE_FOLDED.get(workflow_name.casefold())
+            if flap_debounce:
+                monitor_config.update(flap_debounce)
             checkin_payload = {
                 "check_in_id": uuid.uuid4().hex,
                 "monitor_slug": monitor_slug,
                 "status": checkin_status,
-                "monitor_config": {
-                    "schedule": {"type": "crontab", "value": cron_expr},
-                    "checkin_margin": checkin_margin,
-                    "max_runtime": 60,
-                    "timezone": "UTC",
-                    # FLEET-INFRA-CB (2026-09-08): require two consecutive
-                    # missed check-ins (not one) before opening/reopening the
-                    # Sentry issue, and one ok check-in to close it again, so
-                    # a single slow-but-successful tick can no longer flap
-                    # the issue the way it did (count 322) under a tight
-                    # margin.  Applies to every monitor this reporter
-                    # upserts, not just the one that surfaced the problem.
-                    "failure_issue_threshold": 2,
-                    "recovery_threshold": 1,
-                },
+                "monitor_config": monitor_config,
             }
             send_envelope(envelope_url, auth_header, "check_in", checkin_payload)
             print(f"Sent Sentry Crons check-in '{checkin_status}' for monitor '{monitor_slug}' (workflow '{workflow_name}').")
