@@ -97,9 +97,9 @@
   "overrides": {
     "minimatch": "^10.0.3",
     "postcss": "^8.5.18",
-    "sharp": "0.35.3",
+    "sharp": "0.35.4",
     "undici": "^7.29.0",
-    "js-yaml": "4.3.1",
+    "js-yaml": "^5.4.1",
     "deepmerge-ts": "^8.0.0"
   }
 }
