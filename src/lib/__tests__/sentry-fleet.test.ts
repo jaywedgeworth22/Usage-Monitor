@@ -200,4 +200,37 @@ describe("recordFleetInfraMetric", () => {
     expect(event.tags["metric.kind"]).toBe("gauge");
     expect(event.extra).toMatchObject({ "metric.value": 1234.5 });
   });
+
+  it("classifies integer scheduler.duration_ms as a gauge by name, not value", async () => {
+    process.env.SENTRY_FLEET_DSN =
+      "https://abcd1234567890abcd@o0.ingest.sentry.io/42";
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("ok", { status: 200 }));
+    // Real production duration samples are integers (Date.now() delta).
+    await recordFleetInfraMetric("scheduler.duration_ms", 1234, { outcome: "ok" });
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit | undefined];
+    const lines = String(init?.body ?? "").split("\n");
+    expect(JSON.parse(lines[2]).tags["metric.kind"]).toBe("gauge");
+  });
+
+  it("writes the real byte length into the envelope item header", async () => {
+    process.env.SENTRY_FLEET_DSN =
+      "https://abcd1234567890abcd@o0.ingest.sentry.io/42";
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("ok", { status: 200 }));
+    await recordFleetInfraMetric("scheduler.tick", 1, { total: 10 });
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit | undefined];
+    const body = String(init?.body ?? "");
+    const lines = body.split("\n");
+    const itemHeader = JSON.parse(lines[1]);
+    const eventJson = lines[2];
+    // Sentry envelope protocol: item `length` is the UTF-8 byte count of
+    // the JSON body that follows.  A zero length on a non-empty payload
+    // makes the receiver treat the item as truncated.
+    expect(itemHeader.type).toBe("event");
+    expect(itemHeader.length).toBe(Buffer.byteLength(eventJson, "utf8"));
+    expect(itemHeader.length).toBeGreaterThan(0);
+  });
 });

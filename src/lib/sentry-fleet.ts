@@ -165,6 +165,14 @@ export async function recordFleetInfraEvent(
       fingerprint,
       message,
     };
+    // Serialize the event once so the envelope item header can carry the
+    // real payload byte length.  Per the Sentry envelope protocol, a
+    // non-zero `length` is the UTF-8 byte count of the JSON body that
+    // follows; `scripts/sentry-ci-report.py` computes it the same way.
+    // A zero length on a non-empty payload makes the receiver treat the
+    // item as truncated and reject or misparse the envelope.
+    const eventJson = JSON.stringify(event);
+    const eventByteLength = Buffer.byteLength(eventJson, "utf8");
     const envelope = [
       JSON.stringify({
         event_id: event.event_id,
@@ -178,10 +186,10 @@ export async function recordFleetInfraEvent(
       }),
       JSON.stringify({
         type: "event",
-        length: 0, // Sentry will read until newline-delimited end; length hint is advisory
+        length: eventByteLength,
         content_type: "application/json",
       }),
-      JSON.stringify(event),
+      eventJson,
       "",
     ].join("\n");
     const url =
@@ -223,11 +231,19 @@ export async function recordFleetInfraMetric(
   value: number,
   attributes: Record<string, string | number | boolean> = {}
 ): Promise<void> {
+  // Metric kind is decided by the NAME, not the value.  Sentry Application
+  // Metrics classify `gauge` vs `counter` by semantics (a measurement vs
+  // a count), and `scheduler.duration_ms` is always a gauge even though
+  // `Date.now() - tickStartedAt` is an integer.  Anything ending in
+  // `_ms`, `duration_*`, or `*_ratio` is a gauge; everything else is a
+  // counter (the typical Sentry Application Metrics shape).
+  const isGauge = /(?:^|[._])(?:duration_ms|duration|ratio|latency)\b/.test(name);
+  const kind = isGauge ? "gauge" : "counter";
   const tags: FleetInfraTags = {
     app: "usage-monitor",
     agent: process.env.AGENT_TAG?.trim() || "MM",
     "metric.name": name,
-    "metric.kind": typeof value === "number" && Number.isInteger(value) ? "counter" : "gauge",
+    "metric.kind": kind,
   };
   for (const [k, v] of Object.entries(attributes)) {
     if (v === undefined || v === null) continue;

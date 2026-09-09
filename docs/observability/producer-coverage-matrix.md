@@ -4,7 +4,7 @@ Authoritative map of every known producer of `/api/ingest/usage` (and `/api/otlp
 
 ## How the wire works
 
-- v2 batch envelope = `{ schemaVersion, producerId, sourceVersion?, environment, events: UsageTelemetryV2Event[] }` parsed by `src/lib/usage-telemetry.ts` against `UsageTelemetryV2BatchSchema` and `UsageTelemetryV2EventSchema` from `@jaywedgeworth22/congress-trading-shared`.
+- v2 batch envelope = `{ schemaVersion: 2, producerId, producerInstanceId?, events: UsageTelemetryV2Event[] }` parsed by `src/lib/usage-telemetry.ts` against `UsageTelemetryV2BatchSchema` and `UsageTelemetryV2EventSchema` from `@jaywedgeworth22/congress-trading-shared`.  `sourceVersion` and `environment` are NOT batch-level fields in the strict v2 schema; `environment` lives on each event.
 - Auth: `Authorization: Bearer ${USAGE_INGEST_TOKEN}` (or per-producer `USAGE_INGEST_PRODUCER_TOKENS` mapping when `USAGE_INGEST_REQUIRE_SCOPED_TOKENS=true`).
 - Idempotency: `eventId` is the producer's durable key; UM re-derives the same length-prefixed SHA-256 from the shared contract when absent.
 - Persisted result semantics (narrower than request acceptance): `attempted` = submitted events, `persisted` = newly inserted rows, `skippedPrunedDuplicates` = blocked by retention tombstones.  Never derive `persisted` from `activeEvents.length`.
@@ -60,7 +60,7 @@ Fields the schema makes optional, and which producers actually send them.
 | `providerConnectionRef`, `billingAccountRef` | optional | congress-trade, socratic-trade (via `keySource`, `userId`) | Persisted |
 | `coverage` | optional | botfleet | Persisted as `coverage` JSON; not in idempotency basis |
 | `billingMode` | optional | all (actual or estimated) | Persisted |
-| `metricType` | required | all (usage, cost, subscription, quota, credit_balance) | Persisted; `quota_sync` and `credit_balance` are monitor-only |
+| `metricType` | required | all (usage, cost, subscription, quota) | Persisted; **`quota_sync` and `credit_balance` are monitor-only** — the shared schema does not advertise them as producer-supplied.  A producer emitting them will pass Zod parse but the row will land in monitor-owned code paths only. |
 | `quantity` | optional | local collectors, claude-code OTLP | Persisted |
 | `unit` | optional | all | Persisted; defaults to `event` |
 | `costUsd` | optional | all (botfleet: actual, local: estimated) | Persisted; cash math is recorded-wins, derived is metadata-only |
