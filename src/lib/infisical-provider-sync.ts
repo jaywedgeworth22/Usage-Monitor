@@ -543,6 +543,29 @@ const CREDENTIAL_MAPPINGS: readonly CredentialMapping[] = [
       };
     },
   },
+  {
+    // PD #79: this Provider row was created 2026-08-21 with no CREDENTIAL_MAPPINGS
+    // entry at all, so nothing could ever fill in its apiKey/config short of a
+    // manual Settings-page edit that never happened — every poll has failed
+    // "apiKey is required for Namecheap" since creation, for zero snapshots ever.
+    // clientIp is REQUIRED here (not optional — see the needsConfig fix in
+    // provider-definitions.ts) because fetchUsage() hard-rejects a missing/
+    // loopback ClientIP; Namecheap's API also requires that IP be whitelisted
+    // on the account regardless of what this app sends.
+    scope: "um",
+    providerName: "namecheap",
+    attempts: [{
+      source: "um",
+      required: ["NAMECHEAP_API_KEY", "NAMECHEAP_API_USER", "NAMECHEAP_CLIENT_IP"],
+    }],
+    build: (values) => ({
+      apiKey: values.get("NAMECHEAP_API_KEY"),
+      publicConfig: {
+        apiUser: values.get("NAMECHEAP_API_USER") ?? "",
+        clientIp: values.get("NAMECHEAP_CLIENT_IP") ?? "",
+      },
+    }),
+  },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -593,6 +616,9 @@ const SECRET_NAME_TO_PROVIDER: ReadonlyMap<string, string> = new Map<string, str
   // so lingering OCI secrets must not be flagged for (re)wiring.
   ["COOLIFY_API_TOKEN", "coolify"],
   ["COOLIFY_HOST", "coolify"],
+  ["NAMECHEAP_API_KEY", "namecheap"],
+  ["NAMECHEAP_API_USER", "namecheap"],
+  ["NAMECHEAP_CLIENT_IP", "namecheap"],
   // Vector DB
   ["PINECONE_API_KEY", "pinecone"],
   ["VOYAGE_API_KEY", "voyage"],
