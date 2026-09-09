@@ -166,6 +166,9 @@ export async function POST(request: NextRequest) {
   // remains the only request allowed to consume parsing/DB memory.
   const releaseAdmission = tryAcquireIngestAdmission();
   if (!releaseAdmission) {
+    void import("@/lib/sentry-ops").then(({ recordIngestAdmissionRejected }) =>
+      recordIngestAdmissionRejected({ route: "ingest/usage" })
+    );
     return respondError(503, "receiver_busy", "Usage ingest is busy. Retry later.", {
       retryAfterSeconds: INGEST_ADMISSION_RETRY_AFTER_SECONDS,
     });

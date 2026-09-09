@@ -175,6 +175,9 @@ export async function POST(request: NextRequest) {
   // receiver's memory/CPU failure mode.
   const releaseAdmission = tryAcquireIngestAdmission();
   if (!releaseAdmission) {
+    void import("@/lib/sentry-ops").then(({ recordIngestAdmissionRejected }) =>
+      recordIngestAdmissionRejected({ route: "otlp/v1/metrics" })
+    );
     return NextResponse.json(
       { error: "Usage ingest is busy. Retry later." },
       {

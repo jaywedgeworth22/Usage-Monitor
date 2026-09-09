@@ -281,6 +281,45 @@ Coolify **build-time** env (Next inlines it; runtime Infisical inject cannot rea
 bundle). The in-process scheduler ticks every 15 minutes; the Sentry cron monitor
 `usage-monitor-scheduler` must use that same interval (do not upsert a 1-minute schedule).
 
+### App-health Sentry metrics and the fleet-infra mirror
+
+Three Application Metrics join the existing `scheduler.tick` and `ingest.failed` in the
+`usage-monitor` Sentry project:
+
+- `scheduler.duration_ms` (gauge) — wall-clock time of one full
+  `fetchAllDueProviders` + `runUsageMaintenance` cycle, emitted from
+  `src/lib/usage-recorder.ts` with `{ outcome, total, providerFetchDegraded }`.
+- `ingest.admission_rejected` (counter) — every time the process-global
+  admission token in `src/lib/ingest-admission.ts` returns a 503 to
+  `/api/ingest/usage` or `/api/otlp/v1/metrics`, with `{ route }`.
+- `rollup.completed` (counter) — once per non-empty retention batch in
+  `src/lib/data-retention.ts` with `{ scanned, pruned, rollupsTouched,
+  tombstonesWritten }`.
+
+The same five signals (the two existing + the three new) also POST a raw
+Sentry envelope to the **fleet-infra** project so the shared fleet health
+view sees UM alongside the peer apps.  The mirror is in
+`src/lib/sentry-fleet.ts` and is DSN-gated by `SENTRY_FLEET_DSN` (absent =
+complete no-op, same contract as `SENTRY_DSN`).  It does NOT re-init the
+Sentry SDK — it uses a hand-rolled envelope client to avoid forcing a
+second `@sentry/nextjs` runtime.  All events are tagged
+`[app:usage-monitor, agent:MM]` with the metric name in `metric.name`.
+The fleet-infra CI reporter in `.github/workflows/sentry-ci-report.yml`
+keeps its own `[app, workflow]` fingerprint for CI failures; the two
+shapes do not cross-dedup.
+
+Infisical `usage-monitor` (env `prod`, path `/`) carries
+`SENTRY_FLEET_DSN`; Coolify env for the UM app sets the same variable.
+The same fleet-infra DSN that `scripts/sentry-ci-report.py` reads lives
+in repo or org Actions secrets — they are the same value, the
+Infisical copy is for the runtime mirror only.
+
+The producer × field matrix for `/api/ingest/usage` and
+`/api/otlp/v1/metrics` lives in `docs/observability/producer-coverage-matrix.md`.
+It is the human reference for the v2 wire (the shared package
+`UsageTelemetryV2EventSchema` is the absolute truth).  When a new
+producer lands, update the matrix in the same PR.
+
 ## Datadog (logs + APM + RUM)
 
 Uses the **existing** fleet Datadog account (US5, `DD_SITE=us5.datadoghq.com`).  Do not create a

@@ -42,6 +42,7 @@ import {
   logSchedulerDegraded,
   logSchedulerOutcome,
   recordSentryCronHeartbeat,
+  recordSchedulerDuration,
 } from "@/lib/sentry-ops";
 const DEFAULT_PROVIDER_TIMEOUT_MS = 90_000;
 const providerAttemptTokens = new Map<string, symbol>();
@@ -699,9 +700,11 @@ export async function runUsagePollingSchedulerTick(
   const markTickStarted = dependencies.markTickStarted ?? markSchedulerTickStarted;
   const markTickCompleted = dependencies.markTickCompleted ?? markSchedulerTickCompleted;
   markTickStarted();
+  const tickStartedAt = Date.now();
   try {
     const result = await (dependencies.fetchProviders ?? fetchAllDueProviders)();
     const maintenance = await (dependencies.runMaintenance ?? runUsageMaintenance)();
+    const tickDurationMs = Date.now() - tickStartedAt;
     const maintenanceHealthy = isUsageMaintenanceHealthy(maintenance);
     // Deliberately NOT folded into `succeeded` (maintenanceHealthy) below: a
     // provider-fetch outage is upstream (third-party credentials/network/API),
@@ -731,6 +734,11 @@ export async function runUsagePollingSchedulerTick(
       skipped: result.skipped,
       providerFetchDegraded,
     });
+    void recordSchedulerDuration(tickDurationMs, {
+      outcome: "ok",
+      total: result.total,
+      providerFetchDegraded,
+    });
     if (providerFetchDegraded) {
       void logSchedulerDegraded({
         total: result.total,
@@ -741,9 +749,14 @@ export async function runUsagePollingSchedulerTick(
       });
     }
   } catch (error) {
+    const tickDurationMs = Date.now() - tickStartedAt;
     markTickCompleted(false, null);
     void recordSentryCronHeartbeat("error");
     void logSchedulerOutcome("error", {
+      reason: error instanceof Error ? error.name : "unknown",
+    });
+    void recordSchedulerDuration(tickDurationMs, {
+      outcome: "error",
       reason: error instanceof Error ? error.name : "unknown",
     });
     console.error("[usage-scheduler] tick failed", error);
