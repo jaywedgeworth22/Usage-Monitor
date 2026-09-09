@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POLL_INTERVAL_MS } from "@/lib/usage-recorder";
 import {
   SENTRY_CRON_CHECKIN_MARGIN,
@@ -40,12 +40,117 @@ describe("sparse Sentry ops no-op without a client", () => {
       logSchedulerOutcome,
       logSchedulerDegraded,
       logIngestFailed,
+      recordSchedulerDuration,
+      recordIngestAdmissionRejected,
+      recordRollupCompleted,
     } = await import("@/lib/sentry-ops");
     await expect(recordSentryCronHeartbeat("ok")).resolves.toBeUndefined();
     await expect(logSchedulerOutcome("ok")).resolves.toBeUndefined();
     await expect(logSchedulerDegraded({ failures: 1 })).resolves.toBeUndefined();
     await expect(logIngestFailed({ reason: "test" })).resolves.toBeUndefined();
+    await expect(recordSchedulerDuration(123)).resolves.toBeUndefined();
+    await expect(recordIngestAdmissionRejected({ route: "ingest/usage" })).resolves.toBeUndefined();
+    await expect(recordRollupCompleted({ rollupsTouched: 1 })).resolves.toBeUndefined();
     vi.doUnmock("@sentry/nextjs");
     vi.resetModules();
+  });
+});
+
+describe("Sentry Application Metrics emitted into the usage-monitor project", () => {
+  it("emits scheduler.duration_ms as a gauge with the outcome tag", async () => {
+    vi.resetModules();
+    const gauge = vi.fn();
+    vi.doMock("@sentry/nextjs", () => ({
+      metrics: { gauge, count: vi.fn() },
+      logger: { warn: vi.fn(), error: vi.fn() },
+    }));
+    const { recordSchedulerDuration } = await import("@/lib/sentry-ops");
+    await recordSchedulerDuration(1234, { outcome: "ok", total: 10 });
+    expect(gauge).toHaveBeenCalledWith(
+      "scheduler.duration_ms",
+      1234,
+      expect.objectContaining({
+        unit: "millisecond",
+        attributes: expect.objectContaining({ outcome: "ok", total: 10 }),
+      })
+    );
+    vi.doUnmock("@sentry/nextjs");
+    vi.resetModules();
+  });
+
+  it("clips a negative duration to 0 instead of emitting garbage", async () => {
+    vi.resetModules();
+    const gauge = vi.fn();
+    vi.doMock("@sentry/nextjs", () => ({
+      metrics: { gauge, count: vi.fn() },
+    }));
+    const { recordSchedulerDuration } = await import("@/lib/sentry-ops");
+    await recordSchedulerDuration(-1);
+    expect(gauge).toHaveBeenCalledWith(
+      "scheduler.duration_ms",
+      0,
+      expect.objectContaining({ unit: "millisecond" })
+    );
+    vi.doUnmock("@sentry/nextjs");
+    vi.resetModules();
+  });
+
+  it("emits ingest.admission_rejected as a counter with the route tag", async () => {
+    vi.resetModules();
+    const count = vi.fn();
+    vi.doMock("@sentry/nextjs", () => ({ metrics: { count } }));
+    const { recordIngestAdmissionRejected } = await import("@/lib/sentry-ops");
+    await recordIngestAdmissionRejected({ route: "otlp/v1/metrics" });
+    expect(count).toHaveBeenCalledWith(
+      "ingest.admission_rejected",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({ route: "otlp/v1/metrics" }),
+      })
+    );
+    vi.doUnmock("@sentry/nextjs");
+    vi.resetModules();
+  });
+
+  it("emits rollup.completed as a counter with the per-batch rollupsTouched tag", async () => {
+    vi.resetModules();
+    const count = vi.fn();
+    vi.doMock("@sentry/nextjs", () => ({ metrics: { count } }));
+    const { recordRollupCompleted } = await import("@/lib/sentry-ops");
+    await recordRollupCompleted({ rollupsTouched: 7, pruned: 100 });
+    expect(count).toHaveBeenCalledWith(
+      "rollup.completed",
+      1,
+      expect.objectContaining({
+        attributes: expect.objectContaining({ rollupsTouched: 7, pruned: 100 }),
+      })
+    );
+    vi.doUnmock("@sentry/nextjs");
+    vi.resetModules();
+  });
+});
+
+describe("Sentry ops mirror to fleet-infra when SENTRY_FLEET_DSN is set", () => {
+  beforeEach(() => {
+    process.env.SENTRY_FLEET_DSN =
+      "https://abcd1234567890abcd@o0.ingest.sentry.io/123456";
+  });
+
+  it("logIngestFailed mirrors to fleet-infra with the route tag", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("ok", { status: 200 }));
+    const { logIngestFailed } = await import("@/lib/sentry-ops");
+    await logIngestFailed({ route: "ingest/usage", reason: "TypeError" });
+    expect(fetchSpy).toHaveBeenCalled();
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit | undefined];
+    const lines = String(init?.body ?? "").split("\n");
+    const event = JSON.parse(lines[2]);
+    expect(event.tags).toMatchObject({
+      app: "usage-monitor",
+      agent: "MM",
+      "metric.name": "ingest.failed",
+      "metric.route": "ingest/usage",
+    });
   });
 });

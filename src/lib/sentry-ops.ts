@@ -6,6 +6,13 @@
 // same split: Datadog remains the warehouse; Sentry.logger is a few health
 // outcomes, not the access-log firehose.  Every call is a no-op when the SDK
 // was never initialized (no DSN).
+//
+// fleet-infra mirror: a small subset of these signals also posts a raw
+// envelope to the fleet-infra Sentry project so the shared fleet health
+// channel sees UM's app-health alongside the other apps.  See
+// `docs/plans/2026-09-01-sentry-fleet-integration.md` and
+// `docs/observability/producer-coverage-matrix.md`.  The mirror is
+// DSN-gated by SENTRY_FLEET_DSN; absent = no-op.
 
 export const SENTRY_CRON_MONITOR_SLUG = "usage-monitor-scheduler";
 
@@ -153,5 +160,147 @@ export async function logIngestFailed(
     metrics?.count?.("ingest.failed", 1, { attributes: attrs });
   } catch {
     // Sparse Sentry logs/metrics are best-effort.
+  }
+  // fleet-infra mirror: warn so it lands in the shared health view
+  // alongside peer apps' ingest-failure signals.
+  try {
+    const { recordFleetInfraMetric } = await import("@/lib/sentry-fleet");
+    const cleanAttrs = Object.fromEntries(
+      Object.entries(attributes).filter(
+        ([, value]) => value !== undefined && value !== null
+      )
+    ) as Record<string, string | number | boolean>;
+    await recordFleetInfraMetric("ingest.failed", 1, cleanAttrs);
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Wave M / M1: emit a "scheduler.duration_ms" gauge for each completed
+ * tick so the Sentry Metrics view shows the wall-clock time of
+ * `fetchAllDueProviders` + `runUsageMaintenance`.  UM-AGENTS plan called
+ * this out as the missing application metric.  No-op when the SDK was
+ * never initialized or when fleet-infra is unconfigured.
+ */
+export async function recordSchedulerDuration(
+  durationMs: number,
+  attributes: Record<string, string | number | boolean | undefined> = {}
+): Promise<void> {
+  const safeMs = Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0;
+  try {
+    const mod = await loadSentry();
+    if (mod) {
+      const metrics = api<{
+        gauge: (
+          name: string,
+          value: number,
+          options?: { unit?: string; attributes?: Record<string, string | number | boolean> }
+        ) => void;
+      }>(mod, "metrics");
+      const attrs = Object.fromEntries(
+        Object.entries(attributes).filter(([, value]) => value !== undefined)
+      ) as Record<string, string | number | boolean>;
+      metrics?.gauge?.("scheduler.duration_ms", safeMs, {
+        unit: "millisecond",
+        attributes: attrs,
+      });
+    }
+  } catch {
+    // best-effort
+  }
+  try {
+    const { recordFleetInfraMetric } = await import("@/lib/sentry-fleet");
+    const cleanAttrs = Object.fromEntries(
+      Object.entries(attributes).filter(
+        ([, value]) => value !== undefined && value !== null
+      )
+    ) as Record<string, string | number | boolean>;
+    await recordFleetInfraMetric("scheduler.duration_ms", safeMs, cleanAttrs);
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Wave M / M1: emit an "ingest.admission_rejected" counter every time the
+ * process-global admission token in src/lib/ingest-admission.ts turns
+ * away an HTTP request because the SQLite writer is busy.  This is the
+ * UM-side signal of the "503 + Retry-After: 5" response that an OTLP
+ * exporter sees on retry.  No-op when SDK never initialized or fleet-infra
+ * unconfigured.
+ */
+export async function recordIngestAdmissionRejected(
+  attributes: Record<string, string | number | boolean | undefined> = {}
+): Promise<void> {
+  try {
+    const mod = await loadSentry();
+    if (mod) {
+      const metrics = api<{
+        count: (
+          name: string,
+          value?: number,
+          options?: { attributes?: Record<string, string | number | boolean> }
+        ) => void;
+      }>(mod, "metrics");
+      const attrs = Object.fromEntries(
+        Object.entries(attributes).filter(([, value]) => value !== undefined)
+      ) as Record<string, string | number | boolean>;
+      metrics?.count?.("ingest.admission_rejected", 1, { attributes: attrs });
+    }
+  } catch {
+    // best-effort
+  }
+  try {
+    const { recordFleetInfraMetric } = await import("@/lib/sentry-fleet");
+    const cleanAttrs = Object.fromEntries(
+      Object.entries(attributes).filter(
+        ([, value]) => value !== undefined && value !== null
+      )
+    ) as Record<string, string | number | boolean>;
+    await recordFleetInfraMetric("ingest.admission_rejected", 1, cleanAttrs);
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Wave M / M1: emit a "rollup.completed" counter per data-retention
+ * batch with the count of daily rollup rows touched, so we can see
+ * retention progress in the Sentry Metrics view (and the fleet-infra
+ * mirror).  No-op when SDK never initialized or fleet-infra
+ * unconfigured.
+ */
+export async function recordRollupCompleted(
+  attributes: Record<string, string | number | boolean | undefined> = {}
+): Promise<void> {
+  try {
+    const mod = await loadSentry();
+    if (mod) {
+      const metrics = api<{
+        count: (
+          name: string,
+          value?: number,
+          options?: { attributes?: Record<string, string | number | boolean> }
+        ) => void;
+      }>(mod, "metrics");
+      const attrs = Object.fromEntries(
+        Object.entries(attributes).filter(([, value]) => value !== undefined)
+      ) as Record<string, string | number | boolean>;
+      metrics?.count?.("rollup.completed", 1, { attributes: attrs });
+    }
+  } catch {
+    // best-effort
+  }
+  try {
+    const { recordFleetInfraMetric } = await import("@/lib/sentry-fleet");
+    const cleanAttrs = Object.fromEntries(
+      Object.entries(attributes).filter(
+        ([, value]) => value !== undefined && value !== null
+      )
+    ) as Record<string, string | number | boolean>;
+    await recordFleetInfraMetric("rollup.completed", 1, cleanAttrs);
+  } catch {
+    // best-effort
   }
 }

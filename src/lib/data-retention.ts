@@ -737,6 +737,14 @@ async function pruneExternalUsageEvents(
     result.pruned += batch.pruned;
     result.rollupsTouched += batch.rollupsTouched;
     result.tombstonesWritten += batch.tombstonesWritten;
+    void import("@/lib/sentry-ops").then(({ recordRollupCompleted }) =>
+      recordRollupCompleted({
+        scanned: batch.scanned,
+        pruned: batch.pruned,
+        rollupsTouched: batch.rollupsTouched,
+        tombstonesWritten: batch.tombstonesWritten,
+      })
+    );
     if (batch.scanned < batchSize) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
