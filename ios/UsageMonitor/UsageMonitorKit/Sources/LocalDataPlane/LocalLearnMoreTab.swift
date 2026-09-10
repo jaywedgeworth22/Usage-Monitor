@@ -1,15 +1,10 @@
 import SwiftUI
 
-/// "Learn More" tab for **Usage Local Monitor** — the on-device self-host
-/// product.  Owner 2026-09-09: "just have one part of local app that is a tab
-/// for info about the server and client app including: features that setup
-/// has, the big picture overview of how it works (not details), and
-/// info/link to where they can go to learn more."
+/// Learn More tab for Usage Local Monitor — the on-device app.
+/// Owner 2026-09-09: one tab for what the hosted dashboard and the iPhone app
+/// are, what this app can do, and where to read more.  Not an Agents tab.
 ///
-/// Content is intentionally **non-actionable**: it explains what the
-/// three-piece fleet looks like, what the on-device app does and does not
-/// do, and where to read more (server URL, client URL, GitHub).  No live
-/// data sources, no data plane, no Settings state.
+/// Non-actionable: no live data, no Settings state.  Product copy only.
 public struct LocalLearnMoreTab: View {
     public init() {}
 
@@ -18,7 +13,7 @@ public struct LocalLearnMoreTab: View {
             List {
                 sectionOverview
                 sectionFeatures
-                sectionFleet
+                sectionPieces
                 sectionLearnMore
             }
             .listStyle(.insetGrouped)
@@ -31,9 +26,9 @@ public struct LocalLearnMoreTab: View {
     private var sectionOverview: some View {
         Section {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                Text("This is **Usage Local Monitor** — the on-device self-host product. It runs entirely on this device: SQLite for money, Keychain for API keys, no remote server required.")
+                Text("This is Usage Local Monitor.  It keeps spend, budgets, and API keys on this device — no hosted server required.")
                     .font(Theme.Typography.body)
-                Text("It is one of three pieces in Jay's usage-tracking fleet. The other two are the hosted server (Usage.Jays.Services) and the iOS client app (the App Store build).")
+                Text("It is one of three Usage Monitor pieces.  The other two are the hosted dashboard and the App Store iPhone app.")
                     .font(Theme.Typography.body)
             }
         } header: {
@@ -46,57 +41,57 @@ public struct LocalLearnMoreTab: View {
             featureRow(
                 icon: "chart.pie.fill",
                 title: "Month-To-Date Spend",
-                detail: "Aggregates every connected provider, subscription, and one-off charge into one USD total with budget pacing."
+                detail: "One USD total across connected providers, subscriptions, and one-off charges, with budget pacing."
             )
             featureRow(
                 icon: "calendar",
                 title: "Recurring Fees",
-                detail: "Materializes one synthetic charge per billing period per subscription, so subscription cost flows through the same MTD math as polled usage."
+                detail: "Adds each subscription's period charge so it counts in the same month-to-date total."
             )
             featureRow(
                 icon: "square.and.arrow.down",
                 title: "Encrypted Backup",
-                detail: "Exports a JSON package (cards + budgets + fees, no API keys) and re-imports it on a fresh device."
+                detail: "Export cards, budgets, and fees (not API keys) and restore them on a new device."
             )
             featureRow(
                 icon: "faceid",
                 title: "App Lock",
-                detail: "Optional Face ID / passcode gate before the dashboard opens, so the on-device money view is private."
+                detail: "Optional Face ID or passcode before the dashboard opens."
             )
             featureRow(
                 icon: "icloud.slash.fill",
-                title: "Fully Offline",
-                detail: "Works on a plane. The poll adapters hit each provider directly over the public internet; no Mac, no Coolify, no account."
+                title: "Works Offline",
+                detail: "Works without a Mac or a hosted account.  Checking a provider still needs the internet."
             )
         } header: {
             Text("Features")
         } footer: {
-            Text("Every card on the dashboard reads from the on-device SQLite database. Provider API keys live in iOS Keychain and never leave the device.")
+            Text("Cards read from the on-device database.  Provider API keys stay in iOS Keychain on this device.")
         }
     }
 
-    private var sectionFleet: some View {
+    private var sectionPieces: some View {
         Section {
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                 fleetRow(
                     icon: "iphone",
                     color: Color(red: 0.05, green: 0.72, blue: 0.68),
-                    title: "Usage Local Monitor (this app)",
-                    detail: "On-device self-host. SQLite + Keychain. No server."
+                    title: "Usage Local Monitor (This App)",
+                    detail: "On this device.  Spend and keys stay here."
                 )
                 fleetRow(
                     icon: "globe",
                     color: Color.blue,
-                    title: "Usage.Jays.Services — server",
-                    detail: "Hosted dashboard. Sentry, Sentry Metrics, Datadog. Pulls from every cloud account the user has on file."
+                    title: "Usage.Jays.Services",
+                    detail: "Hosted dashboard for the same spend picture in a browser."
                 )
                 fleetRow(
                     icon: "applelogo",
                     color: Color.indigo,
-                    title: "Usage Monitor — iOS client",
-                    detail: "App Store build. Reads the server dashboard, the same charts on the phone."
+                    title: "Usage Monitor (iPhone)",
+                    detail: "App Store app.  Reads the hosted dashboard on your phone."
                 )
-                Text("How the pieces fit together: the server runs in Coolify and ingests from cloud provider APIs, OTLP endpoints, and push telemetry. The iOS client is a thin read-only view. The local app is a full self-host instance that talks directly to each provider API and does not depend on the server being up.")
+                Text("The hosted dashboard collects usage from your cloud accounts.  The iPhone app is a read-only view of that dashboard.  This local app talks to each provider on its own and does not need the hosted dashboard to be up.")
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.secondaryText)
             }
@@ -109,32 +104,24 @@ public struct LocalLearnMoreTab: View {
         Section {
             linkRow(
                 icon: "globe",
-                title: "Server Dashboard",
+                title: "Dashboard",
                 detail: "usage.jays.services",
                 url: "https://usage.jays.services"
             )
             linkRow(
                 icon: "applelogo",
-                title: "iOS Client App",
-                detail: "App Store — search \"Usage Monitor\" by Jay Wedgeworth",
+                title: "iPhone App",
+                detail: "App Store — Usage Monitor",
                 url: "https://apps.apple.com/search?term=usage%20monitor%20jays%20services"
             )
             linkRow(
-                icon: "chevron.left.forwardslash.chevron.right",
-                title: "Source on GitHub",
-                detail: "github.com/jaywedgeworth22/Usage-Monitor",
-                url: "https://github.com/jaywedgeworth22/Usage-Monitor"
-            )
-            linkRow(
                 icon: "envelope",
-                title: "Owner Contact",
+                title: "Support",
                 detail: "mail@jays.services",
                 url: "mailto:mail@jays.services"
             )
         } header: {
             Text("Learn More")
-        } footer: {
-            Text("Documentation, agent-sync protocol, and the rollout history live in the GitHub repo's docs/ directory. Owner changes flow through fleet-coordinated PRs; check mac.jays.services/board for the live fleet status board.")
         }
     }
 
