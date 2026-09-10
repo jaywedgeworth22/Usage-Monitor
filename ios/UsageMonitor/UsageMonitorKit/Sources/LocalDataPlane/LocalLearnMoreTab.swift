@@ -1,4 +1,5 @@
 import SwiftUI
+import DesignSystem
 
 /// Learn More tab for Usage Local Monitor — the on-device app.
 /// Owner 2026-09-09: one tab for what the hosted dashboard and the iPhone app
@@ -18,6 +19,7 @@ public struct LocalLearnMoreTab: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Learn More")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 
@@ -41,7 +43,7 @@ public struct LocalLearnMoreTab: View {
             featureRow(
                 icon: "chart.pie.fill",
                 title: "Month-To-Date Spend",
-                detail: "One USD total across connected providers, subscriptions, and one-off charges, with budget pacing."
+                detail: "One USD total across connected providers and subscriptions, with budget pacing."
             )
             featureRow(
                 icon: "calendar",
@@ -50,8 +52,8 @@ public struct LocalLearnMoreTab: View {
             )
             featureRow(
                 icon: "square.and.arrow.down",
-                title: "Encrypted Backup",
-                detail: "Export cards, budgets, and fees (not API keys) and restore them on a new device."
+                title: "Local Backup",
+                detail: "Export cards, budgets, and fees as a JSON file (not API keys) and restore them on a new device."
             )
             featureRow(
                 icon: "faceid",
@@ -60,8 +62,8 @@ public struct LocalLearnMoreTab: View {
             )
             featureRow(
                 icon: "icloud.slash.fill",
-                title: "Works Offline",
-                detail: "Works without a Mac or a hosted account.  Checking a provider still needs the internet."
+                title: "No Server Required",
+                detail: "Saved cards and budgets are viewable offline.  Checking a provider for fresh usage still needs the internet."
             )
         } header: {
             Text("Features")
@@ -112,7 +114,7 @@ public struct LocalLearnMoreTab: View {
                 icon: "applelogo",
                 title: "iPhone App",
                 detail: "App Store — Usage Monitor",
-                url: "https://apps.apple.com/search?term=usage%20monitor%20jays%20services"
+                url: "https://apps.apple.com/app/id6799230435"
             )
             linkRow(
                 icon: "envelope",
