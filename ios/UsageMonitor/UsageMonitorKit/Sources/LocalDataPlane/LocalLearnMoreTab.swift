@@ -91,9 +91,9 @@ public struct LocalLearnMoreTab: View {
                     icon: "applelogo",
                     color: Color.indigo,
                     title: "Usage Monitor (iPhone)",
-                    detail: "App Store app.  Reads the hosted dashboard on your phone."
+                    detail: "App Store app.  Syncs live with the hosted dashboard, with optional full-access management."
                 )
-                Text("The hosted dashboard collects usage from your cloud accounts.  The iPhone app is a read-only view of that dashboard.  This local app talks to each provider on its own and does not need the hosted dashboard to be up.")
+                Text("The hosted dashboard collects usage from your cloud accounts.  The iPhone app is a live-sync client of that dashboard, with optional full-access management.  This local app polls each supported provider directly and lets you track fee-only subscriptions manually — it does not need the hosted dashboard to be up.")
                     .font(Theme.Typography.caption)
                     .foregroundStyle(Theme.Colors.secondaryText)
             }
