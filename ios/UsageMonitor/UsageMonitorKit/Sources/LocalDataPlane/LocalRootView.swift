@@ -40,7 +40,7 @@ public struct LocalRootView: View {
     }
 
     public enum Tab: String, CaseIterable, Identifiable {
-        case overview, providers, projects, fleet, alerts, settings
+        case overview, providers, projects, fleet, alerts, learnMore, settings
         public var id: String { rawValue }
         var title: String {
             switch self {
@@ -49,6 +49,7 @@ public struct LocalRootView: View {
             case .projects: return "Projects"
             case .fleet: return "Fleet"
             case .alerts: return "Alerts"
+            case .learnMore: return "Learn More"
             case .settings: return "Settings"
             }
         }
@@ -59,6 +60,7 @@ public struct LocalRootView: View {
             case .projects: return "folder.fill"
             case .fleet: return "laptopcomputer.and.ipad"
             case .alerts: return "bell.badge.fill"
+            case .learnMore: return "info.circle.fill"
             case .settings: return "gearshape.fill"
             }
         }
@@ -88,6 +90,14 @@ public struct LocalRootView: View {
             .tabItem { Label(Tab.alerts.title, systemImage: Tab.alerts.systemImage) }
             .tag(Tab.alerts)
             .badge(model.alerts.isEmpty ? 0 : model.alerts.count)
+            // Owner 2026-09-09: "just have one part of local app that is a tab
+            // for info about the server and client app including: features
+            // that setup has, the big picture overview of how it works (not
+            // details), and info/link to where they can go to learn more."
+            // No live data, no model dependencies, no Settings state.
+            LocalLearnMoreTab()
+                .tabItem { Label(Tab.learnMore.title, systemImage: Tab.learnMore.systemImage) }
+                .tag(Tab.learnMore)
             settingsTab
                 .tabItem { Label(Tab.settings.title, systemImage: Tab.settings.systemImage) }
                 .tag(Tab.settings)
