@@ -28,6 +28,7 @@
     "fleet:collect": "node scripts/fleet-usage-collector.mjs",
     "codex:collect": "node scripts/codex-usage-collector.mjs",
     "grok:collect": "node scripts/grok-usage-collector.mjs",
+    "subscription-quota:collect": "node scripts/subscription-quota-collector.mjs",
     "copilot:collect": "node scripts/copilot-usage-collector.mjs",
     "import:receipt-screenshots": "node scripts/add-user-billing-receipts.mjs",
     "import:billing-receipts": "node scripts/import-private-billing-receipts.mjs",

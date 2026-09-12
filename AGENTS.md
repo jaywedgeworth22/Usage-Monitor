@@ -54,6 +54,18 @@ but contribute zero to `persisted`; never derive it from `activeEvents.length`.
   polls this to skip exhausted model types until `resetAt`.  Skip is when
   remaining is 0, `isExhausted`, or `antigravity-usage` N/A remaining (none
   remains).  Near-cap (≤20%) is display-only.
+  `skipModelTypes` is Antigravity instance routing ONLY, so a window is only a
+  skip target when `via === "antigravity"`; an exhausted Claude or Codex plan
+  window never emits one.  The response is additive-only -- iOS and BotFleet read
+  `windows` and `skipModelTypes`, which keep every field they have had.
+  `windows[]` also carries `providerKey` / `providerLabel` / `via`, and the body
+  carries `providerGroups` with one entry per provider including the expected
+  providers that have reported nothing yet.
+  Producers: `scripts/antigravity-usage-collector.mjs` for Antigravity, and
+  `scripts/subscription-quota-collector.mjs` for Claude, Codex, Grok and MiniMax
+  (see `docs/rollouts/2026-09-12-subscription-quota-collector.md`).  All of them
+  emit through `scripts/lib/quota-event.mjs`: `credits` = percent REMAINING,
+  `limit` = 100, everything else in `metadata`.  Do not invent a second shape.
 - `GET /api/budget-status` — dashboard session cookie OR Bearer `USAGE_READ_TOKEN`
   (required in production; falls back to `USAGE_INGEST_TOKEN` only outside
   production or with the explicit break-glass flag — see "Env vars").
