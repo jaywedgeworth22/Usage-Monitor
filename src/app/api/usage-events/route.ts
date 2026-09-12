@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
+  buildDailySpendSeries,
   classifyCostCoverage,
   summarizeExternalUsageEvents,
 } from "@/lib/external-usage-events";
@@ -132,12 +133,16 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const [summary, projects, providers] = await Promise.all([
+  const [summary, projects, providers, dailySeries] = await Promise.all([
     summarizeExternalUsageEvents(since, getExternalEventRawCutoff(), new Date(), until),
     prisma.project.findMany({ select: { id: true, name: true } }),
     prisma.provider.findMany({
       select: { id: true, name: true, displayName: true },
     }),
+    // Additive: per-day cost series over the same [since, until] window, so
+    // the dashboard's chart-range burn chart can render actual history for
+    // the selected range instead of a fixed month-to-date projection.
+    buildDailySpendSeries(since, getExternalEventRawCutoff(), until ?? new Date()),
   ]);
 
   const projectNameById = new Map(projects.map((p) => [p.id, p.name]));
@@ -195,5 +200,6 @@ export async function GET(request: NextRequest) {
     totalRequests: groups.reduce((sum, group) => sum + group.totalRequests, 0),
     eventCount: groups.reduce((sum, group) => sum + group.eventCount, 0),
     groups,
+    dailySeries,
   });
 }

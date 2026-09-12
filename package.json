@@ -78,6 +78,8 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.22.0",
     "@eslint/eslintrc": "^3.3.7",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "^26.4.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
@@ -87,6 +89,7 @@
     "dotenv": "^17.4.2",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.4",
+    "jsdom": "^30.0.1",
     "postcss": "^8.5.18",
     "prisma": "^6.0.0",
     "tailwindcss": "^3.4.19",

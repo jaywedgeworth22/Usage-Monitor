@@ -911,6 +911,91 @@ export async function summarizeExternalUsageEvents(
   });
 }
 
+export interface DailySpendPoint {
+  /** UTC calendar day, YYYY-MM-DD. */
+  day: string;
+  totalCostUsd: number;
+}
+
+/**
+ * Per-day cost series over [since, until] — the range-scoped counterpart to
+ * summarizeExternalUsageEvents above, bucketed by UTC calendar day instead of
+ * by summary dimension. Feeds the dashboard's chart-range burn chart (see
+ * GET /api/usage-events) so changing the timeframe visibly changes what the
+ * chart renders instead of only changing a caption.
+ *
+ * Same raw/rollup split as summarizeExternalUsageEventsUnserialized: days at
+ * or after `rawCutoff` are summed straight from ExternalUsageEvent; older
+ * days are summed from the durable ExternalUsageEventDailyRollup table.
+ *
+ * Approximate, not exact: unlike the grouped summary, this does not net out
+ * receipt-cash payments or subscription-analytics token estimates from
+ * totalCostUsd (both are rare and small in practice). Use `groups` on the
+ * summary response, not this series, for anything that must reconcile
+ * exactly — this is a trend chart, not a ledger.
+ */
+export async function buildDailySpendSeries(
+  since: Date,
+  rawCutoff: Date,
+  until: Date
+): Promise<DailySpendPoint[]> {
+  const byDay = new Map<string, number>();
+
+  if (since < rawCutoff) {
+    const rollupDayLt =
+      until < rawCutoff
+        ? new Date(
+            Date.UTC(until.getUTCFullYear(), until.getUTCMonth(), until.getUTCDate() + 1)
+          )
+        : rawCutoff;
+    const rollupRows = await prisma.externalUsageEventDailyRollup.groupBy({
+      by: ["day"],
+      where: {
+        day: {
+          gte: new Date(
+            Date.UTC(since.getUTCFullYear(), since.getUTCMonth(), since.getUTCDate())
+          ),
+          lt: rollupDayLt,
+        },
+        metricType: { notIn: Array.from(STATUS_METRIC_TYPES) },
+      },
+      _sum: { totalCostUsd: true },
+    });
+    for (const row of rollupRows) {
+      const key = row.day.toISOString().slice(0, 10);
+      byDay.set(key, (byDay.get(key) ?? 0) + (row._sum.totalCostUsd ?? 0));
+    }
+  }
+
+  const rawSince = since > rawCutoff ? since : rawCutoff;
+  // Fail-closed like loadAnalyticsTokenRows above: a test double without
+  // $queryRaw degrades to rollup-only data rather than throwing.
+  if (rawSince <= until && typeof prisma.$queryRaw === "function") {
+    try {
+      const rawRows = await prisma.$queryRaw<Array<{ day: string; totalUsd: unknown }>>`
+        SELECT
+          date("occurredAt") AS "day",
+          COALESCE(SUM("costUsd"), 0) AS "totalUsd"
+        FROM "ExternalUsageEvent"
+        WHERE "occurredAt" >= ${rawSince}
+          AND "occurredAt" <= ${until}
+          AND "metricType" NOT IN ('quota_sync', 'credit_balance')
+        GROUP BY date("occurredAt")
+      `;
+      for (const row of rawRows) {
+        if (!row?.day) continue;
+        byDay.set(row.day, (byDay.get(row.day) ?? 0) + Number(row.totalUsd ?? 0));
+      }
+    } catch {
+      // Best-effort — the series degrades to whatever rollup data covers.
+    }
+  }
+
+  return Array.from(byDay.entries())
+    .map(([day, totalCostUsd]) => ({ day, totalCostUsd }))
+    .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+}
+
 /**
  * E1: SQL-groupBy rewrite of the old cursor-paginated JS fold. The raw side
  * is ONE aggregate query grouped by every summary dimension (plus limit /
