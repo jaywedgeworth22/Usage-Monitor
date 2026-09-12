@@ -28,6 +28,11 @@ public final class PortfolioHistoryStore {
     public private(set) var requiresSession = false
     public private(set) var lastError: APIError?
     public private(set) var isReloading = false
+    /// Daily spend series backing `RangeSpendChart` for any selection other
+    /// than "This month" (which shows the month-to-date `SpendPaceChart`
+    /// instead — that chart never reads this store). `nil` while the current
+    /// month is selected, or before the first successful range fetch lands.
+    public private(set) var rangeSeries: RangeSpendSeries?
 
     // `fetch()` is called from unstructured `Task { await store... }` sites
     // (chip taps in DashboardRootView) that are never cancelled, so two
@@ -52,6 +57,7 @@ public final class PortfolioHistoryStore {
         requiresSession = false
         lastError = nil
         isReloading = false
+        rangeSeries = nil
     }
 
     public func loadIfNeeded(using client: APIClient) async {
@@ -102,6 +108,7 @@ public final class PortfolioHistoryStore {
             }
         }
 
+        var summarySucceeded = false
         do {
             let summary = try await client.usageEventsSummary(
                 queryItems: requestedTimeframe.usageEventsQueryItems
@@ -111,12 +118,14 @@ public final class PortfolioHistoryStore {
             summaryTimeframe = requestedTimeframe
             requiresSession = false
             lastError = nil
+            summarySucceeded = true
         } catch let error as APIError {
             guard generation == fetchGeneration else { return }
             if case .unauthorized = error {
                 requiresSession = true
                 state = .idle
                 lastError = nil
+                rangeSeries = nil
                 return
             }
             if let previous {
@@ -137,6 +146,34 @@ public final class PortfolioHistoryStore {
             } else {
                 state = .failed(transport)
             }
+        }
+
+        // The month-pace chart (`SpendPaceChart`, driven by `BudgetStore`)
+        // already covers "This month" — only load a daily range series for
+        // any OTHER selection, and only once the summary call above proved
+        // the session still works.
+        guard requestedTimeframe != .currentMonth else {
+            rangeSeries = nil
+            return
+        }
+        guard summarySucceeded else { return }
+
+        do {
+            let window = requestedTimeframe.dailyRollupWindow()
+            let response = try await client.dailyRollups(
+                from: RangeSpendSeries.dayFormatter.string(from: window.from),
+                to: RangeSpendSeries.dayFormatter.string(from: window.to)
+            )
+            guard generation == fetchGeneration else { return }
+            rangeSeries = RangeSpendSeries.build(
+                response: response,
+                timeframe: requestedTimeframe,
+                isClamped: window.isClamped
+            )
+        } catch {
+            // Keep whatever range chart was already on screen rather than
+            // blanking it over a transient failure — the total above already
+            // updated successfully.
         }
     }
 }

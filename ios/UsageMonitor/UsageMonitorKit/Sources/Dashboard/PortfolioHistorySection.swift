@@ -49,16 +49,49 @@ struct PortfolioHistorySection: View {
             // Only the first cold load gets a skeleton; reloads keep the prior
             // summary on screen (dimmed + spinner) so the user never sees a
             // blank card just because they picked a new range.
-            SkeletonBlock(height: 72, radius: Theme.Radius.md)
-                .accessibilityLabel("Loading usage history for \(store.timeframe.displayLabel)")
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                SkeletonBlock(height: 140, radius: Theme.Radius.md)
+                SkeletonBlock(height: 72, radius: Theme.Radius.md)
+            }
+            .accessibilityLabel("Loading usage history for \(store.timeframe.displayLabel)")
         } else if let error = store.state.error {
             Text(error.message)
                 .font(Theme.Typography.caption)
                 .foregroundStyle(Theme.Colors.warning)
         } else if let summary = store.summary {
-            summaryBody(summary)
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                chartBody
+                summaryBody(summary)
+            }
         } else {
             Text("Pull to refresh after signing in for full access.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+    }
+
+    /// This card is the ONE place the chart-range control lives, and it sits
+    /// directly above the chart it actually drives — "This month" defers to
+    /// the month-pace chart already shown up in the hero area (never
+    /// duplicated here); every other selection gets its own daily bars.
+    @ViewBuilder
+    private var chartBody: some View {
+        if store.timeframe == .currentMonth {
+            Text("This month's pace chart is shown above · budgets stay month-to-date.")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.tertiaryText)
+        } else if let series = store.rangeSeries, !series.isEmpty {
+            RangeSpendChart(series: series)
+                .opacity(store.isReloading ? 0.55 : 1)
+        } else if store.isReloading {
+            SkeletonBlock(height: 120, radius: Theme.Radius.md)
+                .accessibilityLabel("Loading chart for \(store.timeframe.displayLabel)")
+        } else if store.rangeSeries != nil {
+            Text("No usage recorded for \(store.timeframe.displayLabel).")
+                .font(Theme.Typography.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        } else {
+            Text("Chart unavailable for this range — showing the total below.")
                 .font(Theme.Typography.caption)
                 .foregroundStyle(Theme.Colors.secondaryText)
         }

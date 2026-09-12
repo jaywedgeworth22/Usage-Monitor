@@ -531,6 +531,23 @@ public actor APIClient {
         )
     }
 
+    /// `GET /api/export/daily-rollups` — the daily spend series behind the
+    /// Overview chart-range card for any selection other than "This month"
+    /// (which shows the month-to-date pace chart instead). Session-gated,
+    /// same as `usageEventsSummary`. `from`/`to` are inclusive UTC calendar
+    /// days (`yyyy-MM-dd`); the route rejects windows over 92 days, so
+    /// callers should pre-clamp (see `TimeframeOption.dailyRollupWindow`).
+    public func dailyRollups(from: String, to: String) async throws -> DailyRollupsResponse {
+        try await get(
+            "/api/export/daily-rollups",
+            queryItems: [
+                URLQueryItem(name: "from", value: from),
+                URLQueryItem(name: "to", value: to),
+            ],
+            authorization: .session
+        )
+    }
+
     // MARK: - Request plumbing
 
     private func get<T: Decodable>(
