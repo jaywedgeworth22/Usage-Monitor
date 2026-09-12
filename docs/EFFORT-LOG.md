@@ -131,11 +131,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 ## Deployed
 - **2026-09-12 — AG — IN PROGRESS — Resolve all open app issues across GitHub issues, effort log, and Mac board (branch antigravity/resolve-all-app-issues).**  Fix collectors token resolution to ~/.secrets/global-api-keys and launchd plists; land PagerDuty #79/#105/#104 fix; reconcile effort logs and sync GitHub issues.
   _Board closeout (AG 2026-09-12): DEPLOYED.  PR #1437 squash `915db30a`.  Live revision `915db30a` on Coolify.  Repaired 4 LaunchAgents with direct Node execution and fallback token resolution from `~/.secrets/global-api-keys`.  Fixed idempotency collision timestamp jitter tolerance in `sameEvent` and verified full 180-day Codex history (26,901 events) re-ingested clean.  First line preserved for effort-key stability._
-
-## Deployed
 - **2026-08-17 — GROK — SHIPPED TestFlight — UM Client + Local 1.0.1 via Xcode.app on this Mac.** Owner: use normal Xcode here. Client `1.0.1 (202608172057)` upload succeeded 16:08Z and again 18:56Z. Local upload succeeded 19:01Z. `DEVELOPER_DIR=/Applications/Xcode.app` (26.6). ASC list API was 500 at start; ship used `--version 1.0.1`. App Store review attach still needs a VALID processing state.
-
-## Deployed
 - **2026-08-14 — GROK — DEPLOYED — Add all four Cloudflare accounts as UM providers.**  #1185 + oneshot #1187 live as `d674904`.  Four ON rows: `cloudflare-usage-jays` …d1b7, `-socratic` …2e79, `-congress` …1ae9, `-jay-old` …8c73.  Seed logged `created=4`; later ticks do not force `isActive`.  UJS token is distinct `CLOUDFLARE_JAY_*` (restored in Infisical; was overwritten with fleet).  ST token restored too.  Fleet remains fallback for CT/Old.
 - **2026-08-14 — GROK — IN PROGRESS — Apex iCloud MX + receipts Worker catch-all (branch `grok/apex-icloud-receipts-routing`).**  Owner: `*@jays.services` → iCloud; `receipts.jays.services` → receipt-inbox Worker.  Live DNS already cut over (apex `mx01`/`mx02.mail.icloud.com`, SPF `include:icloud.com`; receipts CF MX unchanged; catch-all now Worker).  Docs PR #1182 (auto-merge).  Do not repair apex Email Routing.  Receipt: `docs/rollouts/2026-08-14-apex-icloud-receipts-routing.md`.
   _Board closeout (GROK 2026-08-14): DEPLOYED.  Live MX verified on 1.1.1.1.  Docs squash `009face6`.  First line preserved._
