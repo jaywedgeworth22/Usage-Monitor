@@ -75,6 +75,14 @@ public actor APIClient {
         try await get("/api/subscriptions", authorization: .read)
     }
 
+    /// `GET /api/quota-windows` — latest remaining-percent quota windows per
+    /// provider (5h / 7d / 24h / monthly), bearer or dashboard-session
+    /// authorized like the other read routes. Powers the Overview
+    /// "Subscription Quotas" card.
+    public func fetchQuotaWindows() async throws -> QuotaWindowsResponse {
+        try await get("/api/quota-windows", authorization: .read)
+    }
+
     /// `GET /api/health` — public liveness probe.
     public func health() async throws -> ServerHealth {
         try await get("/api/health", authorization: .none)

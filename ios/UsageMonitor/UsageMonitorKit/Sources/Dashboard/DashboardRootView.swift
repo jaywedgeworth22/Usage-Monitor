@@ -24,6 +24,7 @@ public struct DashboardRootView: View {
 
     @State private var intelligenceStore = IntelligenceStore()
     @State private var portfolioHistoryStore = PortfolioHistoryStore()
+    @State private var quotaWindowsStore = QuotaWindowsStore()
     @State private var showBudgetSheet = false
 
     public init() {}
@@ -72,9 +73,11 @@ public struct DashboardRootView: View {
                 .task(id: env?.accessIdentityRevision) { [apiClient = env?.apiClient] in
                     intelligenceStore.reset()
                     portfolioHistoryStore.reset()
+                    quotaWindowsStore.reset()
                     if let apiClient {
                         await intelligenceStore.loadIfNeeded(using: apiClient)
                         await portfolioHistoryStore.loadIfNeeded(using: apiClient)
+                        await quotaWindowsStore.loadIfNeeded(using: apiClient)
                     }
                 }
                 .sheet(isPresented: $showBudgetSheet) {
@@ -137,6 +140,11 @@ public struct DashboardRootView: View {
                         )
                     }
                 }
+            )
+
+            SubscriptionQuotasCard(
+                store: quotaWindowsStore,
+                onOpenSettings: { env?.selectTab?(.settings) }
             )
 
             PortfolioHistorySection(
@@ -227,6 +235,7 @@ public struct DashboardRootView: View {
         if let apiClient = env?.apiClient {
             await intelligenceStore.refresh(using: apiClient)
             await portfolioHistoryStore.refresh(using: apiClient)
+            await quotaWindowsStore.refresh(using: apiClient)
         }
         if store.lastError == nil {
             Haptics.success()
