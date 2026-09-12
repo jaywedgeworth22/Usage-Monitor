@@ -36,6 +36,12 @@ export interface ExternalUsageGroup {
   latestAt: string;
 }
 
+export interface DailySpendSeriesPoint {
+  /** UTC calendar day, YYYY-MM-DD. */
+  day: string;
+  totalCostUsd: number;
+}
+
 export interface ExternalUsageSummary {
   days: number;
   totalCostUsd: number;
@@ -52,6 +58,9 @@ export interface ExternalUsageSummary {
   totalRequests: number;
   eventCount: number;
   groups: ExternalUsageGroup[];
+  /** Per-day cost series over the same requested window — powers the
+   * chart-range burn chart. Optional: absent on older cached responses. */
+  dailySeries?: DailySpendSeriesPoint[];
 }
 
 interface ExternalTelemetryPanelProps {

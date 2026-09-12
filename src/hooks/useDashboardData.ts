@@ -652,16 +652,26 @@ export function useDashboardData() {
     };
   }, [fetchProviders]);
 
-  // Portfolio auto-refresh when open
+  // Range-scoped fetch (usage events + project budgets) for the chart /
+  // telemetry section. Runs on mount and whenever `timeframe` changes
+  // (fetchPortfolioData's identity changes with it — see its useCallback
+  // deps above), regardless of whether the portfolio panel is expanded.
+  // The chart-range control sits above the chart unconditionally, so
+  // selecting a new range must never be a no-op just because the section
+  // happens to be collapsed. One grouped query + one project query — cheap
+  // enough to always run.
+  useEffect(() => {
+    void fetchPortfolioData();
+  }, [fetchPortfolioData]);
+
+  // Poll for fresher portfolio/chart data only while the section is open —
+  // no point refreshing data nobody can see. The fetch above already covers
+  // the initial load and every timeframe change.
   useEffect(() => {
     if (!portfolioOpen) return;
-    if (!document.hidden) void fetchPortfolioData();
-    const interval = window.setInterval(
-      () => {
-        if (!document.hidden) void fetchPortfolioData();
-      },
-      AUTO_REFRESH_INTERVAL_MS
-    );
+    const interval = window.setInterval(() => {
+      if (!document.hidden) void fetchPortfolioData();
+    }, AUTO_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(interval);
   }, [fetchPortfolioData, portfolioOpen]);
 
