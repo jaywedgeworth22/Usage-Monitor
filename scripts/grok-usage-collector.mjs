@@ -27,6 +27,7 @@ import {
   expandHome,
   parseCollectorArgs,
   readIfFresh,
+  resolveCollectorToken,
   sessionKeyFor,
   walkFiles,
 } from "./lib/run-session-token-collector.mjs";
@@ -86,9 +87,10 @@ async function main() {
     log("nothing to send");
     return;
   }
-  const token =
-    process.env.GROK_INGEST_TOKEN?.trim() ||
-    process.env.USAGE_INGEST_TOKEN?.trim();
+  const token = resolveCollectorToken([
+    "GROK_INGEST_TOKEN",
+    "USAGE_INGEST_TOKEN",
+  ]);
   try {
     const ack = await postUsageBatches({
       events,
@@ -105,6 +107,6 @@ async function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }

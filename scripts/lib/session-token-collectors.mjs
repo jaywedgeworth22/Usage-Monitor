@@ -662,21 +662,36 @@ function sleep(ms) {
 async function postUsageBatchWithRetry({ ingestUrl, ingestToken, body, log }) {
   const maxAttempts = 8;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const response = await fetch(ingestUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-usage-telemetry-version": "2",
-        authorization: `Bearer ${ingestToken}`,
-      },
-      body: JSON.stringify(body),
-    });
-    const text = await response.text();
-    let parsed;
+    let response;
+    let text;
+    let parsed = null;
     try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = null;
+      response = await fetch(ingestUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-usage-telemetry-version": "2",
+          authorization: `Bearer ${ingestToken}`,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000),
+      });
+      text = await response.text();
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = null;
+      }
+    } catch (networkError) {
+      const waitMs = Math.min(60_000, Math.pow(2, attempt) * 1000);
+      log(
+        `ingest network error (${networkError instanceof Error ? networkError.message : String(networkError)}) on attempt ${attempt}/${maxAttempts}; retry in ${waitMs}ms`
+      );
+      if (attempt === maxAttempts) {
+        throw networkError;
+      }
+      await sleep(waitMs);
+      continue;
     }
     if (response.status === 429 || response.status === 503) {
       const retryAfter = Number(parsed?.error?.retryAfterSeconds);
@@ -695,7 +710,8 @@ async function postUsageBatchWithRetry({ ingestUrl, ingestToken, body, log }) {
     }
     if (!response.ok && response.status !== 202) {
       const detail = parsed?.error?.code ? parsed.error.code : `HTTP ${response.status}`;
-      throw new Error(`Ingest rejected the batch (${detail})`);
+      const msg = parsed?.error?.message ? `: ${parsed.error.message}` : "";
+      throw new Error(`Ingest rejected the batch (${detail}${msg})`);
     }
     return parsed;
   }

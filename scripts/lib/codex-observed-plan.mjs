@@ -63,7 +63,7 @@ export function observedPlanEvent({ planType, occurredAtIso }) {
     quantity: 1,
     billingMode: "estimated",
     confidence: "estimated",
-    occurredAt: occurredAtIso,
+    occurredAt: `${day}T00:00:00.000Z`,
     metadata: { chatgptPlanType: planType },
   };
 }
