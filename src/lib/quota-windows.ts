@@ -18,6 +18,16 @@ export interface SkipModelType {
 export interface QuotaWindow {
   id: string;
   provider: string;
+  /** Canonical provider key the window is grouped under (see PROVIDER_ALIASES). */
+  providerKey: string;
+  /** Human label for the provider, e.g. "Claude".  Additive; safe to ignore. */
+  providerLabel: string;
+  /**
+   * Set to "antigravity" when the window comes from Antigravity's own routing
+   * buckets rather than the named vendor's subscription.  Antigravity reports a
+   * bucket called "Claude and GPT models"; that is NOT the user's Claude plan.
+   */
+  via: string | null;
   sourceApp: string | null;
   modelId: string | null;
   modelType: string | null;
@@ -34,13 +44,88 @@ export interface QuotaWindow {
   source: string | null;
 }
 
+/** One provider's subscription quota windows.  Additive to the v1 response. */
+export interface QuotaProviderGroup {
+  provider: string;
+  providerLabel: string;
+  via: string | null;
+  /** True for the five providers the dashboard always shows a row for. */
+  expected: boolean;
+  windows: QuotaWindow[];
+}
+
 export interface QuotaWindowsResponse {
   generatedAt: string;
   windows: QuotaWindow[];
   skipModelTypes: SkipModelType[];
+  /**
+   * Windows grouped by provider, with an entry for every expected provider even
+   * when it has reported nothing yet (empty `windows`).  A provider that is
+   * missing should be visible, not silently absent.
+   */
+  providerGroups: QuotaProviderGroup[];
 }
 
 const ANTIGRAVITY_INSTANCE = "antigravity";
+
+/**
+ * Canonical provider keys for subscription quota reporting, in display order.
+ * The dashboard renders a row for every one of these, reported or not.
+ */
+export const EXPECTED_QUOTA_PROVIDERS = [
+  "anthropic",
+  "openai",
+  "google-antigravity",
+  "xai",
+  "minimax",
+] as const;
+
+/** Event `provider` values that should collapse onto one canonical key. */
+const PROVIDER_ALIASES: Record<string, string> = {
+  anthropic: "anthropic",
+  "claude-code": "anthropic",
+  claude: "anthropic",
+  openai: "openai",
+  "openai-codex": "openai",
+  codex: "openai",
+  google: "google-antigravity",
+  "google-antigravity": "google-antigravity",
+  antigravity: "google-antigravity",
+  "antigravity-cli": "google-antigravity",
+  xai: "xai",
+  "grok-build": "xai",
+  grok: "xai",
+  minimax: "minimax",
+  "minimax-code": "minimax",
+};
+
+const PROVIDER_LABELS: Record<string, string> = {
+  anthropic: "Claude",
+  openai: "Codex",
+  "google-antigravity": "Antigravity",
+  xai: "Grok",
+  minimax: "MiniMax",
+};
+
+/** Collapse an event `provider` onto the key its windows are grouped under. */
+export function quotaProviderKey(provider: string): string {
+  const raw = String(provider ?? "").trim().toLowerCase();
+  return PROVIDER_ALIASES[raw] ?? raw;
+}
+
+/** Human label for a provider key.  Falls back to the raw slug. */
+export function quotaProviderLabel(provider: string): string {
+  const key = quotaProviderKey(provider);
+  return PROVIDER_LABELS[key] ?? (key || "Unknown");
+}
+
+/**
+ * Antigravity routes to several vendors' models under its own subscription, so
+ * its buckets must never be presented as the user's Claude or ChatGPT plan.
+ */
+export function quotaProviderVia(provider: string): string | null {
+  return quotaProviderKey(provider) === "google-antigravity" ? "antigravity" : null;
+}
 
 const CLAUDE_GPT_MODELS = [
   "claude-opus-4-6-thinking",
@@ -99,6 +184,9 @@ export function quotaStatus(input: {
 
 function skipTargetsFor(window: QuotaWindow): SkipModelType[] {
   if (!window.skip) return [];
+  // skipModelTypes drives Antigravity instance routing only.  Claude/Codex/
+  // Grok/MiniMax subscription windows must never emit an antigravity skip.
+  if (window.via !== "antigravity") return [];
   if (window.modelId) {
     return [{ instanceId: ANTIGRAVITY_INSTANCE, model: window.modelId }];
   }
@@ -136,6 +224,9 @@ export function projectQuotaWindows(
     latest.set(series, {
       id: series,
       provider: event.provider,
+      providerKey: quotaProviderKey(event.provider),
+      providerLabel: quotaProviderLabel(event.provider),
+      via: quotaProviderVia(event.provider),
       sourceApp: event.service ?? null,
       modelId,
       modelType: modelId,
@@ -172,5 +263,43 @@ export function projectQuotaWindows(
     generatedAt: now.toISOString(),
     windows,
     skipModelTypes,
+    providerGroups: groupWindowsByProvider(windows),
   };
+}
+
+/**
+ * Group windows by canonical provider.  Every expected provider gets a group
+ * even with no windows, so the dashboard can show "no quota report yet" instead
+ * of quietly omitting the provider.
+ */
+export function groupWindowsByProvider(windows: QuotaWindow[]): QuotaProviderGroup[] {
+  const groups = new Map<string, QuotaProviderGroup>();
+  for (const provider of EXPECTED_QUOTA_PROVIDERS) {
+    groups.set(provider, {
+      provider,
+      providerLabel: quotaProviderLabel(provider),
+      via: quotaProviderVia(provider),
+      expected: true,
+      windows: [],
+    });
+  }
+  for (const window of windows) {
+    const key = window.providerKey;
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        provider: key,
+        providerLabel: quotaProviderLabel(key),
+        via: quotaProviderVia(key),
+        expected: false,
+        windows: [],
+      };
+      groups.set(key, group);
+    }
+    group.windows.push(window);
+  }
+  for (const group of groups.values()) {
+    group.windows.sort((a, b) => a.label.localeCompare(b.label));
+  }
+  return [...groups.values()];
 }
