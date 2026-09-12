@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template launchd job for scripts/subscription-quota-collector.mjs.
+
+  Reports percent REMAINING per subscription window for Claude, Codex, Grok and
+  MiniMax.  Must run on the Mac that holds those CLIs' own OAuth credentials —
+  the script calls the same endpoints each vendor's CLI calls, with the token
+  that CLI already stored locally.  Antigravity is NOT collected here; it is
+  already covered by com.jays.antigravity-usage-collector.
+
+  Install:
+    cp scripts/com.jays.subscription-quota-collector.plist.example \
+       ~/Library/LaunchAgents/com.jays.subscription-quota-collector.plist
+    # replace every /ABSOLUTE/PATH placeholder below, then:
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.jays.subscription-quota-collector.plist
+    launchctl kickstart -k gui/$(id -u)/com.jays.subscription-quota-collector
+
+  Dry run first (prints numbers, window labels and ISO dates only):
+    node scripts/subscription-quota-collector.mjs --dry-run --redacted
+
+  StartInterval 900 = 15 minutes, matching the other collectors.  The script
+  exits 0 when at least one provider succeeded or was skipped, and 1 only when
+  every provider failed, so launchd does not flap on a single dead endpoint.
+
+  Uninstall:
+    launchctl bootout gui/$(id -u)/com.jays.subscription-quota-collector
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.jays.subscription-quota-collector</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/ABSOLUTE/PATH/TO/node</string>
+    <string>/ABSOLUTE/PATH/TO/Usage-Monitor/scripts/subscription-quota-collector.mjs</string>
+    <string>--provider</string>
+    <string>all</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/ABSOLUTE/PATH/TO/HOME/Library/Logs/subscription-quota-collector.log</string>
+  <key>StandardErrorPath</key>
+  <string>/ABSOLUTE/PATH/TO/HOME/Library/Logs/subscription-quota-collector.log</string>
+</dict>
+</plist>
