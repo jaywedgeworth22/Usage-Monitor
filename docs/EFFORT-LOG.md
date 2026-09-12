@@ -126,7 +126,11 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+(none)
+
+## Deployed
 - **2026-09-12 — AG — IN PROGRESS — Resolve all open app issues across GitHub issues, effort log, and Mac board (branch antigravity/resolve-all-app-issues).**  Fix collectors token resolution to ~/.secrets/global-api-keys and launchd plists; land PagerDuty #79/#105/#104 fix; reconcile effort logs and sync GitHub issues.
+  _Board closeout (AG 2026-09-12): DEPLOYED.  PR #1437 squash `915db30a`.  Live revision `915db30a` on Coolify.  Repaired 4 LaunchAgents with direct Node execution and fallback token resolution from `~/.secrets/global-api-keys`.  Fixed idempotency collision timestamp jitter tolerance in `sameEvent` and verified full 180-day Codex history (26,901 events) re-ingested clean.  First line preserved for effort-key stability._
 
 ## Deployed
 - **2026-08-17 — GROK — SHIPPED TestFlight — UM Client + Local 1.0.1 via Xcode.app on this Mac.** Owner: use normal Xcode here. Client `1.0.1 (202608172057)` upload succeeded 16:08Z and again 18:56Z. Local upload succeeded 19:01Z. `DEVELOPER_DIR=/Applications/Xcode.app` (26.6). ASC list API was 500 at start; ship used `--version 1.0.1`. App Store review attach still needs a VALID processing state.
