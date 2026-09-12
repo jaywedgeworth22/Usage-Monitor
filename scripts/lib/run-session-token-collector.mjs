@@ -1,6 +1,31 @@
+import { readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { homedir } from "node:os";
+
+/**
+ * Resolves an ingest token from environment variables or falls back to
+ * ~/.secrets/global-api-keys (same pattern as mac-server-watchdog.sh and local-keys-bundle.mjs).
+ */
+export function resolveCollectorToken(tokenEnvVarNames = ["USAGE_INGEST_TOKEN"]) {
+  for (const name of tokenEnvVarNames) {
+    const val = process.env[name]?.trim();
+    if (val) return val;
+  }
+  try {
+    const secretsPath = join(homedir(), ".secrets", "global-api-keys");
+    const content = readFileSync(secretsPath, "utf8");
+    for (const name of tokenEnvVarNames) {
+      const match = new RegExp(`^(?:export\\s+)?${name}=["\']?([^"\'\\r\\n]+)["\']?`, "m").exec(content);
+      if (match && match[1]?.trim()) {
+        return match[1].trim();
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
 
 /** Default lookback when LaunchAgents omit --days/--since.  UTC month-start
  *  dropped June–August Codex sessions on 1 September (owner 2026-09-03). */

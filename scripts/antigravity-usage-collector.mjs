@@ -65,6 +65,8 @@ import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { resolveCollectorToken } from "./lib/run-session-token-collector.mjs";
+
 const DRY_RUN = process.argv.includes("--dry-run");
 const DEBUG = process.argv.includes("--debug");
 
@@ -584,11 +586,13 @@ async function postBatch(events, ingestToken) {
 }
 
 async function main() {
-  const ingestToken = process.env.ANTIGRAVITY_INGEST_TOKEN?.trim();
+  const ingestToken = resolveCollectorToken([
+    "ANTIGRAVITY_INGEST_TOKEN",
+    "USAGE_INGEST_TOKEN",
+  ]);
   if (!ingestToken && !DRY_RUN) {
     fail(
-      "Missing ANTIGRAVITY_INGEST_TOKEN. Run this via `infisical run -- ...` " +
-        "(see the doc header) or pass --dry-run to inspect parsing without sending."
+      "Missing ANTIGRAVITY_INGEST_TOKEN or USAGE_INGEST_TOKEN. Ensure token is set in environment or ~/.secrets/global-api-keys."
     );
   }
 

@@ -149,7 +149,7 @@ const ALLOWLIST: Record<Scope, readonly string[]> = {
     "XAI_TEAM_ID",
   ],
   "st-primary": ["BRIDGE_MANIFEST_V1", "GEMINI_API_KEY", "DEEPSEEK_API_KEY"],
-  um: [],
+  um: ["NAMECHEAP_API_KEY", "NAMECHEAP_API_USER", "NAMECHEAP_CLIENT_IP"],
 };
 
 interface SecretRead {
@@ -949,20 +949,21 @@ afterAll(async () => {
 });
 
 describe("Infisical provider credential sync", () => {
-  it("reads only the functional allowlist and preserves three scopes", async () => {
-    configureSources("st", "ct", "shared");
+  it("reads only the functional allowlist and preserves four scopes", async () => {
+    configureSources("st", "ct", "shared", "um");
     const secrets = {
       st: valuesFor("st"),
       ct: valuesFor("ct"),
       shared: valuesFor("shared"),
+      um: valuesFor("um"),
     };
     const capture = installInfisicalMock(secrets);
 
     const result = await syncProviderCredentialsFromInfisical();
 
-    expect(capture.loginSources.sort()).toEqual(["ct", "shared", "st"]);
+    expect(capture.loginSources.sort()).toEqual(["ct", "shared", "st", "um"]);
     expect(new Set(capture.redirects)).toEqual(new Set(["error"]));
-    for (const source of ["st", "ct", "shared"] as const) {
+    for (const source of ["st", "ct", "shared", "um"] as const) {
       expect(capture.scopeReads.filter((read) => read.source === source)).toEqual([
         {
           source,
@@ -1060,14 +1061,31 @@ describe("Infisical provider credential sync", () => {
     expect(
       capture.secretReads.some((read) => read.name.startsWith("OCI_"))
     ).toBe(false);
+    // PD #79 regression coverage: the "um" scope populates namecheap's apiKey
+    // and public config (apiUser/clientIp) exactly like any other mapping.
+    const namecheap = providers.find((provider) => provider.name === "namecheap")!;
+    expect(namecheap).toBeDefined();
+    expect(decrypt(namecheap.apiKey!)).toBe(secrets.um.NAMECHEAP_API_KEY);
+    expect(namecheap.config).toMatchObject({
+      apiUser: secrets.um.NAMECHEAP_API_USER,
+      clientIp: secrets.um.NAMECHEAP_CLIENT_IP,
+    });
+    expect(decryptJson(namecheap.secretConfig!)).toMatchObject({
+      infisicalCredential: {
+        scope: "um",
+        source: "um",
+        providerName: "namecheap",
+      },
+    });
   });
 
   it("splits comma-delimited LlamaParse keys into stable, deduplicated managed rows", async () => {
-    configureSources("st", "ct", "shared");
+    configureSources("st", "ct", "shared", "um");
     const secrets = {
       st: valuesFor("st"),
       ct: valuesFor("ct"),
       shared: valuesFor("shared"),
+      um: valuesFor("um"),
     };
     const llamaKeys = ["llama-first-key", "llama-second-key", "llama-third-key"];
     secrets.ct.LLAMAPARSE_API_KEY = ` ${llamaKeys[0]},, ${llamaKeys[1]} , ${llamaKeys[0]} ,${llamaKeys[2]} `;
@@ -1137,13 +1155,14 @@ describe("Infisical provider credential sync", () => {
   });
 
   it("uses shared only after a definite miss, then promotes the app key", async () => {
-    configureSources("st", "ct", "shared");
+    configureSources("st", "ct", "shared", "um");
     const st = valuesFor("st");
     delete st.RESEND_API_KEY;
     const firstSecrets = {
       st,
       ct: valuesFor("ct"),
       shared: valuesFor("shared"),
+      um: valuesFor("um"),
     };
     installInfisicalMock(firstSecrets);
 
@@ -1316,11 +1335,12 @@ describe("Infisical provider credential sync", () => {
   });
 
   it("selects the exact current-key duplicate and never adopts an old label", async () => {
-    configureSources("st", "ct", "shared");
+    configureSources("st", "ct", "shared", "um");
     const secrets = {
       st: valuesFor("st"),
       ct: valuesFor("ct"),
       shared: valuesFor("shared"),
+      um: valuesFor("um"),
     };
     const oldCt = await prisma.provider.create({
       data: {
@@ -1456,11 +1476,12 @@ describe("Infisical provider credential sync", () => {
   });
 
   it("adopts an exact Resend domain row instead of creating a duplicate", async () => {
-    configureSources("st", "ct", "shared");
+    configureSources("st", "ct", "shared", "um");
     const secrets = {
       st: valuesFor("st"),
       ct: valuesFor("ct"),
       shared: valuesFor("shared"),
+      um: valuesFor("um"),
     };
     const existing = await prisma.provider.create({
       data: {

@@ -332,7 +332,23 @@ function sameEvent(
   left: ExternalUsageEventInput | ExistingExternalUsageEvent,
   right: ExternalUsageEventInput | ExistingExternalUsageEvent
 ): boolean {
-  return stableJson(comparableEvent(left)) === stableJson(comparableEvent(right));
+  const leftComp = comparableEvent(left);
+  const rightComp = comparableEvent(right);
+  if (stableJson(leftComp) === stableJson(rightComp)) {
+    return true;
+  }
+  // Allow timestamp jitter up to 5 seconds when all other fields match exactly.
+  // This prevents subsecond clock drift or JSON serialization differences in
+  // historical sessions from falsely triggering idempotency collisions.
+  const timeDiffMs = Math.abs(left.occurredAt.getTime() - right.occurredAt.getTime());
+  if (timeDiffMs <= 5000) {
+    const leftWithoutTime = { ...leftComp, occurredAt: null };
+    const rightWithoutTime = { ...rightComp, occurredAt: null };
+    if (stableJson(leftWithoutTime) === stableJson(rightWithoutTime)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function assertCompatibleProjectAttribution(
