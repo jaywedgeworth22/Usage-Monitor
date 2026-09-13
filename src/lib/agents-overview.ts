@@ -86,20 +86,32 @@ export const AGENT_PLATFORMS: readonly AgentPlatformMeta[] = [
   },
   {
     id: "antigravity-cli",
-    name: "Antigravity",
+    name: "Antigravity CLI",
     provider: "Google",
     description: "Antigravity pair-programming agent & agy-acp PM2 service.",
-    dataCapability: "Quota windows from agy /usage only. Token telemetry is not available.",
-    fidelityTier: "unavailable",
-    tokenTelemetryKind: "character_estimate",
+    dataCapability: "Exact cumulative status-line tokens plus /usage quota windows",
+    fidelityTier: "session_jsonl",
+    tokenTelemetryKind: "session_jsonl",
     notes:
-      "Google Antigravity does not expose token telemetry.  Local transcript character estimates are not usage and must not be read as burn.  Seat is $100/mo Google AI Ultra; $30 of that was already Google One, so $70 net for the AI.",
+      "The CLI status line reports exact cumulative input and output.  Model attribution and cache read/write are accepted only when the current-request counters reconcile to the cumulative delta; mixed or missed history stays unpriced with an unknown model.",
     defaultMonthlySeatCostUsd: AGENT_SEAT_CATALOG["antigravity-cli"].billedMonthlyUsd ?? 70,
     listMonthlySeatCostUsd: AGENT_SEAT_CATALOG["antigravity-cli"].listMonthlyUsd,
     bundledOffsetUsd: 30,
     bundledOffsetLabel: "Google One",
+  },
+  {
+    id: "antigravity-ide",
+    name: "Antigravity Desktop",
+    provider: "Google",
+    description: "Antigravity native desktop coding app.",
+    dataCapability: "Quota windows only. Exact desktop turn-token export is not available.",
+    fidelityTier: "unavailable",
+    tokenTelemetryKind: "none",
+    notes:
+      "The native desktop app does not expose the CLI status-line token stream.  Its local brain transcripts are not used as token estimates.",
+    defaultMonthlySeatCostUsd: 0,
     unavailableReason:
-      "Antigravity does not expose token telemetry.  Local transcript character estimates are not usage.  This is not zero use.",
+      "Antigravity Desktop does not expose exact turn-token telemetry.  This is not zero usage.",
   },
   {
     id: "github-copilot",
@@ -117,13 +129,39 @@ export const AGENT_PLATFORMS: readonly AgentPlatformMeta[] = [
     name: "MiniMax Code",
     provider: "MiniMax",
     description: "MiniMax Code CLI / agent seat.",
-    dataCapability: "Receipt-backed seat. Token telemetry is not wired yet.",
+    dataCapability: "Exact Token Plan quota windows; process detection; no per-turn token feed",
     fidelityTier: "unavailable",
     tokenTelemetryKind: "none",
-    notes: "MiniMax Code billed cash waits on a receipt.  Token telemetry is not reported yet.",
+    notes: "The official mmx CLI exposes exact rolling and weekly remaining-percent quota.  Token usage is not reported because MiniMax has no exact local per-turn feed.",
     defaultMonthlySeatCostUsd: 0,
     unavailableReason:
-      "MiniMax Code has no token collector yet.  This is not zero usage.",
+      "MiniMax Code has no exact local per-turn token feed.  This is not zero usage.",
+  },
+  {
+    id: "deepseek-dsh",
+    name: "DeepSeek Harness",
+    provider: "DeepSeek",
+    description: "DeepSeek Harness CLI and ACP seat.",
+    dataCapability: "Exact assistant-message token usage from compressed DSH sessions",
+    fidelityTier: "session_jsonl",
+    tokenTelemetryKind: "session_jsonl",
+    notes:
+      "Ingests exact input, output, cache-read, and reasoning detail from standalone DSH session archives.  BotFleet child exclusion activates only after durable BotFleet delivery is deployed.",
+    defaultMonthlySeatCostUsd: 0,
+  },
+  {
+    id: "kimi-code",
+    name: "Kimi Code",
+    provider: "Moonshot AI",
+    description: "Kimi Code CLI and ACP seat.",
+    dataCapability: "Live process detection. Exact token telemetry is not available.",
+    fidelityTier: "unavailable",
+    tokenTelemetryKind: "none",
+    notes:
+      "Kimi Code's local wire log exposes request models and a turn-counting estimate, but no provider input/output usage ledger.  Usage is not reported.",
+    defaultMonthlySeatCostUsd: 0,
+    unavailableReason:
+      "Kimi Code does not expose exact local token usage.  This is not zero usage.",
   },
 ];
 
@@ -132,7 +170,12 @@ const TOKEN_TELEMETRY_KIND_BY_APP = new Map(
 );
 
 export function isReliableTokenSourceApp(sourceApp: string): boolean {
-  const kind = TOKEN_TELEMETRY_KIND_BY_APP.get(sourceApp.trim().toLowerCase());
+  const normalized = sourceApp.trim().toLowerCase();
+  // Historical antigravity-cli token rows came from transcript character
+  // estimates.  Only the separate status-line producer carries exact counts.
+  if (normalized === "antigravity-cli") return false;
+  const appKey = normalized === "antigravity-statusline" ? "antigravity-cli" : normalized;
+  const kind = TOKEN_TELEMETRY_KIND_BY_APP.get(appKey);
   if (!kind) return true;
   return isReliableTokenTelemetryKind(kind);
 }
@@ -165,6 +208,7 @@ export interface AgentPlatformStatus {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   apiEquivalentCostUsd: number;
+  apiEquivalentCostComplete: boolean;
   reportedCostUsd: number;
   estimatedCostUsd: number;
   netSavingsUsd: number;
@@ -173,6 +217,7 @@ export interface AgentPlatformStatus {
     tokens: number;
     percentOfPlatform: number;
     apiEquivalentCostUsd: number;
+    apiEquivalentCostKnown: boolean;
   }>;
 }
 
@@ -188,6 +233,8 @@ export interface AgentsOverviewResponse {
     totalAgentCount: number;
     totalTokens: number;
     totalApiEquivalentCostUsd: number;
+    apiEquivalentCostComplete: boolean;
+    unpricedModelCount: number;
     totalSubscriptionCostUsd: number;
     totalNetSavingsUsd: number;
     savingsMultiplier: number;
@@ -199,6 +246,7 @@ export interface AgentsOverviewResponse {
   burn5h: {
     tokens5h: number;
     costEstimate5hUsd: number;
+    costEstimateComplete: boolean;
     burnRateTokensPerHour: number;
     burnRateUsdPerHour: number;
   };
@@ -209,6 +257,7 @@ export interface AgentsOverviewResponse {
     tokens: number;
     percent: number;
     apiEquivalentCostUsd: number;
+    apiEquivalentCostKnown: boolean;
   }>;
 }
 
@@ -383,6 +432,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     cacheRead: number;
     cacheCreation: number;
     unknown: number;
+    incompleteInput: boolean;
     total: number;
   };
 
@@ -403,7 +453,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
   }
 
   let grandTotalTokens = 0;
-  const tokensByModel = new Map<string, { provider: string; tokens: number; apiCost: number }>();
+  const tokensByModel = new Map<string, { provider: string; tokens: number; apiCost: number; apiCostKnown: boolean }>();
 
   const allTokenRows = [
     ...tokenGroups.map((g) => ({
@@ -424,7 +474,8 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
 
   for (const group of allTokenRows) {
     if (!isReliableTokenSourceApp(group.sourceApp)) continue;
-    const app = group.sourceApp.toLowerCase();
+    const sourceApp = group.sourceApp.toLowerCase();
+    const app = sourceApp === "antigravity-statusline" ? "antigravity-cli" : sourceApp;
     const model = group.keyRef || "unknown-model";
     const qty = Math.max(0, group.quantity || 0);
     grandTotalTokens += qty;
@@ -434,13 +485,24 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     }
     const modelMap = tokensByPlatformAndModel.get(app)!;
     if (!modelMap.has(model)) {
-      modelMap.set(model, { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, unknown: 0, total: 0 });
+      modelMap.set(model, {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheCreation: 0,
+        unknown: 0,
+        incompleteInput: false,
+        total: 0,
+      });
     }
     const breakdown = modelMap.get(model)!;
     breakdown.total += qty;
 
     const label = group.label?.toLowerCase() || "";
-    if (label.includes("input")) {
+    if (label.includes("inputunsplit")) {
+      breakdown.incompleteInput = true;
+      breakdown.unknown += qty;
+    } else if (label.includes("input")) {
       breakdown.input += qty;
     } else if (label.includes("output")) {
       breakdown.output += qty;
@@ -453,7 +515,12 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     }
 
     // Model distribution
-    const existingModel = tokensByModel.get(model) || { provider: group.provider, tokens: 0, apiCost: 0 };
+    const existingModel = tokensByModel.get(model) || {
+      provider: group.provider,
+      tokens: 0,
+      apiCost: 0,
+      apiCostKnown: true,
+    };
     existingModel.tokens += qty;
     tokensByModel.set(model, existingModel);
   }
@@ -479,6 +546,8 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     const appKey = meta.id.toLowerCase();
     const isRunning =
       agentProcesses[appKey] === "running" ||
+      (appKey === "deepseek-dsh" && agentProcesses.deepseek === "running") ||
+      (appKey === "kimi-code" && agentProcesses.kimi === "running") ||
       (appKey === "grok-build" && (macProcesses["grok-leader"] === "running" || agentProcesses["grok-build"] === "running")) ||
       (appKey === "claude-code" && (macProcesses["claude-remote-control"] === "running" || agentProcesses["claude-code"] === "running"));
 
@@ -491,6 +560,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     let platformCacheRead = 0;
     let platformCacheCreation = 0;
     let platformApiCost = 0;
+    let platformApiCostComplete = true;
 
     const modelsUsed: AgentPlatformStatus["modelsUsed"] = [];
 
@@ -505,7 +575,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       const modelPricing = getModelPricing(modelName);
       const priced = modelPricing
         ? deriveTokenCostUsd(modelPricing.pricing, {
-            input: breakdown.input + breakdown.unknown,
+            input: breakdown.input,
             output: breakdown.output,
             cacheRead: breakdown.cacheRead,
             cacheCreation: breakdown.cacheCreation,
@@ -513,6 +583,9 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
         : null;
 
       const modelCost = priced?.costUsd || 0;
+      const modelCostKnown =
+        Boolean(priced?.complete) && !breakdown.incompleteInput && breakdown.unknown === 0;
+      if (!modelCostKnown && breakdown.total > 0) platformApiCostComplete = false;
       platformApiCost += modelCost;
 
       modelsUsed.push({
@@ -520,12 +593,14 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
         tokens: breakdown.total,
         percentOfPlatform: 0, // computed below
         apiEquivalentCostUsd: Number(modelCost.toFixed(4)),
+        apiEquivalentCostKnown: modelCostKnown,
       });
 
       // Add to overall model distribution
       const globalModel = tokensByModel.get(modelName);
       if (globalModel) {
         globalModel.apiCost += modelCost;
+        globalModel.apiCostKnown = globalModel.apiCostKnown && modelCostKnown;
       }
     }
 
@@ -604,6 +679,8 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       cacheReadTokens: accuracy.usageIsReliable ? platformCacheRead : 0,
       cacheCreationTokens: accuracy.usageIsReliable ? platformCacheCreation : 0,
       apiEquivalentCostUsd: Number(displayApiCost.toFixed(2)),
+      apiEquivalentCostComplete:
+        accuracy.usageIsReliable && platformApiCostComplete,
       reportedCostUsd: Number(displayReported.toFixed(2)),
       estimatedCostUsd: Number(displayEstimated.toFixed(2)),
       netSavingsUsd: Number(netSavings.toFixed(2)),
@@ -618,6 +695,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       tokens: data.tokens,
       percent: grandTotalTokens > 0 ? (data.tokens / grandTotalTokens) * 100 : 0,
       apiEquivalentCostUsd: Number(data.apiCost.toFixed(2)),
+      apiEquivalentCostKnown: data.apiCostKnown,
     }))
     .sort((a, b) => b.tokens - a.tokens);
 
@@ -625,6 +703,9 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
   const totalNetSavings = Math.max(0, totalApiEquivalentCost - totalSubscriptionCost);
   const savingsMultiplier = totalSubscriptionCost > 0 ? totalApiEquivalentCost / totalSubscriptionCost : 1;
   const unreliablePlatforms = platforms.filter((p) => !p.usageIsReliable);
+  const unpricedModelCount = modelDistribution.filter(
+    (model) => !model.apiEquivalentCostKnown,
+  ).length;
   const telemetryIncompleteNote = telemetryIncompleteNoteFor(
     unreliablePlatforms.map((p) => p.name),
   );
@@ -633,6 +714,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
   let tokens5h = 0;
   let derivedCost5hUsd = 0;
   let reportedCost5hUsd = 0;
+  let derivedCost5hComplete = true;
 
   for (const g of token5hGroups) {
     if (!isReliableTokenSourceApp(g.sourceApp)) continue;
@@ -640,9 +722,19 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     tokens5h += qty;
     const model = g.keyRef || "";
     const modelPricing = getModelPricing(model);
+    const label = g.label?.toLowerCase() || "";
+    if (label.includes("inputunsplit") && qty > 0) derivedCost5hComplete = false;
+    const breakdown = label.includes("output")
+      ? { output: qty }
+      : label.includes("cacheread") || label.includes("cache_read") || label.includes("cache_hit")
+        ? { cacheRead: qty }
+        : label.includes("cachecreation") || label.includes("cache_creation") || label.includes("cache_write")
+          ? { cacheCreation: qty }
+          : { input: qty };
     const priced = modelPricing
-      ? deriveTokenCostUsd(modelPricing.pricing, { input: qty })
+      ? deriveTokenCostUsd(modelPricing.pricing, breakdown)
       : null;
+    if (!priced?.complete && qty > 0) derivedCost5hComplete = false;
     derivedCost5hUsd += priced?.costUsd || 0;
   }
 
@@ -668,6 +760,9 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       totalAgentCount: AGENT_PLATFORMS.length,
       totalTokens: grandTotalTokens,
       totalApiEquivalentCostUsd: Number(totalApiEquivalentCost.toFixed(2)),
+      apiEquivalentCostComplete:
+        unpricedModelCount === 0 && unreliablePlatforms.length === 0,
+      unpricedModelCount,
       totalSubscriptionCostUsd: Number(totalSubscriptionCost.toFixed(2)),
       totalNetSavingsUsd: Number(totalNetSavings.toFixed(2)),
       savingsMultiplier: Number(savingsMultiplier.toFixed(1)),
@@ -679,6 +774,8 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     burn5h: {
       tokens5h,
       costEstimate5hUsd: Number(costEstimate5hUsd.toFixed(2)),
+      costEstimateComplete:
+        derivedCost5hComplete && unreliablePlatforms.length === 0,
       burnRateTokensPerHour: Math.round(burnRateTokensPerHour),
       burnRateUsdPerHour: Number(burnRateUsdPerHour.toFixed(2)),
     },

@@ -130,11 +130,45 @@ const CLAUDE_OPUS_5: ModelPricingEntry = {
   mode: "chat",
 };
 
-const DEEPSEEK_V4_PRO: ModelPricingEntry = {
-  input_cost_per_token: 1.4e-7,
-  output_cost_per_token: 2.8e-7,
-  cache_read_input_token_cost: 1.4e-8,
-  litellm_provider: "deepseek",
+const CLAUDE_SONNET_5: ModelPricingEntry = {
+  input_cost_per_token: 2e-6,
+  output_cost_per_token: 10e-6,
+  cache_read_input_token_cost: 0.2e-6,
+  litellm_provider: "anthropic",
+  mode: "chat",
+};
+
+const GPT_56_LUNA: ModelPricingEntry = {
+  input_cost_per_token: 0.2e-6,
+  output_cost_per_token: 1.2e-6,
+  cache_read_input_token_cost: 0.02e-6,
+  litellm_provider: "openai",
+  mode: "chat",
+};
+
+const GPT_56_TERRA: ModelPricingEntry = {
+  input_cost_per_token: 2e-6,
+  output_cost_per_token: 12e-6,
+  cache_read_input_token_cost: 0.2e-6,
+  litellm_provider: "openai",
+  mode: "chat",
+};
+
+const GPT_56_SOL: ModelPricingEntry = {
+  input_cost_per_token: 4e-6,
+  output_cost_per_token: 20e-6,
+  cache_read_input_token_cost: 0.4e-6,
+  litellm_provider: "openai",
+  mode: "chat",
+};
+
+/** OpenAI standard API rates, 2026-09-13.  Codex OAuth usage remains a
+ * subscription signal; this price is API-equivalent analytics only. */
+const GPT_6_ASTRA: ModelPricingEntry = {
+  input_cost_per_token: 1e-5,
+  output_cost_per_token: 5e-5,
+  cache_read_input_token_cost: 1e-6,
+  litellm_provider: "openai",
   mode: "chat",
 };
 
@@ -144,8 +178,11 @@ const RUNTIME_PRICING_OVERRIDES: Record<string, ModelPricingEntry> = {
   "gemini-3.6-flash": GEMINI_36_FLASH,
   "gemini-2.5-pro": GEMINI_25_PRO,
   "claude-opus-5": CLAUDE_OPUS_5,
-  "deepseek-v4-pro": DEEPSEEK_V4_PRO,
-  "deepseek-v4-flash": DEEPSEEK_V4_PRO,
+  "claude-sonnet-5": CLAUDE_SONNET_5,
+  "gpt-5.6-luna": GPT_56_LUNA,
+  "gpt-5.6-terra": GPT_56_TERRA,
+  "gpt-5.6-sol": GPT_56_SOL,
+  "gpt-6-astra": GPT_6_ASTRA,
   "grok-4.6": GROK_46,
   "grok-4.6-build": GROK_46,
   "xai/grok-4.6": GROK_46,
@@ -155,6 +192,25 @@ const RUNTIME_PRICING_OVERRIDES: Record<string, ModelPricingEntry> = {
   "xai/grok-4.5": GROK_45,
   "xai/grok-4.5-build": GROK_45,
 };
+
+// Official DeepSeek V4 pricing changes by the request's UTC weekday/hour,
+// while Codex Spark has no published standard API rate.  Grouped analytics
+// cannot truthfully price either case, so they stay explicitly unknown.
+const EXPLICITLY_UNPRICED_MODELS = new Set([
+  "deepseek-flash",
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "gpt-5.3-codex-spark",
+]);
+
+function isExplicitlyUnpricedAlias(model: string): boolean {
+  const lower = model.trim().toLowerCase();
+  const basename = lower.split("/").pop() || lower;
+  if (EXPLICITLY_UNPRICED_MODELS.has(lower) || EXPLICITLY_UNPRICED_MODELS.has(basename)) {
+    return true;
+  }
+  return [...EXPLICITLY_UNPRICED_MODELS].some((key) => basename.startsWith(`${key}-`));
+}
 
 function catalogEntry(key: string): ModelPricingEntry | undefined {
   return RUNTIME_PRICING_OVERRIDES[key] ?? CATALOG[key];
@@ -228,6 +284,7 @@ export function resolvePricingKey(model: string): string | null {
 function resolvePricingKeyUncached(model: string): string | null {
   const trimmed = model.trim();
   if (!trimmed) return null;
+  if (isExplicitlyUnpricedAlias(trimmed)) return null;
   if (catalogEntry(trimmed)) return trimmed;
 
   const lower = trimmed.toLowerCase();
@@ -275,7 +332,7 @@ export function getModelPricing(model: string): {
   pricing: ModelPricingEntry;
 } | null {
   const key = resolvePricingKey(model);
-  if (!key) return null;
+  if (!key || isExplicitlyUnpricedAlias(key)) return null;
   const pricing = catalogEntry(key);
   if (!pricing) return null;
   return { key, pricing };

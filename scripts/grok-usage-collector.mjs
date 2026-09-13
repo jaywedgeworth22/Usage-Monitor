@@ -24,9 +24,12 @@ import {
   postUsageBatches,
 } from "./lib/session-token-collectors.mjs";
 import {
+  canAdvanceCollectorCheckpoint,
   expandHome,
-  parseCollectorArgs,
+  fileMayContainEventsSince,
   readIfFresh,
+  recordCollectorSuccess,
+  resolveCollectorArgs,
   resolveCollectorToken,
   sessionKeyFor,
   walkFiles,
@@ -51,12 +54,17 @@ function fail(message, code = 1) {
 export async function collectGrokEvents({
   grokHome = expandHome(process.env.GROK_HOME || join(homedir(), ".grok")),
   since,
+  scanStatus,
 } = {}) {
+  const markIncomplete = () => {
+    if (scanStatus) scanStatus.complete = false;
+  };
   const root = join(grokHome, "sessions");
-  const files = await walkFiles(root, { name: "updates.jsonl" });
+  const files = await walkFiles(root, { name: "updates.jsonl", onTraversalError: markIncomplete });
   const events = [];
   for (const file of files) {
-    const text = await readIfFresh(file);
+    if (!(await fileMayContainEventsSince(file, since, { onStatError: markIncomplete }))) continue;
+    const text = await readIfFresh(file, { onReadError: markIncomplete });
     if (!text) continue;
     const parsed = parseGrokUpdatesJsonl(text, {
       sessionKey: sessionKeyFor(grokHome, file),
@@ -67,17 +75,19 @@ export async function collectGrokEvents({
 }
 
 async function main() {
+  const passStartedAt = new Date();
   let args;
   try {
-    args = parseCollectorArgs(process.argv);
+    args = await resolveCollectorArgs(process.argv, PRODUCER_ID, { now: passStartedAt });
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
-  const events = await collectGrokEvents({ since: args.since });
+  const scanStatus = { complete: true };
+  const events = await collectGrokEvents({ since: args.since, scanStatus });
   const tokenEvents = events.filter((e) => e.metricType === "usage").length;
   const costEvents = events.filter((e) => e.metricType === "cost").length;
   log(
-    `parsed ${events.length} event(s) (${tokenEvents} token, ${costEvents} cost) since ${args.since.toISOString()}`
+    `parsed ${events.length} event(s) (${tokenEvents} token, ${costEvents} cost) since ${args.since.toISOString()}${args.resumedFromState ? " (incremental)" : ""}`
   );
   if (DEBUG) {
     const models = new Set(events.map((e) => e.producerKeyRef).filter(Boolean));
@@ -85,6 +95,9 @@ async function main() {
   }
   if (events.length === 0) {
     log("nothing to send");
+    if (!DRY && canAdvanceCollectorCheckpoint(args, { scanComplete: scanStatus.complete })) {
+      await recordCollectorSuccess(PRODUCER_ID, passStartedAt);
+    }
     return;
   }
   const token = resolveCollectorToken([
@@ -102,6 +115,9 @@ async function main() {
     });
     log(`ingest ack: ${JSON.stringify({ received: ack.received, persisted: ack.persisted, rejected: ack.rejected, dryRun: ack.dryRun ?? false })}`);
     if (ack.rejected > 0) fail(`Ingest reported rejections: ${ack.rejected}`);
+    if (!DRY && canAdvanceCollectorCheckpoint(args, { scanComplete: scanStatus.complete })) {
+      await recordCollectorSuccess(PRODUCER_ID, passStartedAt);
+    }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }

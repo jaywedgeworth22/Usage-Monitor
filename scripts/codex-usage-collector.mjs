@@ -31,9 +31,14 @@ import {
 } from "./lib/codex-observed-plan.mjs";
 import {
   codexSessionKeyFor,
+  botFleetChildExclusionEnabled,
+  canAdvanceCollectorCheckpoint,
   expandHome,
-  parseCollectorArgs,
+  fileMayContainEventsSince,
+  isBotFleetManagedCodexSession,
   readIfFresh,
+  recordCollectorSuccess,
+  resolveCollectorArgs,
   resolveCollectorToken,
   walkFiles,
 } from "./lib/run-session-token-collector.mjs";
@@ -57,14 +62,20 @@ function fail(message, code = 1) {
 export async function collectCodexEvents({
   codexHome = expandHome(process.env.CODEX_HOME || join(homedir(), ".codex")),
   since,
+  scanStatus,
 } = {}) {
+  const markIncomplete = () => {
+    if (scanStatus) scanStatus.complete = false;
+  };
   const roots = ["sessions", "archived_sessions"].map((dir) => join(codexHome, dir));
   const events = [];
   for (const root of roots) {
-    const files = await walkFiles(root, { suffix: ".jsonl" });
+    const files = await walkFiles(root, { suffix: ".jsonl", onTraversalError: markIncomplete });
     for (const file of files) {
-      const text = await readIfFresh(file);
+      if (!(await fileMayContainEventsSince(file, since, { onStatError: markIncomplete }))) continue;
+      const text = await readIfFresh(file, { onReadError: markIncomplete });
       if (!text) continue;
+      if (botFleetChildExclusionEnabled() && isBotFleetManagedCodexSession(text)) continue;
       const parsed = parseCodexJsonl(text, {
         sessionKey: codexSessionKeyFor(codexHome, file),
       });
@@ -75,14 +86,16 @@ export async function collectCodexEvents({
 }
 
 async function main() {
+  const passStartedAt = new Date();
   let args;
   try {
-    args = parseCollectorArgs(process.argv);
+    args = await resolveCollectorArgs(process.argv, PRODUCER_ID, { now: passStartedAt });
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
-  const events = await collectCodexEvents({ since: args.since });
-  log(`parsed ${events.length} token event(s) since ${args.since.toISOString()}`);
+  const scanStatus = { complete: true };
+  const events = await collectCodexEvents({ since: args.since, scanStatus });
+  log(`parsed ${events.length} token event(s) since ${args.since.toISOString()}${args.resumedFromState ? " (incremental)" : ""}`);
   const observed = await readCodexObservedPlan(join(expandHome(process.env.CODEX_HOME || join(homedir(), ".codex")), "auth.json"));
   if (observed?.planType) {
     events.push(
@@ -99,6 +112,9 @@ async function main() {
   }
   if (events.length === 0) {
     log("nothing to send");
+    if (!DRY && canAdvanceCollectorCheckpoint(args, { scanComplete: scanStatus.complete })) {
+      await recordCollectorSuccess(PRODUCER_ID, passStartedAt);
+    }
     return;
   }
   const token = resolveCollectorToken([
@@ -116,6 +132,9 @@ async function main() {
     });
     log(`ingest ack: ${JSON.stringify({ received: ack.received, persisted: ack.persisted, rejected: ack.rejected, dryRun: ack.dryRun ?? false })}`);
     if (ack.rejected > 0) fail(`Ingest reported rejections: ${ack.rejected}`);
+    if (!DRY && canAdvanceCollectorCheckpoint(args, { scanComplete: scanStatus.complete })) {
+      await recordCollectorSuccess(PRODUCER_ID, passStartedAt);
+    }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }

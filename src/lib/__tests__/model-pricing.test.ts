@@ -59,6 +59,50 @@ describe("resolvePricingKey", () => {
     expect(batch?.pricing.output_cost_per_token).toBeCloseTo(9.375e-7, 12);
   });
 
+  it("prices GPT-6 Astra at official OpenAI API-equivalent rates", () => {
+    const astra = getModelPricing("gpt-6-astra");
+    expect(astra?.pricing.input_cost_per_token).toBeCloseTo(10e-6, 12);
+    expect(astra?.pricing.cache_read_input_token_cost).toBeCloseTo(1e-6, 12);
+    expect(astra?.pricing.output_cost_per_token).toBeCloseTo(50e-6, 12);
+    const derived = deriveTokenCostUsd(astra!.pricing, {
+      input: 1_000_000,
+      cacheRead: 1_000_000,
+      output: 1_000_000,
+    });
+    expect(derived.costUsd).toBeCloseTo(61, 6);
+  });
+
+  it("prices the current Codex standard models and leaves Spark unknown", () => {
+    const cases = [
+      ["gpt-5.6-luna", 0.2e-6, 0.02e-6, 1.2e-6],
+      ["gpt-5.6-terra", 2e-6, 0.2e-6, 12e-6],
+      ["gpt-5.6-sol", 4e-6, 0.4e-6, 20e-6],
+    ] as const;
+    for (const [model, input, cacheRead, output] of cases) {
+      const pricing = getModelPricing(model)?.pricing;
+      expect(pricing?.input_cost_per_token).toBeCloseTo(input, 12);
+      expect(pricing?.cache_read_input_token_cost).toBeCloseTo(cacheRead, 12);
+      expect(pricing?.output_cost_per_token).toBeCloseTo(output, 12);
+    }
+    expect(resolvePricingKey("gpt-5.3-codex-spark")).toBeNull();
+  });
+
+  it("prices Claude Sonnet 5 without inventing a cache-write rate", () => {
+    const pricing = getModelPricing("claude-sonnet-5")?.pricing;
+    expect(pricing?.input_cost_per_token).toBeCloseTo(2e-6, 12);
+    expect(pricing?.cache_read_input_token_cost).toBeCloseTo(0.2e-6, 12);
+    expect(pricing?.output_cost_per_token).toBeCloseTo(10e-6, 12);
+    expect(pricing?.cache_creation_input_token_cost).toBeUndefined();
+  });
+
+  it("leaves time-dependent DeepSeek V4 rates unknown without request time", () => {
+    expect(resolvePricingKey("deepseek-v4-flash")).toBeNull();
+    expect(resolvePricingKey("deepseek-v4-pro")).toBeNull();
+    expect(resolvePricingKey("deepseek/deepseek-v4-pro")).toBeNull();
+    expect(resolvePricingKey("openrouter/deepseek/deepseek-v4-flash-20260913")).toBeNull();
+    expect(getModelPricing("deepseek/deepseek-v4-pro")).toBeNull();
+  });
+
   it("caches lookups without changing results", () => {
     const first = resolvePricingKey("gpt-4o");
     const second = resolvePricingKey("gpt-4o");
