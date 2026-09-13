@@ -122,6 +122,25 @@ final class LocalQuotaReaderTests: XCTestCase {
         XCTAssertEqual(result.windows.first { $0.providerKey == "xai" }?.remainingPercent, 40)
     }
 
+    func testClaudeKeychainReaderTimeoutDoesNotHoldRefresh() async throws {
+        let home = try makeFixtureHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try writeJSON(["mcpOAuth": [:]], to: home.appendingPathComponent(".claude/.credentials.json"))
+        let started = ContinuousClock.now
+        let reader = LocalQuotaReader(
+            homeDirectory: home,
+            runAntigravity: { Data("{}".utf8) },
+            readClaudeKeychain: {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                return Data(#"{"claudeAiOauth":{"accessToken":"never-used"}}"#.utf8)
+            }
+        )
+        let result = await reader.read()
+        let elapsed = started.duration(to: .now)
+        XCTAssertLessThan(elapsed, .seconds(5))
+        XCTAssertEqual(result.issues["anthropic"], "Claude Code quota login is unavailable.  Sign in to Claude Code to connect subscription quotas.")
+    }
+
     func testGrokSubscriptionConfigExcludesOnDemandAndPrepaidCaps() async throws {
         let home = try makeFixtureHome()
         defer { try? FileManager.default.removeItem(at: home) }

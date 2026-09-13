@@ -128,6 +128,7 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+- **2026-09-13 - CODEX - IN PROGRESS - Native macOS Usage Monitor quota app.**  PR #1450, issue #1449.  Menu bar/Dock/both installed and verified with 37 tests before owner follow-ups: hide unused platforms, reuse BotFleet SVG logos, collapse MiniMax video, and investigate Grok Bot quotas for UM only.  BotFleet integration is coordinated separately. <!-- wb-agent-report:5acfbc5c64334f92a94db9a6d2075908 -->
 
 (none)
 
@@ -482,7 +483,6 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 - **Resolve Agent Sync Relay noise and Anthropic must-keep-funded alerts (AG)** — MERGED PR #113 / DEPLOYED. Updated `ensureAgentSyncProviderSeeded` to automatically disable the Agent Sync Relay provider on startup/poll, silencing the spurious missing_snapshot PagerDuty alerts. Also added a migration step in the same boot sequence to unflag `mustKeepFunded` for Anthropic since Anthropic does not expose a wallet balance. Tests green.
 
 ## Completed
-- **2026-09-13 - CODEX - COMPLETE - Native macOS Usage Monitor quota app.**  PR #1450, issue #1449, board 5acfbc5c.  Installed locally at ~/Applications/Usage Monitor.app with menu bar, Dock, or both; eight local quota readers and optional server coverage.  Antigravity displays only Gemini Models and Third-Party Models, each with actual 5-hour and weekly caps/resets.  37 offline tests pass; native bundle signing and plist checks pass; live Codex, Cursor, MiniMax, and all four Antigravity windows verified.  Grok live payload mapping verified and regression-tested.  Claude lacks subscription OAuth, Kimi login is expired, and Gemini CLI/Copilot/Windsurf/DeepSeek remain unconnected; those states are explicit.  On-demand helper inventoried and Coding completion note maintained.  Local ad hoc distribution.
 
 
 - **2026-08-21 — KIMI — PLANNED — [P1] Restore deploy gating on the Coolify path.**  Board item d0f5f1db.  _RETIRED 2026-08-21: Kimi seat retired by owner directive.  Deploy gating handled by Coolify webhook deploy observer (`production-deploy-verify.yml`) and branch protection.  Retired per fleet protocol._

@@ -10,7 +10,11 @@ let package = Package(
     ],
     targets: [
         .target(name: "QuotaCore", linkerSettings: [.linkedLibrary("sqlite3")]),
-        .executableTarget(name: "UsageMonitorMenu", dependencies: ["QuotaCore"]),
+        .executableTarget(
+            name: "UsageMonitorMenu",
+            dependencies: ["QuotaCore"],
+            resources: [.process("Resources")]
+        ),
         .testTarget(name: "QuotaCoreTests", dependencies: ["QuotaCore"]),
     ]
 )

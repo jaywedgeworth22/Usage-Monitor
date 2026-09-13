@@ -34,8 +34,11 @@ struct MonitorDashboard: View {
                     VStack(alignment: .leading, spacing: 22) {
                         summary
                         if let error = model.serverError {
-                            Label("Server: \(error)  Last readings may be outdated.", systemImage: "exclamationmark.triangle")
+                            Label("Server: \(error)  Local readings remain available.", systemImage: "exclamationmark.triangle")
                                 .font(.callout).foregroundStyle(Palette.warning)
+                        }
+                        if let error = model.handoffError {
+                            Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(Palette.warning)
                         }
                         if !model.localEnabled && !model.serverEnabled {
                             ContentUnavailableView("Connect a Quota Source", systemImage: "link",
@@ -80,10 +83,10 @@ struct MonitorDashboard: View {
                 Section("Platforms") {
                     ForEach(model.sections, id: \.providerKey) { section in
                         HStack(spacing: 8) {
-                            Circle().fill(section.hasFreshReport && model.issues[section.providerKey] == nil ? Palette.accent : Color.gray.opacity(0.4)).frame(width: 6, height: 6)
+                            PlatformLogo(providerKey: section.providerKey, size: 17)
                             Text(section.providerLabel)
                             Spacer()
-                            if section.providerKey != "google-antigravity", model.issues[section.providerKey] == nil, let remaining = section.windows.filter(\.isFresh).compactMap(\.remainingPercent).min() {
+                            if section.providerKey != "google-antigravity", model.issues[section.providerKey] == nil, let remaining = section.windows.filter { $0.isFresh && !$0.window.isSupplementaryVideoQuota }.compactMap(\.remainingPercent).min() {
                                 Text("\(Int(remaining.rounded()))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                             }
                         }.tag(section.providerKey)
@@ -153,18 +156,23 @@ struct PlatformCard: View {
     let compact: Bool
     var wide = false
     @State private var expanded = false
+    @State private var videoExpanded = false
 
+    private var primaryWindows: [QuotaWindowSnapshot] {
+        section.windows.filter { !$0.window.isSupplementaryVideoQuota }
+    }
+    private var videoWindows: [QuotaWindowSnapshot] {
+        section.windows.filter { $0.window.isSupplementaryVideoQuota }
+    }
     private var displayedWindows: [QuotaWindowSnapshot] {
-        expanded ? section.windows : Array(section.windows.prefix(4))
+        expanded ? primaryWindows : Array(primaryWindows.prefix(4))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 12 : 16) {
             HStack(spacing: 10) {
-                Text(monogram).font(.system(size: compact ? 12 : 15, weight: .bold, design: .rounded))
+                PlatformLogo(providerKey: section.providerKey, size: compact ? 25 : 32)
                     .frame(width: compact ? 28 : 36, height: compact ? 28 : 36)
-                    .background(Palette.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
-                    .foregroundStyle(Palette.accent).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(section.providerLabel).font(.headline)
                     if section.via == "antigravity" {
@@ -199,9 +207,22 @@ struct PlatformCard: View {
                         QuotaRow(snapshot: snapshot, now: now, sourceFailed: issue != nil, compact: compact)
                     }
                 }
-                if section.windows.count > 4 {
-                    Button(expanded ? "Show Less" : "Show All \(section.windows.count) Windows") { expanded.toggle() }
+                if primaryWindows.count > 4 {
+                    Button(expanded ? "Show Less" : "Show All \(primaryWindows.count) Windows") { expanded.toggle() }
                         .buttonStyle(.plain).font(.caption.weight(.medium)).foregroundStyle(Palette.accent)
+                }
+                if !videoWindows.isEmpty {
+                    Divider()
+                    DisclosureGroup(isExpanded: $videoExpanded) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(videoWindows, id: \.window.id) { snapshot in
+                                QuotaRow(snapshot: snapshot, now: now, sourceFailed: issue != nil, compact: true)
+                            }
+                        }.padding(.top, 8)
+                    } label: {
+                        Label("Video · \(videoWindows.count) windows", systemImage: "video")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 if let issue {
                     Label(issue, systemImage: "exclamationmark.circle")
@@ -215,15 +236,7 @@ struct PlatformCard: View {
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.black.opacity(0.07)))
     }
 
-    private var monogram: String {
-        switch section.providerKey {
-        case "anthropic": return "Cl"
-        case "openai": return "Cx"
-        case "google-antigravity": return "Ag"
-        case "github-copilot": return "Co"
-        default: return String(section.providerLabel.prefix(2))
-        }
-    }
+
 }
 
 private struct QuotaRow: View {
@@ -339,6 +352,7 @@ struct MonitorSettings: View {
     @State private var token = ""
     @State private var message: String?
     @State private var isError = false
+    @State private var saving = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -351,7 +365,7 @@ struct MonitorSettings: View {
             GroupBox("Quota Sources") {
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle("Read Agent Quotas on This Mac", isOn: $local)
-                    Text("Uses existing Claude, Codex, Antigravity, Cursor, Grok, MiniMax, Kimi, and Gemini CLI sign-ins.  Other platforms can report through your server.")
+                    Text("Uses existing Claude, Codex, Antigravity, Cursor, Grok CLI, Grok Bot, and MiniMax sign-ins.  Shares local quota readings with BotFleet.")
                         .font(.caption).foregroundStyle(.secondary)
                     Divider()
                     Toggle("Connect Usage Monitor Server", isOn: $server)
@@ -370,20 +384,30 @@ struct MonitorSettings: View {
             HStack {
                 if model.hasSavedToken {
                     Button("Forget Server Token", role: .destructive) {
-                        do { try model.forgetServer(); server = false; token = ""; message = "Server token removed."; isError = false }
-                        catch { message = error.localizedDescription; isError = true }
+                        saving = true
+                        Task {
+                            defer { saving = false }
+                            do { try await model.forgetServer(); server = false; token = ""; message = "Server token removed."; isError = false }
+                            catch { message = error.localizedDescription; isError = true }
+                        }
                     }
                 }
                 Spacer()
                 Button("Save & Refresh") {
-                    do {
-                        try model.saveConnection(local: local, server: server, endpoint: endpoint, token: token)
-                        token = ""; message = "Settings saved."; isError = false
-                    } catch { message = error.localizedDescription; isError = true }
+                    saving = true
+                    Task {
+                        defer { saving = false }
+                        do {
+                            try await model.saveConnection(local: local, server: server, endpoint: endpoint, token: token)
+                            token = ""; message = "Settings saved."; isError = false
+                        } catch { message = error.localizedDescription; isError = true }
+                    }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }
+            if saving { ProgressView("Saving settings…").font(.caption) }
             Spacer(minLength: 0)
         }
+        .disabled(saving)
         .padding(24).frame(width: 580, height: 510).tint(Palette.accent).preferredColorScheme(.light)
         .onAppear { local = model.localEnabled; server = model.serverEnabled; endpoint = model.endpoint }
     }

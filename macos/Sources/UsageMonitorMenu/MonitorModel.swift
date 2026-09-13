@@ -24,6 +24,7 @@ final class MonitorModel: ObservableObject {
     @Published private(set) var lastChecked: Date?
     @Published private(set) var issues: [String: String] = [:]
     @Published private(set) var serverError: String?
+    @Published private(set) var handoffError: String?
     @Published private(set) var now = Date()
     @Published private(set) var localEnabled: Bool
     @Published private(set) var serverEnabled: Bool
@@ -44,13 +45,13 @@ final class MonitorModel: ObservableObject {
         serverEnabled = defaults.bool(forKey: "serverEnabled")
         let savedEndpoint = defaults.string(forKey: "endpoint") ?? "https://usage.jays.services/api/quota-windows"
         endpoint = savedEndpoint
-        hasSavedToken = TokenStore.read(server: savedEndpoint) != nil
+        hasSavedToken = defaults.bool(forKey: "hasSavedToken")
     }
 
     var sections: [QuotaPlatformSection] { response.platformSections(now: now) }
     var freshWindows: [QuotaWindowSnapshot] {
         sections.flatMap(\.windows).filter {
-            $0.isFresh && $0.remainingPercent != nil && issues[$0.window.canonicalProviderKey] == nil
+            $0.isFresh && $0.remainingPercent != nil && !$0.window.isSupplementaryVideoQuota && issues[$0.window.canonicalProviderKey] == nil
         }
     }
     var reportingCount: Int { Set(freshWindows.map { $0.window.canonicalProviderKey }).count }
@@ -86,15 +87,17 @@ final class MonitorModel: ObservableObject {
         clockTimer?.invalidate()
     }
 
-    func saveConnection(local: Bool, server: Bool, endpoint input: String, token: String) throws {
+    func saveConnection(local: Bool, server: Bool, endpoint input: String, token: String) async throws {
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: value), QuotaClient.isAllowedEndpoint(url) else { throw QuotaClientError.invalidEndpoint }
         let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         if !cleanToken.isEmpty {
             guard !cleanToken.contains("\n"), !cleanToken.contains("\r") else { throw QuotaClientError.invalidToken }
-            try TokenStore.save(cleanToken, server: value)
+            try await TokenStore.save(cleanToken, server: value)
         }
-        if server && TokenStore.read(server: value) == nil { throw QuotaClientError.invalidToken }
+        let savedToken = !cleanToken.isEmpty ? cleanToken : server ? await TokenStore.read(server: value) : nil
+        if server && savedToken == nil { throw QuotaClientError.invalidToken }
+        let saved = savedToken != nil || (value == endpoint && hasSavedToken)
         revision += 1
         request?.cancel()
         request = nil
@@ -102,7 +105,8 @@ final class MonitorModel: ObservableObject {
         localEnabled = local
         serverEnabled = server
         endpoint = value
-        hasSavedToken = TokenStore.read(server: value) != nil
+        hasSavedToken = saved
+        defaults.set(saved, forKey: "hasSavedToken")
         defaults.set(local, forKey: "localEnabled")
         defaults.set(server, forKey: "serverEnabled")
         defaults.set(value, forKey: "endpoint")
@@ -116,9 +120,11 @@ final class MonitorModel: ObservableObject {
         refresh()
     }
 
-    func forgetServer() throws {
-        try TokenStore.delete(server: endpoint)
-        try saveConnection(local: localEnabled, server: false, endpoint: endpoint, token: "")
+    func forgetServer() async throws {
+        try await TokenStore.delete(server: endpoint)
+        hasSavedToken = false
+        defaults.set(false, forKey: "hasSavedToken")
+        try await saveConnection(local: localEnabled, server: false, endpoint: endpoint, token: "")
     }
 
     func refresh() {
@@ -128,14 +134,15 @@ final class MonitorModel: ObservableObject {
         let useLocal = localEnabled
         let useServer = serverEnabled
         let currentEndpoint = endpoint
-        let token = useServer ? TokenStore.read(server: currentEndpoint) : nil
         request = Task { [weak self] in
             async let localRead: LocalQuotaResult? = useLocal ? Self.readLocalSources() : nil
             var newServer: QuotaResponse?
             var failure: String?
             if useServer {
+                let token = await TokenStore.read(server: currentEndpoint)
                 do {
-                    guard let url = URL(string: currentEndpoint), let token else { throw QuotaClientError.invalidToken }
+                    guard let url = URL(string: currentEndpoint) else { throw QuotaClientError.invalidEndpoint }
+                    guard let token else { throw TokenStore.Failure.read }
                     let client = try QuotaClient(endpoint: url, token: token)
                     newServer = try await client.fetch()
                 } catch is CancellationError { return }
@@ -153,10 +160,17 @@ final class MonitorModel: ObservableObject {
                 self.issues = [:]
                 self.localWindows = []
             }
+            do {
+                if useLocal { try LocalQuotaSnapshot.write(windows: self.localWindows, now: self.now) }
+                else { try LocalQuotaSnapshot.remove() }
+                self.handoffError = nil
+            } catch {
+                self.handoffError = "BotFleet quota sharing is unavailable."
+            }
             if let newServer { self.serverWindows = newServer.platformSections(now: self.now).flatMap { $0.windows.map(\.window) } }
             if !useServer { self.serverWindows = [] }
             self.serverError = failure
-            let localProviders = Set(self.localWindows.filter { $0.boundedRemainingPercent != nil }.map(\.canonicalProviderKey))
+            let localProviders = Set(self.localWindows.map(\.canonicalProviderKey))
             // Provider identity is the merge boundary; the server may track
             // another account, so do not borrow its weekly cap for a local login.
             let supplemental = self.serverWindows.filter { !localProviders.contains($0.canonicalProviderKey) }
@@ -173,10 +187,10 @@ final class MonitorModel: ObservableObject {
 
     private nonisolated static func readLocalSources() async -> LocalQuotaResult {
         async let primary = LocalQuotaReader().read()
-        async let additional = AdditionalQuotaReader().read()
         async let cursor = CursorQuotaReader().read()
+        async let grokBot = GrokBotQuotaReader().read()
         async let antigravity = AntigravitySummaryReader().read()
-        let results = await [primary, additional, cursor]
+        let results = await [primary, cursor, grokBot]
         let summary = await antigravity
         var windows = results.flatMap(\.windows)
         var issues = results.reduce(into: [String: String]()) { $0.merge($1.issues) { _, next in next } }

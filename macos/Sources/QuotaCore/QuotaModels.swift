@@ -143,6 +143,13 @@ public struct QuotaWindow: Codable, Equatable, Sendable {
         QuotaProviders.canonicalKey(provider: provider, providerKey: providerKey, via: via)
     }
 
+    /// Video allowances are supplementary to MiniMax's coding subscription.
+    public var isSupplementaryVideoQuota: Bool {
+        guard canonicalProviderKey == "minimax" else { return false }
+        let identity = [modelId, modelType, label].compactMap { $0 }.joined(separator: " ").lowercased()
+        return identity.contains("video") || identity.contains("hailuo")
+    }
+
     /// A bounded value suitable for display.  NaN and infinities are unknown.
     public var boundedRemainingPercent: Double? {
         guard !remainingUnknown, let value = remainingPercent, value.isFinite else { return nil }
@@ -336,7 +343,7 @@ public extension QuotaResponse {
             sections.append(makeSection(key: provider.key, label: provider.label, via: provider.via, expected: true, grouped: grouped, now: now))
         }
 
-        let futureKeys = grouped.keys.filter { key in !QuotaProviders.expected.contains(where: { $0.key == key }) }.sorted()
+        let futureKeys = grouped.keys.filter { key in !QuotaProviders.hidden.contains(key) && !QuotaProviders.expected.contains(where: { $0.key == key }) }.sorted()
         for key in futureKeys {
             let group = providerGroups.first { QuotaProviders.canonicalKey(provider: $0.provider, providerKey: nil, via: $0.via) == key }
             let groupLabel = group?.providerLabel.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -417,17 +424,16 @@ private enum QuotaProviders {
         let via: String?
     }
 
+    static let hidden: Set<String> = ["kimi", "gemini-cli", "github-copilot", "windsurf"]
+
     static let expected: [Expected] = [
         Expected(key: "anthropic", label: "Claude", via: nil),
         Expected(key: "openai", label: "Codex", via: nil),
         Expected(key: "google-antigravity", label: "Antigravity", via: "antigravity"),
         Expected(key: "cursor", label: "Cursor", via: nil),
-        Expected(key: "xai", label: "Grok", via: nil),
+        Expected(key: "xai", label: "Grok CLI", via: nil),
+        Expected(key: "grok-bot", label: "Grok Bot", via: "cursor"),
         Expected(key: "minimax", label: "MiniMax", via: nil),
-        Expected(key: "kimi", label: "Kimi", via: nil),
-        Expected(key: "gemini-cli", label: "Gemini CLI", via: nil),
-        Expected(key: "github-copilot", label: "GitHub Copilot", via: nil),
-        Expected(key: "windsurf", label: "Windsurf", via: nil),
         Expected(key: "deepseek", label: "DeepSeek", via: nil),
     ]
 
@@ -443,6 +449,7 @@ private enum QuotaProviders {
             "google": "google-antigravity", "google-antigravity": "google-antigravity", "antigravity": "google-antigravity", "antigravity-cli": "google-antigravity",
             "cursor": "cursor",
             "xai": "xai", "grok": "xai", "grok-build": "xai",
+            "grok-bot": "grok-bot", "grok bot": "grok-bot", "grokbot": "grok-bot",
             "minimax": "minimax", "minimax-code": "minimax",
             "kimi": "kimi", "moonshot": "kimi", "moonshot-ai": "kimi",
             "gemini": "gemini-cli", "gemini-cli": "gemini-cli",

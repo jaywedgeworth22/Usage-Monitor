@@ -27,7 +27,7 @@ public struct LocalQuotaReader: Sendable {
     private let now: @Sendable () -> Date
     private let fetchJSON: @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
     private let runAntigravity: @Sendable () async throws -> Data
-    private let readClaudeKeychain: @Sendable () -> Data?
+    private let readClaudeKeychain: @Sendable () async -> Data?
 
     private static let maxCredentialBytes = 1_048_576
     private static let maxResponseBytes = 1_048_576
@@ -43,7 +43,7 @@ public struct LocalQuotaReader: Sendable {
         now: @escaping @Sendable () -> Date = { Date() },
         fetchJSON: (@Sendable (URLRequest) async throws -> (Data, HTTPURLResponse))? = nil,
         runAntigravity: (@Sendable () async throws -> Data)? = nil,
-        readClaudeKeychain: (@Sendable () -> Data?)? = nil
+        readClaudeKeychain: (@Sendable () async -> Data?)? = nil
     ) {
         self.homeDirectory = homeDirectory.standardizedFileURL
         self.now = now
@@ -51,7 +51,7 @@ public struct LocalQuotaReader: Sendable {
         self.runAntigravity = runAntigravity ?? Self.makeAntigravityRunner(homeDirectory: self.homeDirectory)
         if let readClaudeKeychain { self.readClaudeKeychain = readClaudeKeychain }
         else if self.homeDirectory == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL {
-            self.readClaudeKeychain = { ClaudeCredentialSource.read() }
+            self.readClaudeKeychain = { await ClaudeCredentialSource.read() }
         } else { self.readClaudeKeychain = { nil } }
     }
 
@@ -102,7 +102,7 @@ public struct LocalQuotaReader: Sendable {
             return value
         }
         var candidate = validOAuth(file)
-        if candidate == nil, let data = readClaudeKeychain(), data.count <= 65_536,
+        if candidate == nil, let data = await ClaudeCredentialSource.boundedRead({ await readClaudeKeychain() }), data.count <= 65_536,
            let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             candidate = validOAuth(root)
         }

@@ -64,6 +64,24 @@ final class QuotaCoreTests: XCTestCase {
         XCTAssertEqual(nanSnapshot.status, .unknown)
     }
 
+    func testUnusedPlatformsStayHiddenEvenWhenServerReportsThem() {
+        let hidden = ["kimi", "gemini-cli", "github-copilot", "windsurf"]
+        let windows = hidden.map { key in
+            QuotaWindow(id: key, provider: key, label: "Quota", remainingPercent: 30, occurredAt: "2023-11-14T22:13:20Z")
+        }
+        let response = QuotaResponse(generatedAt: "", windows: windows)
+        XCTAssertTrue(Set(response.platformSections(now: now).map(\.providerKey)).isDisjoint(with: hidden))
+    }
+
+    func testVideoClassificationDoesNotDemoteCodingOrOtherProviders() {
+        let video = QuotaWindow(id: "video", provider: "minimax", modelId: "video", label: "1d", occurredAt: "")
+        let coding = QuotaWindow(id: "coding", provider: "minimax", modelId: "MiniMax-M2", label: "5h", occurredAt: "")
+        let other = QuotaWindow(id: "other", provider: "xai", label: "Video", occurredAt: "")
+        XCTAssertTrue(video.isSupplementaryVideoQuota)
+        XCTAssertFalse(coding.isSupplementaryVideoQuota)
+        XCTAssertFalse(other.isSupplementaryVideoQuota)
+    }
+
     func testPercentagesAreClampedWithoutInventingCaps() {
         XCTAssertEqual(QuotaWindowSnapshot(window: window(percentage: 130), now: now).remainingPercent, 100)
         XCTAssertEqual(QuotaWindowSnapshot(window: window(percentage: -5), now: now).remainingPercent, 0)
@@ -90,11 +108,11 @@ final class QuotaCoreTests: XCTestCase {
         let future = window(provider: "new-provider", occurred: "2023-11-14T22:05:00Z")
         let response = QuotaResponse(generatedAt: "2023-11-14T22:10:00Z", windows: [future])
         let sections = response.platformSections(now: now)
-        XCTAssertEqual(Array(sections.prefix(11)).map(\.providerKey), [
-            "anthropic", "openai", "google-antigravity", "cursor", "xai", "minimax",
-            "kimi", "gemini-cli", "github-copilot", "windsurf", "deepseek"
+        XCTAssertEqual(Array(sections.prefix(8)).map(\.providerKey), [
+            "anthropic", "openai", "google-antigravity", "cursor", "xai", "grok-bot", "minimax",
+            "deepseek"
         ])
-        XCTAssertTrue(sections.prefix(11).allSatisfy(\.isMissing))
+        XCTAssertTrue(sections.prefix(8).allSatisfy(\.isMissing))
         XCTAssertEqual(sections.last?.providerKey, "new-provider")
     }
 

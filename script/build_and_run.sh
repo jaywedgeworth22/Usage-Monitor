@@ -37,8 +37,9 @@ kill_owned_app() {
 
 build_and_stage() {
   swift build --package-path "$PACKAGE_DIR" --configuration debug --jobs 2
-  local build_binary
-  build_binary="$(swift build --package-path "$PACKAGE_DIR" --configuration debug --show-bin-path)/$PRODUCT_NAME"
+  local build_bin_dir build_binary build_resources
+  build_bin_dir="$(swift build --package-path "$PACKAGE_DIR" --configuration debug --show-bin-path)"
+  build_binary="$build_bin_dir/$PRODUCT_NAME"
   [[ -x "$build_binary" ]] || { echo "built executable not found: $build_binary" >&2; exit 1; }
 
   [[ ! -L "$DIST_DIR" ]] || { echo "refusing symlink dist directory: $DIST_DIR" >&2; exit 1; }
@@ -47,6 +48,12 @@ build_and_stage() {
   mkdir -p "$APP_MACOS" "$APP_RESOURCES"
   cp "$build_binary" "$APP_EXECUTABLE"
   chmod +x "$APP_EXECUTABLE"
+  build_resources="$(find "$build_bin_dir" -maxdepth 1 -type d \( -name "*_"$PRODUCT_NAME.bundle -o -name "*_"$PRODUCT_NAME.resources \) -print -quit)"
+  [[ -n "$build_resources" ]] || {
+    echo "SwiftPM resource bundle not found in: $build_bin_dir" >&2
+    exit 1
+  }
+  cp -R "$build_resources" "$APP_RESOURCES/"
   if [[ -f "$ICON_SOURCE" && -x "$(command -v sips 2>/dev/null || true)" && -x "$(command -v iconutil 2>/dev/null || true)" ]]; then
     local iconset
     iconset="$(mktemp -d "${TMPDIR:-/tmp}/usage-monitor-icon.XXXXXX").iconset"
