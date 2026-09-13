@@ -72,8 +72,14 @@ export async function collectDeepSeekEvents({
   since,
   scanStatus,
 } = {}) {
+  const markIncomplete = () => {
+    if (scanStatus) scanStatus.complete = false;
+  };
   const root = join(dshHome, "sessions");
-  const files = await walkFiles(root, { name: "session.jsonl.zstd" });
+  const files = await walkFiles(root, {
+    name: "session.jsonl.zstd",
+    onTraversalError: markIncomplete,
+  });
   const events = [];
   for (const file of files) {
     if (botFleetChildExclusionEnabled() && isBotFleetSessionPath(file)) continue;

@@ -60,7 +60,7 @@ export async function collectGrokEvents({
     if (scanStatus) scanStatus.complete = false;
   };
   const root = join(grokHome, "sessions");
-  const files = await walkFiles(root, { name: "updates.jsonl" });
+  const files = await walkFiles(root, { name: "updates.jsonl", onTraversalError: markIncomplete });
   const events = [];
   for (const file of files) {
     if (!(await fileMayContainEventsSince(file, since, { onStatError: markIncomplete }))) continue;

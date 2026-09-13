@@ -203,6 +203,15 @@ const EXPLICITLY_UNPRICED_MODELS = new Set([
   "gpt-5.3-codex-spark",
 ]);
 
+function isExplicitlyUnpricedAlias(model: string): boolean {
+  const lower = model.trim().toLowerCase();
+  const basename = lower.split("/").pop() || lower;
+  if (EXPLICITLY_UNPRICED_MODELS.has(lower) || EXPLICITLY_UNPRICED_MODELS.has(basename)) {
+    return true;
+  }
+  return [...EXPLICITLY_UNPRICED_MODELS].some((key) => basename.startsWith(`${key}-`));
+}
+
 function catalogEntry(key: string): ModelPricingEntry | undefined {
   return RUNTIME_PRICING_OVERRIDES[key] ?? CATALOG[key];
 }
@@ -275,7 +284,7 @@ export function resolvePricingKey(model: string): string | null {
 function resolvePricingKeyUncached(model: string): string | null {
   const trimmed = model.trim();
   if (!trimmed) return null;
-  if (EXPLICITLY_UNPRICED_MODELS.has(trimmed.toLowerCase())) return null;
+  if (isExplicitlyUnpricedAlias(trimmed)) return null;
   if (catalogEntry(trimmed)) return trimmed;
 
   const lower = trimmed.toLowerCase();
@@ -323,7 +332,7 @@ export function getModelPricing(model: string): {
   pricing: ModelPricingEntry;
 } | null {
   const key = resolvePricingKey(model);
-  if (!key) return null;
+  if (!key || isExplicitlyUnpricedAlias(key)) return null;
   const pricing = catalogEntry(key);
   if (!pricing) return null;
   return { key, pricing };

@@ -70,7 +70,7 @@ export async function collectCodexEvents({
   const roots = ["sessions", "archived_sessions"].map((dir) => join(codexHome, dir));
   const events = [];
   for (const root of roots) {
-    const files = await walkFiles(root, { suffix: ".jsonl" });
+    const files = await walkFiles(root, { suffix: ".jsonl", onTraversalError: markIncomplete });
     for (const file of files) {
       if (!(await fileMayContainEventsSince(file, since, { onStatError: markIncomplete }))) continue;
       const text = await readIfFresh(file, { onReadError: markIncomplete });

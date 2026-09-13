@@ -98,6 +98,9 @@ describe("resolvePricingKey", () => {
   it("leaves time-dependent DeepSeek V4 rates unknown without request time", () => {
     expect(resolvePricingKey("deepseek-v4-flash")).toBeNull();
     expect(resolvePricingKey("deepseek-v4-pro")).toBeNull();
+    expect(resolvePricingKey("deepseek/deepseek-v4-pro")).toBeNull();
+    expect(resolvePricingKey("openrouter/deepseek/deepseek-v4-flash-20260913")).toBeNull();
+    expect(getModelPricing("deepseek/deepseek-v4-pro")).toBeNull();
   });
 
   it("caches lookups without changing results", () => {

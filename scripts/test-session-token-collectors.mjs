@@ -39,6 +39,7 @@ import {
   recordCollectorSuccess,
   resolveCollectorArgs,
   sessionKeyFor,
+  walkFiles,
 } from "./lib/run-session-token-collector.mjs";
 import {
   observedPlanEvent,
@@ -269,6 +270,29 @@ assert(
     !isBotFleetSessionPath("/Users/test/.dsh/sessions/local/session.jsonl.zstd"),
   "BotFleet child-path detection covers both managed workspace layouts",
 );
+
+const traversalRoot = await mkdtemp(join(tmpdir(), "collector-traversal-"));
+try {
+  const notDirectory = join(traversalRoot, "not-a-directory");
+  await writeFile(notDirectory, "fixture");
+  let traversalErrors = 0;
+  const traversed = await walkFiles(notDirectory, {
+    suffix: ".jsonl",
+    onTraversalError: () => { traversalErrors += 1; },
+  });
+  assert(
+    traversed.length === 0 && traversalErrors === 1,
+    "directory traversal errors mark a collector scan incomplete",
+  );
+  traversalErrors = 0;
+  await walkFiles(join(traversalRoot, "provider-not-installed"), {
+    suffix: ".jsonl",
+    onTraversalError: () => { traversalErrors += 1; },
+  });
+  assert(traversalErrors === 0, "a missing provider root remains a valid empty scan");
+} finally {
+  await rm(traversalRoot, { recursive: true, force: true });
+}
 
 const codexFixture = [
   JSON.stringify({

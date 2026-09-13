@@ -174,8 +174,8 @@ function finishClaudeCostCheck(models: ModelCostCheck[]): ClaudeCostCheckReport 
       unpricedModelCount: models.filter(
         (m) =>
           !m.derivationComplete &&
-          m.pricingKey === null &&
-          m.tokens.input + m.tokens.output + m.tokens.cacheRead + m.tokens.cacheCreation > 0
+          m.tokens.input + m.tokens.output + m.tokens.cacheRead +
+            m.tokens.cacheCreation + m.tokens.unknown > 0
       ).length,
     },
   };

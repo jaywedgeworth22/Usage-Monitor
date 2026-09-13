@@ -300,7 +300,7 @@ export default function ApiEquivalentCostCard() {
           Codex CLI, Grok Build, Copilot CLI, and DeepSeek Harness sessions.
           {SENTENCE_GAP}Excludes end-user production app traffic (routed through OpenRouter).
           {data.totals.unpricedModelCount > 0
-            ? `${SENTENCE_GAP}${data.totals.unpricedModelCount} unpriced model${data.totals.unpricedModelCount === 1 ? "" : "s"} under-count derivation.`
+            ? `${SENTENCE_GAP}${data.totals.unpricedModelCount} incompletely priced model${data.totals.unpricedModelCount === 1 ? "" : "s"} under-count derivation.`
             : ""}
         </p>
       </div>

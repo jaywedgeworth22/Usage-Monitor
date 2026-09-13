@@ -120,13 +120,16 @@ export function parseCollectorArgs(argv, now = new Date()) {
   };
 }
 
-export async function walkFiles(root, { suffix, name } = {}) {
+export async function walkFiles(root, { suffix, name, onTraversalError } = {}) {
   const out = [];
   async function walk(dir) {
     let entries;
     try {
       entries = await readdir(dir, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      if (!(error && typeof error === "object" && error.code === "ENOENT")) {
+        onTraversalError?.(error);
+      }
       return;
     }
     for (const entry of entries) {

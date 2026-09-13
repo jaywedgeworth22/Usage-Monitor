@@ -61,7 +61,7 @@ export async function collectCopilotEvents({
     if (scanStatus) scanStatus.complete = false;
   };
   const root = join(copilotHome, "session-state");
-  const files = await walkFiles(root, { name: "events.jsonl" });
+  const files = await walkFiles(root, { name: "events.jsonl", onTraversalError: markIncomplete });
   const events = [];
   for (const file of files) {
     if (!(await fileMayContainEventsSince(file, since, { onStatError: markIncomplete }))) continue;
