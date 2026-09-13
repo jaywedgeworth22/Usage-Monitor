@@ -12,8 +12,9 @@ export const SUBSCRIPTION_ANALYTICS_SOURCE_APPS = [
   "claude-code",
   "grok-build",
   "openai-codex",
-  "antigravity-cli",
+  "antigravity-statusline",
   "github-copilot",
+  "deepseek-dsh",
 ] as const;
 
 export type SubscriptionAnalyticsSourceApp =
@@ -25,8 +26,9 @@ export type SubscriptionAnalyticsSourceApp =
 const SOURCE_APP_ONLY_ANALYTICS = new Set<string>([
   "grok-build",
   "openai-codex",
-  "antigravity-cli",
+  "antigravity-statusline",
   "github-copilot",
+  "deepseek-dsh",
 ]);
 
 export function isClaudeCodeAnalyticsTelemetry(input: {

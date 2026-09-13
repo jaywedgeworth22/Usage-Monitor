@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { UsageTelemetryV2BatchSchema } from "@jaywedgeworth22/congress-trading-shared";
 import { fleetIngestJobs } from "./fleet-usage-collector.mjs";
+import { quotaEventsFromMiniMax } from "./minimax-usage-collector.mjs";
 import {
   ANTIGRAVITY_PRODUCER_ID,
   CLAUDE_PRODUCER_ID,
@@ -13,7 +17,8 @@ import {
   GROK_COST_USD_TICKS,
   GROK_PRODUCER_ID,
   chunkEvents,
-  parseAntigravityTranscriptJsonl,
+  isCompleteUsageIngestAck,
+  parseAntigravityStatuslineJsonl,
   parseClaudeSessionJsonl,
   parseCodexJsonl,
   parseCopilotEventsJsonl,
@@ -23,8 +28,15 @@ import {
 } from "./lib/session-token-collectors.mjs";
 import {
   DEFAULT_COLLECTOR_LOOKBACK_DAYS,
+  COLLECTOR_STATE_OVERLAP_MINUTES,
+  botFleetChildExclusionEnabled,
+  canAdvanceCollectorCheckpoint,
   codexSessionKeyFor,
+  isBotFleetManagedCodexSession,
   parseCollectorArgs,
+  readIfFresh,
+  recordCollectorSuccess,
+  resolveCollectorArgs,
   sessionKeyFor,
 } from "./lib/run-session-token-collector.mjs";
 import {
@@ -39,6 +51,18 @@ function assert(cond, message) {
   }
 }
 
+assert(
+  isCompleteUsageIngestAck(
+    { received: 4, persisted: 0, duplicates: 4, pruned: 0, rejected: 0 },
+    4,
+  ),
+  "complete duplicate acknowledgements are accepted",
+);
+assert(
+  !isCompleteUsageIngestAck({ received: 4, persisted: 4, rejected: 0 }, 4),
+  "partial 2xx acknowledgement bodies are never assumed delivered",
+);
+
 const split = splitInclusiveCache({
   input: 30297,
   output: 386,
@@ -48,6 +72,127 @@ const split = splitInclusiveCache({
 assert(split.input === 30297 - 9984, "codex uncached input");
 assert(split.cacheRead === 9984, "codex cache read");
 assert(split.output === 386, "codex output");
+
+const antigravityStatusEvents = parseAntigravityStatuslineJsonl(
+  JSON.stringify({
+    type: "antigravity.statusline.usage",
+    occurredAt: "2026-09-13T12:00:00.000Z",
+    sessionHash: "a".repeat(64),
+    signature: "b".repeat(64),
+    model: "Gemini 3.8 Flash (High)",
+    breakdownComplete: true,
+    usage: { input: 63_382, output: 346, cacheRead: 20_857, cacheCreation: 0 },
+  }),
+);
+assert(antigravityStatusEvents.length === 3, "Antigravity status line emits exact token splits");
+assert(
+  antigravityStatusEvents.find((event) => event.label === "token:input")?.quantity === 63_382,
+  "Antigravity status line preserves exclusive input tokens",
+);
+assert(
+  antigravityStatusEvents.every((event) => event.confidence === "actual"),
+  "Antigravity status line counts are provider-reported",
+);
+assert(
+  !JSON.stringify(antigravityStatusEvents).includes("transcript"),
+  "Antigravity events omit transcript content and paths",
+);
+
+const statuslineStateRoot = await mkdtemp(join(tmpdir(), "ag-statusline-"));
+try {
+  const sink = join(dirname(fileURLToPath(import.meta.url)), "antigravity-statusline-telemetry.mjs");
+  const runStatusline = (contextWindow, agentState) => execFileSync(
+    process.execPath,
+    [sink],
+    {
+      env: { ANTIGRAVITY_TELEMETRY_STATE_DIR: statuslineStateRoot },
+      input: JSON.stringify({
+        conversation_id: "private-session-id",
+        cwd: "/private/workspace",
+        model: { id: "gemini-3.8-flash" },
+        agent_state: agentState,
+        context_window: contextWindow,
+      }),
+    },
+  );
+  runStatusline({
+    total_input_tokens: 100,
+    total_output_tokens: 20,
+    current_usage: {
+      input_tokens: 80,
+      output_tokens: 20,
+      cache_read_input_tokens: 20,
+      cache_creation_input_tokens: 0,
+    },
+  }, "tool_use");
+  runStatusline({
+    total_input_tokens: 250,
+    total_output_tokens: 50,
+    current_usage: {
+      input_tokens: 100,
+      output_tokens: 30,
+      cache_read_input_tokens: 40,
+      cache_creation_input_tokens: 10,
+    },
+  }, "idle");
+  runStatusline({
+    total_input_tokens: 400,
+    total_output_tokens: 80,
+    current_usage: {
+      input_tokens: 10,
+      output_tokens: 10,
+      cache_read_input_tokens: 5,
+      cache_creation_input_tokens: 0,
+    },
+  }, "idle");
+  const captured = await readFile(join(statuslineStateRoot, "usage.jsonl"), "utf8");
+  const capturedRows = captured.trim().split("\n").map((line) => JSON.parse(line));
+  assert(capturedRows.length === 3, "status line captures each cumulative-token change");
+  assert(capturedRows[1].breakdownComplete === true, "matching current usage preserves exact cache split");
+  assert(capturedRows[2].breakdownComplete === false, "missed requests retain exact total deltas without inventing cache split");
+  assert(
+    capturedRows[2].usage.input === 150 && capturedRows[2].usage.output === 30,
+    "unreconciled status update uses cumulative input and output deltas",
+  );
+  assert(!captured.includes("private-session-id"), "status line hashes the private session id");
+  assert(!captured.includes("/private/workspace"), "status line omits workspace paths");
+  const capturedEvents = parseAntigravityStatuslineJsonl(captured);
+  assert(
+    capturedEvents.some((event) =>
+      event.label === "token:inputUnsplit" && event.metadata.tokenBreakdownComplete === false
+    ),
+    "unreconciled input remains exact total usage with incomplete cost provenance",
+  );
+} finally {
+  await rm(statuslineStateRoot, { recursive: true, force: true });
+}
+
+const minimaxQuotaEvents = quotaEventsFromMiniMax(
+  {
+    model_remains: [
+      {
+        model_name: "MiniMax-M3",
+        end_time: 1789293600000,
+        current_interval_remaining_percent: 88,
+        weekly_end_time: 1789344000000,
+        current_weekly_remaining_percent: 93,
+      },
+    ],
+  },
+  new Date("2026-09-13T12:00:00.000Z"),
+);
+assert(minimaxQuotaEvents.length === 2, "MiniMax emits rolling and weekly quota windows");
+assert(minimaxQuotaEvents[0].credits === 88, "MiniMax remaining percent preserved");
+assert(minimaxQuotaEvents[0].producerKeyRef === "MiniMax-M3", "MiniMax model preserved");
+assert(
+  UsageTelemetryV2BatchSchema.safeParse({
+    schemaVersion: 2,
+    producerId: "minimax-code",
+    producerInstanceId: "test-host",
+    events: minimaxQuotaEvents,
+  }).success,
+  "MiniMax quota batch schema valid",
+);
 
 const codexFixture = [
   JSON.stringify({
@@ -218,6 +363,92 @@ assert(
 );
 const sinceArgs = parseCollectorArgs(["node", "x", "--since", "2026-06-15T00:00:00.000Z"]);
 assert(sinceArgs.since.toISOString() === "2026-06-15T00:00:00.000Z", "--since ISO");
+assert(sinceArgs.explicitSince === true, "--since marks explicit backfill");
+
+const stateRoot = await mkdtemp(join(tmpdir(), "usage-collector-state-"));
+try {
+  const successfulThrough = new Date("2026-09-13T12:00:00.000Z");
+  await recordCollectorSuccess(CODEX_PRODUCER_ID, successfulThrough, { stateRoot });
+  const resumed = await resolveCollectorArgs(
+    ["node", "codex-usage-collector.mjs"],
+    CODEX_PRODUCER_ID,
+    { stateRoot, now: new Date("2026-09-13T13:00:00.000Z") },
+  );
+  assert(resumed.resumedFromState === true, "collector resumes from durable success state");
+  assert(
+    resumed.since.toISOString() ===
+      new Date(successfulThrough.getTime() - COLLECTOR_STATE_OVERLAP_MINUTES * 60_000).toISOString(),
+    "collector replays the bounded overlap",
+  );
+  const explicit = await resolveCollectorArgs(
+    ["node", "codex-usage-collector.mjs", "--days", "7"],
+    CODEX_PRODUCER_ID,
+    { stateRoot, now: new Date("2026-09-13T13:00:00.000Z") },
+  );
+  assert(explicit.resumedFromState === false, "explicit backfill bypasses collector state");
+  assert(
+    !canAdvanceCollectorCheckpoint(explicit),
+    "explicit backfill cannot advance the recurring checkpoint",
+  );
+  const persistedState = JSON.parse(
+    await readFile(join(stateRoot, `${CODEX_PRODUCER_ID}.json`), "utf8"),
+  );
+  assert(
+    persistedState.successfulThrough === successfulThrough.toISOString(),
+    "collector success state persists atomically",
+  );
+  await writeFile(
+    join(stateRoot, `${CODEX_PRODUCER_ID}.json`),
+    `${JSON.stringify({
+      version: 1,
+      producerId: CODEX_PRODUCER_ID,
+      successfulThrough: "2026-09-14T13:00:00.000Z",
+    })}\n`,
+  );
+  const futureState = await resolveCollectorArgs(
+    ["node", "codex-usage-collector.mjs"],
+    CODEX_PRODUCER_ID,
+    { stateRoot, now: new Date("2026-09-13T13:00:00.000Z") },
+  );
+  assert(!futureState.resumedFromState, "future collector checkpoint is rejected");
+  let readFailed = false;
+  await readIfFresh(join(stateRoot, "missing.jsonl"), {
+    onReadError: () => { readFailed = true; },
+  });
+  assert(readFailed, "unreadable scan inputs are surfaced to the collector");
+  assert(
+    !canAdvanceCollectorCheckpoint(defaultArgs, { scanComplete: false }),
+    "incomplete scans cannot advance the recurring checkpoint",
+  );
+} finally {
+  await rm(stateRoot, { recursive: true, force: true });
+}
+
+const botFleetSessionMeta = JSON.stringify({
+  type: "session_meta",
+  payload: {
+    originator: "botfleet",
+    cwd: "/Users/jay/.botfleet/workspaces/test",
+  },
+});
+assert(
+  isBotFleetManagedCodexSession(botFleetSessionMeta),
+  "BotFleet Codex child sessions are identified before standalone ingest",
+);
+assert(
+  !botFleetChildExclusionEnabled({}),
+  "BotFleet child exclusion stays gated until durable BotFleet delivery is active",
+);
+assert(
+  botFleetChildExclusionEnabled({ USAGE_MONITOR_EXCLUDE_BOTFLEET_CHILDREN: "1" }),
+  "BotFleet child exclusion requires the explicit activation flag",
+);
+assert(
+  !isBotFleetManagedCodexSession(
+    JSON.stringify({ type: "session_meta", payload: { originator: "codex_cli_rs", cwd: "/tmp/test" } }),
+  ),
+  "standalone Codex sessions remain eligible",
+);
 
 const codexHome = "/Users/jay/.codex";
 const rolloutName =
@@ -459,40 +690,6 @@ assert(chunks.length === 3, `chunk count ${chunks.length}`);
 assert(chunks[0].length === 100 && chunks[2].length === 50, "chunk sizes");
 
 
-// Antigravity Transcript Tests
-const agFixture = [
-  JSON.stringify({
-    step_index: 0,
-    source: "USER_EXPLICIT",
-    type: "USER_INPUT",
-    created_at: "2026-08-20T12:00:00.000Z",
-    content: "<USER_REQUEST>Fix the auth bug</USER_REQUEST><USER_SETTINGS_CHANGE>Model Selection from None to Gemini 3.6 Flash (High)</USER_SETTINGS_CHANGE>",
-  }),
-  JSON.stringify({
-    step_index: 1,
-    source: "MODEL",
-    type: "PLANNER_RESPONSE",
-    created_at: "2026-08-20T12:00:02.000Z",
-    content: "I will check the auth route handler now.",
-    tool_calls: [{ name: "view_file", args: { AbsolutePath: "/path/to/auth.ts" } }],
-  }),
-].join("\n");
-
-const agEvents = parseAntigravityTranscriptJsonl(agFixture, { sessionKey: "test/ag-transcript.jsonl" });
-assert(agEvents.length === 2, `ag event count ${agEvents.length}`);
-assert(agEvents[0].producerKeyRef === "gemini-3.6-flash", "ag model override parsed");
-assert(agEvents[0].label === "token:input", "ag user input token event");
-assert(agEvents[1].label === "token:output", "ag planner response token event");
-assert(agEvents[0].billingMode === "estimated" && agEvents[0].provider === "google", "ag provider & billing mode");
-
-const agBatch = {
-  schemaVersion: 2,
-  producerId: ANTIGRAVITY_PRODUCER_ID,
-  producerInstanceId: "test-host",
-  events: agEvents,
-};
-assert(UsageTelemetryV2BatchSchema.safeParse(agBatch).success, "ag batch schema valid");
-
 // Claude Code Tests
 const claudeFixture = [
   JSON.stringify({
@@ -546,6 +743,41 @@ assert(dsEvents.length === 3, `deepseek event count ${dsEvents.length}`);
 assert(dsEvents[0].producerKeyRef === "deepseek-v4-pro", "deepseek model parsed");
 assert(dsEvents[0].provider === "deepseek", "deepseek provider");
 
+const dshFixture = JSON.stringify({
+  type: "assistant/message",
+  time: 1789281924151,
+  data: {
+    message: {
+      id: "message-1",
+      source: { provider: "deepseek-official", model: "deepseek-v4-flash" },
+    },
+    usage: {
+      inputTokens: 2667,
+      outputTokens: 227,
+      cacheReadTokens: 7296,
+      reasoningTokens: 71,
+    },
+  },
+});
+const dshEvents = parseDeepSeekSessionJsonl(dshFixture, { sessionKey: "test/dsh.zstd" });
+assert(dshEvents.length === 3, `DSH event count ${dshEvents.length}`);
+assert(
+  dshEvents.find((event) => event.label === "token:input")?.quantity === 2667,
+  "DSH inputTokens is exclusive of cache reads",
+);
+assert(
+  dshEvents.find((event) => event.label === "token:cacheRead")?.quantity === 7296,
+  "DSH cache reads remain separate when larger than input",
+);
+assert(
+  dshEvents.find((event) => event.label === "token:output")?.metadata.reasoningTokens === 71,
+  "DSH preserves reasoning-token detail without double-counting output",
+);
+assert(
+  dshEvents.every((event) => event.confidence === "actual"),
+  "DSH marks provider-reported token counts actual",
+);
+
 const dsBatch = {
   schemaVersion: 2,
   producerId: DEEPSEEK_PRODUCER_ID,
@@ -569,7 +801,7 @@ const quotaEvent = {
 const fleetJobs = fleetIngestJobs({
   quotaEvents: [quotaEvent],
   sessionResults: {
-    antigravity: agEvents,
+    antigravity: antigravityStatusEvents,
     claude: claudeEvents,
     codex: codexEvents,
     grok: grokEvents,
@@ -584,7 +816,7 @@ assert(
 assert(
   fleetJobs.find((job) => job.producerId === ANTIGRAVITY_PRODUCER_ID)?.events[0] ===
     quotaEvent,
-  "Antigravity quota shares antigravity-cli with transcript events"
+  "Antigravity quota keeps the antigravity-cli producer namespace"
 );
 assert(
   fleetJobs.find((job) => job.producerId === CLAUDE_PRODUCER_ID)?.events === claudeEvents,

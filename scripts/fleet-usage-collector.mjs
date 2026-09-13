@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Master unified fleet usage collector for ALL coding agent seats:
-// - Google Antigravity (Live Quota Windows + Session Transcripts)
+// - Google Antigravity (Live Quota Windows + Safe Status-Line Snapshots)
 // - Anthropic Claude Code & Monet (~/.claude/projects/)
 // - OpenAI Codex CLI (~/.codex/sessions)
 // - Grok Build (~/.grok/sessions)
@@ -19,13 +19,14 @@ import { pathToFileURL } from "node:url";
 
 import {
   ANTIGRAVITY_PRODUCER_ID,
+  ANTIGRAVITY_STATUSLINE_PRODUCER_ID,
   CLAUDE_PRODUCER_ID,
   CODEX_PRODUCER_ID,
   COPILOT_PRODUCER_ID,
   DEEPSEEK_PRODUCER_ID,
   GROK_PRODUCER_ID,
   filterEventsSince,
-  parseAntigravityTranscriptJsonl,
+  parseAntigravityStatuslineJsonl,
   parseClaudeSessionJsonl,
   parseCodexJsonl,
   parseCopilotEventsJsonl,
@@ -35,7 +36,9 @@ import {
 } from "./lib/session-token-collectors.mjs";
 import {
   codexSessionKeyFor,
+  botFleetChildExclusionEnabled,
   expandHome,
+  isBotFleetManagedCodexSession,
   parseCollectorArgs,
   readIfFresh,
   sessionKeyFor,
@@ -112,13 +115,16 @@ async function collectAllSessionEvents(since) {
     deepseek: [],
   };
 
-  // Antigravity transcripts
-  const agBrain = expandHome("~/.gemini/antigravity/brain");
-  const agFiles = await walkFiles(agBrain, { name: "transcript.jsonl" });
-  for (const f of agFiles) {
-    const text = await readIfFresh(f);
-    if (!text) continue;
-    results.antigravity.push(...filterEventsSince(parseAntigravityTranscriptJsonl(text, { sessionKey: sessionKeyFor(agBrain, f) }), since));
+  // Antigravity status-line snapshots contain only model and exact counters.
+  const agSnapshots = expandHome(
+    process.env.ANTIGRAVITY_TELEMETRY_SNAPSHOT ||
+      "~/.cache/usage-monitor/antigravity-statusline/usage.jsonl",
+  );
+  const agSnapshotText = await readIfFresh(agSnapshots);
+  if (agSnapshotText) {
+    results.antigravity.push(
+      ...filterEventsSince(parseAntigravityStatuslineJsonl(agSnapshotText), since),
+    );
   }
 
   // Claude Code
@@ -137,6 +143,7 @@ async function collectAllSessionEvents(since) {
     for (const f of codexFiles) {
       const text = await readIfFresh(f);
       if (!text) continue;
+      if (botFleetChildExclusionEnabled() && isBotFleetManagedCodexSession(text)) continue;
       results.codex.push(...filterEventsSince(parseCodexJsonl(text, { sessionKey: codexSessionKeyFor(codexHome, f) }), since));
     }
   }
@@ -161,11 +168,19 @@ async function collectAllSessionEvents(since) {
 
   // DeepSeek
   const dshHome = expandHome("~/.dsh");
-  const dshFiles = await walkFiles(join(dshHome, "sessions"), { suffix: ".jsonl" });
+  const dshFiles = await walkFiles(join(dshHome, "sessions"), { name: "session.jsonl.zstd" });
   for (const f of dshFiles) {
-    const text = await readIfFresh(f);
-    if (!text) continue;
-    results.deepseek.push(...filterEventsSince(parseDeepSeekSessionJsonl(text, { sessionKey: sessionKeyFor(dshHome, f) }), since));
+    if (botFleetChildExclusionEnabled() && f.includes(".botfleet-workspaces-")) continue;
+    try {
+      const text = execFileSync(process.env.ZSTD_BIN || "/opt/homebrew/bin/zstd", ["-dc", f], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        maxBuffer: 128 * 1024 * 1024,
+      });
+      results.deepseek.push(...filterEventsSince(parseDeepSeekSessionJsonl(text, { sessionKey: sessionKeyFor(dshHome, f) }), since));
+    } catch (error) {
+      if (DEBUG) log(`DeepSeek archive skipped: ${error instanceof Error ? error.name : "error"}`);
+    }
   }
 
   return results;
@@ -187,7 +202,11 @@ export function fleetIngestJobs({ quotaEvents = [], sessionResults = {} } = {}) 
   return [
     {
       producerId: ANTIGRAVITY_PRODUCER_ID,
-      events: [...quotaEvents, ...(sessionResults.antigravity ?? [])],
+      events: quotaEvents,
+    },
+    {
+      producerId: ANTIGRAVITY_STATUSLINE_PRODUCER_ID,
+      events: sessionResults.antigravity ?? [],
     },
     { producerId: CLAUDE_PRODUCER_ID, events: sessionResults.claude ?? [] },
     { producerId: CODEX_PRODUCER_ID, events: sessionResults.codex ?? [] },

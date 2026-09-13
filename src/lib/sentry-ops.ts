@@ -264,6 +264,36 @@ export async function recordIngestAdmissionRejected(
   }
 }
 
+/** Count schema-rejected v2 events without copying event ids, validation
+ * detail, producer payloads, or any other billing-ledger content to Sentry. */
+export async function recordIngestEventsRejected(
+  count: number,
+  attributes: {
+    route?: "ingest/usage";
+    outcome?: "all_rejected" | "partial";
+  } = {}
+): Promise<void> {
+  const safeCount = Math.max(0, Math.floor(Number.isFinite(count) ? count : 0));
+  if (safeCount === 0) return;
+  try {
+    const mod = await loadSentry();
+    if (!mod) return;
+    const metrics = api<{
+      count: (
+        name: string,
+        value?: number,
+        options?: { attributes?: Record<string, string | number | boolean> }
+      ) => void;
+    }>(mod, "metrics");
+    const attrs: Record<string, string> = {};
+    if (attributes.route) attrs.route = attributes.route;
+    if (attributes.outcome) attrs.outcome = attributes.outcome;
+    metrics?.count?.("ingest.events_rejected", safeCount, { attributes: attrs });
+  } catch {
+    // Best-effort diagnostic counter; Usage Monitor remains the ledger.
+  }
+}
+
 /**
  * Wave M / M1: emit a "rollup.completed" counter per data-retention
  * batch with the count of daily rollup rows touched, so we can see

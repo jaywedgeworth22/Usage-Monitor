@@ -1,34 +1,38 @@
 #!/usr/bin/env node
-// Local collector for GitHub Copilot CLI session JSONL.
+// Local collector for DeepSeek Harness (DSH) session archives.
 //
-// Reads ~/.copilot/session-state/*/events.jsonl session.shutdown
-// modelMetrics (same layout as ccusage). Pushes estimated token events to
-// Usage Monitor ingest. Not GitHub org billing. Not cash. Does not open
-// ~/.copilot/data.db (that SQLite file holds GitHub tokens).
+// Reads ~/.dsh/sessions/**/session.jsonl.zstd assistant/message records and
+// sends exact input/output/cache-read token counts plus model attribution.
+// BotFleet-managed child sessions can be excluded after BotFleet's durable
+// sender is deployed.  API-equivalent analytics only.
 //
 // Usage:
-//   node scripts/copilot-usage-collector.mjs [--dry-run] [--debug] [--days N] [--since ISO]
-//
-// Env:
-//   USAGE_INGEST_TOKEN or COPILOT_INGEST_TOKEN
-//   USAGE_MONITOR_INGEST_URL (default https://usage.jays.services/api/ingest/usage)
-//   COPILOT_HOME (default ~/.copilot)
+//   node scripts/deepseek-usage-collector.mjs [--dry-run] [--debug] [--days N] [--since ISO]
 
+// Env:
+//   USAGE_INGEST_TOKEN or DEEPSEEK_INGEST_TOKEN
+//   USAGE_MONITOR_INGEST_URL (default https://usage.jays.services/api/ingest/usage)
+//   DSH_HOME (default ~/.dsh)
+//   ZSTD_BIN (default /opt/homebrew/bin/zstd)
+
+
+import { execFile } from "node:child_process";
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 
 import {
-  COPILOT_PRODUCER_ID,
+  DEEPSEEK_PRODUCER_ID,
   filterEventsSince,
-  parseCopilotEventsJsonl,
+  parseDeepSeekSessionJsonl,
   postUsageBatches,
 } from "./lib/session-token-collectors.mjs";
 import {
+  botFleetChildExclusionEnabled,
   canAdvanceCollectorCheckpoint,
   expandHome,
-  fileMayContainEventsSince,
-  readIfFresh,
   recordCollectorSuccess,
   resolveCollectorArgs,
   resolveCollectorToken,
@@ -36,41 +40,58 @@ import {
   walkFiles,
 } from "./lib/run-session-token-collector.mjs";
 
+const execFileAsync = promisify(execFile);
 const DRY = process.argv.includes("--dry-run");
 const DEBUG = process.argv.includes("--debug");
-const PRODUCER_ID = process.env.COPILOT_PRODUCER_ID || COPILOT_PRODUCER_ID;
+const PRODUCER_ID = process.env.DEEPSEEK_PRODUCER_ID || DEEPSEEK_PRODUCER_ID;
 const INGEST_URL =
   process.env.USAGE_MONITOR_INGEST_URL ||
   "https://usage.jays.services/api/ingest/usage";
 
 function log(message) {
-  console.log(`[copilot-usage-collector] ${message}`);
+  console.log(`[deepseek-usage-collector] ${message}`);
 }
 
 function fail(message, code = 1) {
-  console.error(`[copilot-usage-collector] ${message}`);
+  console.error(`[deepseek-usage-collector] ${message}`);
   process.exit(code);
 }
 
-export async function collectCopilotEvents({
-  copilotHome = expandHome(process.env.COPILOT_HOME || join(homedir(), ".copilot")),
+function isBotFleetSessionPath(path) {
+  return path.includes("/.botfleet/workspaces/") || path.includes(".botfleet-workspaces-");
+}
+
+async function decompress(path) {
+  const zstdBin = process.env.ZSTD_BIN || "/opt/homebrew/bin/zstd";
+  const { stdout } = await execFileAsync(zstdBin, ["-dc", path], {
+    encoding: "utf8",
+    maxBuffer: 128 * 1024 * 1024,
+  });
+  return stdout;
+}
+
+export async function collectDeepSeekEvents({
+  dshHome = expandHome(process.env.DSH_HOME || join(homedir(), ".dsh")),
   since,
   scanStatus,
 } = {}) {
-  const markIncomplete = () => {
-    if (scanStatus) scanStatus.complete = false;
-  };
-  const root = join(copilotHome, "session-state");
-  const files = await walkFiles(root, { name: "events.jsonl" });
+  const root = join(dshHome, "sessions");
+  const files = await walkFiles(root, { name: "session.jsonl.zstd" });
   const events = [];
   for (const file of files) {
-    if (!(await fileMayContainEventsSince(file, since, { onStatError: markIncomplete }))) continue;
-    const text = await readIfFresh(file, { onReadError: markIncomplete });
-    if (!text) continue;
-    const parsed = parseCopilotEventsJsonl(text, {
-      sessionKey: sessionKeyFor(copilotHome, file),
-    });
-    events.push(...filterEventsSince(parsed, since));
+    if (botFleetChildExclusionEnabled() && isBotFleetSessionPath(file)) continue;
+    try {
+      const fileStat = await stat(file);
+      if (since && fileStat.mtime < since) continue;
+      const text = await decompress(file);
+      const parsed = parseDeepSeekSessionJsonl(text, {
+        sessionKey: sessionKeyFor(dshHome, file),
+      });
+      events.push(...filterEventsSince(parsed, since));
+    } catch (error) {
+      if (scanStatus) scanStatus.complete = false;
+      if (DEBUG) log(`skipped unreadable archive (${error instanceof Error ? error.name : "error"})`);
+    }
   }
   return events;
 }
@@ -84,10 +105,10 @@ async function main() {
     fail(error instanceof Error ? error.message : String(error));
   }
   const scanStatus = { complete: true };
-  const events = await collectCopilotEvents({ since: args.since, scanStatus });
+  const events = await collectDeepSeekEvents({ since: args.since, scanStatus });
   log(`parsed ${events.length} token event(s) since ${args.since.toISOString()}${args.resumedFromState ? " (incremental)" : ""}`);
   if (DEBUG) {
-    const models = new Set(events.map((e) => e.producerKeyRef).filter(Boolean));
+    const models = new Set(events.map((event) => event.producerKeyRef).filter(Boolean));
     log(`models: ${[...models].join(", ") || "(none)"}`);
   }
   if (events.length === 0) {
@@ -98,7 +119,7 @@ async function main() {
     return;
   }
   const token = resolveCollectorToken([
-    "COPILOT_INGEST_TOKEN",
+    "DEEPSEEK_INGEST_TOKEN",
     "USAGE_INGEST_TOKEN",
   ]);
   try {
@@ -121,5 +142,5 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main();
+  main().catch((error) => fail(error instanceof Error ? error.message : String(error)));
 }

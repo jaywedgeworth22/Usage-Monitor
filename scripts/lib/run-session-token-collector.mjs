@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
 
 /**
@@ -30,8 +30,64 @@ export function resolveCollectorToken(tokenEnvVarNames = ["USAGE_INGEST_TOKEN"])
 /** Default lookback when LaunchAgents omit --days/--since.  UTC month-start
  *  dropped June–August Codex sessions on 1 September (owner 2026-09-03). */
 export const DEFAULT_COLLECTOR_LOOKBACK_DAYS = 180;
+export const COLLECTOR_STATE_OVERLAP_MINUTES = 24 * 60;
 
-export function parseCollectorArgs(argv) {
+function collectorStatePath(producerId, stateRoot) {
+  const safeProducerId = producerId.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const root = stateRoot ?? join(homedir(), ".cache", "usage-monitor", "collector-state");
+  return join(root, `${safeProducerId}.json`);
+}
+
+/**
+ * Recurring collectors keep a durable successful-through watermark and replay
+ * 24 hours for delayed shutdown records and late writes.  Stable event ids
+ * make that bounded catch-up overlap idempotent.
+ * Explicit --days/--since remains an intentional backfill and bypasses state.
+ */
+export async function resolveCollectorArgs(
+  argv,
+  producerId,
+  { stateRoot, now = new Date() } = {},
+) {
+  const args = parseCollectorArgs(argv, now);
+  if (args.explicitSince) return args;
+  try {
+    const raw = await readFile(collectorStatePath(producerId, stateRoot), "utf8");
+    const state = JSON.parse(raw);
+    if (state?.version !== 1 || state?.producerId !== producerId) return args;
+    const successfulThrough = new Date(state.successfulThrough);
+    if (
+      !Number.isNaN(successfulThrough.getTime()) &&
+      successfulThrough.getTime() <= now.getTime()
+    ) {
+      const since = new Date(
+        successfulThrough.getTime() - COLLECTOR_STATE_OVERLAP_MINUTES * 60_000,
+      );
+      return { ...args, since, resumedFromState: true };
+    }
+  } catch {
+    // Missing/corrupt state falls back to the bounded bootstrap lookback.
+  }
+  return args;
+}
+
+export async function recordCollectorSuccess(
+  producerId,
+  successfulThrough,
+  { stateRoot } = {},
+) {
+  const path = collectorStatePath(producerId, stateRoot);
+  await mkdir(dirname(path), { recursive: true });
+  const tempPath = `${path}.${process.pid}.tmp`;
+  await writeFile(
+    tempPath,
+    `${JSON.stringify({ version: 1, producerId, successfulThrough: successfulThrough.toISOString() })}\n`,
+    { mode: 0o600 },
+  );
+  await rename(tempPath, path);
+}
+
+export function parseCollectorArgs(argv, now = new Date()) {
   const dryRun = argv.includes("--dry-run");
   const debug = argv.includes("--debug");
   let days = null;
@@ -48,14 +104,20 @@ export function parseCollectorArgs(argv) {
   if (sinceIso) {
     since = new Date(sinceIso);
   } else if (Number.isFinite(days) && days > 0) {
-    since = new Date(Date.now() - days * 86_400_000);
+    since = new Date(now.getTime() - days * 86_400_000);
   } else {
-    since = new Date(Date.now() - DEFAULT_COLLECTOR_LOOKBACK_DAYS * 86_400_000);
+    since = new Date(now.getTime() - DEFAULT_COLLECTOR_LOOKBACK_DAYS * 86_400_000);
   }
   if (Number.isNaN(since.getTime())) {
     throw new Error(`Invalid --since ${sinceIso}`);
   }
-  return { dryRun, debug, since };
+  return {
+    dryRun,
+    debug,
+    since,
+    explicitSince: Boolean(sinceIso || (Number.isFinite(days) && days > 0)),
+    resumedFromState: false,
+  };
 }
 
 export async function walkFiles(root, { suffix, name } = {}) {
@@ -83,12 +145,27 @@ export async function walkFiles(root, { suffix, name } = {}) {
   return out;
 }
 
-export async function readIfFresh(path) {
+export async function readIfFresh(path, { onReadError } = {}) {
   try {
     return await readFile(path, "utf8");
-  } catch {
+  } catch (error) {
+    onReadError?.(error);
     return null;
   }
+}
+
+export async function fileMayContainEventsSince(path, since, { onStatError } = {}) {
+  if (!since) return true;
+  try {
+    return (await stat(path)).mtime >= since;
+  } catch (error) {
+    onStatError?.(error);
+    return false;
+  }
+}
+
+export function canAdvanceCollectorCheckpoint(args, { scanComplete = true } = {}) {
+  return !args.dryRun && !args.explicitSince && scanComplete;
 }
 
 export function expandHome(path) {
@@ -124,4 +201,32 @@ export function codexSessionKeyFor(codexHome, filePath) {
     return `sessions/${rest}`;
   }
   return `sessions/${fileName}`;
+}
+
+/** BotFleet emits its child-turn usage separately under producer `botfleet`.
+ * Exclude those Codex rollouts here because ingest idempotency is namespaced
+ * by producer and cannot collapse the same turn across both producers. */
+export function isBotFleetManagedCodexSession(text) {
+  for (const line of text.split("\n")) {
+    if (!line.includes('"session_meta"')) continue;
+    try {
+      const row = JSON.parse(line);
+      if (row?.type !== "session_meta") continue;
+      const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
+      const originator = typeof payload.originator === "string" ? payload.originator : "";
+      const cwd = typeof payload.cwd === "string" ? payload.cwd : "";
+      return (
+        originator.trim().toLowerCase() === "botfleet" ||
+        cwd.includes("/.botfleet/workspaces/") ||
+        cwd.includes("/.botfleet-workspaces/")
+      );
+    } catch {
+      // Keep looking for a valid session_meta row.
+    }
+  }
+  return false;
+}
+
+export function botFleetChildExclusionEnabled(env = process.env) {
+  return env.USAGE_MONITOR_EXCLUDE_BOTFLEET_CHILDREN === "1";
 }

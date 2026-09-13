@@ -29,6 +29,7 @@ export const CODEX_PRODUCER_ID = "openai-codex";
 export const GROK_PRODUCER_ID = "grok-build";
 export const COPILOT_PRODUCER_ID = "github-copilot";
 export const ANTIGRAVITY_PRODUCER_ID = "antigravity-cli";
+export const ANTIGRAVITY_STATUSLINE_PRODUCER_ID = "antigravity-statusline";
 export const CLAUDE_PRODUCER_ID = "claude-code";
 export const DEEPSEEK_PRODUCER_ID = "deepseek-dsh";
 export const CURSOR_PRODUCER_ID = "cursor-agent";
@@ -383,79 +384,47 @@ export function parseClaudeSessionJsonl(text, { sessionKey, fallbackOccurredAt }
   return events;
 }
 
-export function parseAntigravityTranscriptJsonl(text, { sessionKey, fallbackOccurredAt } = {}) {
+export function parseAntigravityStatuslineJsonl(text, { fallbackOccurredAt } = {}) {
   const fallbackIso = fallbackOccurredAt ?? new Date(0).toISOString();
   const events = [];
-  const lines = text.split("\n");
-  let currentModel = "gemini-3.7-flash";
-  let currentEffort = "medium";
-
-  for (let lineNo = 0; lineNo < lines.length; lineNo += 1) {
-    const line = lines[lineNo].trim();
+  for (const line of text.split("\n")) {
     if (!line.startsWith("{")) continue;
-    let obj;
+    let row;
     try {
-      obj = JSON.parse(line);
+      row = JSON.parse(line);
     } catch {
       continue;
     }
-    const content = typeof obj.content === "string" ? obj.content : "";
-    if (content.includes("USER_SETTINGS_CHANGE") || content.includes("Model Selection")) {
-      const modelMatch = content.match(/Model Selection`?\s+from\s+.*?\s+to\s+([^\n<]+?)(?:\.\s+No need|\.\s+|$|<)/i);
-      if (modelMatch) {
-        const raw = modelMatch[1].trim().toLowerCase();
-        if (raw.includes("gemini 3.6 flash")) currentModel = "gemini-3.6-flash";
-        else if (raw.includes("gemini 3.7 flash")) currentModel = "gemini-3.7-flash";
-        else if (raw.includes("gemini 2.5 pro") || raw.includes("gemini pro")) currentModel = "gemini-2.5-pro";
-        else if (raw.includes("claude 3.5 sonnet")) currentModel = "claude-3-5-sonnet";
-        else if (raw.includes("claude 3.7 sonnet")) currentModel = "claude-3-7-sonnet";
-        else if (raw.includes("gpt-4o")) currentModel = "gpt-4o";
-
-        if (raw.includes("(high)")) currentEffort = "high";
-        else if (raw.includes("(low)")) currentEffort = "low";
-        else if (raw.includes("(medium)")) currentEffort = "medium";
+    if (row?.type !== "antigravity.statusline.usage") continue;
+    const sessionHash = typeof row.sessionHash === "string" ? row.sessionHash : "";
+    const signature = typeof row.signature === "string" ? row.signature : "";
+    const model = typeof row.model === "string" ? row.model.trim() : "";
+    if (!sessionHash || !signature || !model || !row.usage || typeof row.usage !== "object") continue;
+    const breakdown = {
+      input: finiteCount(row.usage.input),
+      output: finiteCount(row.usage.output),
+      cacheRead: finiteCount(row.usage.cacheRead),
+      cacheCreation: finiteCount(row.usage.cacheCreation),
+    };
+    const parsed = tokenEventsFromBreakdown({
+      producerId: ANTIGRAVITY_STATUSLINE_PRODUCER_ID,
+      provider: "google-antigravity",
+      service: "antigravity-cli",
+      sessionKey: sessionHash,
+      occurredAtIso: isoTimestamp(row.occurredAt, fallbackIso),
+      model,
+      breakdown,
+      extraId: signature,
+    });
+    for (const event of parsed) {
+      event.confidence = "actual";
+      if (row.breakdownComplete !== true && event.metadata?.tokenType === "input") {
+        event.label = "token:inputUnsplit";
+        delete event.metadata.tokenType;
+        event.metadata.tokenBreakdownComplete = false;
       }
     }
-
-    const occurredAtIso = isoTimestamp(obj.created_at, fallbackIso);
-    const stepType = obj.type;
-
-    let inTok = 0;
-    let outTok = 0;
-
-    if (stepType === "USER_INPUT") {
-      inTok = Math.ceil(content.length / 4);
-    } else if (stepType === "PLANNER_RESPONSE") {
-      outTok = Math.ceil(content.length / 4);
-      if (Array.isArray(obj.tool_calls)) {
-        for (const tc of obj.tool_calls) {
-          outTok += Math.ceil(JSON.stringify(tc.args || {}).length / 4);
-        }
-      }
-    } else if (stepType === "GENERIC" || stepType === "SYSTEM_MESSAGE") {
-      inTok = Math.ceil(content.length / 4);
-    }
-
-    if (inTok > 0 || outTok > 0) {
-      const breakdown = {
-        input: inTok,
-        output: outTok,
-        cacheRead: 0,
-        cacheCreation: 0,
-      };
-      events.push(
-        ...tokenEventsFromBreakdown({
-          producerId: ANTIGRAVITY_PRODUCER_ID,
-          provider: "google",
-          service: "antigravity-ide",
-          sessionKey: sessionKey ?? "antigravity",
-          occurredAtIso,
-          model: currentModel,
-          breakdown,
-          extraId: `L${lineNo}:${currentModel}`,
-        })
-      );
-    }
+    events.push(...parsed);
   }
   return events;
 }
@@ -473,18 +442,39 @@ export function parseDeepSeekSessionJsonl(text, { sessionKey, fallbackOccurredAt
     } catch {
       continue;
     }
-    const usage = obj?.usage || obj?.metrics?.usage;
+    const dshData = obj?.data && typeof obj.data === "object" ? obj.data : null;
+    const isDshAssistantMessage = obj?.type === "assistant/message" && dshData;
+    const usage = isDshAssistantMessage
+      ? dshData.usage
+      : obj?.usage || obj?.metrics?.usage;
     if (!usage || typeof usage !== "object") continue;
-    const model = (typeof obj.model === "string" && obj.model.trim()) || "deepseek-chat";
-    const occurredAtIso = isoTimestamp(obj.timestamp || obj.created_at, fallbackIso);
-    const breakdown = splitInclusiveCache({
-      input: usage.prompt_tokens || usage.input_tokens || 0,
-      output: usage.completion_tokens || usage.output_tokens || 0,
-      cacheRead: usage.prompt_cache_hit_tokens || usage.cache_read_input_tokens || 0,
-      cacheCreation: usage.prompt_cache_miss_tokens || 0,
-    });
-    events.push(
-      ...tokenEventsFromBreakdown({
+    const source = isDshAssistantMessage && dshData.message?.source && typeof dshData.message.source === "object"
+      ? dshData.message.source
+      : {};
+    const model =
+      (typeof source.model === "string" && source.model.trim()) ||
+      (typeof obj.model === "string" && obj.model.trim()) ||
+      "deepseek-chat";
+    const occurredAtIso = isoTimestamp(
+      isDshAssistantMessage ? obj.time : obj.timestamp || obj.created_at,
+      fallbackIso,
+    );
+    const breakdown = isDshAssistantMessage
+      ? {
+          // DSH exposes cache reads separately; inputTokens is already the
+          // uncached input count and can be lower than cacheReadTokens.
+          input: finiteCount(usage.inputTokens),
+          output: finiteCount(usage.outputTokens),
+          cacheRead: finiteCount(usage.cacheReadTokens),
+          cacheCreation: finiteCount(usage.cacheCreationTokens || usage.cacheWriteTokens),
+        }
+      : splitInclusiveCache({
+          input: usage.prompt_tokens || usage.input_tokens || 0,
+          output: usage.completion_tokens || usage.output_tokens || 0,
+          cacheRead: usage.prompt_cache_hit_tokens || usage.cache_read_input_tokens || 0,
+          cacheCreation: usage.prompt_cache_miss_tokens || 0,
+        });
+    const parsed = tokenEventsFromBreakdown({
         producerId: DEEPSEEK_PRODUCER_ID,
         provider: "deepseek",
         service: "deepseek-harness",
@@ -492,9 +482,22 @@ export function parseDeepSeekSessionJsonl(text, { sessionKey, fallbackOccurredAt
         occurredAtIso,
         model,
         breakdown,
-        extraId: `L${lineNo}:${model}`,
-      })
-    );
+        extraId:
+          (isDshAssistantMessage && typeof dshData.message?.id === "string" && dshData.message.id) ||
+          `L${lineNo}:${model}`,
+      });
+    // DeepSeek outputTokens already includes reasoning tokens.  Keep the
+    // separate count as diagnostic metadata without double-counting it.
+    const reasoningTokens = finiteCount(usage.reasoningTokens);
+    for (const event of parsed) {
+      event.confidence = "actual";
+      if (reasoningTokens > 0) {
+        if (event.metadata?.tokenType === "output") {
+          event.metadata.reasoningTokens = reasoningTokens;
+        }
+      }
+    }
+    events.push(...parsed);
   }
   return events;
 }
@@ -641,9 +644,9 @@ export async function postUsageBatches({
       body: bodyFor(batch),
       log,
     });
-    received += Number(parsed?.received ?? batch.length);
-    persisted += Number(parsed?.persisted ?? 0);
-    rejected += Number(parsed?.rejected ?? 0);
+    received += parsed.received;
+    persisted += parsed.persisted;
+    rejected += parsed.rejected;
     // Authenticated ingest allows 10 req / 1s.  A 400-day backfill is 100+
     // batches; blasting them trips 429 and aborts the rest of history.
     if (i < batches.length - 1) {
@@ -685,7 +688,7 @@ async function postUsageBatchWithRetry({ ingestUrl, ingestToken, body, log }) {
     } catch (networkError) {
       const waitMs = Math.min(60_000, Math.pow(2, attempt) * 1000);
       log(
-        `ingest network error (${networkError instanceof Error ? networkError.message : String(networkError)}) on attempt ${attempt}/${maxAttempts}; retry in ${waitMs}ms`
+        `ingest network error (${networkError instanceof Error ? networkError.name : "unknown"}) on attempt ${attempt}/${maxAttempts}; retry in ${waitMs}ms`
       );
       if (attempt === maxAttempts) {
         throw networkError;
@@ -693,7 +696,7 @@ async function postUsageBatchWithRetry({ ingestUrl, ingestToken, body, log }) {
       await sleep(waitMs);
       continue;
     }
-    if (response.status === 429 || response.status === 503) {
+    if (response.status === 429 || response.status >= 500) {
       const retryAfter = Number(parsed?.error?.retryAfterSeconds);
       const waitMs = Math.min(
         60_000,
@@ -709,11 +712,26 @@ async function postUsageBatchWithRetry({ ingestUrl, ingestToken, body, log }) {
       continue;
     }
     if (!response.ok && response.status !== 202) {
-      const detail = parsed?.error?.code ? parsed.error.code : `HTTP ${response.status}`;
-      const msg = parsed?.error?.message ? `: ${parsed.error.message}` : "";
-      throw new Error(`Ingest rejected the batch (${detail}${msg})`);
+      throw new Error(`Ingest rejected the batch (HTTP ${response.status})`);
+    }
+    if (!isCompleteUsageIngestAck(parsed, body.events.length)) {
+      const waitMs = Math.min(60_000, Math.pow(2, attempt) * 1000);
+      log(`ingest returned an ambiguous acknowledgement on attempt ${attempt}/${maxAttempts}; retry in ${waitMs}ms`);
+      if (attempt === maxAttempts) {
+        throw new Error("Ingest returned an ambiguous acknowledgement after 8 attempts");
+      }
+      await sleep(waitMs);
+      continue;
     }
     return parsed;
   }
   throw new Error("Ingest retry loop exhausted");
+}
+
+export function isCompleteUsageIngestAck(ack, expectedReceived) {
+  if (!ack || typeof ack !== "object" || Array.isArray(ack)) return false;
+  const counts = [ack.received, ack.persisted, ack.duplicates, ack.pruned, ack.rejected];
+  if (!counts.every((value) => Number.isInteger(value) && value >= 0)) return false;
+  return ack.received === expectedReceived &&
+    ack.persisted + ack.duplicates + ack.pruned + ack.rejected === ack.received;
 }

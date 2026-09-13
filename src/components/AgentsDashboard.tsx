@@ -57,6 +57,11 @@ export function AgentsDashboard() {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(usd);
   };
 
+  const formatKnownCost = (usd: number, complete: boolean) => {
+    if (complete) return formatCurrency(usd);
+    return usd > 0 ? `${formatCurrency(usd)} known+` : "Unknown";
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header & Window Controls */}
@@ -171,7 +176,10 @@ export function AgentsDashboard() {
                 <span className="text-[11px] text-muted-foreground">LiteLLM Catalog</span>
               </div>
               <div className="mt-2 text-2xl font-bold text-foreground">
-                {formatCurrency(data.summary.totalApiEquivalentCostUsd)}
+                {formatKnownCost(
+                  data.summary.totalApiEquivalentCostUsd,
+                  data.summary.apiEquivalentCostComplete,
+                )}
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
                 Billed seats this window: {formatCurrency(data.summary.totalSubscriptionCostUsd)}
@@ -187,7 +195,11 @@ export function AgentsDashboard() {
                 </span>
               </div>
               <div className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                +{formatCurrency(data.summary.totalNetSavingsUsd)}
+                {data.summary.apiEquivalentCostComplete
+                  ? `+${formatCurrency(data.summary.totalNetSavingsUsd)}`
+                  : data.summary.totalNetSavingsUsd > 0
+                    ? `+${formatCurrency(data.summary.totalNetSavingsUsd)} known+`
+                    : "Unknown"}
               </div>
               <div className="mt-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">
                 Saved vs paying direct API list pricing
@@ -212,7 +224,7 @@ export function AgentsDashboard() {
                 </div>
                 <div>
                   <div className="text-[11px] text-muted-foreground">5h Cost Equivalent</div>
-                  <div className="text-lg font-bold text-foreground mt-0.5">{formatCurrency(data.burn5h.costEstimate5hUsd)}</div>
+                  <div className="text-lg font-bold text-foreground mt-0.5">{formatKnownCost(data.burn5h.costEstimate5hUsd, data.burn5h.costEstimateComplete)}</div>
                 </div>
                 <div>
                   <div className="text-[11px] text-muted-foreground">Token Pace / hr</div>
@@ -220,7 +232,7 @@ export function AgentsDashboard() {
                 </div>
                 <div>
                   <div className="text-[11px] text-muted-foreground">Burn Rate / hr</div>
-                  <div className="text-lg font-bold text-foreground mt-0.5">{formatCurrency(data.burn5h.burnRateUsdPerHour)}/h</div>
+                  <div className="text-lg font-bold text-foreground mt-0.5">{formatKnownCost(data.burn5h.burnRateUsdPerHour, data.burn5h.costEstimateComplete)}/h</div>
                 </div>
               </div>
             </div>
@@ -299,7 +311,12 @@ export function AgentsDashboard() {
                         <div>
                           <div className="text-[10px] text-muted-foreground">PAYG Value</div>
                           <div className="font-bold text-foreground mt-0.5">
-                            {formatAgentMoneyValue(platform, platform.estimatedCostUsd, formatCurrency)}
+                            {platform.usageIsReliable
+                              ? formatKnownCost(
+                                  platform.estimatedCostUsd,
+                                  platform.apiEquivalentCostComplete,
+                                )
+                              : formatAgentMoneyValue(platform, platform.estimatedCostUsd, formatCurrency)}
                           </div>
                         </div>
                         <div>
@@ -397,7 +414,9 @@ export function AgentsDashboard() {
                         <td className="py-2.5 text-right font-medium text-foreground">{formatTokens(m.tokens)}</td>
                         <td className="py-2.5 text-right text-muted-foreground">{m.percent.toFixed(1)}%</td>
                         <td className="py-2.5 text-right text-emerald-600 dark:text-emerald-400 font-semibold">
-                          {formatCurrency(m.apiEquivalentCostUsd)}
+                          {m.apiEquivalentCostKnown
+                            ? formatCurrency(m.apiEquivalentCostUsd)
+                            : "Unknown"}
                         </td>
                       </tr>
                     ))}

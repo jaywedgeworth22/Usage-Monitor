@@ -86,7 +86,7 @@ describe("agents-overview", () => {
     const result = await computeAgentsOverview(30);
     expect(result.ok).toBe(true);
     expect(result.summary.totalTokens).toBe(170_000);
-    expect(result.platforms.length).toBe(7);
+    expect(result.platforms.length).toBe(10);
     // 30-day window sits inside the raw-event retention window, so rollups
     // must not be queried (they would double-count the same days).
     expect(rollupSpy).not.toHaveBeenCalled();
@@ -118,6 +118,8 @@ describe("agents-overview", () => {
     expect(cursor?.listMonthlySeatCostUsd).toBe(200);
     const minimax = result.platforms.find((p) => p.id === "minimax-code");
     expect(minimax?.billedMonthlySeatCostUsd).toBe(0);
+    expect(result.platforms.find((p) => p.id === "deepseek-dsh")).toBeDefined();
+    expect(result.platforms.find((p) => p.id === "kimi-code")).toBeDefined();
   });
 
   it("uses rollups only for days before the raw-event cutoff", async () => {
@@ -221,7 +223,7 @@ describe("agents-overview", () => {
     expect(antigravity?.bundledOffsetLabel).toBe("Google One");
     expect(antigravity?.seatCostNote).toContain("$70 net for the AI");
     expect(antigravity?.usageIsReliable).toBe(false);
-    expect(antigravity?.telemetryAccuracy).toBe("unavailable");
+    expect(antigravity?.telemetryAccuracy).toBe("none_in_window");
     expect(antigravity?.telemetryAccuracyLabel).toBe("not reported");
     expect(antigravity?.totalTokens).toBe(0);
     expect(antigravity?.modelsUsed).toEqual([]);
@@ -264,5 +266,33 @@ describe("agents-overview", () => {
     expect(cursor?.usageIsReliable).toBe(false);
     expect(cursor?.telemetryAccuracy).toBe("unavailable");
     expect(cursor?.totalTokens).toBe(0);
+  });
+
+  it("marks unpriced model cost unknown instead of presenting zero as complete", async () => {
+    vi.spyOn(prisma.externalUsageEvent as any, "groupBy").mockImplementation(async (args: any) => {
+      if (args.where?.metricType === "usage") {
+        return [
+          {
+            sourceApp: "deepseek-dsh",
+            provider: "deepseek",
+            keyRef: "deepseek-v4-flash",
+            label: "token:output",
+            _sum: { quantity: 10_000 },
+          },
+        ] as any;
+      }
+      return [] as any;
+    });
+    vi.spyOn(prisma.externalUsageEventDailyRollup as any, "groupBy").mockResolvedValue([] as any);
+
+    const result = await computeAgentsOverview(30);
+    const deepseek = result.platforms.find((p) => p.id === "deepseek-dsh");
+    expect(deepseek?.totalTokens).toBe(10_000);
+    expect(deepseek?.apiEquivalentCostUsd).toBe(0);
+    expect(deepseek?.apiEquivalentCostComplete).toBe(false);
+    expect(deepseek?.modelsUsed[0]?.apiEquivalentCostKnown).toBe(false);
+    expect(result.summary.apiEquivalentCostComplete).toBe(false);
+    expect(result.summary.unpricedModelCount).toBe(1);
+    expect(result.modelDistribution[0]?.apiEquivalentCostKnown).toBe(false);
   });
 });
