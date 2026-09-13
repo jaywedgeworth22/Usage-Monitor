@@ -52,6 +52,18 @@ function BrandMark({ className = "h-8 w-8" }: { className?: string }) {
   );
 }
 
+function triggerSentryFeedback() {
+  if (typeof window === "undefined") return;
+  const Sentry = (window as unknown as { Sentry?: { getFeedback?: () => { createForm?: () => Promise<{ appendToDom: () => void; open: () => void }> } } }).Sentry;
+  const feedback = Sentry?.getFeedback?.();
+  if (feedback?.createForm) {
+    void feedback.createForm().then((form) => {
+      form.appendToDom();
+      form.open();
+    }).catch(() => {});
+  }
+}
+
 export default function Nav() {
   const pathname = usePathname();
   const router = useRouter();
@@ -338,6 +350,19 @@ export default function Nav() {
                           );
                         })}
                       </div>
+                      <div className="mt-3 border-t border-gray-200 pt-2.5 dark:border-gray-700">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setPrefsOpen(false);
+                            triggerSentryFeedback();
+                          }}
+                          className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+                        >
+                          <span>Report a Problem</span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -474,6 +499,16 @@ export default function Nav() {
                   </>
                 )}
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  triggerSentryFeedback();
+                }}
+                className="block min-h-11 w-full rounded-lg px-3 py-2.5 text-left text-sm font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
+              >
+                Report a Problem
+              </button>
               <button
                 type="button"
                 onClick={handleLogout}
