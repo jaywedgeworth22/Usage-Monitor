@@ -16,8 +16,8 @@ public struct LocalRootView: View {
     @State private var showWipeConfirmation = false
     @State private var pathProviders = NavigationPath()
     @State private var providersFilter: LocalProviderFilter = .all
-    /// Shared state for the import-mode picker + action button so the two
-    /// stay in sync while remaining independent List rows.
+    /// Shared state for Import Package.  Mode is chosen after the file pick so
+    /// a List Picker cannot swallow the button tap.
     @State private var importState = LocalImportState()
 
     /// Caller must supply a main-actor `AppSettings` (e.g. `@State` from the app
@@ -298,18 +298,30 @@ public struct LocalRootView: View {
                     Toggle("Require Face ID / Passcode", isOn: $settings.appLockEnabled)
                         .tint(Theme.Colors.accent)
                 }
-                Section("Backup") {
+                Section {
                     LocalExportButton(model: model)
-                    // Each import-flow piece is its own Section row so iOS
-                    // does not collapse the Picker + Button into a single
-                    // hit-tested row.  See LocalImportState doc.
-                    LocalImportModePicker(state: importState)
+                } header: {
+                    Text("Backup")
+                } footer: {
+                    Text("A backup restores cards, budgets, and fees — never API keys.")
+                }
+                // Own Section (not a Picker sibling).  A List Picker in the same
+                // section still steals the next row's tap — owner 2026-09-04 and
+                // 2026-09-13: Import Package always opened Merge / Replace All.
+                Section {
                     LocalImportButton(model: model, state: importState)
                     LocalImportMessage(state: importState)
+                } header: {
+                    Text("Import Package")
+                } footer: {
+                    Text("Pick the JSON from usage.jays.services (Download For Local) or a phone export.  There is no bundle key or passphrase.  API keys are not in that file.")
+                }
+                Section {
                     LocalKeysImportButton(model: model)
-                    Text("A backup restores cards, budgets, and fees — never API keys.  After import, open each provider and tap Connect Account, or use Import Keys for a key file from your Mac.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Import Keys")
+                } footer: {
+                    Text("Only for a Mac .umkeys file.  Needs the passphrase you set when you built it.  Do not use this for the website JSON.")
                 }
                 Section("Also in This Project") {
                     Text("**Usage Client Monitor** is the other app: a live-sync client for a server you host yourself (or the owner fleet). Use that when you run a VPS.")
