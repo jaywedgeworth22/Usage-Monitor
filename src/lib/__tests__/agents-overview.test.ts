@@ -295,4 +295,36 @@ describe("agents-overview", () => {
     expect(result.summary.unpricedModelCount).toBe(1);
     expect(result.modelDistribution[0]?.apiEquivalentCostKnown).toBe(false);
   });
+
+  it("does not include cache-unsplit input in the known API-equivalent subtotal", async () => {
+    vi.spyOn(prisma.externalUsageEvent as any, "groupBy").mockImplementation(async (args: any) => {
+      if (args.where?.metricType === "usage") {
+        return [
+          {
+            sourceApp: "antigravity-statusline",
+            provider: "google-antigravity",
+            keyRef: "gpt-5.6-sol",
+            label: "token:inputUnsplit",
+            _sum: { quantity: 100_000 },
+          },
+          {
+            sourceApp: "antigravity-statusline",
+            provider: "google-antigravity",
+            keyRef: "gpt-5.6-sol",
+            label: "token:output",
+            _sum: { quantity: 10_000 },
+          },
+        ] as any;
+      }
+      return [] as any;
+    });
+    vi.spyOn(prisma.externalUsageEventDailyRollup as any, "groupBy").mockResolvedValue([] as any);
+
+    const result = await computeAgentsOverview(30);
+    const antigravity = result.platforms.find((p) => p.id === "antigravity-cli");
+    expect(antigravity?.totalTokens).toBe(110_000);
+    expect(antigravity?.apiEquivalentCostUsd).toBeCloseTo(0.2, 6);
+    expect(antigravity?.apiEquivalentCostComplete).toBe(false);
+    expect(antigravity?.modelsUsed[0]?.apiEquivalentCostKnown).toBe(false);
+  });
 });

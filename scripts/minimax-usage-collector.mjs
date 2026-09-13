@@ -29,6 +29,7 @@ function isoFromEpoch(value, fallback) {
 export function quotaEventsFromMiniMax(payload, observedAt = new Date()) {
   const rows = Array.isArray(payload?.model_remains) ? payload.model_remains : [];
   const events = [];
+  const observedIso = observedAt.toISOString();
   for (const row of rows) {
     const model = typeof row?.model_name === "string" ? row.model_name.trim() : "";
     if (!model) continue;
@@ -50,7 +51,7 @@ export function quotaEventsFromMiniMax(payload, observedAt = new Date()) {
       if (remaining == null) continue;
       const resetAt = isoFromEpoch(window.end, observedAt.toISOString());
       events.push({
-        eventId: `minimax-quota:${model}:${window.name}:${resetAt}`,
+        eventId: `minimax-quota:${model}:${window.name}:${resetAt}:${observedIso}`,
         provider: "minimax",
         service: "minimax-code",
         producerKeyRef: model,
@@ -60,7 +61,7 @@ export function quotaEventsFromMiniMax(payload, observedAt = new Date()) {
         credits: remaining,
         billingMode: "actual",
         confidence: "actual",
-        occurredAt: observedAt.toISOString(),
+        occurredAt: observedIso,
         metadata: {
           model,
           quotaWindow: window.duration,

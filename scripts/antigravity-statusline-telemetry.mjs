@@ -30,6 +30,39 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+async function lastCapturedSnapshot(sessionHash) {
+  let text;
+  try {
+    text = await readFile(eventLog, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return null;
+    throw error;
+  }
+  const lines = text.trimEnd().split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    try {
+      const row = JSON.parse(lines[index]);
+      if (
+        row?.type === "antigravity.statusline.usage" &&
+        row.sessionHash === sessionHash &&
+        Number.isFinite(Number(row.totalInput)) &&
+        Number.isFinite(Number(row.totalOutput))
+      ) {
+        return row;
+      }
+    } catch {
+      // Ignore an interrupted append and keep looking for the last complete row.
+    }
+  }
+  return null;
+}
+
+async function persistState(state) {
+  const temp = `${captureState}.${process.pid}.tmp`;
+  await writeFile(temp, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+  await rename(temp, captureState);
+}
+
 async function main() {
   let payload;
   try {
@@ -64,7 +97,7 @@ async function main() {
     // First observation for this session.
   }
   const sessionHash = hash(sessionId);
-  const previous = state[sessionHash];
+  const previous = state[sessionHash] || await lastCapturedSnapshot(sessionHash);
   const legacyTotals = typeof previous === "string"
     ? previous.split(":").map((value) => finiteCount(value))
     : [];
@@ -85,7 +118,13 @@ async function main() {
   const previousSignature = typeof previous === "string"
     ? `0:${previous}`
     : `${previousGeneration}:${previousInput}:${previousOutput}`;
-  if (!counterReset && (previousSignature === totalSignature || inputDelta + outputDelta === 0)) return;
+  if (!counterReset && (previousSignature === totalSignature || inputDelta + outputDelta === 0)) {
+    if (!state[sessionHash] && previous) {
+      state[sessionHash] = { totalInput, totalOutput, generation };
+      await persistState(state);
+    }
+    return;
+  }
   const signature = hash(`${sessionHash}\0${model}\0${totalSignature}`);
   // current_usage describes the current request, while the total fields are
   // cumulative for the conversation.  Use the exact split only when it fully
@@ -112,9 +151,7 @@ async function main() {
   };
   await appendFile(eventLog, `${JSON.stringify(snapshot)}\n`, { mode: 0o600 });
   state[sessionHash] = { totalInput, totalOutput, generation };
-  const temp = `${captureState}.${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(state)}\n`, { mode: 0o600 });
-  await rename(temp, captureState);
+  await persistState(state);
 }
 
 main().catch(() => {

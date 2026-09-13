@@ -39,6 +39,7 @@ import {
   botFleetChildExclusionEnabled,
   expandHome,
   isBotFleetManagedCodexSession,
+  isBotFleetSessionPath,
   parseCollectorArgs,
   readIfFresh,
   sessionKeyFor,
@@ -170,7 +171,7 @@ async function collectAllSessionEvents(since) {
   const dshHome = expandHome("~/.dsh");
   const dshFiles = await walkFiles(join(dshHome, "sessions"), { name: "session.jsonl.zstd" });
   for (const f of dshFiles) {
-    if (botFleetChildExclusionEnabled() && f.includes(".botfleet-workspaces-")) continue;
+    if (botFleetChildExclusionEnabled() && isBotFleetSessionPath(f)) continue;
     try {
       const text = execFileSync(process.env.ZSTD_BIN || "/opt/homebrew/bin/zstd", ["-dc", f], {
         encoding: "utf8",

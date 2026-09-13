@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DERIVED_ANALYTICS_TOKEN_SOURCE_APPS,
   isClaudeCodeAnalyticsTelemetry,
   isSubscriptionAnalyticsTelemetry,
   shouldDeriveAnalyticsTokenEstimate,
@@ -67,5 +68,12 @@ describe("subscription analytics discriminators", () => {
         service: "codex-cli",
       })
     ).toBe(true);
+    expect(DERIVED_ANALYTICS_TOKEN_SOURCE_APPS).toEqual([
+      "grok-build",
+      "openai-codex",
+      "antigravity-statusline",
+      "github-copilot",
+      "deepseek-dsh",
+    ]);
   });
 });

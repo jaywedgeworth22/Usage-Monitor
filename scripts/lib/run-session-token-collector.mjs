@@ -230,3 +230,7 @@ export function isBotFleetManagedCodexSession(text) {
 export function botFleetChildExclusionEnabled(env = process.env) {
   return env.USAGE_MONITOR_EXCLUDE_BOTFLEET_CHILDREN === "1";
 }
+
+export function isBotFleetSessionPath(path) {
+  return path.includes("/.botfleet/workspaces/") || path.includes(".botfleet-workspaces-");
+}

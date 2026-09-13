@@ -33,6 +33,7 @@ import {
   canAdvanceCollectorCheckpoint,
   codexSessionKeyFor,
   isBotFleetManagedCodexSession,
+  isBotFleetSessionPath,
   parseCollectorArgs,
   readIfFresh,
   recordCollectorSuccess,
@@ -170,6 +171,23 @@ try {
       capturedRows[3].inputDelta === 50 && capturedRows[3].outputDelta === 5,
     "counter reset starts a new generation without waiting for the old high-water mark",
   );
+  await rm(join(statuslineStateRoot, "capture-state.json"), { force: true });
+  runStatusline({
+    total_input_tokens: 50,
+    total_output_tokens: 5,
+    current_usage: {
+      input_tokens: 50,
+      output_tokens: 5,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    },
+  }, "tool_use");
+  const replayedRows = (await readFile(join(statuslineStateRoot, "usage.jsonl"), "utf8"))
+    .trim().split("\n").map((line) => JSON.parse(line));
+  assert(
+    replayedRows.length === 4,
+    "status-line state loss recovers from the durable snapshot without appending a conflicting retry",
+  );
   assert(!captured.includes("private-session-id"), "status line hashes the private session id");
   assert(!captured.includes("/private/workspace"), "status line omits workspace paths");
   const capturedEvents = parseAntigravityStatuslineJsonl(captured);
@@ -211,6 +229,30 @@ const minimaxQuotaEvents = quotaEventsFromMiniMax(
 assert(minimaxQuotaEvents.length === 2, "MiniMax emits rolling and weekly quota windows");
 assert(minimaxQuotaEvents[0].credits === 88, "MiniMax remaining percent preserved");
 assert(minimaxQuotaEvents[0].producerKeyRef === "MiniMax-M3", "MiniMax model preserved");
+const sameMiniMaxObservation = quotaEventsFromMiniMax(
+  { model_remains: [{
+    model_name: "MiniMax-M3",
+    end_time: 1789293600000,
+    current_interval_remaining_percent: 88,
+  }] },
+  new Date("2026-09-13T12:00:00.000Z"),
+);
+const laterMiniMaxObservation = quotaEventsFromMiniMax(
+  { model_remains: [{
+    model_name: "MiniMax-M3",
+    end_time: 1789293600000,
+    current_interval_remaining_percent: 87,
+  }] },
+  new Date("2026-09-13T12:01:00.000Z"),
+);
+assert(
+  minimaxQuotaEvents[0].eventId === sameMiniMaxObservation[0].eventId,
+  "MiniMax exact observation retries keep the same event id",
+);
+assert(
+  minimaxQuotaEvents[0].eventId !== laterMiniMaxObservation[0].eventId,
+  "MiniMax polls in the same quota window use distinct observation ids",
+);
 assert(
   UsageTelemetryV2BatchSchema.safeParse({
     schemaVersion: 2,
@@ -219,6 +261,13 @@ assert(
     events: minimaxQuotaEvents,
   }).success,
   "MiniMax quota batch schema valid",
+);
+
+assert(
+  isBotFleetSessionPath("/Users/test/.botfleet/workspaces/child/session.jsonl.zstd") &&
+    isBotFleetSessionPath("/tmp/.botfleet-workspaces-child/session.jsonl.zstd") &&
+    !isBotFleetSessionPath("/Users/test/.dsh/sessions/local/session.jsonl.zstd"),
+  "BotFleet child-path detection covers both managed workspace layouts",
 );
 
 const codexFixture = [

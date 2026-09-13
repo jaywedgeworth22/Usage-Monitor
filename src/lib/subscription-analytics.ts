@@ -20,6 +20,9 @@ export const SUBSCRIPTION_ANALYTICS_SOURCE_APPS = [
 export type SubscriptionAnalyticsSourceApp =
   (typeof SUBSCRIPTION_ANALYTICS_SOURCE_APPS)[number];
 
+export const DERIVED_ANALYTICS_TOKEN_SOURCE_APPS =
+  SUBSCRIPTION_ANALYTICS_SOURCE_APPS.filter((sourceApp) => sourceApp !== "claude-code");
+
 /** sourceApp-only seats. Claude Code stays exact (sourceApp AND service)
  *  because `sourceApp=claude-code` without `service=claude-code` is used for
  *  other Anthropic telemetry that must remain cash. */

@@ -499,8 +499,10 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     breakdown.total += qty;
 
     const label = group.label?.toLowerCase() || "";
-    if (label.includes("inputunsplit")) breakdown.incompleteInput = true;
-    if (label.includes("input")) {
+    if (label.includes("inputunsplit")) {
+      breakdown.incompleteInput = true;
+      breakdown.unknown += qty;
+    } else if (label.includes("input")) {
       breakdown.input += qty;
     } else if (label.includes("output")) {
       breakdown.output += qty;
@@ -573,7 +575,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       const modelPricing = getModelPricing(modelName);
       const priced = modelPricing
         ? deriveTokenCostUsd(modelPricing.pricing, {
-            input: breakdown.input + breakdown.unknown,
+            input: breakdown.input,
             output: breakdown.output,
             cacheRead: breakdown.cacheRead,
             cacheCreation: breakdown.cacheCreation,
@@ -581,7 +583,8 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
         : null;
 
       const modelCost = priced?.costUsd || 0;
-      const modelCostKnown = Boolean(priced?.complete) && !breakdown.incompleteInput;
+      const modelCostKnown =
+        Boolean(priced?.complete) && !breakdown.incompleteInput && breakdown.unknown === 0;
       if (!modelCostKnown && breakdown.total > 0) platformApiCostComplete = false;
       platformApiCost += modelCost;
 

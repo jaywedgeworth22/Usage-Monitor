@@ -33,6 +33,7 @@ import {
   botFleetChildExclusionEnabled,
   canAdvanceCollectorCheckpoint,
   expandHome,
+  isBotFleetSessionPath,
   recordCollectorSuccess,
   resolveCollectorArgs,
   resolveCollectorToken,
@@ -55,10 +56,6 @@ function log(message) {
 function fail(message, code = 1) {
   console.error(`[deepseek-usage-collector] ${message}`);
   process.exit(code);
-}
-
-function isBotFleetSessionPath(path) {
-  return path.includes("/.botfleet/workspaces/") || path.includes(".botfleet-workspaces-");
 }
 
 async function decompress(path) {
