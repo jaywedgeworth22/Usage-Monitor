@@ -47,9 +47,9 @@ struct MonitorDashboard: View {
                             Spacer()
                             Text("Percent remaining").font(.caption).foregroundStyle(.secondary)
                         }
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), alignment: .top)], alignment: .leading, spacing: 16) {
+                        LazyVGrid(columns: selected == "all" ? [GridItem(.adaptive(minimum: 290), alignment: .top)] : [GridItem(.flexible())], alignment: .leading, spacing: 16) {
                             ForEach(visibleSections, id: \.providerKey) { section in
-                                PlatformCard(section: section, now: model.now, issue: model.issues[section.providerKey], compact: false)
+                                PlatformCard(section: section, now: model.now, issue: model.issues[section.providerKey], compact: false, wide: selected != "all")
                             }
                         }
                         Text("Each window is an independent cap.  A model offered through Antigravity uses the Antigravity subscription.  Unreported limits stay unavailable.")
@@ -151,6 +151,7 @@ struct PlatformCard: View {
     let now: Date
     let issue: String?
     let compact: Bool
+    var wide = false
     @State private var expanded = false
 
     private var displayedWindows: [QuotaWindowSnapshot] {
@@ -184,9 +185,19 @@ struct PlatformCard: View {
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                ForEach(Array(displayedWindows.enumerated()), id: \.offset) { index, snapshot in
-                    if index > 0 { Divider() }
-                    QuotaRow(snapshot: snapshot, now: now, sourceFailed: issue != nil, compact: compact)
+                if wide && displayedWindows.count > 1 {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 22) {
+                        ForEach(displayedWindows, id: \.window.id) { snapshot in
+                            QuotaRow(snapshot: snapshot, now: now, sourceFailed: issue != nil, compact: compact)
+                                .padding(12)
+                                .background(Palette.background, in: RoundedRectangle(cornerRadius: 8))
+                        }
+                    }
+                } else {
+                    ForEach(Array(displayedWindows.enumerated()), id: \.offset) { index, snapshot in
+                        if index > 0 { Divider() }
+                        QuotaRow(snapshot: snapshot, now: now, sourceFailed: issue != nil, compact: compact)
+                    }
                 }
                 if section.windows.count > 4 {
                     Button(expanded ? "Show Less" : "Show All \(section.windows.count) Windows") { expanded.toggle() }
@@ -267,7 +278,8 @@ private struct QuotaRow: View {
                 HStack {
                     Text(snapshot.observedAt.map { "Updated \($0.formatted(date: .omitted, time: .shortened))" } ?? "Update time unavailable")
                     Spacer()
-                    if snapshot.isStale { Text("Stale").foregroundStyle(Palette.warning) }
+                    if snapshot.observedAt == nil { Text("Not reported") }
+                    else if snapshot.isStale { Text("Stale").foregroundStyle(Palette.warning) }
                     else if let source = snapshot.window.source { Text(source).lineLimit(1) }
                 }.font(.system(size: 9)).foregroundStyle(.tertiary)
             }

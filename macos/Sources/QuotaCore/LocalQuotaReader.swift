@@ -107,7 +107,7 @@ public struct LocalQuotaReader: Sendable {
             candidate = validOAuth(root)
         }
         guard let oauth = candidate, let token = firstString(oauth, ["accessToken", "access_token"]) else {
-            return ProviderRead(provider: provider, windows: [], issue: "Claude Code login is unavailable.  Sign in to Claude Code and allow access to its Keychain item.")
+            return ProviderRead(provider: provider, windows: [], issue: "Claude Code quota login is unavailable.  Sign in to Claude Code to connect subscription quotas.")
         }
 
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
@@ -412,6 +412,18 @@ private func parseCodex(_ root: [String: Any], planType: String?, observedAt: Da
 }
 
 private func parseGrok(_ root: [String: Any], observedAt: Date) -> [QuotaWindow] {
+    let config = record(root["config"])
+    if let used = firstNumber(config, ["creditUsagePercent"]) {
+        let period = record(config["currentPeriod"])
+        let reset = firstTimestamp(period, ["end"]) ?? firstTimestamp(config, ["billingPeriodEnd"])
+        let start = firstTimestamp(period, ["start"]) ?? firstTimestamp(config, ["billingPeriodStart"])
+        let cadence: String? = if let start, let reset, let startDate = parseDate(start), let endDate = parseDate(reset) {
+            windowToken(seconds: endDate.timeIntervalSince(startDate))
+        } else { nil }
+        // On-demand caps and prepaid balances are separate from this subscription.
+        return [window(provider: .grok, id: "subscription", label: cadence.map { "\($0) window" } ?? "Subscription window",
+                       remaining: 100 - used, resetAt: reset, windowToken: cadence, observedAt: observedAt)]
+    }
     let nested = record(root["credits"] ?? root["usage"] ?? root["billing"] ?? root["data"])
     var merged = nested; for (key, value) in root { merged[key] = value }
     let remainingDirect = firstNumber(merged, ["remainingPercent", "remaining_percent", "percentageRemaining", "percentage_remaining"])

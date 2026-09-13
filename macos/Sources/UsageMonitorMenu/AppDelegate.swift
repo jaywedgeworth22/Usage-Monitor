@@ -79,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func togglePopover() {
-        guard let button = statusItem?.button else { return }
+        guard let button = statusItem?.button else { showMonitor(); return }
         if popover.isShown { popover.performClose(nil) }
         else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
@@ -135,6 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             appMenu.addItem(item)
         }
         add("Open Usage Monitor", #selector(showMonitor), "1")
+        add("Quick Quotas", #selector(togglePopover), "2")
         add("Settings…", #selector(showSettings), ",")
         add("Refresh Quotas", #selector(refresh), "r")
         appMenu.addItem(.separator())

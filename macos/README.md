@@ -8,7 +8,11 @@ Quota refreshes run every five minutes, on wake, and on demand.  Readings older 
 
 Closing the main window keeps the app running.  Open it again from its menu bar panel or Dock icon.  Settings → Show In changes the mode immediately.  Quit from the app menu or the menu bar panel's More menu.  There is no LaunchAgent or login item.
 
+Keyboard shortcuts: ⌘1 opens the dashboard, ⌘2 opens Quick Quotas, ⌘R refreshes, and ⌘, opens Settings.
+
 Antigravity displays exactly four shared windows: Gemini Models and Third-Party Models, each with a 5-hour and weekly cap.  Repeated model observations are not additional quotas.  Missing weekly data stays unavailable with no invented reset.  GitHub Copilot, Windsurf, DeepSeek, and additional platforms can be supplied by the server; they have no built-in local reader yet.  Expired local sessions require signing in again in the provider's app or CLI.
+
+Antigravity's grouped source requires a running Antigravity app or CLI that exposes `RetrieveUserQuotaSummary`.  If no compatible process is running, the installed `antigravity-usage` helper can supply only the 5-hour windows.  Claude reads its OAuth credential file or Keychain item silently; an MCP-only login cannot supply subscription quotas.  Local and server windows are never combined within a provider because they may belong to different accounts.
 
 From the repository root:
 

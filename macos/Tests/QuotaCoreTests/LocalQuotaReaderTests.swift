@@ -122,6 +122,22 @@ final class LocalQuotaReaderTests: XCTestCase {
         XCTAssertEqual(result.windows.first { $0.providerKey == "xai" }?.remainingPercent, 40)
     }
 
+    func testGrokSubscriptionConfigExcludesOnDemandAndPrepaidCaps() async throws {
+        let home = try makeFixtureHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try writeJSON(["token": "fixture"], to: home.appendingPathComponent(".grok/auth.json"))
+        let reader = LocalQuotaReader(homeDirectory: home, fetchJSON: { _ in
+            Self.httpResponse(#"{"config":{"creditUsagePercent":51,"currentPeriod":{"start":"2026-09-10T00:00:00Z","end":"2026-09-17T00:00:00Z"},"onDemandCap":{"val":500},"prepaidBalance":{"val":300},"productUsage":[{"usagePercent":50},{"usagePercent":1}]}}"#)
+        }, runAntigravity: { Data("{}".utf8) })
+        let result = await reader.read()
+        let grok = try XCTUnwrap(result.windows.first { $0.providerKey == "xai" })
+        XCTAssertEqual(grok.remainingPercent, 49)
+        XCTAssertEqual(grok.window, "1w")
+        XCTAssertEqual(grok.resetAt, "2026-09-17T00:00:00Z")
+        XCTAssertNil(grok.absoluteLimit)
+        XCTAssertNil(grok.absoluteRemaining)
+    }
+
     private func writeJSON(_ object: Any, to url: URL) throws {
         let data = try JSONSerialization.data(withJSONObject: object)
         try data.write(to: url, options: .atomic)
