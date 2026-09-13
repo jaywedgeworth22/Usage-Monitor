@@ -128,6 +128,8 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 (mirror: docs/EFFORT-LOG.md in the repo). As of 2026-07-18.
 
 ## In Progress
+
+- **2026-09-13 - CODEX - IN_PROGRESS - Native macOS Usage Monitor with menu bar and Dock quota dashboard.**  Board 5acfbc5c.  Native SwiftUI app, local subscription quota readers, optional server connection, menu bar/Dock/both controls, bounded probes, and native CI.  Lane /Users/jay/apps/usage-monitor-codex-macos @ codex/macos-quota-monitor.
 (none)
 
 ## Deployed
