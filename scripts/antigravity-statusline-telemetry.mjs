@@ -65,19 +65,27 @@ async function main() {
   }
   const sessionHash = hash(sessionId);
   const previous = state[sessionHash];
+  const legacyTotals = typeof previous === "string"
+    ? previous.split(":").map((value) => finiteCount(value))
+    : [];
   const previousInput = previous && typeof previous === "object"
     ? finiteCount(previous.totalInput)
-    : 0;
+    : legacyTotals[0] ?? 0;
   const previousOutput = previous && typeof previous === "object"
     ? finiteCount(previous.totalOutput)
+    : legacyTotals[1] ?? 0;
+  const previousGeneration = previous && typeof previous === "object"
+    ? finiteCount(previous.generation)
     : 0;
-  const inputDelta = Math.max(0, totalInput - previousInput);
-  const outputDelta = Math.max(0, totalOutput - previousOutput);
-  const totalSignature = `${totalInput}:${totalOutput}`;
+  const counterReset = totalInput < previousInput || totalOutput < previousOutput;
+  const generation = counterReset ? previousGeneration + 1 : previousGeneration;
+  const inputDelta = counterReset ? totalInput : Math.max(0, totalInput - previousInput);
+  const outputDelta = counterReset ? totalOutput : Math.max(0, totalOutput - previousOutput);
+  const totalSignature = `${generation}:${totalInput}:${totalOutput}`;
   const previousSignature = typeof previous === "string"
-    ? previous
-    : `${previousInput}:${previousOutput}`;
-  if (previousSignature === totalSignature || inputDelta + outputDelta === 0) return;
+    ? `0:${previous}`
+    : `${previousGeneration}:${previousInput}:${previousOutput}`;
+  if (!counterReset && (previousSignature === totalSignature || inputDelta + outputDelta === 0)) return;
   const signature = hash(`${sessionHash}\0${model}\0${totalSignature}`);
   // current_usage describes the current request, while the total fields are
   // cumulative for the conversation.  Use the exact split only when it fully
@@ -94,6 +102,7 @@ async function main() {
     model,
     totalInput,
     totalOutput,
+    counterGeneration: generation,
     inputDelta,
     outputDelta,
     breakdownComplete,
@@ -102,7 +111,7 @@ async function main() {
       : { input: inputDelta, output: outputDelta, cacheRead: 0, cacheCreation: 0 },
   };
   await appendFile(eventLog, `${JSON.stringify(snapshot)}\n`, { mode: 0o600 });
-  state[sessionHash] = { totalInput, totalOutput };
+  state[sessionHash] = { totalInput, totalOutput, generation };
   const temp = `${captureState}.${process.pid}.tmp`;
   await writeFile(temp, `${JSON.stringify(state)}\n`, { mode: 0o600 });
   await rename(temp, captureState);

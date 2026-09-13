@@ -116,8 +116,8 @@ try {
     },
   );
   runStatusline({
-    total_input_tokens: 100,
-    total_output_tokens: 20,
+    total_input_tokens: 500,
+    total_output_tokens: 100,
     current_usage: {
       input_tokens: 80,
       output_tokens: 20,
@@ -126,8 +126,8 @@ try {
     },
   }, "tool_use");
   runStatusline({
-    total_input_tokens: 250,
-    total_output_tokens: 50,
+    total_input_tokens: 650,
+    total_output_tokens: 130,
     current_usage: {
       input_tokens: 100,
       output_tokens: 30,
@@ -136,8 +136,8 @@ try {
     },
   }, "idle");
   runStatusline({
-    total_input_tokens: 400,
-    total_output_tokens: 80,
+    total_input_tokens: 800,
+    total_output_tokens: 160,
     current_usage: {
       input_tokens: 10,
       output_tokens: 10,
@@ -145,18 +145,45 @@ try {
       cache_creation_input_tokens: 0,
     },
   }, "idle");
+  runStatusline({
+    total_input_tokens: 50,
+    total_output_tokens: 5,
+    current_usage: {
+      input_tokens: 50,
+      output_tokens: 5,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    },
+  }, "tool_use");
   const captured = await readFile(join(statuslineStateRoot, "usage.jsonl"), "utf8");
   const capturedRows = captured.trim().split("\n").map((line) => JSON.parse(line));
-  assert(capturedRows.length === 3, "status line captures each cumulative-token change");
+  assert(capturedRows.length === 4, "status line captures each cumulative-token change and reset");
+  assert(capturedRows[0].breakdownComplete === false, "first install does not assign mixed history to the current request");
   assert(capturedRows[1].breakdownComplete === true, "matching current usage preserves exact cache split");
   assert(capturedRows[2].breakdownComplete === false, "missed requests retain exact total deltas without inventing cache split");
   assert(
     capturedRows[2].usage.input === 150 && capturedRows[2].usage.output === 30,
     "unreconciled status update uses cumulative input and output deltas",
   );
+  assert(
+    capturedRows[3].counterGeneration === 1 &&
+      capturedRows[3].inputDelta === 50 && capturedRows[3].outputDelta === 5,
+    "counter reset starts a new generation without waiting for the old high-water mark",
+  );
   assert(!captured.includes("private-session-id"), "status line hashes the private session id");
   assert(!captured.includes("/private/workspace"), "status line omits workspace paths");
   const capturedEvents = parseAntigravityStatuslineJsonl(captured);
+  const firstCaptureEvents = capturedEvents.filter((event) =>
+    event.producerKeyRef === "unknown-antigravity-model" &&
+    (event.quantity === 500 || event.quantity === 100)
+  );
+  assert(
+    firstCaptureEvents.length === 2 && firstCaptureEvents.every((event) =>
+      event.producerKeyRef === "unknown-antigravity-model" &&
+      event.metadata.modelAttributionComplete === false
+    ),
+    "first-install mixed history keeps exact totals but unknown model attribution",
+  );
   assert(
     capturedEvents.some((event) =>
       event.label === "token:inputUnsplit" && event.metadata.tokenBreakdownComplete === false

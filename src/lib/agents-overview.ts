@@ -93,7 +93,7 @@ export const AGENT_PLATFORMS: readonly AgentPlatformMeta[] = [
     fidelityTier: "session_jsonl",
     tokenTelemetryKind: "session_jsonl",
     notes:
-      "The CLI status line reports exact cumulative input and output.  Cache read/write are split only when the current-request counters reconcile to the cumulative delta; transcript character estimates are not used.",
+      "The CLI status line reports exact cumulative input and output.  Model attribution and cache read/write are accepted only when the current-request counters reconcile to the cumulative delta; mixed or missed history stays unpriced with an unknown model.",
     defaultMonthlySeatCostUsd: AGENT_SEAT_CATALOG["antigravity-cli"].billedMonthlyUsd ?? 70,
     listMonthlySeatCostUsd: AGENT_SEAT_CATALOG["antigravity-cli"].listMonthlyUsd,
     bundledOffsetUsd: 30,

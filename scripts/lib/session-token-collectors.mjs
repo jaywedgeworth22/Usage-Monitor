@@ -406,22 +406,27 @@ export function parseAntigravityStatuslineJsonl(text, { fallbackOccurredAt } = {
       cacheRead: finiteCount(row.usage.cacheRead),
       cacheCreation: finiteCount(row.usage.cacheCreation),
     };
+    const breakdownComplete = row.breakdownComplete === true;
     const parsed = tokenEventsFromBreakdown({
       producerId: ANTIGRAVITY_STATUSLINE_PRODUCER_ID,
       provider: "google-antigravity",
       service: "antigravity-cli",
       sessionKey: sessionHash,
       occurredAtIso: isoTimestamp(row.occurredAt, fallbackIso),
-      model,
+      model: breakdownComplete ? model : "unknown-antigravity-model",
       breakdown,
       extraId: signature,
     });
     for (const event of parsed) {
       event.confidence = "actual";
-      if (row.breakdownComplete !== true && event.metadata?.tokenType === "input") {
-        event.label = "token:inputUnsplit";
-        delete event.metadata.tokenType;
-        event.metadata.tokenBreakdownComplete = false;
+      if (!breakdownComplete) {
+        event.metadata.observedCurrentModel = model;
+        event.metadata.modelAttributionComplete = false;
+        if (event.metadata?.tokenType === "input") {
+          event.label = "token:inputUnsplit";
+          delete event.metadata.tokenType;
+          event.metadata.tokenBreakdownComplete = false;
+        }
       }
     }
     events.push(...parsed);
