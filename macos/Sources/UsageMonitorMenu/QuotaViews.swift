@@ -55,8 +55,10 @@ struct MonitorDashboard: View {
                                 PlatformCard(section: section, now: model.now, issue: model.issues[section.providerKey], compact: false, wide: selected != "all")
                             }
                         }
-                        Text("Each window is an independent cap.  A model offered through Antigravity uses the Antigravity subscription.  Unreported limits stay unavailable.")
-                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if selected == "google-antigravity" {
+                            Text("Models used through Antigravity share its subscription quotas.")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .padding(26)
                 }
