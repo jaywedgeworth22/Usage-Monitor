@@ -6,7 +6,14 @@ import SwiftUI
 enum UsageMonitorMain {
     @MainActor
     static func main() {
+        if let existing = NSRunningApplication.runningApplications(withBundleIdentifier: "com.jays.usage-monitor.mac")
+            .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && !$0.isTerminated }) {
+            existing.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            return
+        }
         let app = NSApplication.shared
+        app.disableRelaunchOnLogin()
+        NSWindow.allowsAutomaticWindowTabbing = false
         let delegate = AppDelegate()
         app.delegate = delegate
         app.run()
@@ -96,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.title = "Usage Monitor"
             window.minSize = NSSize(width: 800, height: 540)
             window.isReleasedWhenClosed = false
+            window.isRestorable = false
             window.delegate = self
             window.contentView = NSHostingView(rootView:
                 MonitorDashboard(model: model, openSettings: { [weak self] in self?.showSettings() }))
@@ -114,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Usage Monitor Settings"
             window.isReleasedWhenClosed = false
+            window.isRestorable = false
             window.contentView = NSHostingView(rootView: MonitorSettings(model: model))
             window.center()
             settingsWindow = window
