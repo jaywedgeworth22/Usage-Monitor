@@ -30,6 +30,10 @@ final class MonitorModel: ObservableObject {
     @Published private(set) var serverEnabled: Bool
     @Published private(set) var endpoint: String
     @Published private(set) var hasSavedToken: Bool
+    @Published private(set) var connectingClaude = false
+    @Published private(set) var claudeConnectionMessage: String?
+    private var claudeCredential: Data?
+    private var sessionToken: String?
     private let defaults: UserDefaults
     private var localWindows: [QuotaWindow] = []
     private var serverWindows: [QuotaWindow] = []
@@ -87,6 +91,35 @@ final class MonitorModel: ObservableObject {
         clockTimer?.invalidate()
     }
 
+    func connectClaude() async {
+        guard !connectingClaude else { return }
+        connectingClaude = true
+        claudeConnectionMessage = nil
+        defer { connectingClaude = false }
+        let data = await ClaudeCredentialSource.connect()
+        guard let data,
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let oauth = root["claudeAiOauth"] as? [String: Any],
+              let token = (oauth["accessToken"] ?? oauth["access_token"]) as? String,
+              !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            claudeCredential = nil
+            claudeConnectionMessage = "Usage Monitor could not read a Claude quota credential.  Your Claude login has not been changed."
+            restartRefresh()
+            return
+        }
+        claudeCredential = data
+        claudeConnectionMessage = "Claude credential loaded for this app session."
+        restartRefresh()
+    }
+
+    private func restartRefresh() {
+        revision += 1
+        request?.cancel()
+        request = nil
+        isRefreshing = false
+        refresh()
+    }
+
     func saveConnection(local: Bool, server: Bool, endpoint input: String, token: String) async throws {
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: value), QuotaClient.isAllowedEndpoint(url) else { throw QuotaClientError.invalidEndpoint }
@@ -95,7 +128,12 @@ final class MonitorModel: ObservableObject {
             guard !cleanToken.contains("\n"), !cleanToken.contains("\r") else { throw QuotaClientError.invalidToken }
             try await TokenStore.save(cleanToken, server: value)
         }
-        let savedToken = !cleanToken.isEmpty ? cleanToken : server ? await TokenStore.read(server: value) : nil
+        let cachedToken = value == endpoint ? sessionToken : nil
+        let savedToken: String?
+        if !cleanToken.isEmpty { savedToken = cleanToken }
+        else if server, let cachedToken { savedToken = cachedToken }
+        else if server { savedToken = await TokenStore.read(server: value) }
+        else { savedToken = nil }
         if server && savedToken == nil { throw QuotaClientError.invalidToken }
         let saved = savedToken != nil || (value == endpoint && hasSavedToken)
         revision += 1
@@ -105,6 +143,7 @@ final class MonitorModel: ObservableObject {
         localEnabled = local
         serverEnabled = server
         endpoint = value
+        sessionToken = savedToken
         hasSavedToken = saved
         defaults.set(saved, forKey: "hasSavedToken")
         defaults.set(local, forKey: "localEnabled")
@@ -134,12 +173,13 @@ final class MonitorModel: ObservableObject {
         let useLocal = localEnabled
         let useServer = serverEnabled
         let currentEndpoint = endpoint
+        let token = sessionToken
+        let credential = claudeCredential
         request = Task { [weak self] in
-            async let localRead: LocalQuotaResult? = useLocal ? Self.readLocalSources() : nil
+            async let localRead: LocalQuotaResult? = useLocal ? Self.readLocalSources(claudeCredential: credential) : nil
             var newServer: QuotaResponse?
             var failure: String?
             if useServer {
-                let token = await TokenStore.read(server: currentEndpoint)
                 do {
                     guard let url = URL(string: currentEndpoint) else { throw QuotaClientError.invalidEndpoint }
                     guard let token else { throw TokenStore.Failure.read }
@@ -185,8 +225,8 @@ final class MonitorModel: ObservableObject {
         }
     }
 
-    private nonisolated static func readLocalSources() async -> LocalQuotaResult {
-        async let primary = LocalQuotaReader().read()
+    private nonisolated static func readLocalSources(claudeCredential: Data?) async -> LocalQuotaResult {
+        async let primary = LocalQuotaReader(claudeCredential: claudeCredential).read()
         async let cursor = CursorQuotaReader().read()
         async let grokBot = GrokBotQuotaReader().read()
         async let antigravity = AntigravitySummaryReader().read()

@@ -85,7 +85,7 @@ final class LocalQuotaReaderTests: XCTestCase {
         )
 
         let result = await reader.read()
-        XCTAssertEqual(result.issues["anthropic"], "This account needs you to sign in again.")
+        XCTAssertEqual(result.issues["anthropic"], "Claude quota access was rejected.  Reconnect Claude in Settings to reread your existing login.")
         XCTAssertEqual(result.issues["openai"], "Codex is not signed in locally.")
         XCTAssertEqual(result.issues["xai"], "Grok is not signed in locally.")
         XCTAssertFalse(result.issues.values.joined(separator: " ").contains("super-secret"))
@@ -102,7 +102,7 @@ final class LocalQuotaReaderTests: XCTestCase {
         return url
     }
 
-    func testClaudeKeychainFallbackAndGrokProfileEnvelope() async throws {
+    func testClaudeSessionCredentialAndGrokProfileEnvelope() async throws {
         let home = try makeFixtureHome()
         defer { try? FileManager.default.removeItem(at: home) }
         try writeJSON(["mcpOAuth": [:]], to: home.appendingPathComponent(".claude/.credentials.json"))
@@ -114,31 +114,53 @@ final class LocalQuotaReaderTests: XCTestCase {
             }
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-grok")
             return Self.httpResponse(#"{"remaining_percent":40}"#)
-        }, runAntigravity: { Data("{}".utf8) }, readClaudeKeychain: {
+        }, runAntigravity: { Data("{}".utf8) }, claudeCredential:
             Data(#"{"claudeAiOauth":{"accessToken":"fixture-claude","expiresAt":4102444800000}}"#.utf8)
-        })
+        )
         let result = await reader.read()
         XCTAssertEqual(result.windows.first { $0.providerKey == "anthropic" }?.remainingPercent, 70)
         XCTAssertEqual(result.windows.first { $0.providerKey == "xai" }?.remainingPercent, 40)
     }
 
-    func testClaudeKeychainReaderTimeoutDoesNotHoldRefresh() async throws {
+    func testRepeatedRefreshWithoutClaudeCredentialRequiresExplicitConnection() async throws {
         let home = try makeFixtureHome()
         defer { try? FileManager.default.removeItem(at: home) }
         try writeJSON(["mcpOAuth": [:]], to: home.appendingPathComponent(".claude/.credentials.json"))
-        let started = ContinuousClock.now
-        let reader = LocalQuotaReader(
-            homeDirectory: home,
-            runAntigravity: { Data("{}".utf8) },
-            readClaudeKeychain: {
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
-                return Data(#"{"claudeAiOauth":{"accessToken":"never-used"}}"#.utf8)
-            }
+        let reader = LocalQuotaReader(homeDirectory: home, fetchJSON: { _ in
+            XCTFail("Missing Claude quota access must not contact a provider.")
+            return Self.httpResponse("{}")
+        }, runAntigravity: { Data("{}".utf8) })
+        for _ in 0..<3 {
+            let result = await reader.read()
+            XCTAssertTrue(result.windows.filter { $0.providerKey == "anthropic" }.isEmpty)
+            XCTAssertEqual(result.issues["anthropic"], "Claude quota access is unavailable.  Use Connect Claude in Settings to read your existing login.")
+        }
+    }
+
+    func testRejectedClaudeCredentialRequestsReconnectWithoutAssumingSignedOut() async throws {
+        let home = try makeFixtureHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let reader = LocalQuotaReader(homeDirectory: home, fetchJSON: { _ in
+            Self.httpResponse("{}", status: 401)
+        }, runAntigravity: { Data("{}".utf8) }, claudeCredential:
+            Data(#"{"claudeAiOauth":{"accessToken":"rejected-fixture"}}"#.utf8)
         )
         let result = await reader.read()
-        let elapsed = started.duration(to: .now)
-        XCTAssertLessThan(elapsed, .seconds(5))
-        XCTAssertEqual(result.issues["anthropic"], "Claude Code quota login is unavailable.  Sign in to Claude Code to connect subscription quotas.")
+        XCTAssertEqual(result.issues["anthropic"], "Claude quota access was rejected.  Reconnect Claude in Settings to reread your existing login.")
+        XCTAssertTrue(result.windows.filter { $0.providerKey == "anthropic" }.isEmpty)
+    }
+
+    func testInvalidClaudeSessionCredentialNeverReachesNetwork() async throws {
+        let home = try makeFixtureHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        for data in [Data("not-json".utf8), Data(#"{"mcpOAuth":{}}"#.utf8), Data(#"{"claudeAiOauth":{"accessToken":"expired-fixture","expiresAt":1}}"#.utf8)] {
+            let reader = LocalQuotaReader(homeDirectory: home, fetchJSON: { _ in
+                XCTFail("An invalid session credential must not make a quota request.")
+                return Self.httpResponse("{}")
+            }, runAntigravity: { Data("{}".utf8) }, claudeCredential: data)
+            let result = await reader.read()
+            XCTAssertNotNil(result.issues["anthropic"])
+        }
     }
 
     func testGrokSubscriptionConfigExcludesOnDemandAndPrepaidCaps() async throws {
