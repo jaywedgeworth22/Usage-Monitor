@@ -1,4 +1,14 @@
-## Current (2026-09-04 GROK — Sentry Usage enrichment)
+## Current (2026-09-13 FX — Local Import Package tap)
+
+Usage Local Monitor Settings no longer puts a Merge / Replace picker next to
+**Import Package**.  That List Picker stole the button tap (repeat of
+2026-09-04).  Import Package is its own section; merge vs replace is a sheet
+after the file pick.  The website **Download For Local** JSON
+(`usage-monitor-local-export` v1) is the package — no bundle key, no
+passphrase, no API keys.  `.umkeys` is Import Keys only.  Board `b4ebf716`.
+Rollout: `docs/rollouts/2026-09-13-local-import-package-tap.md`.
+
+## Prior (2026-09-04 GROK — Sentry Usage enrichment)
 
 Sentry **Usage** (not Balance) now rolls up official `stats_v2` month-to-date
 totals by category: Errors, Transactions, Replays, Attachments, Profiles,

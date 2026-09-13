@@ -420,34 +420,31 @@ struct LocalExportButton: View {
     }
 }
 
-/// Shared state for the import flow so the picker and the action button can
-/// each become their own List row — a single VStack collapsed into one List
-/// row used to swallow the button's tap region (owner 2026-09-04: "very hard
-/// to be able to select it and I'm not sure I even can at all").
+/// Shared state for Import Package.  Merge vs Replace is chosen *after* the
+/// file picker so a List Picker cannot swallow the button tap (owner 2026-09-04
+/// and 2026-09-13: tapping Import always opened the Merge / Replace dropdown).
 @MainActor
 @Observable
 final class LocalImportState {
-    var mode: LocalImportMode = .merge
     var isImporting: Bool = false
     var message: String? = nil
     var isImportError: Bool = false
     var showImporter: Bool = false
-}
-
-struct LocalImportModePicker: View {
-    @Bindable var state: LocalImportState
-
-    var body: some View {
-        Picker("Import Mode", selection: $state.mode) {
-            Text("Merge (Skip Existing)").tag(LocalImportMode.merge)
-            Text("Replace All Data").tag(LocalImportMode.replace)
-        }
-    }
+    var pendingData: Data? = nil
+    var showModeSheet: Bool = false
 }
 
 struct LocalImportButton: View {
     @Bindable var model: LocalAppModel
     @Bindable var state: LocalImportState
+
+    private static var packageTypes: [UTType] {
+        var types: [UTType] = [.json, .data]
+        if let umexport = UTType(filenameExtension: "umexport") {
+            types.append(umexport)
+        }
+        return types
+    }
 
     var body: some View {
         Button {
@@ -456,38 +453,112 @@ struct LocalImportButton: View {
             if state.isImporting {
                 ProgressView()
             } else {
-                Label("Import Export Package", systemImage: "square.and.arrow.down")
+                Label("Import Package", systemImage: "square.and.arrow.down")
             }
         }
         .disabled(state.isImporting)
-        // Force a full-width tap region: a Button collapsed into a List row
-        // otherwise loses the bottom half of its hit area to the row chrome.
+        .buttonStyle(.borderless)
         .contentShape(Rectangle())
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 44)
         .fileImporter(
             isPresented: $state.showImporter,
-            allowedContentTypes: [.json],
+            allowedContentTypes: Self.packageTypes,
             allowsMultipleSelection: false
         ) { result in
-            Task { await handle(result) }
+            handlePick(result)
+        }
+        .sheet(isPresented: $state.showModeSheet, onDismiss: {
+            if !state.isImporting {
+                state.pendingData = nil
+            }
+        }) {
+            LocalImportModeSheet(model: model, state: state)
         }
     }
 
-    private func handle(_ result: Result<[URL], Error>) async {
-        state.isImporting = true
-        defer { state.isImporting = false }
+    private func handlePick(_ result: Result<[URL], Error>) {
         do {
             let urls = try result.get()
             guard let url = urls.first else { return }
             let access = url.startAccessingSecurityScopedResource()
             defer { if access { url.stopAccessingSecurityScopedResource() } }
-            let data = try Data(contentsOf: url)
-            let r = try await model.importPackage(data: data, mode: state.mode)
+            state.pendingData = try Data(contentsOf: url)
+            state.message = nil
             state.isImportError = false
-            state.message =
-                "Imported \(r.providers) providers, \(r.subscriptions) fees, \(r.charges) charges, \(r.snapshots) snapshots"
-                + (r.skipped > 0 ? " (\(r.skipped) skipped)" : "")
-                + ". Re-enter API keys."
+            Task { @MainActor in
+                // fileImporter must finish dismissing before another sheet presents.
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard state.pendingData != nil else { return }
+                state.showModeSheet = true
+            }
+        } catch {
+            state.isImportError = true
+            state.message = error.localizedDescription
+            state.pendingData = nil
+        }
+    }
+}
+
+private struct LocalImportModeSheet: View {
+    @Bindable var model: LocalAppModel
+    @Bindable var state: LocalImportState
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Use the JSON from usage.jays.services (Download For Local) or a phone export.  There is no bundle key or passphrase for this file.  API keys are never included.")
+                        .font(Theme.Typography.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                Section {
+                    Button("Merge (Skip Existing)") {
+                        Task { await run(.merge) }
+                    }
+                    .disabled(state.isImporting || state.pendingData == nil)
+                    Button("Replace All Data", role: .destructive) {
+                        Task { await run(.replace) }
+                    }
+                    .disabled(state.isImporting || state.pendingData == nil)
+                } footer: {
+                    Text("Merge keeps cards already on this phone.  Replace All wipes local money data first, then loads the file.")
+                }
+                if state.isImporting {
+                    Section {
+                        HStack(spacing: Theme.Spacing.sm) {
+                            ProgressView()
+                            Text("Importing…")
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Import Package")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        state.pendingData = nil
+                        dismiss()
+                    }
+                    .disabled(state.isImporting)
+                }
+            }
+            .interactiveDismissDisabled(state.isImporting)
+        }
+    }
+
+    private func run(_ mode: LocalImportMode) async {
+        guard let data = state.pendingData else { return }
+        state.isImporting = true
+        defer { state.isImporting = false }
+        do {
+            let r = try await model.importPackage(data: data, mode: mode)
+            state.isImportError = false
+            state.message = r.summaryLine
+            state.pendingData = nil
+            dismiss()
         } catch {
             state.isImportError = true
             state.message = error.localizedDescription
@@ -542,7 +613,7 @@ struct LocalKeysImportButton: View {
                     .font(.caption)
                     .foregroundStyle(messageIsError ? Theme.Colors.danger : Theme.Colors.secondaryText)
             }
-            Text("Keys go straight to this device's Keychain.  Delete the bundle file after importing.")
+            Text("This is only for a Mac .umkeys file, not the website JSON.  Keys go to this device's Keychain.  Delete the bundle file after importing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
