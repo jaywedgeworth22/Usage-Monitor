@@ -1,31 +1,69 @@
 name: Sentry CI Report
 
-# Fleet-wide CI observability: receives completion events from the observed
-# workflows, but only reserves a runner for failures or scheduled check-ins.
-# It reports those actionable events to the shared `fleet-infra` Sentry project
-# (org jays-services). ADDITIVE ONLY — this file must never modify the behavior
-# of the workflows it observes.
+# Fleet-wide CI observability: receives request and completion events from the
+# observed workflows, but only reserves a runner for scheduled runs and for
+# failures.  It reports those actionable events to the shared `fleet-infra`
+# Sentry project (org jays-services).  ADDITIVE ONLY — this file must never
+# modify the behavior of the workflows it observes.
 #
-# Two independent signals per completed run:
-#   1. On conclusion == failure / timed_out / startup_failure: a Sentry error
-#      event, tagged with {app, workflow, branch, actor}, carrying the run URL,
-#      fingerprinted on [ci-failure, app, workflow] so every failure of one
-#      workflow groups into ONE Sentry issue instead of paging separately every
-#      time. The branch is a TAG only, never a fingerprint component (it was
-#      until 2026-08-12, which minted a permanent issue per feature branch —
-#      ~85 of the fleet's unresolved fleet-infra issues). The `app` tag +
-#      fingerprint component are REQUIRED: the fleet-infra project is shared
-#      across repos, and this repo shares workflow names ("CI", "Security",
-#      "Effort Issues Sync") with Socratic.Trade / Congress.Trade, so without
-#      `app` a "CI" failure here would dedup into the same Sentry issue as a
-#      "CI" failure there. See AGENT-SYNC.md "Observability".
-#   2. On event == schedule (i.e. the completed run was a cron-triggered
-#      run of a workflow that defines `schedule:`): a Sentry Crons check-in
-#      (ok on success, error on failure) with an upsert monitor_config whose
-#      schedule mirrors that workflow's own cron expression, slug
-#      `ci-usage-monitor-<workflow-slug>`. This means a nightly/weekly job that
-#      silently STOPS firing (not "runs and fails" but "never runs again")
-#      raises a missed-check-in alert instead of going unnoticed.
+# Three signals across the two phases of one observed run:
+#   1. On action == requested AND event == schedule (the run has just been
+#      CREATED — GitHub has not allocated a runner yet, and the conclusion is
+#      still null): a Sentry Crons check-in with status `in_progress`, which
+#      OPENS the check-in for that tick.  No failure event is possible here;
+#      there is no conclusion yet to look at.
+#   2. On action == completed AND conclusion == failure / timed_out /
+#      startup_failure: a Sentry error event, tagged with
+#      {app, workflow, branch, actor}, carrying the run URL, fingerprinted on
+#      [ci-failure, app, workflow] so every failure of one workflow groups into
+#      ONE Sentry issue instead of paging separately every time.  The branch is
+#      a TAG only, never a fingerprint component (it was until 2026-08-12,
+#      which minted a permanent issue per feature branch — ~85 of the fleet's
+#      unresolved fleet-infra issues).  The `app` tag + fingerprint component
+#      are REQUIRED: the fleet-infra project is shared across repos, and this
+#      repo shares workflow names ("CI", "Security", "Effort Issues Sync") with
+#      Socratic.Trade / Congress.Trade, so without `app` a "CI" failure here
+#      would dedup into the same Sentry issue as a "CI" failure there.  See
+#      AGENT-SYNC.md "Observability".
+#   3. On action == completed AND event == schedule (the completed run was a
+#      cron-triggered run of a workflow that defines `schedule:`): the TERMINAL
+#      Sentry Crons check-in (error when the conclusion is one of the alerting
+#      conclusions in (2), ok for every other conclusion -- the monitor answers
+#      "did this cron fire", and an intentional cancelled / skipped tick is not
+#      a failure of the schedule, so it closes the check-in as ok rather than
+#      minting a Crons failure with no explanatory event beside it) with an
+#      upsert
+#      monitor_config whose schedule mirrors that workflow's own cron
+#      expression, slug `ci-usage-monitor-<workflow-slug>`.  It carries the SAME
+#      check_in_id as (1) — both phases derive it from the observed run id and
+#      attempt (uuid5, see checkin_id_for_run in the script) — which is what
+#      CLOSES the in_progress check-in that phase 1 opened.  This means a
+#      nightly/weekly job that silently STOPS firing (not "runs and fails" but
+#      "never runs again") raises a missed-check-in alert instead of going
+#      unnoticed.
+#
+# Why the `requested` activity type and not `in_progress` (FLEET-INFRA-CB,
+# 2026-09-08): GitHub's `in_progress` workflow_run activity fires only once a
+# runner has actually picked the job up.  For "iOS TestFlight ship (Mac runner)"
+# that is a macos-latest job whose runner queueing time would then count
+# against `checkin_margin`, which is precisely the latency this change exists
+# to stop absorbing.  `requested` fires the moment the run is created, so the
+# margin now measures only GitHub's schedule-dispatch delay plus this reporter
+# reaching Sentry; the observed job's own runtime bound moved to `max_runtime`
+# in MAX_RUNTIME_OVERRIDES.  Note the trade that makes: because the check-in
+# opens at run CREATION, `max_runtime` now has to cover the ios-ship-usage
+# concurrency-queue wait and the macos-latest allocation as well as the job's
+# own timeout-minutes: 120 and the completed-phase reporter.  See the
+# MAX_RUNTIME_OVERRIDES comment in scripts/sentry-ci-report.py for the full
+# derivation of 260 -- a structural bound sized to what the workflow graph
+# permits (observed runs top out at 10.9min), carrying no false-timeout
+# exposure of its own.
+#
+# Re-run caveat: GitHub does NOT fire `requested` when a run is re-run, so a
+# re-run attempt opens no in_progress check-in.  Its terminal check-in simply
+# stands alone (the check_in_id is keyed on the run ATTEMPT, so it never tries
+# to close attempt 1's already-closed check-in) — exactly the behavior this
+# reporter had before the requested phase existed.
 #
 # Raw Sentry envelope HTTP via python3 — no action marketplace dependency, no
 # new job permissions beyond what's needed to read the triggering run.
@@ -85,12 +123,19 @@ on:
       - Security
       - Shared package pin check
       - Sentry Deploy
-    types: [completed]
+    types: [requested, completed]
 
 permissions:
   contents: read
 
 concurrency:
+  # Keyed on the OBSERVED run id, so the `requested` and `completed` reporter
+  # runs for ONE observed run share a group and are serialised.  With
+  # cancel-in-progress: false that ordering is guaranteed rather than raced:
+  # the in_progress check-in always reaches Sentry before the terminal check-in
+  # bearing the same check_in_id, which is the order Sentry needs to open and
+  # then close one check-in rather than see a close for something it has never
+  # seen open.
   group: sentry-ci-report-${{ github.event.workflow_run.id }}
   cancel-in-progress: false
 
@@ -101,12 +146,22 @@ jobs:
   # ALERT_CONCLUSIONS in scripts/sentry-ci-report.py. Every scheduled run
   # remains eligible because Sentry Crons needs both success and error
   # check-ins.
+  #
+  # `requested`-type runs are gated to SCHEDULED observed runs only: the
+  # in_progress check-in exists for cron monitors and nothing else, so every
+  # push / PR / manual `requested` event is skipped here, before a runner is
+  # ever allocated (zero Actions minutes).  This does roughly double the number
+  # of skipped reporter entries in the Actions list — one per requested event
+  # on top of one per completed event — which is accepted: they cost nothing
+  # but a list row, and the alternative (an ungated requested listener) would
+  # burn a runner on every push.
   report:
     if: >-
-      github.event.workflow_run.conclusion == 'failure' ||
+      (github.event.action == 'requested' && github.event.workflow_run.event == 'schedule') ||
+      (github.event.action == 'completed' && (github.event.workflow_run.conclusion == 'failure' ||
       github.event.workflow_run.conclusion == 'timed_out' ||
       github.event.workflow_run.conclusion == 'startup_failure' ||
-      github.event.workflow_run.event == 'schedule'
+      github.event.workflow_run.event == 'schedule'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -119,10 +174,17 @@ jobs:
         # without re-reviewing the security implications.
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Report failure + cron check-in to Sentry fleet-infra
+      - name: Report cron check-in (in_progress at request, ok/error at completion) and failure event to Sentry fleet-infra
         shell: bash
         env:
           SENTRY_FLEET_DSN: ${{ secrets.SENTRY_FLEET_DSN }}
+          # Which phase of the observed run this reporter is handling:
+          # "requested" (open the in_progress check-in) or "completed" (failure
+          # event + terminal check-in).
+          WORKFLOW_RUN_ACTION: ${{ github.event.action }}
+          # Part of the deterministic check_in_id, so a re-run (which never
+          # fires `requested`) gets its own id instead of reclosing attempt 1's.
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
           WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           WORKFLOW_EVENT: ${{ github.event.workflow_run.event }}
