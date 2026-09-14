@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   canonicalProjectKey,
@@ -20,6 +20,7 @@ import {
   getModelPricing,
 } from "@/lib/pricing/model-pricing";
 import {
+  DERIVED_ANALYTICS_TOKEN_SOURCE_APPS,
   isSubscriptionAnalyticsTelemetry,
   shouldDeriveAnalyticsTokenEstimate,
 } from "@/lib/subscription-analytics";
@@ -745,7 +746,7 @@ async function loadAnalyticsTokenRows(
         label: string | null;
         quantity: unknown;
       }>
-    >`
+    >(Prisma.sql`
       SELECT
         "sourceApp",
         "provider",
@@ -758,9 +759,9 @@ async function loadAnalyticsTokenRows(
         AND "occurredAt" <= ${until}
         AND "metricType" = 'usage'
         AND "unit" = 'token'
-        AND "sourceApp" IN ('grok-build', 'openai-codex', 'antigravity-cli', 'github-copilot')
+        AND "sourceApp" IN (${Prisma.join(DERIVED_ANALYTICS_TOKEN_SOURCE_APPS)})
       GROUP BY "sourceApp", "provider", "service", "keyRef", "label"
-    `;
+    `);
     if (!Array.isArray(rows)) return [];
     return rows
       .filter((row) => typeof row?.sourceApp === "string" && typeof row.provider === "string")

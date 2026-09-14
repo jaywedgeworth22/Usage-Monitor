@@ -12,12 +12,16 @@ export const SUBSCRIPTION_ANALYTICS_SOURCE_APPS = [
   "claude-code",
   "grok-build",
   "openai-codex",
-  "antigravity-cli",
+  "antigravity-statusline",
   "github-copilot",
+  "deepseek-dsh",
 ] as const;
 
 export type SubscriptionAnalyticsSourceApp =
   (typeof SUBSCRIPTION_ANALYTICS_SOURCE_APPS)[number];
+
+export const DERIVED_ANALYTICS_TOKEN_SOURCE_APPS =
+  SUBSCRIPTION_ANALYTICS_SOURCE_APPS.filter((sourceApp) => sourceApp !== "claude-code");
 
 /** sourceApp-only seats. Claude Code stays exact (sourceApp AND service)
  *  because `sourceApp=claude-code` without `service=claude-code` is used for
@@ -25,8 +29,9 @@ export type SubscriptionAnalyticsSourceApp =
 const SOURCE_APP_ONLY_ANALYTICS = new Set<string>([
   "grok-build",
   "openai-codex",
-  "antigravity-cli",
+  "antigravity-statusline",
   "github-copilot",
+  "deepseek-dsh",
 ]);
 
 export function isClaudeCodeAnalyticsTelemetry(input: {

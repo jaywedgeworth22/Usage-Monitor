@@ -42,6 +42,7 @@ describe("sparse Sentry ops no-op without a client", () => {
       logIngestFailed,
       recordSchedulerDuration,
       recordIngestAdmissionRejected,
+      recordIngestEventsRejected,
       recordRollupCompleted,
     } = await import("@/lib/sentry-ops");
     await expect(recordSentryCronHeartbeat("ok")).resolves.toBeUndefined();
@@ -50,6 +51,7 @@ describe("sparse Sentry ops no-op without a client", () => {
     await expect(logIngestFailed({ reason: "test" })).resolves.toBeUndefined();
     await expect(recordSchedulerDuration(123)).resolves.toBeUndefined();
     await expect(recordIngestAdmissionRejected({ route: "ingest/usage" })).resolves.toBeUndefined();
+    await expect(recordIngestEventsRejected(2, { route: "ingest/usage" })).resolves.toBeUndefined();
     await expect(recordRollupCompleted({ rollupsTouched: 1 })).resolves.toBeUndefined();
     vi.doUnmock("@sentry/nextjs");
     vi.resetModules();
@@ -106,6 +108,23 @@ describe("Sentry Application Metrics emitted into the usage-monitor project", ()
       1,
       expect.objectContaining({
         attributes: expect.objectContaining({ route: "otlp/v1/metrics" }),
+      })
+    );
+    vi.doUnmock("@sentry/nextjs");
+    vi.resetModules();
+  });
+
+  it("emits only a count and low-cardinality tags for rejected ingest events", async () => {
+    vi.resetModules();
+    const count = vi.fn();
+    vi.doMock("@sentry/nextjs", () => ({ metrics: { count } }));
+    const { recordIngestEventsRejected } = await import("@/lib/sentry-ops");
+    await recordIngestEventsRejected(3, { route: "ingest/usage", outcome: "partial" });
+    expect(count).toHaveBeenCalledWith(
+      "ingest.events_rejected",
+      3,
+      expect.objectContaining({
+        attributes: { route: "ingest/usage", outcome: "partial" },
       })
     );
     vi.doUnmock("@sentry/nextjs");

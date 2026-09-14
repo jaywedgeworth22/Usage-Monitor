@@ -206,6 +206,12 @@ export async function POST(request: NextRequest) {
     // to persist — ACK it with rejected === received instead of the old
     // all-or-nothing 400.
     if (usageTelemetryV2 && events.length === 0) {
+      void import("@/lib/sentry-ops").then(({ recordIngestEventsRejected }) =>
+        recordIngestEventsRejected(v2Rejected, {
+          route: "ingest/usage",
+          outcome: "all_rejected",
+        })
+      ).catch(() => undefined);
       return NextResponse.json(
         {
           ok: true,
@@ -403,6 +409,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (usageTelemetryV2) {
+      if (v2Rejected > 0) {
+        void import("@/lib/sentry-ops").then(({ recordIngestEventsRejected }) =>
+          recordIngestEventsRejected(v2Rejected, {
+            route: "ingest/usage",
+            outcome: "partial",
+          })
+        ).catch(() => undefined);
+      }
       const duplicates = Math.max(
         0,
         persistResult.attempted - persistResult.persisted - persistResult.skippedPrunedDuplicates
