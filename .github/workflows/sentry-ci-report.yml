@@ -11,7 +11,10 @@ name: Sentry CI Report
 #      CREATED — GitHub has not allocated a runner yet, and the conclusion is
 #      still null): a Sentry Crons check-in with status `in_progress`, which
 #      OPENS the check-in for that tick.  No failure event is possible here;
-#      there is no conclusion yet to look at.
+#      there is no conclusion yet to look at.  Before sending it, the job
+#      asks the Actions API whether the observed run has already completed
+#      and skips the check-in if so, since GitHub does not guarantee this
+#      requested-phase run is created before the completed-phase one.
 #   2. On action == completed AND conclusion == failure / timed_out /
 #      startup_failure: a Sentry error event, tagged with
 #      {app, workflow, branch, actor}, carrying the run URL, fingerprinted on
@@ -130,12 +133,25 @@ permissions:
 
 concurrency:
   # Keyed on the OBSERVED run id, so the `requested` and `completed` reporter
-  # runs for ONE observed run share a group and are serialised.  With
-  # cancel-in-progress: false that ordering is guaranteed rather than raced:
-  # the in_progress check-in always reaches Sentry before the terminal check-in
-  # bearing the same check_in_id, which is the order Sentry needs to open and
-  # then close one check-in rather than see a close for something it has never
-  # seen open.
+  # runs for ONE observed run share this group.  With cancel-in-progress:
+  # false the group serializes those two reporter runs WHENEVER the
+  # requested-phase run is created first, which is the normal case — the
+  # in_progress check-in then reaches Sentry before the terminal check-in
+  # bearing the same check_in_id.  GitHub does NOT guarantee that order,
+  # though: for a very fast observed run, GitHub can create the
+  # completed-phase reporter run before the requested-phase one, so the
+  # terminal check-in could reach Sentry first.  To stay correct either way,
+  # the requested-phase job also asks the Actions API (permissions:
+  # actions: read, below) whether the observed run has already completed —
+  # fetch_observed_run_status() in scripts/sentry-ci-report.py — and skips
+  # its in_progress check-in when it has, leaving the terminal check-in
+  # standing alone exactly as it stood before this change.  Sentry's own
+  # monitor consumer also treats an in_progress update that arrives after a
+  # terminal check-in as out-of-order and leaves the terminal status
+  # unchanged (sentry/src/sentry/monitors/consumers/monitor_consumer.py,
+  # is_out_of_order_in_progress), so this skip is belt-and-suspenders on top
+  # of that, not the only thing preventing a stale in_progress from
+  # resurrecting a closed check-in.
   group: sentry-ci-report-${{ github.event.workflow_run.id }}
   cancel-in-progress: false
 
@@ -156,6 +172,14 @@ jobs:
   # but a list row, and the alternative (an ungated requested listener) would
   # burn a runner on every push.
   report:
+    permissions:
+      contents: read
+      # Lets the requested-phase job ask the Actions API for the observed
+      # run's own status (fetch_observed_run_status() in
+      # scripts/sentry-ci-report.py) before sending its in_progress
+      # check-in, so it can skip that check-in if the observed run has
+      # already completed — see the `concurrency` comment above.
+      actions: read
     if: >-
       (github.event.action == 'requested' && github.event.workflow_run.event == 'schedule') ||
       (github.event.action == 'completed' && (github.event.workflow_run.conclusion == 'failure' ||
@@ -178,6 +202,12 @@ jobs:
         shell: bash
         env:
           SENTRY_FLEET_DSN: ${{ secrets.SENTRY_FLEET_DSN }}
+          # Scoped to this job's own `permissions:` above (contents: read,
+          # actions: read) — used only by fetch_observed_run_status() to
+          # read the observed run's status, never printed or logged.
+          # GITHUB_REPOSITORY and GITHUB_API_URL are default runner env vars
+          # and do not need to be set here.
+          GITHUB_TOKEN: ${{ github.token }}
           # Which phase of the observed run this reporter is handling:
           # "requested" (open the in_progress check-in) or "completed" (failure
           # event + terminal check-in).

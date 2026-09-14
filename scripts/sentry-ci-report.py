@@ -19,7 +19,14 @@ Three signals are sent, across the two phases of one observed run:
      to alert on there.  A config-drift event CAN still be sent here (the
      unconditional stale-cron-key guard in section 0, or the
      unmapped-schedule event raised by resolve_cron_expr()) if this reporter's
-     own CRON_SCHEDULES mapping has fallen out of date.
+     own CRON_SCHEDULES mapping has fallen out of date.  Before sending the
+     in_progress check-in, this phase also asks the Actions API whether the
+     observed run has already finished (fetch_observed_run_status()) and
+     skips the check-in if so.  GitHub's own concurrency group does not
+     GUARANTEE that this requested-phase reporter run is created before the
+     completed-phase one — a very fast observed run can flip that order — so
+     this check is what actually keeps the two reporter runs from racing to
+     open a check-in the completed phase has already closed.
   2. COMPLETED phase, if the run's conclusion warrants an alert (failure /
      timed_out / startup_failure — see ALERT_CONCLUSIONS): a Sentry error event
      tagged with {app, workflow, branch, actor}, carrying the run URL,
@@ -399,6 +406,62 @@ def resolve_cron_expr(
     return None
 
 
+def fetch_observed_run_status(run_id: str) -> str | None:
+    """Ask the Actions API for the observed run's current status, or None.
+
+    Exists for one race: GitHub's `sentry-ci-report-<run id>` concurrency
+    group serializes the requested-phase and completed-phase reporter runs
+    only when the requested-phase run is CREATED first, which is the normal
+    case.  GitHub does not guarantee that order — for a very fast observed
+    run, GitHub can create the completed-phase reporter run before the
+    requested-phase one, so the terminal check-in would reach Sentry before
+    the in_progress one it is meant to close.  Calling this before sending
+    the in_progress check-in lets the requested phase notice that case
+    (status == "completed") and skip its check-in entirely, so the
+    completed phase's terminal check-in simply stands alone exactly as it
+    did before this change, instead of an in_progress update landing after
+    the check-in Sentry already closed.
+
+    Fails open on any problem: returns None (never raises) when
+    GITHUB_TOKEN, GITHUB_REPOSITORY, or run_id is empty, and on any
+    exception while calling the API.  "Fail open" here means "behave as if
+    this function did not exist" — the caller then sends the in_progress
+    check-in as it always has.  That is safe because the worst case is
+    exactly the pre-existing standalone terminal check-in PLUS a stray
+    in_progress update Sentry receives after the fact, which is the same
+    outcome this whole feature is meant to avoid, not a new failure mode.
+    Never includes the token, the API URL, or exception text in output —
+    only the exception's type name, to keep the job log free of anything
+    sensitive.
+    """
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com").strip() or "https://api.github.com"
+    run_id = (run_id or "").strip()
+    if not token or not repo or not run_id:
+        return None
+
+    req = urllib.request.Request(
+        f"{api_url}/repos/{repo}/actions/runs/{run_id}",
+        method="GET",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "sentry-ci-report",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return data.get("status")
+    except Exception as exc:  # noqa: BLE001 — fail open on ANY problem reading the observed run's status
+        print(
+            f"::warning::could not read the observed run's status ({type(exc).__name__}); "
+            "sending the in_progress check-in anyway"
+        )
+        return None
+
+
 def parse_dsn(dsn: str) -> tuple[str, str, str]:
     """Parse a Sentry DSN into (public_key, host, project_id). Raises ValueError
     without ever including the raw DSN in the message."""
@@ -557,6 +620,15 @@ def main() -> int:
                 f"'{workflow_name}': WORKFLOW_RUN_ID is empty, so the completed phase could "
                 "not close this check-in and it would time out into a false alert. "
                 "The completed phase will still send a standalone terminal check-in."
+            )
+            return 0
+
+        observed_status = fetch_observed_run_status(run_id)
+        if observed_status == "completed":
+            print(
+                f"Observed run {run_id} already completed before this requested-phase job ran; "
+                "skipping the in_progress check-in so the completed phase's terminal check-in "
+                "stands alone."
             )
             return 0
 
