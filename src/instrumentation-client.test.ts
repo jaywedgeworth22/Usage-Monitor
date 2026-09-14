@@ -9,7 +9,10 @@ describe("Sentry max-features client", () => {
       "utf8"
     );
     expect(src).toMatch(/feedbackIntegration\(/);
+    expect(src).toMatch(/autoInject:\s*false/);
+    expect(src).toMatch(/formTitle:\s*"Report a Problem"/);
     expect(src).toMatch(/NEXT_PUBLIC_SENTRY_FEEDBACK_ENABLED/);
     expect(src).toMatch(/replaysSessionSampleRate/);
+    expect(src).toMatch(/export function openSentryFeedback/);
   });
 });

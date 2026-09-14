@@ -30,7 +30,7 @@ name: Auto-merge PRs
 # write as the repo secret GH_PAT. No code change is needed -- this workflow
 # self-activates and arms under that identity.
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened, labeled, ready_for_review, unlabeled]
 
 permissions:

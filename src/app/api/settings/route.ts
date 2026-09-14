@@ -8,17 +8,18 @@ import { prisma } from "@/lib/prisma";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function isAuthorized(request: NextRequest): boolean {
-  const hasDashboardSession = verifySessionToken(
-    request.cookies.get(SESSION_COOKIE_NAME)?.value
-  );
-  if (hasDashboardSession) return true;
+function isDashboardSession(request: NextRequest): boolean {
+  return verifySessionToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+}
+
+function isReadAuthorized(request: NextRequest): boolean {
+  if (isDashboardSession(request)) return true;
   if (!resolveUsageReadToken()) return false;
   return isUsageReadAuthorized(request);
 }
 
 export async function GET(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isReadAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -45,14 +46,16 @@ export async function GET(request: NextRequest) {
       channels: config.channels.map((c) => ({
         kind: c.kind,
         ...(c.kind === "pushover" ? { userKeyPreview: `${c.userKey.slice(0, 4)}...` } : {}),
-        ...(c.kind === "email" ? { from: c.from, to: c.to } : {}),
+        ...(c.kind === "email" && isDashboardSession(request)
+          ? { from: c.from, to: c.to }
+          : {}),
       })),
     },
   });
 }
 
 export async function PUT(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isDashboardSession(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

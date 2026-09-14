@@ -1,4 +1,8 @@
-## Current (2026-09-13 FX — Local Import Package tap)
+## Current (2026-09-13 FX — read token cannot mutate alerts)
+
+`PUT /api/settings` is dashboard-session only.  `USAGE_READ_TOKEN` still reads GET.  APNs list omits full device tokens.  Auto-merge workflows are `pull_request` + same-repo.  Boards `154b622e` `e93a83fe`.  Branch `fx/read-token-writes`.
+
+## Prior (2026-09-13 FX — Local Import Package tap)
 
 Usage Local Monitor Settings no longer puts a Merge / Replace picker next to
 **Import Package**.  That List Picker stole the button tap (repeat of
