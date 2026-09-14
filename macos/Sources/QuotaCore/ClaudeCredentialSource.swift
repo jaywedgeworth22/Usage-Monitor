@@ -84,7 +84,14 @@ enum ClaudeCredentialSource {
         let output = Pipe()
         process.standardOutput = output
         let reader = output.fileHandleForReading
-        defer { try? reader.close() }
+        defer {
+            // Ensure the child process is reaped and pipes are closed even on
+            // early returns so we never leak a zombie or file descriptor.
+            if process.isRunning { process.terminate() }
+            try? output.fileHandleForWriting.close()
+            try? reader.close()
+            if process.isRunning { process.waitUntilExit() }
+        }
         do {
             try process.run()
             try? output.fileHandleForWriting.close()
@@ -119,12 +126,40 @@ enum ClaudeCredentialSource {
             guard process.terminationStatus == 0 else { return nil }
             if let string = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                let trimmed = string.data(using: .utf8) {
+                // macOS 26+ may output a hex-encoded string when the value
+                // contains non-ASCII bytes.  Detect and decode it.
+                if let decoded = Self.decodeHexString(trimmed) {
+                    return decoded
+                }
                 return trimmed
             }
             return data
         } catch {
             return nil
         }
+    }
+
+    /// Returns decoded `Data` when the input is a pure hex string (pairs of
+    /// `[0-9a-fA-F]`, optionally whitespace-separated).  Returns `nil` for
+    /// anything that doesn't look like hex output, so the caller falls through
+    /// to treating the data as-is.
+    private static func decodeHexString(_ data: Data) -> Data? {
+        guard let raw = String(data: data, encoding: .utf8) else { return nil }
+        let hex = raw.filter { !$0.isWhitespace }
+        // Must be even-length and entirely hex digits.
+        guard hex.count >= 2, hex.count.isMultiple(of: 2),
+              hex.allSatisfy({ $0.isHexDigit }) else { return nil }
+        // Only decode if it looks like hex-encoded JSON (starts with 7b = '{').
+        guard hex.hasPrefix("7b") || hex.hasPrefix("7B") else { return nil }
+        var decoded = Data(capacity: hex.count / 2)
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 2)
+            guard let byte = UInt8(hex[index..<next], radix: 16) else { return nil }
+            decoded.append(byte)
+            index = next
+        }
+        return decoded
     }
 }
 
