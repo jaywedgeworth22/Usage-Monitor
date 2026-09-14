@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 enum ClaudeCredentialSource {
@@ -35,13 +36,19 @@ enum ClaudeCredentialSource {
     }
 
     private static func readSynchronously() -> Data? {
+        if let data = readViaSecurityCLI() {
+            return data
+        }
+
+        let context = LAContext()
+        context.interactionNotAllowed = true
+
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",
             kSecReturnAttributes as String: true,
-            kSecReturnPersistentRef as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
+            kSecUseAuthenticationContext as String: context,
         ]
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
@@ -49,17 +56,75 @@ enum ClaudeCredentialSource {
               let newest = items.max(by: {
                   ($0[kSecAttrModificationDate as String] as? Date ?? .distantPast)
                     < ($1[kSecAttrModificationDate as String] as? Date ?? .distantPast)
-              }), let reference = newest[kSecValuePersistentRef as String] as? Data else { return nil }
-        let dataQuery: [String: Any] = [
-            kSecValuePersistentRef as String: reference,
+              }) else { return nil }
+
+        var dataQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Code-credentials",
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
+            kSecUseAuthenticationContext as String: context,
         ]
+        if let account = newest[kSecAttrAccount as String] {
+            dataQuery[kSecAttrAccount as String] = account
+        }
         var payload: CFTypeRef?
         guard SecItemCopyMatching(dataQuery as CFDictionary, &payload) == errSecSuccess,
-              let data = payload as? Data, data.count <= 65_536 else { return nil }
+              let data = payload as? Data, data.count <= 1_048_576 else { return nil }
         return data
+    }
+
+    private static func readViaSecurityCLI() -> Data? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", "Claude Code-credentials", "-w"]
+        process.environment = ["HOME": FileManager.default.homeDirectoryForCurrentUser.path]
+        process.standardInput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let output = Pipe()
+        process.standardOutput = output
+        let reader = output.fileHandleForReading
+        defer { try? reader.close() }
+        do {
+            try process.run()
+            try? output.fileHandleForWriting.close()
+            let descriptor = reader.fileDescriptor
+            _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) | O_NONBLOCK)
+            let deadline = ProcessInfo.processInfo.systemUptime + 3.0
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while true {
+                if ProcessInfo.processInfo.systemUptime >= deadline { return nil }
+                let count = Darwin.read(descriptor, &buffer, buffer.count)
+                if count > 0 {
+                    guard data.count + count <= 1_048_576 else { return nil }
+                    data.append(contentsOf: buffer.prefix(count))
+                    continue
+                }
+                if count < 0 && errno == EAGAIN {
+                    if !process.isRunning {
+                        while true {
+                            let finalCount = Darwin.read(descriptor, &buffer, buffer.count)
+                            if finalCount > 0 { data.append(contentsOf: buffer.prefix(finalCount)) }
+                            else { break }
+                        }
+                        break
+                    }
+                    usleep(5000)
+                    continue
+                }
+                if count == 0 { break }
+            }
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            if let string = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               let trimmed = string.data(using: .utf8) {
+                return trimmed
+            }
+            return data
+        } catch {
+            return nil
+        }
     }
 }
 

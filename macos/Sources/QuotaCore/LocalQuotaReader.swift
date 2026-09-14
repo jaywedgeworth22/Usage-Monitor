@@ -102,7 +102,7 @@ public struct LocalQuotaReader: Sendable {
             return value
         }
         var candidate = validOAuth(file)
-        if candidate == nil, let data = await ClaudeCredentialSource.boundedRead({ await readClaudeKeychain() }), data.count <= 65_536,
+        if candidate == nil, let data = await ClaudeCredentialSource.boundedRead({ await readClaudeKeychain() }), data.count <= Self.maxCredentialBytes,
            let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             candidate = validOAuth(root)
         }
@@ -362,7 +362,7 @@ private func parseClaude(_ root: [String: Any], planType: String?, observedAt: D
         guard utilization != nil || direct != nil else { continue }
         var base = key; var model: String?
         for suffix in suffixes where key.hasSuffix("_\(suffix)") { model = suffix; base = String(key.dropLast(suffix.count + 1)); break }
-        let token = claudeToken(base) ?? claudeToken(key) ?? base
+        guard let token = claudeToken(base) ?? claudeToken(key) else { continue }
         let remaining = direct.map(percentage) ?? utilization.map { 100 - min(100, max(0, $0)) }
         let title = model.map { "\($0.prefix(1).uppercased())\($0.dropFirst())" }
         result.append(window(provider: .claude, id: key, label: title == nil ? "\(token) window" : "\(token) window (\(title!))", remaining: remaining, resetAt: firstTimestamp(value, ["resets_at", "resetsAt", "reset_at", "resetAt"]), windowToken: token, modelId: model, planName: planType, observedAt: observedAt))
