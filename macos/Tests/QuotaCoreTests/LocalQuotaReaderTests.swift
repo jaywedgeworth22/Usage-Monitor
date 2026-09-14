@@ -163,6 +163,47 @@ final class LocalQuotaReaderTests: XCTestCase {
         }
     }
 
+    func testExplicitClaudeSnapshotPrecedesRevokedFileCredential() async throws {
+        let home = try makeFixtureHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        // The on-disk file holds a valid-looking but revoked token; the explicit
+        // Connect Claude snapshot is the credential that must be used.
+        try writeJSON(
+            ["claudeAiOauth": ["accessToken": "revoked-file", "expiresAt": 4102444800000]],
+            to: home.appendingPathComponent(".claude/.credentials.json")
+        )
+        let reader = LocalQuotaReader(homeDirectory: home, fetchJSON: { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer current-snapshot")
+            return Self.httpResponse(#"{"five_hour":{"utilization":25}}"#)
+        }, runAntigravity: { Data("{}".utf8) }, claudeCredential:
+            Data(#"{"claudeAiOauth":{"accessToken":"current-snapshot","expiresAt":4102444800000}}"#.utf8)
+        )
+        let result = await reader.read()
+        XCTAssertEqual(result.windows.first { $0.providerKey == "anthropic" }?.remainingPercent, 75)
+        XCTAssertNil(result.issues["anthropic"])
+    }
+
+    func testRejectedSnapshotFallsBackToFileCredential() async throws {
+        let home = try makeFixtureHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try writeJSON(
+            ["claudeAiOauth": ["accessToken": "file-fallback", "expiresAt": 4102444800000]],
+            to: home.appendingPathComponent(".claude/.credentials.json")
+        )
+        let reader = LocalQuotaReader(homeDirectory: home, fetchJSON: { request in
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer stale-snapshot" {
+                return Self.httpResponse("{}", status: 401)
+            }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer file-fallback")
+            return Self.httpResponse(#"{"five_hour":{"utilization":20}}"#)
+        }, runAntigravity: { Data("{}".utf8) }, claudeCredential:
+            Data(#"{"claudeAiOauth":{"accessToken":"stale-snapshot","expiresAt":4102444800000}}"#.utf8)
+        )
+        let result = await reader.read()
+        XCTAssertEqual(result.windows.first { $0.providerKey == "anthropic" }?.remainingPercent, 80)
+        XCTAssertNil(result.issues["anthropic"])
+    }
+
     func testGrokSubscriptionConfigExcludesOnDemandAndPrepaidCaps() async throws {
         let home = try makeFixtureHome()
         defer { try? FileManager.default.removeItem(at: home) }
