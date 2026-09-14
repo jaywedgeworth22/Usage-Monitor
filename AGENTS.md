@@ -1,5 +1,8 @@
 # Usage Monitor — agent notes
 
+
+> **Note:** The macOS Agent Quotas menu bar app has been extracted into its own repository and is now called **[AgentBar](https://github.com/jaywedgeworth22/agent-bar)**. The `macos/` folder in this repo is kept for historical reference only.
+
 ## Codex Cloud protocol bootstrap
 
 Run `bash .codex/setup.sh` during cloud provisioning and `bash .codex/maintenance.sh` on
