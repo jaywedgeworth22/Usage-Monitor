@@ -45,6 +45,13 @@ final class LocalQuotaReaderTests: XCTestCase {
         XCTAssertFalse(result.issues.values.joined(separator: " ").contains("account-secret"))
     }
 
+    func testRealClaudeCredentialSourceReadsValidData() async throws {
+        guard let data = await ClaudeCredentialSource.read() else { return }
+        XCTAssertGreaterThan(data.count, 65_536)
+        let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        XCTAssertNotNil(root?["claudeAiOauth"])
+    }
+
     func testOtherKnownShapesAndAntigravityUseConservativeParsing() async throws {
         let root = try makeFixtureHome()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -139,6 +146,37 @@ final class LocalQuotaReaderTests: XCTestCase {
         let elapsed = started.duration(to: .now)
         XCTAssertLessThan(elapsed, .seconds(5))
         XCTAssertEqual(result.issues["anthropic"], "Claude Code quota login is unavailable.  Sign in to Claude Code to connect subscription quotas.")
+    }
+
+    func testClaudeKeychainAcceptsPayloadsLargerThan64KB() async throws {
+        let home = try makeFixtureHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try writeJSON(["mcpOAuth": [:]], to: home.appendingPathComponent(".claude/.credentials.json"))
+        // Create a payload > 64KB (e.g. 120KB) containing claudeAiOauth
+        var padding = [String: String]()
+        for i in 0..<1500 {
+            padding["key_\(i)"] = "padding_value_for_large_keychain_payload_\(i)"
+        }
+        let payloadDict: [String: Any] = [
+            "claudeAiOauth": [
+                "accessToken": "fixture-large-claude",
+                "expiresAt": 4102444800000
+            ],
+            "metadata": padding
+        ]
+        let payloadData = try JSONSerialization.data(withJSONObject: payloadDict)
+        XCTAssertGreaterThan(payloadData.count, 65_536)
+        XCTAssertLessThan(payloadData.count, 1_048_576)
+
+        let reader = LocalQuotaReader(homeDirectory: home, fetchJSON: { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer fixture-large-claude")
+            return Self.httpResponse(#"{"five_hour":{"utilization":20}}"#)
+        }, runAntigravity: { Data("{}".utf8) }, readClaudeKeychain: {
+            payloadData
+        })
+        let result = await reader.read()
+        XCTAssertEqual(result.windows.first { $0.providerKey == "anthropic" }?.remainingPercent, 80)
+        XCTAssertNil(result.issues["anthropic"])
     }
 
     func testGrokSubscriptionConfigExcludesOnDemandAndPrepaidCaps() async throws {
