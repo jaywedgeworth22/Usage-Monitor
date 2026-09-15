@@ -491,6 +491,8 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 - **Resolve Agent Sync Relay noise and Anthropic must-keep-funded alerts (AG)** — MERGED PR #113 / DEPLOYED. Updated `ensureAgentSyncProviderSeeded` to automatically disable the Agent Sync Relay provider on startup/poll, silencing the spurious missing_snapshot PagerDuty alerts. Also added a migration step in the same boot sequence to unflag `mustKeepFunded` for Anthropic since Anthropic does not expose a wallet balance. Tests green.
 
 ## Completed
+- **2026-09-14 - CLAUDE - COMPLETED (merged) - UM sentry-ci-report hardening: committed harness in CI + guard tying MAX_RUNTIME_OVERRIDES to ios-ship.yml timeout-minutes.** <!-- wb-agent-report:3ccaa57e868e4878a0a5b68eca0cf35a -->
+
 
 - **2026-09-13 - CODEX - COMPLETED - Native macOS Usage Monitor quota app (#1450, bfdd7e9a; issue #1449).**  Installed and verified menu bar/Dock/both with 49 Swift tests and green native/web/security CI.  Four Antigravity shared windows, BotFleet marks, collapsed MiniMax video, hidden unused platforms, and live Grok Bot weekly allowance.  Private quota-only BotFleet handoff is published; BotFleet consumer continues separately in BotFleet #408.  Six local providers verified; Claude needs a quota-capable OAuth login and DeepSeek has no connected source. <!-- wb-agent-report:5acfbc5c64334f92a94db9a6d2075908 -->
 
