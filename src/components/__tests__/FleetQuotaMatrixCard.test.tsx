@@ -291,6 +291,7 @@ describe("formatCountdown and quotaTone branches", () => {
     expect(formatCountdown("2026-09-14T06:00:00.000Z", NOW_MS)).toBe("Resets in 2d 6h");
     expect(formatCountdown("2026-09-12T03:15:00.000Z", NOW_MS)).toBe("Resets in 3h 15m");
     expect(formatCountdown("2026-09-12T00:09:00.000Z", NOW_MS)).toBe("Resets in 9m");
+    expect(formatCountdown("2026-09-13T00:00:00.000Z", NOW_MS)).toBe("Resets in 1d 0h");
   });
 
   it("covers unknown, exhausted, available, moderate, and near-cap tones", () => {

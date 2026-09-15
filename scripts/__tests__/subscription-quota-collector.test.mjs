@@ -178,6 +178,26 @@ describe("parseCodexUsage", () => {
     expect(readings[0].quotaWindow).toBe("5h");
     expect(readings[0].planType).toBe("plus");
   });
+
+  it("parses now from an ISO string and skips an empty primary window", () => {
+    const readings = parseCodexUsage(
+      {
+        plan_type: "plus",
+        rate_limits: {
+          primary: { unused: true },
+          secondary_window: {
+            used_percent: 10,
+            reset_after_seconds: 60,
+            limit_window_seconds: 604_800,
+          },
+        },
+      },
+      { now: "2026-09-12T12:00:00.000Z" },
+    );
+    expect(readings).toHaveLength(1);
+    expect(readings[0].quotaWindow).toBe("weekly");
+    expect(readings[0].remainingPercent).toBe(90);
+  });
 });
 
 describe("parseGrokBilling", () => {
@@ -208,6 +228,14 @@ describe("parseGrokBilling", () => {
     expect(row.remainingPercent).toBe(25);
     expect(row.usedPercent).toBe(75);
     expect(row.quotaWindow).toBe("weekly");
+  });
+
+  it("accepts remainingPercent and a seconds window on the nested credits object", () => {
+    const [row] = parseGrokBilling({
+      credits: { remainingPercent: 12, limit_window_seconds: 86_400, resetsAt: "2026-09-13T00:00:00Z" },
+    });
+    expect(row.remainingPercent).toBe(12);
+    expect(row.quotaWindow).toBe("daily");
   });
 });
 
