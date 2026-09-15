@@ -270,6 +270,9 @@ jobs:
       # credentials, which is why it sat outside CI. The guard now compares
       # `import.meta.url`, matching the rest of scripts/. A regression in it
       # re-breaks the exit code, so this step is also that fix's own guard.
+      - name: Test sentry-ci-report
+        run: npm run test:sentry-ci-report
+
       - name: Test R2 weekly archive
         run: npm run test:r2-archive
 
