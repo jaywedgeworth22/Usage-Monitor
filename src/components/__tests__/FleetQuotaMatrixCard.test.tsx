@@ -299,6 +299,30 @@ describe("formatCountdown and quotaTone branches", () => {
     expect(quotaTone("available", 80).label).toBe("Available");
     expect(quotaTone("available", 30).label).toBe("Moderate Quota");
     expect(quotaTone("near_cap", 10).label).toBe("Near Quota Cap");
+    expect(quotaTone("available", 0).label).toBe("Exhausted");
+  });
+});
+
+describe("QuotaWindowCard remainingUnknown and via without a window token", () => {
+  it("omits a percent when remaining is unknown and still says via Antigravity", () => {
+    const html = renderToStaticMarkup(
+      createElement(QuotaWindowCard, {
+        win: {
+          id: "ag-unknown",
+          label: "Routing bucket",
+          window: null,
+          remainingPercent: null,
+          remainingUnknown: true,
+          status: "unknown",
+          resetAt: null,
+          via: "antigravity",
+        },
+        nowMs: NOW_MS,
+      }),
+    );
+    expect(html).toContain("via Antigravity");
+    expect(html).toContain("Not reported");
+    expect(html).not.toContain("% remaining");
   });
 });
 
@@ -345,6 +369,13 @@ describe("ProviderLogo fallback", () => {
     );
     expect(html).toContain("MI");
     expect(html).not.toContain("/logos/");
+  });
+
+  it("renders a question mark when the label has no letters", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProviderLogo, { providerKey: "unknown", providerLabel: "123" }),
+    );
+    expect(html).toContain("?");
   });
 });
 
