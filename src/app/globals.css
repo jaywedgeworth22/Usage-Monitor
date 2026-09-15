@@ -288,6 +288,11 @@ body {
   --um-incomplete: #475569;
   --um-surface: #ffffff;
   --um-canvas: #f6f7f9;
+  /* RGB triplets for Tailwind surface tokens (card/muted/border). */
+  --um-card: 255 255 255;
+  --um-muted: 243 244 246;
+  --um-muted-foreground: 107 114 128;
+  --um-border: 229 231 235;
 }
 .dark {
   --um-accent: #fb923c;
@@ -298,4 +303,8 @@ body {
   --um-incomplete: #94a3b8;
   --um-surface: #1f2937;
   --um-canvas: #111827;
+  --um-card: 17 24 39;
+  --um-muted: 31 41 55;
+  --um-muted-foreground: 156 163 175;
+  --um-border: 55 65 81;
 }
