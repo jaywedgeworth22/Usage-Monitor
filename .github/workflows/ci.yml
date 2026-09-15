@@ -334,6 +334,8 @@ jobs:
       #    without jq, so a runner image change degrades rather than breaks).
       - name: Test session token collectors
         run: npm run test:session-token-collectors
+      - name: Test detached collector runtime updates
+        run: npm run test:collector-runtime
 
       - name: Test CF token map
         run: npm run test:cf-token-map

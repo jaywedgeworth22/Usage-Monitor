@@ -14,10 +14,25 @@ enum DisplayMode: String, CaseIterable, Identifiable {
     }
 }
 
+public enum QuotaViewLayout: String, CaseIterable, Identifiable {
+    case allAtOnce = "allAtOnce"
+    case detailed = "detailed"
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .allAtOnce: return "All at Once"
+        case .detailed: return "Detailed"
+        }
+    }
+}
+
 @MainActor
 final class MonitorModel: ObservableObject {
     @Published var displayMode: DisplayMode {
         didSet { defaults.set(displayMode.rawValue, forKey: "displayMode") }
+    }
+    @Published var viewLayout: QuotaViewLayout {
+        didSet { defaults.set(viewLayout.rawValue, forKey: "quotaViewLayout") }
     }
     @Published private(set) var response = QuotaResponse(generatedAt: "")
     @Published private(set) var isRefreshing = false
@@ -45,6 +60,7 @@ final class MonitorModel: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         displayMode = DisplayMode(rawValue: defaults.string(forKey: "displayMode") ?? "") ?? .both
+        viewLayout = QuotaViewLayout(rawValue: defaults.string(forKey: "quotaViewLayout") ?? "") ?? .allAtOnce
         localEnabled = defaults.object(forKey: "localEnabled") as? Bool ?? true
         serverEnabled = defaults.bool(forKey: "serverEnabled")
         let savedEndpoint = defaults.string(forKey: "endpoint") ?? "https://usage.jays.services/api/quota-windows"

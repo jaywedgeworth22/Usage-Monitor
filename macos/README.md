@@ -1,6 +1,10 @@
 # Usage Monitor for macOS
 
-Usage Monitor for macOS is a read-only client for local Claude, Codex, Antigravity, Cursor, Grok CLI, Grok Bot, and MiniMax quota readers.  It can also read an optional HTTPS `GET /api/quota-windows` endpoint with a Keychain token.  It presents the latest quota windows with their source timestamps and keeps missing quota data visible instead of inventing values.
+> **Note:** The macOS application has been extracted into its own repository and renamed to **AgentBar**.
+>
+> Please visit [jaywedgeworth22/agent-bar](https://github.com/jaywedgeworth22/agent-bar) for the current application source code, build scripts, and documentation.
+
+The `macos` directory in this repository is kept for historical reference.  The Keychain-prompt fix below still applies to this copy and should be mirrored into AgentBar.
 
 The app supports menu bar, Dock, or both surfaces.  Both is the default.  The server read token is stored in macOS Keychain, scoped to its endpoint URL.  The endpoint and display preferences are stored in UserDefaults.  Local CLI credentials are read in memory and are never copied into the app's preferences or logs.
 
