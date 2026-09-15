@@ -183,6 +183,11 @@ const CATALOG: Record<CatalogProviderName, ProviderIntegrationProfile> = {
     limitations: ["Requires an exact team ID and billing-capable management credential.", "Do not treat a SuperGrok seat as a fetchable xAI connection."],
     source: "src/lib/adapters/xai.ts",
   }),
+  minimax: defineBlindProfile({
+    name: "minimax", displayName: "MiniMax", category: "LLM/AI",
+    reason: "MiniMax exposes no documented account/billing API here; subscription quota is read by the Mac-side quota collector, or entered manually.",
+    source: "src/lib/provider-definitions.ts",
+  }),
   mistral: defineProfile({
     name: "mistral", displayName: "Mistral AI", category: "LLM/AI", mode: "partial",
     summary: "Enumerates Mistral workspaces and reads each current-month Admin Usage report, plus organization payment/limit state, spend cap, and rate limits; no undocumented counter is represented as cash cost.",

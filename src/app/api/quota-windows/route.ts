@@ -13,6 +13,12 @@ export const dynamic = "force-dynamic";
  *
  * Latest remaining-percent quota windows for BotFleet skip-model routing.
  * Dual-auth: dashboard session cookie or USAGE_READ_TOKEN.
+ *
+ * Response fields are ADDITIVE ONLY -- the iOS app and BotFleet both read
+ * `windows` and `skipModelTypes` and must keep working unchanged.  `windows[]`
+ * gained `providerKey`, `providerLabel` and `via`, and the body gained
+ * `providerGroups` (one entry per provider, including the expected providers
+ * that have reported nothing yet).  Nothing was removed or renamed.
  */
 export async function GET(request: NextRequest) {
   const hasDashboardSession = verifySessionToken(
@@ -50,6 +56,8 @@ export async function GET(request: NextRequest) {
     },
   });
 
+  // Every subscription provider posts `metricType: "quota"` with credits =
+  // percent remaining, so no per-provider filter is needed here.
   const projected = projectQuotaWindows(events);
   const body = { ok: true as const, ...projected };
   return NextResponse.json(body, {
