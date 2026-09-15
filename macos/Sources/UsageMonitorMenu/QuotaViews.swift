@@ -63,8 +63,10 @@ struct MonitorDashboard: View {
                                 }
                             }
                         }
-                        Text("Each window is an independent cap.  A model offered through Antigravity uses the Antigravity subscription.  Unreported limits stay unavailable.")
-                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if selected == "google-antigravity" {
+                            Text("Models used through Antigravity share its subscription quotas.")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .padding(26)
                 }
@@ -617,13 +619,22 @@ struct MonitorSettings: View {
                     Toggle("Read Agent Quotas on This Mac", isOn: $local)
                     Text("Uses existing Claude, Codex, Antigravity, Cursor, Grok CLI, Grok Bot, and MiniMax sign-ins.  Shares local quota readings with BotFleet.")
                         .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Button(model.connectingClaude ? "Connecting Claude…" : "Connect Claude") {
+                            Task { await model.connectClaude() }
+                        }.disabled(model.connectingClaude || !local)
+                        if model.connectingClaude { ProgressView().controlSize(.small) }
+                    }
+                    Text(model.claudeConnectionMessage ?? "Connect once per app session to access Claude’s existing Keychain login.  macOS may ask for permission; quota refreshes never do.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     Divider()
                     Toggle("Connect Usage Monitor Server", isOn: $server)
                     TextField("Quota Endpoint", text: $endpoint).textFieldStyle(.roundedBorder)
                         .accessibilityLabel("Quota Endpoint").disabled(!server)
                     SecureField(model.hasSavedToken ? "Token saved · enter to replace" : "Usage Monitor read token", text: $token)
                         .textFieldStyle(.roundedBorder).disabled(!server).accessibilityLabel("Usage Monitor read token")
-                    Text("The read token stays in this Mac’s Keychain.  Refreshes every 5 minutes while the app is running.")
+                    Text("The read token stays in Keychain.  Use Save & Refresh once per app session to connect it.  Quotas refresh every 5 minutes without Keychain access.")
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(10)
             }
@@ -657,8 +668,8 @@ struct MonitorSettings: View {
             if saving { ProgressView("Saving settings…").font(.caption) }
             Spacer(minLength: 0)
         }
-        .disabled(saving)
-        .padding(24).frame(width: 580, height: 510).tint(Palette.accent).preferredColorScheme(.light)
+        .disabled(saving || model.connectingClaude)
+        .padding(24).frame(width: 580, height: 610).tint(Palette.accent).preferredColorScheme(.light)
         .onAppear { local = model.localEnabled; server = model.serverEnabled; endpoint = model.endpoint }
     }
 }

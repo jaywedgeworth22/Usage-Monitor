@@ -8,14 +8,13 @@ enum TokenStore {
     private static let keychainGate = DispatchSemaphore(value: 1)
 
     static func read(server: String) async -> String? {
-        await bounded(nil) { readSynchronously(server: server) }
+        await perform(nil) { readSynchronously(server: server) }
     }
 
     private static func readSynchronously(server: String) -> String? {
         var query = base(server)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
-        query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data else { return nil }
@@ -23,7 +22,7 @@ enum TokenStore {
     }
 
     static func save(_ token: String, server: String) async throws {
-        let status = await bounded(OSStatus(errSecInteractionNotAllowed)) { saveSynchronously(token, server: server) }
+        let status = await perform(OSStatus(errSecInteractionNotAllowed)) { saveSynchronously(token, server: server) }
         guard status == errSecSuccess else { throw Failure.write }
     }
 
@@ -40,34 +39,20 @@ enum TokenStore {
     }
 
     static func delete(server: String) async throws {
-        let status = await bounded(OSStatus(errSecInteractionNotAllowed)) { SecItemDelete(base(server) as CFDictionary) }
+        let status = await perform(OSStatus(errSecInteractionNotAllowed)) { SecItemDelete(base(server) as CFDictionary) }
         guard status == errSecSuccess || status == errSecItemNotFound else { throw Failure.write }
     }
 
-    /// Security can wait indefinitely even with interaction disabled.  At most
-    /// one operation may occupy its worker; the UI always receives a bounded result.
-    private static func bounded<Value: Sendable>(_ fallback: Value, operation: @escaping @Sendable () -> Value) async -> Value {
+    /// Only explicit Settings actions reach Keychain.  Keep the action pending
+    /// while macOS handles its prompt; do not return early and retry a live call.
+    private static func perform<Value: Sendable>(_ fallback: Value, operation: @escaping @Sendable () -> Value) async -> Value {
         await withCheckedContinuation { continuation in
-            let completion = Completion(continuation)
             DispatchQueue.global(qos: .utility).async {
-                guard keychainGate.wait(timeout: .now()) == .success else { completion.finish(fallback); return }
-                defer { keychainGate.signal() }
-                completion.finish(operation())
+                guard keychainGate.wait(timeout: .now()) == .success else { continuation.resume(returning: fallback); return }
+                let result = operation()
+                keychainGate.signal()
+                continuation.resume(returning: result)
             }
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) { completion.finish(fallback) }
-        }
-    }
-
-    private final class Completion<Value: Sendable>: @unchecked Sendable {
-        private let lock = NSLock()
-        private var continuation: CheckedContinuation<Value, Never>?
-        init(_ continuation: CheckedContinuation<Value, Never>) { self.continuation = continuation }
-        func finish(_ value: Value) {
-            lock.lock()
-            let pending = continuation
-            continuation = nil
-            lock.unlock()
-            pending?.resume(returning: value)
         }
     }
 
@@ -81,7 +66,7 @@ enum TokenStore {
         case read, write
         var errorDescription: String? {
             switch self {
-            case .read: return "The saved read token is unavailable in Keychain."
+            case .read: return "Open Settings and use Save & Refresh to connect the saved server token for this app session."
             case .write: return "Keychain could not save the connection.  Unlock your login Keychain and try again."
             }
         }

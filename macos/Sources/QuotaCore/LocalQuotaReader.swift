@@ -27,7 +27,7 @@ public struct LocalQuotaReader: Sendable {
     private let now: @Sendable () -> Date
     private let fetchJSON: @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse)
     private let runAntigravity: @Sendable () async throws -> Data
-    private let readClaudeKeychain: @Sendable () async -> Data?
+    private let claudeCredential: Data?
 
     private static let maxCredentialBytes = 1_048_576
     private static let maxResponseBytes = 1_048_576
@@ -38,21 +38,20 @@ public struct LocalQuotaReader: Sendable {
     /// `homeDirectory`, `now`, and the transport/process closures are
     /// injectable solely for offline tests.  Production uses the current home
     /// directory, a real clock, and the bounded transports below.
+    /// `claudeCredential` is an optional in-memory snapshot from an explicit
+    /// user connection.  Automatic reads never access Keychain.
     public init(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         now: @escaping @Sendable () -> Date = { Date() },
         fetchJSON: (@Sendable (URLRequest) async throws -> (Data, HTTPURLResponse))? = nil,
         runAntigravity: (@Sendable () async throws -> Data)? = nil,
-        readClaudeKeychain: (@Sendable () async -> Data?)? = nil
+        claudeCredential: Data? = nil
     ) {
         self.homeDirectory = homeDirectory.standardizedFileURL
         self.now = now
         self.fetchJSON = fetchJSON ?? Self.makeFetcher()
         self.runAntigravity = runAntigravity ?? Self.makeAntigravityRunner(homeDirectory: self.homeDirectory)
-        if let readClaudeKeychain { self.readClaudeKeychain = readClaudeKeychain }
-        else if self.homeDirectory == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL {
-            self.readClaudeKeychain = { await ClaudeCredentialSource.read() }
-        } else { self.readClaudeKeychain = { nil } }
+        self.claudeCredential = claudeCredential
     }
 
     /// Reads all configured local sources concurrently.  This method never
@@ -101,25 +100,44 @@ public struct LocalQuotaReader: Sendable {
             if let expiry = firstTimestamp(value, ["expiresAt", "expires_at"]), let date = parseDate(expiry), date <= now() { return nil }
             return value
         }
-        var candidate = validOAuth(file)
-        if candidate == nil, let data = await ClaudeCredentialSource.boundedRead({ await readClaudeKeychain() }), data.count <= Self.maxCredentialBytes,
-           let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
-            candidate = validOAuth(root)
+        // An explicit Connect Claude snapshot is the credential the user just
+        // confirmed and must win over `.claude/.credentials.json`, which can
+        // hold a syntactically valid but revoked token.  Keep the file as a
+        // fallback so a stale snapshot never strands a working file login, and
+        // retry the next candidate when a lane answers 401/403.
+        var candidates: [[String: Any]] = []
+        if let data = claudeCredential, data.count <= Self.maxCredentialBytes,
+           let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let oauth = validOAuth(root) {
+            candidates.append(oauth)
         }
-        guard let oauth = candidate, let token = firstString(oauth, ["accessToken", "access_token"]) else {
-            return ProviderRead(provider: provider, windows: [], issue: "Claude Code quota login is unavailable.  Sign in to Claude Code to connect subscription quotas.")
+        if let oauth = validOAuth(file) { candidates.append(oauth) }
+        guard !candidates.isEmpty else {
+            return ProviderRead(provider: provider, windows: [], issue: "Claude quota access is unavailable.  Use Connect Claude in Settings to read your existing login.")
         }
 
-        var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        let payload = try await requestJSON(request)
-        let windows = parseClaude(payload, planType: firstString(oauth, ["subscriptionType", "subscription_type"]), observedAt: now())
-        guard !windows.isEmpty else {
-            return ProviderRead(provider: provider, windows: [unknownWindow(provider: provider, label: "Claude quota", observedAt: now())], issue: "Claude returned no readable quota windows.")
+        var rejected = false
+        for oauth in candidates {
+            guard let token = firstString(oauth, ["accessToken", "access_token"]) else { continue }
+            var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
+            request.httpMethod = "GET"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+            let payload: [String: Any]
+            do { payload = try await requestJSON(request) }
+            catch LocalReaderError.reauth {
+                rejected = true
+                continue
+            }
+            let windows = parseClaude(payload, planType: firstString(oauth, ["subscriptionType", "subscription_type"]), observedAt: now())
+            guard !windows.isEmpty else {
+                return ProviderRead(provider: provider, windows: [unknownWindow(provider: provider, label: "Claude quota", observedAt: now())], issue: "Claude returned no readable quota windows.")
+            }
+            return ProviderRead(provider: provider, windows: windows, issue: nil)
         }
-        return ProviderRead(provider: provider, windows: windows, issue: nil)
+        return ProviderRead(provider: provider, windows: [], issue: rejected
+            ? "Claude quota access was rejected.  Reconnect Claude in Settings to reread your existing login."
+            : "Claude quota access is unavailable.  Use Connect Claude in Settings to read your existing login.")
     }
 
     private func readCodex() async throws -> ProviderRead {
