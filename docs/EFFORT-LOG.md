@@ -495,6 +495,8 @@ Protocol: /Users/jay/apps/EFFORT-LOG-PROTOCOL.md (canonical). Live board: this f
 - **Resolve Agent Sync Relay noise and Anthropic must-keep-funded alerts (AG)** — MERGED PR #113 / DEPLOYED. Updated `ensureAgentSyncProviderSeeded` to automatically disable the Agent Sync Relay provider on startup/poll, silencing the spurious missing_snapshot PagerDuty alerts. Also added a migration step in the same boot sequence to unflag `mustKeepFunded` for Anthropic since Anthropic does not expose a wallet balance. Tests green.
 
 ## Completed
+- **2026-09-14 - CLAUDE - COMPLETED (merged) - UM sentry-ci-report hardening: committed harness in CI + guard tying MAX_RUNTIME_OVERRIDES to ios-ship.yml timeout-minutes.** <!-- wb-agent-report:3ccaa57e868e4878a0a5b68eca0cf35a -->
+
 
 - **2026-09-13 - CODEX - COMPLETED (merged #1457) - Stop repeated Claude Keychain prompts in macOS monitor.**  GROK pickup 2026-09-15: leftover `~/apps/usage-monitor-codex-macos` clean; origin/main `ClaudeCredentialSource.connect()` is explicit with no Security.framework retry loop.  Issue #1455 already closed.  No extra TestFlight. <!-- wb-agent-report:53d391a7b88749fe81300b384fac6e77 -->
 - **2026-09-13 - CODEX - COMPLETED (merged #1453) - Session telemetry collectors resend six months every 15 minutes and overstate DSH/Cursor coverage.**  GROK pickup 2026-09-15: origin/main has incremental watermarks plus honest coverage matrix.  Issue #1448 already closed.  BotFleet-child exclusion remains BF #401. <!-- wb-agent-report:876172fe9dec4e68930a2854800287e2 -->
