@@ -1583,7 +1583,8 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
         a.code === "budget_warning" ||
         a.code === "usage_reconciliation_discrepancy" ||
         a.code === "spend_anomaly" ||
-        a.code === "request_anomaly"
+        a.code === "request_anomaly" ||
+        a.code === "catalog_estimate"
     );
     if (reconciled.fixedCostConflict) {
       budgetAlerts.push({
