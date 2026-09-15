@@ -77,21 +77,21 @@ else
   check "testers.json not added" "absent" "absent"
 fi
 
-echo "== ios-ship stays Client-only =="
+echo "== ios-ship Client + Local =="
 if grep -E '^[[:space:]]+.*[[:space:]]--force-ship([[:space:]]|$)' "$SHIP_YML"; then
   check "ios-ship.yml has no --force-ship flag" "absent" "present"
 else
   check "ios-ship.yml has no --force-ship flag" "absent" "absent"
 fi
 if grep -E 'usage-local|LocalUsageMonitor' "$SHIP_YML" | grep -q 'Ship .*Local'; then
-  check "no LocalUsageMonitor ship step" "absent" "present"
+  check "LocalUsageMonitor ship step present" "present" "present"
 else
-  check "no LocalUsageMonitor ship step" "absent" "absent"
+  check "LocalUsageMonitor ship step present" "present" "absent"
 fi
 if grep -q 'LocalUsageMonitor stays skipped' "$SHIP_YML"; then
-  check "LocalUsageMonitor skip comment present" "present" "present"
+  check "LocalUsageMonitor skip comment gone" "absent" "present"
 else
-  check "LocalUsageMonitor skip comment present" "present" "absent"
+  check "LocalUsageMonitor skip comment gone" "absent" "absent"
 fi
 
 echo "== no Swift package =="

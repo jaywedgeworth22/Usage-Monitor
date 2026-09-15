@@ -10,7 +10,7 @@ name: iOS TestFlight ship (Mac runner)
 # ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8, IOS_DIST_P12_BASE64,
 # IOS_DIST_P12_PASSWORD). Never mint a new App Store Connect key.
 #
-# LocalUsageMonitor stays skipped. This job ships Usage Client Monitor only.
+# Ships Usage Client Monitor and LocalUsageMonitor (Import Package tap).
 #
 # WHY THERE IS A `schedule:` TRIGGER (2026-08-13)
 # ----------------------------------------------
@@ -94,7 +94,7 @@ jobs:
       # Runs FIRST so a tick with nothing to ship costs seconds.
       # Logic lives in a script, not inline YAML, so CI can unit-test it on
       # every PR instead of it only ever being exercised on the ship job.
-      # usage-local is intentionally omitted: LocalUsageMonitor stays skipped.
+      # usage-local is included so LocalUsageMonitor ships when ios/ changes.
       - name: Scheduled ship gate (skip unless iOS code changed)
         id: gate
         run: |
