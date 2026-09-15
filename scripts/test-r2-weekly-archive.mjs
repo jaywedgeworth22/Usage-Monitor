@@ -238,6 +238,26 @@ await test("resolveArchiveConfig refuses to fall back to the B2 litestream keys"
   assert.equal(config.creds.accessKeyId, "", "B2 credentials must never leak into an R2 request");
 });
 
+await test("resolveArchiveConfig anchors work dir on the data volume beside the DB", () => {
+  const config = resolveArchiveConfig({
+    R2_ARCHIVE_ENDPOINT: "https://acct.r2.cloudflarestorage.com",
+    R2_ARCHIVE_ACCESS_KEY_ID: "k",
+    R2_ARCHIVE_SECRET_ACCESS_KEY: "s",
+    R2_ARCHIVE_DB_PATH: "/data/prod.db",
+  });
+  assert.equal(config.workDirBase, "/data/.r2-archive-work");
+  const overridden = resolveArchiveConfig(
+    {
+      R2_ARCHIVE_ENDPOINT: "https://acct.r2.cloudflarestorage.com",
+      R2_ARCHIVE_ACCESS_KEY_ID: "k",
+      R2_ARCHIVE_SECRET_ACCESS_KEY: "s",
+      R2_ARCHIVE_DB_PATH: "/data/prod.db",
+      R2_ARCHIVE_WORK_DIR: "/opt/r2-work",
+    }
+  );
+  assert.equal(overridden.workDirBase, "/opt/r2-work");
+});
+
 await test("resolveArchiveConfig normalizes prefix and detects the kill switch", () => {
   const config = resolveArchiveConfig({
     R2_ARCHIVE_ENDPOINT: "https://acct.r2.cloudflarestorage.com",

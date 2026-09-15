@@ -1180,7 +1180,7 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
   const latestCostSnapshotIds = [...latestCostByProviderId.values()].map(
     (snapshot) => snapshot.id
   );
-  const costCoverageCaveatSnapshotIds = new Set<string>();
+  const costCoverageCaveatCodeBySnapshotId = new Map<string, string>();
   if (latestCostSnapshotIds.length > 0) {
     const rows = await prisma.$queryRaw<Array<{ id: string; version: unknown; code: unknown }>>(
       Prisma.sql`
@@ -1194,7 +1194,7 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
     );
     for (const row of rows) {
       if (Number(row.version) === 1 && typeof row.code === "string") {
-        costCoverageCaveatSnapshotIds.add(row.id);
+        costCoverageCaveatCodeBySnapshotId.set(row.id, row.code);
       }
     }
   }
@@ -1316,7 +1316,7 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
     const latestCostSnapshot = latestCostByProviderId.get(p.id) ?? null;
     const snapshotCostCoverageIncomplete =
       latestCostSnapshot != null &&
-      costCoverageCaveatSnapshotIds.has(latestCostSnapshot.id);
+      costCoverageCaveatCodeBySnapshotId.has(latestCostSnapshot.id);
     const geminiCostIdentityStatus = deriveGeminiBillingStatus({
       providerName: p.name,
       providerType: p.type,
@@ -1562,6 +1562,9 @@ async function computeBudgetStatusUncached(now: Date): Promise<BudgetStatusRespo
           totalRequests: latestSnapshot?.totalRequests ?? null,
           credits: latestSnapshot?.credits ?? null,
           fetchedAt: latestSnapshot?.fetchedAt ?? now,
+          costCoverageCaveatCode: latestCostSnapshot
+            ? (costCoverageCaveatCodeBySnapshotId.get(latestCostSnapshot.id) ?? null)
+            : null,
         },
         trackedSpendUsd: spentUsd,
         fixedAccruedUsd: reconciled.fixedAccruedUsd,

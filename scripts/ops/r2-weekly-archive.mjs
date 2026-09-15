@@ -48,8 +48,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { createGzip, gunzipSync } from "node:zlib";
@@ -118,6 +117,13 @@ export function resolveArchiveConfig(env = process.env, overrides = {}) {
   let prefix = (env.R2_ARCHIVE_PREFIX || DEFAULTS.prefix).trim();
   if (prefix && !prefix.endsWith("/")) prefix += "/";
 
+  const dbPath = (env.R2_ARCHIVE_DB_PATH || DEFAULTS.dbPath).trim();
+  // Work must live on the persistent data volume beside the DB, never OS
+  // /tmp: a tmpfs fill (host Coolify 503 incident) is exactly what a
+  // ~100 MB snapshot + verify copy invites. Env override for tests/ops.
+  const workDirBase =
+    (env.R2_ARCHIVE_WORK_DIR || "").trim() || join(dirname(dbPath), ".r2-archive-work");
+
   return {
     missing,
     creds: {
@@ -129,7 +135,8 @@ export function resolveArchiveConfig(env = process.env, overrides = {}) {
     bucket: (env.R2_ARCHIVE_BUCKET || DEFAULTS.bucket).trim(),
     prefix,
     keepGenerations,
-    dbPath: (env.R2_ARCHIVE_DB_PATH || DEFAULTS.dbPath).trim(),
+    dbPath,
+    workDirBase,
     statusPath: (env.R2_ARCHIVE_STATUS_PATH || DEFAULTS.statusPath).trim(),
     // The free-tier kill switch means "stop writing to R2". A ~50 MB weekly
     // object is not what tripped it, but honouring it keeps one switch
@@ -235,7 +242,8 @@ export async function runArchive({ env = process.env, argv = [], fetchImpl } = {
     throw new Error(`database not found at ${config.dbPath}`);
   }
 
-  const workDir = mkdtempSync(join(tmpdir(), "r2-weekly-archive-"));
+  mkdirSync(config.workDirBase, { recursive: true });
+  const workDir = mkdtempSync(join(config.workDirBase, "run-"));
   const snapshotPath = join(workDir, "snapshot.db");
   const compressedPath = join(workDir, "snapshot.db.gz");
   const restoredPath = join(workDir, "verify.db");
