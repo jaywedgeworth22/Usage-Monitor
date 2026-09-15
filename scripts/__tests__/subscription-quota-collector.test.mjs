@@ -40,6 +40,9 @@ describe("quota-event helpers", () => {
     expect(windowLabelFromSeconds(2_592_000)).toBe("monthly");
     expect(windowLabelFromSeconds(0)).toBeNull();
     expect(windowLabelFromSeconds("nonsense")).toBeNull();
+    expect(windowLabelFromSeconds(40 * 86_400)).toBe("40d");
+    expect(windowLabelFromSeconds(3_000)).toBe("1h");
+    expect(windowLabelFromSeconds(86_400)).toBe("daily");
   });
 
   it("accepts ISO, epoch seconds and epoch milliseconds", () => {
@@ -47,6 +50,10 @@ describe("quota-event helpers", () => {
     expect(toIsoTimestamp(1_789_236_000)).toBe(toIsoTimestamp(1_789_236_000_000));
     expect(toIsoTimestamp("not a date")).toBeNull();
     expect(toIsoTimestamp(null)).toBeNull();
+    expect(toIsoTimestamp(new Date("not a date"))).toBeNull();
+    expect(toIsoTimestamp({})).toBeNull();
+    expect(toIsoTimestamp("   ")).toBeNull();
+    expect(toIsoTimestamp("1789236000")).toBe(toIsoTimestamp(1_789_236_000));
   });
 
   it("clamps percentages into 0-100", () => {
@@ -116,7 +123,14 @@ describe("parseClaudeUsage", () => {
     expect(claudeWindowToken("five_hour")).toBe("5h");
     expect(claudeWindowToken("seven_day")).toBe("7d");
     expect(claudeWindowToken("thirty_day")).toBe("30d");
+    expect(claudeWindowToken("two_hour")).toBe("2h");
     expect(claudeWindowToken("totally_new")).toBeNull();
+  });
+
+  it("prefers remaining_percent when utilization is missing", () => {
+    const readings = parseClaudeUsage({ five_hour: { remaining_percent: 81, resets_at: "2026-09-12T18:00:00Z" } });
+    expect(readings[0].remainingPercent).toBe(81);
+    expect(readings[0].usedPercent).toBeNull();
   });
 
   it("returns nothing for an unknown shape instead of inventing a number", () => {
@@ -148,6 +162,22 @@ describe("parseCodexUsage", () => {
     expect(parseCodexUsage({ plan_type: "pro" })).toEqual([]);
     expect(parseCodexUsage(undefined)).toEqual([]);
   });
+
+  it("accepts remaining_percent and window_minutes on a camelCase rateLimit block", () => {
+    const readings = parseCodexUsage(
+      {
+        planType: "plus",
+        rateLimit: {
+          primaryWindow: { remainingPercent: 40, windowMinutes: 300 },
+        },
+      },
+      { now: Date.parse("2026-09-12T12:00:00.000Z") },
+    );
+    expect(readings).toHaveLength(1);
+    expect(readings[0].remainingPercent).toBe(40);
+    expect(readings[0].quotaWindow).toBe("5h");
+    expect(readings[0].planType).toBe("plus");
+  });
 });
 
 describe("parseGrokBilling", () => {
@@ -172,6 +202,13 @@ describe("parseGrokBilling", () => {
     expect(row.remainingPercent).toBeNull();
     expect(row.planType).toBe("supergrok");
   });
+
+  it("computes remaining from remaining credits and a limit", () => {
+    const [row] = parseGrokBilling({ remaining: 20, limit: 80, interval: "weekly" });
+    expect(row.remainingPercent).toBe(25);
+    expect(row.usedPercent).toBe(75);
+    expect(row.quotaWindow).toBe("weekly");
+  });
 });
 
 describe("parseMinimaxRemains", () => {
@@ -192,6 +229,31 @@ describe("parseMinimaxRemains", () => {
 
   it("returns nothing when base_resp reports a failure", () => {
     expect(parseMinimaxRemains({ base_resp: { status_code: 1004 }, model_remains: [] })).toEqual([]);
+  });
+
+  it("emits remainingUnknown for a model row without counts", () => {
+    const readings = parseMinimaxRemains({
+      base_resp: { status_code: 0 },
+      model_remains: [{ model_name: "MiniMax-M2" }],
+    });
+    expect(readings).toHaveLength(1);
+    expect(readings[0].remainingUnknown).toBe(true);
+    expect(readings[0].remainingPercent).toBeNull();
+  });
+
+  it("accepts camelCase MiniMax remains and skips a non-array modelRemains", () => {
+    const readings = parseMinimaxRemains({
+      baseResp: { statusCode: 0 },
+      modelRemains: [
+        {
+          modelName: "MiniMax-M2",
+          currentIntervalUsageCount: 2,
+          currentIntervalTotalCount: 10,
+        },
+      ],
+    });
+    expect(readings[0].remainingPercent).toBe(80);
+    expect(parseMinimaxRemains({ base_resp: { status_code: 0 }, model_remains: { nope: true } })).toEqual([]);
   });
 });
 

@@ -21,9 +21,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import FleetQuotaMatrixCard, {
+  ProviderLogo,
   ProviderSection,
   QuotaWindowCard,
   buildProviderGroups,
+  defaultProviderGroups,
+  formatCountdown,
+  quotaTone,
 } from "@/components/FleetQuotaMatrixCard";
 
 const NBSP = " ";
@@ -277,6 +281,70 @@ describe("FleetQuotaMatrixCard default render (before any fetch resolves)", () =
     for (const label of EXPECTED_LABELS) {
       expect(html).toContain(label);
     }
+  });
+});
+
+describe("formatCountdown and quotaTone branches", () => {
+  it("covers rolling, past, day, hour, and minute countdown copy", () => {
+    expect(formatCountdown(null, NOW_MS)).toBe("Rolling refresh");
+    expect(formatCountdown("2026-09-11T00:00:00.000Z", NOW_MS)).toBe("Refreshing now");
+    expect(formatCountdown("2026-09-14T06:00:00.000Z", NOW_MS)).toBe("Resets in 2d 6h");
+    expect(formatCountdown("2026-09-12T03:15:00.000Z", NOW_MS)).toBe("Resets in 3h 15m");
+    expect(formatCountdown("2026-09-12T00:09:00.000Z", NOW_MS)).toBe("Resets in 9m");
+  });
+
+  it("covers unknown, exhausted, available, moderate, and near-cap tones", () => {
+    expect(quotaTone("unknown", null).label).toBe("Not reported");
+    expect(quotaTone("exhausted", 0).label).toBe("Exhausted");
+    expect(quotaTone("available", 80).label).toBe("Available");
+    expect(quotaTone("available", 30).label).toBe("Moderate Quota");
+    expect(quotaTone("near_cap", 10).label).toBe("Near Quota Cap");
+  });
+});
+
+describe("buildProviderGroups fallbacks", () => {
+  it("groups a flat windows payload and includes expected empty providers", () => {
+    const groups = buildProviderGroups({
+      windows: [
+        {
+          providerKey: "anthropic",
+          provider: "anthropic",
+          label: "5h window",
+          remainingPercent: 70,
+          remainingUnknown: false,
+          status: "available",
+          resetAt: "2026-09-12T05:00:00.000Z",
+          window: "5h",
+        },
+        {
+          provider: "acme",
+          label: "monthly",
+          remainingPercent: null,
+          remainingUnknown: true,
+          status: "nope",
+        },
+      ],
+    });
+    expect(groups.find((g) => g.provider === "anthropic")?.windows).toHaveLength(1);
+    expect(groups.find((g) => g.provider === "openai")?.windows).toEqual([]);
+    expect(groups.find((g) => g.provider === "acme")?.windows[0]?.status).toBe("unknown");
+  });
+
+  it("tolerates a non-object payload and still returns the five expected groups", () => {
+    expect(buildProviderGroups(null).map((g) => g.provider)).toEqual(
+      defaultProviderGroups().map((g) => g.provider),
+    );
+    expect(buildProviderGroups([]).map((g) => g.providerLabel)).toEqual(EXPECTED_LABELS);
+  });
+});
+
+describe("ProviderLogo fallback", () => {
+  it("renders MiniMax initials when no shipped logo exists", () => {
+    const html = renderToStaticMarkup(
+      createElement(ProviderLogo, { providerKey: "minimax", providerLabel: "MiniMax" }),
+    );
+    expect(html).toContain("MI");
+    expect(html).not.toContain("/logos/");
   });
 });
 

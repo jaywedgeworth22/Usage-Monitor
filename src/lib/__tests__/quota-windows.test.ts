@@ -29,6 +29,18 @@ describe("quotaStatus", () => {
       "available",
     );
   });
+
+  it("treats remaining under 20% as near_cap", () => {
+    expect(quotaStatus({ remainingPercent: 19.9, remainingUnknown: false, isExhausted: false })).toBe(
+      "near_cap",
+    );
+  });
+
+  it("treats remainingPercent null without remainingUnknown as exhausted", () => {
+    expect(quotaStatus({ remainingPercent: null, remainingUnknown: false, isExhausted: false })).toBe(
+      "exhausted",
+    );
+  });
 });
 
 describe("projectQuotaWindows", () => {
@@ -200,5 +212,101 @@ describe("provider grouping", () => {
     expect(result.windows[0]?.status).toBe("exhausted");
     // skipModelTypes drives Antigravity instance routing only.
     expect(result.skipModelTypes).toEqual([]);
+  });
+
+  it("emits group skip targets for Antigravity Claude/GPT and Gemini buckets without modelId", () => {
+    const result = projectQuotaWindows([
+      {
+        provider: "google-antigravity",
+        label: "Claude and GPT models",
+        credits: 0,
+        limit: 100,
+        occurredAt: "2026-09-12T12:00:00.000Z",
+        metadata: { bucketId: "claude-gpt", isExhausted: true, source: "antigravity-usage" },
+      },
+      {
+        provider: "google-antigravity",
+        label: "Gemini models",
+        credits: 0,
+        limit: 0,
+        occurredAt: "2026-09-12T12:00:00.000Z",
+        metadata: { bucketId: "gemini", isExhausted: true, source: "antigravity-usage" },
+      },
+      {
+        provider: "google-antigravity",
+        label: "Other routing bucket",
+        credits: 0,
+        limit: 100,
+        occurredAt: new Date("2026-09-12T12:00:00.000Z"),
+        metadata: { bucketId: "other", isExhausted: true, source: "antigravity-usage" },
+      },
+    ]);
+    const models = result.skipModelTypes.map((row) => row.model);
+    expect(models).toContain("claude-opus-4-6-thinking");
+    expect(models).toContain("gemini-3.1-pro-high");
+    expect(models.some((model) => model.includes("other"))).toBe(false);
+  });
+
+  it("falls back labels and ignores invalid metadata, duplicate series, and empty provider", () => {
+    const result = projectQuotaWindows([
+      {
+        provider: "anthropic",
+        credits: 40,
+        occurredAt: "not-a-date",
+        metadata: ["not", "an", "object"],
+      },
+      {
+        provider: "anthropic",
+        credits: 10,
+        limit: 100,
+        occurredAt: "2026-09-12T12:00:00.000Z",
+        metadata: { bucketId: "anthropic:five_hour" },
+      },
+      {
+        provider: "   ",
+        label: "orphan",
+        credits: 50,
+        limit: 100,
+        occurredAt: "2026-09-12T12:00:00.000Z",
+        metadata: { bucketId: "blank" },
+      },
+    ]);
+    expect(result.windows.some((row) => row.label === "anthropic")).toBe(true);
+    expect(result.windows.filter((row) => row.provider === "anthropic")).toHaveLength(2);
+    expect(quotaProviderLabel("   ")).toBe("Unknown");
+    expect(quotaProviderKey(undefined as unknown as string)).toBe("");
+  });
+
+  it("dedupes identical Antigravity skip targets and leaves skipReason null when available", () => {
+    const result = projectQuotaWindows([
+      {
+        provider: "google-antigravity",
+        label: "Opus copy A",
+        credits: 0,
+        limit: 100,
+        occurredAt: "2026-09-12T12:00:00.000Z",
+        metadata: { modelId: "claude-opus-4-6-thinking", isExhausted: true },
+      },
+      {
+        provider: "google-antigravity",
+        label: "Opus copy B",
+        credits: 0,
+        limit: 100,
+        occurredAt: "2026-09-12T12:01:00.000Z",
+        metadata: { modelId: "claude-opus-4-6-thinking", isExhausted: true },
+      },
+      {
+        provider: "google-antigravity",
+        label: "Healthy Gemini",
+        credits: 80,
+        limit: 100,
+        occurredAt: "2026-09-12T12:00:00.000Z",
+        metadata: { modelId: "gemini-3.1-pro-high" },
+      },
+    ]);
+    expect(result.skipModelTypes.filter((row) => row.model === "claude-opus-4-6-thinking")).toHaveLength(1);
+    const healthy = result.windows.find((row) => row.modelId === "gemini-3.1-pro-high");
+    expect(healthy?.skip).toBe(false);
+    expect(healthy?.skipReason).toBeNull();
   });
 });
