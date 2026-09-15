@@ -77,22 +77,37 @@ else
   check "testers.json not added" "absent" "absent"
 fi
 
-echo "== ios-ship stays Client-only =="
+echo "== ios-ship Client + Local =="
 if grep -E '^[[:space:]]+.*[[:space:]]--force-ship([[:space:]]|$)' "$SHIP_YML"; then
   check "ios-ship.yml has no --force-ship flag" "absent" "present"
 else
   check "ios-ship.yml has no --force-ship flag" "absent" "absent"
 fi
 if grep -E 'usage-local|LocalUsageMonitor' "$SHIP_YML" | grep -q 'Ship .*Local'; then
-  check "no LocalUsageMonitor ship step" "absent" "present"
+  check "LocalUsageMonitor ship step present" "present" "present"
 else
-  check "no LocalUsageMonitor ship step" "absent" "absent"
+  check "LocalUsageMonitor ship step present" "present" "absent"
 fi
 if grep -q 'LocalUsageMonitor stays skipped' "$SHIP_YML"; then
-  check "LocalUsageMonitor skip comment present" "present" "present"
+  check "LocalUsageMonitor skip comment gone" "absent" "present"
 else
-  check "LocalUsageMonitor skip comment present" "present" "absent"
+  check "LocalUsageMonitor skip comment gone" "absent" "absent"
 fi
+
+echo "== shipped apps clear the archive signing identity =="
+# Both the Client and the Local Monitor targets default to
+# CODE_SIGN_IDENTITY=iPhone Developer, which bearer-fails on GH-hosted runners.
+# Every APP_KEY this workflow ships must be covered by the workaround, or the
+# archive fails where it previously shipped.
+SHIP_SH="${REPO_ROOT}/scripts/ios-fleet/ship-testflight.sh"
+IDENTITY_BLOCK="$(awk '/^ARCHIVE_IDENTITY_FLAGS=\(\)/{f=1} f{print} f&&/^fi$/{exit}' "$SHIP_SH")"
+for shipped in usage usage-local; do
+  if grep -q "\"${shipped}\"" <<<"$IDENTITY_BLOCK"; then
+    check "identity workaround covers ${shipped}" "present" "present"
+  else
+    check "identity workaround covers ${shipped}" "present" "absent"
+  fi
+done
 
 echo "== no Swift package =="
 if [[ -f "${REPO_ROOT}/ios/UsageMonitor/UsageMonitorKit/Sources/AppCore/AppUpdatePrompt.swift" ]]; then
