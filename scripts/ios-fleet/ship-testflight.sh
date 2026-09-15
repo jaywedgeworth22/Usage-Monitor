@@ -985,12 +985,15 @@ ensure_tf_ready() {
 
 acquire_archive_lock
 log "archiving..."
-# Usage Client: project defaults CODE_SIGN_IDENTITY=iPhone Developer, which
-# makes Xcode ask ASC for IOS_APP_DEVELOPMENT profiles.  On GH-hosted runners
-# that path bearer-fails even with a valid AuthKey_<id>.p8 (runs 34039065969,
-# 34067392006).  Clearing identity lets Automatic pick Distribution for archive.
+# Usage Client and Usage Local Monitor: both targets in
+# ios/UsageMonitor/UsageMonitor.xcodeproj default to
+# CODE_SIGN_IDENTITY=iPhone Developer, which makes Xcode ask ASC for
+# IOS_APP_DEVELOPMENT profiles.  On GH-hosted runners that path bearer-fails
+# even with a valid AuthKey_<id>.p8 (runs 34039065969, 34067392006).
+# Clearing identity lets Automatic pick Distribution for archive.  Both keys
+# need it: ios-ship.yml ships usage-local through this script too.
 ARCHIVE_IDENTITY_FLAGS=()
-if [[ "${APP_KEY}" == "usage" ]]; then
+if [[ "${APP_KEY}" == "usage" || "${APP_KEY}" == "usage-local" ]]; then
   ARCHIVE_IDENTITY_FLAGS+=(CODE_SIGN_IDENTITY=)
 fi
 

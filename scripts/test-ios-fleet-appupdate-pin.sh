@@ -94,6 +94,21 @@ else
   check "LocalUsageMonitor skip comment gone" "absent" "absent"
 fi
 
+echo "== shipped apps clear the archive signing identity =="
+# Both the Client and the Local Monitor targets default to
+# CODE_SIGN_IDENTITY=iPhone Developer, which bearer-fails on GH-hosted runners.
+# Every APP_KEY this workflow ships must be covered by the workaround, or the
+# archive fails where it previously shipped.
+SHIP_SH="${REPO_ROOT}/scripts/ios-fleet/ship-testflight.sh"
+IDENTITY_BLOCK="$(awk '/^ARCHIVE_IDENTITY_FLAGS=\(\)/{f=1} f{print} f&&/^fi$/{exit}' "$SHIP_SH")"
+for shipped in usage usage-local; do
+  if grep -q "\"${shipped}\"" <<<"$IDENTITY_BLOCK"; then
+    check "identity workaround covers ${shipped}" "present" "present"
+  else
+    check "identity workaround covers ${shipped}" "present" "absent"
+  fi
+done
+
 echo "== no Swift package =="
 if [[ -f "${REPO_ROOT}/ios/UsageMonitor/UsageMonitorKit/Sources/AppCore/AppUpdatePrompt.swift" ]]; then
   check "prompt not in UsageMonitorKit" "absent" "present"
