@@ -23,17 +23,9 @@ export async function register() {
   // so the edge runtime (middleware) is covered too.
   if (process.env.NEXT_RUNTIME === "nodejs") {
     await import("./sentry.server.config");
-    if (process.env.SENTRY_DSN) {
-      try {
-        const { nodeProfilingIntegration } = await import(
-          /* webpackIgnore: true */ "@sentry/profiling-node"
-        );
-        const Sentry = await import("@sentry/nextjs");
-        Sentry.addIntegration(nodeProfilingIntegration());
-      } catch {
-        // Native profiler is optional.  Missing binary must not take down Sentry.init.
-      }
-    }
+    // Removed @sentry/profiling-node integration (Seer finding USAGE-MONITOR-3)
+    // because loading the native addon synchronously blocked the event loop for 
+    // ~11 minutes at startup, stalling client component requests (e.g., /login).
   } else if (process.env.NEXT_RUNTIME === "edge") {
     await import("./sentry.edge.config");
   }
