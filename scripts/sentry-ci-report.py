@@ -164,9 +164,11 @@ CHECKIN_MARGIN_OVERRIDES = {
     # hours ending 2026-09-14 05:04 UTC, every one successful, worst gap
     # 357min), and the same pattern continued through 2026-09-16.  With
     # checkin_margin at 40, Sentry marked up to five consecutive missed
-    # check-ins between real ticks, crossed failure_issue_threshold: 2, and
-    # reopened FLEET-INFRA-CB on every gap (53 new events in the two days
-    # after the 40-minute margin merged).
+    # check-ins between real ticks and attached them to FLEET-INFRA-CB even
+    # though that issue stayed resolved (367 -> 420 occurrences in the two days
+    # after the 40-minute margin merged), burying a genuine outage in bogus
+    # misses and leaving the issue one threshold evaluation away from
+    # regressing.
     #
     # 480 matches the "CI" override above (worst observed gap plus buffer)
     # and still catches a genuine multi-hour outage.  Re-tighten toward the
