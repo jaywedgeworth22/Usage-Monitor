@@ -144,28 +144,35 @@ CHECKIN_MARGIN_OVERRIDES = {
     # in_progress check-in added on 2026-09-08 changes nothing here and 480
     # stays as it was.
     "CI": 480,
-    # FLEET-INFRA-CB (2026-09-08, revised the same day): "iOS TestFlight ship
-    # (Mac runner)" runs on its own 13,43 * * * * cron.  This margin was
-    # briefly 90 because the only check-in this reporter sent fired after the
-    # whole workflow_run COMPLETED, so it had to absorb the job's runtime as
-    # well as GitHub's dispatch delay.  The reporter now opens an in_progress
-    # check-in at REQUEST time instead, so the margin covers only the two
-    # things that happen before that check-in can reach Sentry:
-    #  1. GitHub's schedule dispatch itself: 15/40 of the most recent
-    #     scheduled runs landed more than 15min after their nominal minute
-    #     (range 1.2-29.5min, median 9.5min as of 2026-09-08), even though
-    #     every one of those runs succeeded.
-    #  2. This reporter's own requested-phase job: the reporter job itself
-    #     runs in under a minute.  The remaining headroom in the 40min
-    #     margin -- about 10min above (1)'s 29.5min worst observed dispatch
-    #     delay -- covers GitHub's event delivery to this job plus the
-    #     ubuntu-latest runner allocation for it, not the job's own
-    #     execution time.
-    # The job runtime that justified 90 now lives in MAX_RUNTIME_OVERRIDES,
-    # where it belongs: max_runtime bounds how long the check-in may stay
-    # in_progress, which is exactly the "the job is still running" case this
-    # margin used to be misused for.
-    "iOS TestFlight ship (Mac runner)": 40,  # was 90, was 15; see comment above
+    # FLEET-INFRA-CB (2026-09-08, revised the same day; widened again
+    # 2026-09-16): "iOS TestFlight ship (Mac runner)" runs on its own
+    # 13,43 * * * * cron.  This margin was briefly 90 because the only
+    # check-in this reporter sent fired after the whole workflow_run
+    # COMPLETED, so it had to absorb the job's runtime as well as GitHub's
+    # dispatch delay.  The reporter now opens an in_progress check-in at
+    # REQUEST time instead, so this margin is dispatch-latency-only -- it
+    # never has to cover the job's own runtime, which is exactly what
+    # MAX_RUNTIME_OVERRIDES below is for.
+    #
+    # On 2026-09-08 that dispatch delay looked small: 15/40 of the most
+    # recent scheduled runs landed more than 15min after their nominal
+    # minute (range 1.2-29.5min, median 9.5min), so the margin was set to
+    # 40.  Live data since then shows GitHub's dispatcher for THIS workflow
+    # degraded the same way FLEET-INFRA-CA documented for the hourly CI
+    # cron above (since 2026-08-27): as of 2026-09-14, GitHub dispatches the
+    # 13,43 cron only every 105-357 minutes (21 scheduled runs in the 72
+    # hours ending 2026-09-14 05:04 UTC, every one successful, worst gap
+    # 357min), and the same pattern continued through 2026-09-16.  With
+    # checkin_margin at 40, Sentry marked up to five consecutive missed
+    # check-ins between real ticks, crossed failure_issue_threshold: 2, and
+    # reopened FLEET-INFRA-CB on every gap (53 new events in the two days
+    # after the 40-minute margin merged).
+    #
+    # 480 matches the "CI" override above (worst observed gap plus buffer)
+    # and still catches a genuine multi-hour outage.  Re-tighten toward the
+    # 2026-09-08 dispatch-delay figures (1.2-29.5min) once GitHub's cadence
+    # for this workflow recovers to roughly its nominal 30-minute interval.
+    "iOS TestFlight ship (Mac runner)": 480,  # was 40, was 90, was 15; see comment above
 }
 _CHECKIN_MARGINS_FOLDED = {name.casefold(): margin for name, margin in CHECKIN_MARGIN_OVERRIDES.items()}
 
