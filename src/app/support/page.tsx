@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ReportProblemButton } from "@/components/ReportProblemButton";
 
 export const metadata: Metadata = {
   title: "Support — Usage Monitor",
@@ -38,6 +39,14 @@ export default function SupportPage() {
           . Include the app name (Usage Client Monitor or Usage Local Monitor),
           iOS version, and a short description of the issue. Do not send API
           keys or dashboard passwords.
+        </p>
+        <p>
+          Dashboard issues can use{" "}
+          <ReportProblemButton className="text-orange-600 underline underline-offset-2 dark:text-orange-400">
+            Report a Problem with this dashboard
+          </ReportProblemButton>
+          .  That opens the in-app form when Sentry is available, otherwise
+          email.
         </p>
       </section>
 

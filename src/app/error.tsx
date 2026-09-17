@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import { ReportProblemButton } from "@/components/ReportProblemButton";
 
 export default function AppError({
   error,
@@ -41,6 +42,9 @@ export default function AppError({
         >
           Dashboard
         </Link>
+        <ReportProblemButton className="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 underline underline-offset-2 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100">
+          Report a Problem
+        </ReportProblemButton>
       </div>
     </section>
   );
