@@ -7,14 +7,16 @@ type ReportProblemButtonProps = {
   className?: string;
 };
 
-function openFeedbackOrMailto(): void {
+export function openFeedbackOrMailto(): void {
   if (typeof window === "undefined") return;
   const open = (
-    window as unknown as { openSentryFeedback?: () => void }
+    window as unknown as { openSentryFeedback?: () => boolean | void }
   ).openSentryFeedback;
+  // The helper is always a function once instrumentation-client loads, even
+  // when Feedback was never initialized.  false means "form did not open".
   if (typeof open === "function") {
-    open();
-    return;
+    const opened = open();
+    if (opened !== false) return;
   }
   window.location.href = "mailto:mail@jays.services?subject=Report%20a%20Problem";
 }

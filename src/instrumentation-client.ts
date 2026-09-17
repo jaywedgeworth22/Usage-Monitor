@@ -73,8 +73,8 @@ if (dsn) {
   });
 }
 
-/** Open the Sentry user feedback dialog programmatically. */
-export function openSentryFeedback(): void {
+/** Open the Sentry user feedback dialog.  Returns false when Feedback is dark. */
+export function openSentryFeedback(): boolean {
   try {
     const SentryWithFeedback = Sentry as unknown as { getFeedback?: () => { createForm?: () => Promise<{ appendToDom: () => void; open: () => void }> } };
     const feedback = SentryWithFeedback.getFeedback?.();
@@ -83,7 +83,7 @@ export function openSentryFeedback(): void {
         form.appendToDom();
         form.open();
       }).catch(() => {});
-      return;
+      return true;
     }
 
     if (typeof window !== "undefined") {
@@ -93,11 +93,13 @@ export function openSentryFeedback(): void {
           form.appendToDom();
           form.open();
         }).catch(() => {});
+        return true;
       }
     }
   } catch {
     // Safe no-op if feedback is not initialized or fails
   }
+  return false;
 }
 
 if (typeof window !== "undefined") {

@@ -13,6 +13,8 @@ describe("Sentry max-features client", () => {
     expect(src).toMatch(/formTitle:\s*"Report a Problem"/);
     expect(src).toMatch(/NEXT_PUBLIC_SENTRY_FEEDBACK_ENABLED/);
     expect(src).toMatch(/replaysSessionSampleRate/);
-    expect(src).toMatch(/export function openSentryFeedback/);
+    expect(src).toMatch(/export function openSentryFeedback\(\): boolean/);
+    expect(src).toMatch(/return true;/);
+    expect(src).toMatch(/return false;/);
   });
 });

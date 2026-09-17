@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { openFeedbackOrMailto } from "./ReportProblemButton";
 
 describe("subtle Sentry support trigger", () => {
   it("wires Report a Problem on the support page and error boundary", () => {
@@ -17,10 +19,46 @@ describe("subtle Sentry support trigger", () => {
       "utf8"
     );
     expect(button).toMatch(/openSentryFeedback/);
+    expect(button).toMatch(/opened !== false/);
     expect(button).toMatch(/mailto:mail@jays\.services/);
     expect(support).toMatch(/ReportProblemButton/);
     expect(support).toMatch(/Report a Problem with this dashboard/);
     expect(errorPage).toMatch(/ReportProblemButton/);
     expect(errorPage).toMatch(/Report a Problem/);
+  });
+});
+
+describe("openFeedbackOrMailto", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("leaves the page alone when Sentry Feedback actually opens", () => {
+    const open = vi.fn(() => true);
+    const loc = { href: "https://usage.jays.services/support" };
+    vi.stubGlobal("window", { openSentryFeedback: open, location: loc });
+    openFeedbackOrMailto();
+    expect(open).toHaveBeenCalledOnce();
+    expect(loc.href).toBe("https://usage.jays.services/support");
+  });
+
+  it("falls back to mailto when the helper reports Feedback is dark", () => {
+    const open = vi.fn(() => false);
+    const loc = { href: "https://usage.jays.services/support" };
+    vi.stubGlobal("window", { openSentryFeedback: open, location: loc });
+    openFeedbackOrMailto();
+    expect(open).toHaveBeenCalledOnce();
+    expect(loc.href).toBe(
+      "mailto:mail@jays.services?subject=Report%20a%20Problem"
+    );
+  });
+
+  it("falls back to mailto when the helper is missing", () => {
+    const loc = { href: "https://usage.jays.services/support" };
+    vi.stubGlobal("window", { location: loc });
+    openFeedbackOrMailto();
+    expect(loc.href).toBe(
+      "mailto:mail@jays.services?subject=Report%20a%20Problem"
+    );
   });
 });
