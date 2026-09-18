@@ -69,7 +69,7 @@ export function AgentsDashboard() {
       <div className="border-b border-border pb-4">
         <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2.5">
           <span>🤖</span>
-          <span>AI Coding Agents</span>
+          <span>Coding Agents</span>
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
           Live Mac process status, token telemetry when a seat reports it, and PAYG API-equivalent cost.
