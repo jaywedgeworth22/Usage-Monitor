@@ -18,18 +18,18 @@ const read = (relativePath) =>
 
 const workflow = read(".github/workflows/production-deploy-verify.yml");
 const uptimeWorkflow = read(".github/workflows/uptime-monitor.yml");
-const compose = read("deploy/oracle/compose.production.yaml");
-const composeDev = read("deploy/oracle/compose.yaml");
-const caddy = read("deploy/oracle/Caddyfile");
-const oracleReadme = read("deploy/oracle/README.md");
-const deploy = read("deploy/oracle/deploy-production.sh");
-const poller = read("deploy/oracle/auto-deploy.sh");
-const service = read("deploy/oracle/usage-monitor.service");
-const deployService = read("deploy/oracle/usage-monitor-auto-deploy.service");
-const timer = read("deploy/oracle/usage-monitor-auto-deploy.timer");
+const compose = read("deploy/retired/oracle/compose.production.yaml");
+const composeDev = read("deploy/retired/oracle/compose.yaml");
+const caddy = read("deploy/retired/oracle/Caddyfile");
+const oracleReadme = read("deploy/retired/oracle/README.md");
+const deploy = read("deploy/retired/oracle/deploy-production.sh");
+const poller = read("deploy/retired/oracle/auto-deploy.sh");
+const service = read("deploy/retired/oracle/usage-monitor.service");
+const deployService = read("deploy/retired/oracle/usage-monitor-auto-deploy.service");
+const timer = read("deploy/retired/oracle/usage-monitor-auto-deploy.timer");
 const ci = read(".github/workflows/ci.yml");
 const renderRetirement = JSON.parse(
-  read("deploy/oracle/render-retired.production.json"),
+  read("deploy/retired/oracle/render-retired.production.json"),
 );
 
 function requireText(body, pattern, message) {
@@ -596,8 +596,8 @@ assert.deepEqual(
 );
 
 for (const relativePath of [
-  "deploy/oracle/deploy-production.sh",
-  "deploy/oracle/auto-deploy.sh",
+  "deploy/retired/oracle/deploy-production.sh",
+  "deploy/retired/oracle/auto-deploy.sh",
 ]) {
   const result = spawnSync("bash", ["-n", path.join(repoRoot, relativePath)], {
     encoding: "utf8",

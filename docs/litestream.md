@@ -1,10 +1,12 @@
 # Litestream WAL Replication (production → Backblaze B2)
 
 Continuous SQLite backup via [Litestream](https://litestream.io) **0.5.x**. Streams
-writes to `/data/prod.db` as LTX files. **Production** (Coolify/Hetzner or
-legacy Oracle compose path) replicates to **Backblaze B2** (bucket
-`jays-usage-monitor-eu`, S3 endpoint `https://s3.eu-central-003.backblazeb2.com`,
-object prefix `api-usage-monitor/prod.db` in `litestream.yml`).
+writes to `/data/prod.db` as LTX files. **Production** (Hetzner + Coolify +
+GitHub Actions, since the 2026-08-07 cutover) replicates to **Backblaze B2**
+(bucket `jays-usage-monitor-eu`, S3 endpoint
+`https://s3.eu-central-003.backblazeb2.com`, object prefix
+`api-usage-monitor/prod.db` in `litestream.yml`).  The retired Oracle
+container path lives under `deploy/retired/oracle/`; do not redeploy it.
 
 **Cloudflare R2 is weekly archive only** (bucket `usage-monitor-prod-v3`
 prefix `weekly/`).  Frequent replica is Backblaze B2.  Historic Litestream LTX
@@ -17,7 +19,7 @@ is a separate product store, not a database replica.
 production `LITESTREAM_S3_*` at Garage.
 
 The suspended Render service is a deliberate, owner-directed rollback host only
-(see `render.yaml` and `deploy/render/RETIRED-rollback.md`). If ever revived, it
+(see `render.yaml` and `deploy/retired/render/RETIRED-rollback.md`). If ever revived, it
 must use a **separate** R2 bucket/lineage so two hosts never write the same
 replica prefix.
 
@@ -103,8 +105,11 @@ Local pre-migration snapshots on `/data` still exist.
   (Coolify UUID container).  Tries `docker exec --once`, then a host
   `--env-file` fallback from the litestream PID environ.  Never puts
   `LITESTREAM_S3_*` on `docker exec` argv.
-- `deploy/oracle/replica-status-probe.sh` — **legacy Oracle** timer.  Without a
-  live heartbeat, backup reports `env_active_unverified`.
+- `deploy/retired/oracle/replica-status-probe.sh` — **legacy Oracle** script.
+  The Hetzner box runs the byte-identical script from
+  `deploy/coolify/replica-status-probe.sh` via
+  `coolify/usage-monitor-replica-status.{service,timer}`.  Without a live
+  heartbeat, backup reports `env_active_unverified`.
 - Operator runbook: `docs/runbooks/replica-status-probe.md` (reasons, fallback
   trust rules after #1354/#1355, Coolify verify commands).
 
@@ -112,7 +117,9 @@ Local pre-migration snapshots on `/data` still exist.
 
 Runtime config lives in the Infisical `usage-monitor` project (env `prod`) as
 the sole source of truth — see `DEPLOY.md` "Runtime env: Infisical is the
-source of truth" and `deploy/oracle/README.md`. Set there:
+source of truth" and `deploy/README.md` for the canonical deploy index.  The
+retired Oracle-era runbook is preserved under `deploy/retired/oracle/` for
+historical reference only. Set there:
 
 ```
 # Primary (B2) — write key fleet-usage-monitor-backup (not the read-only monitor key)
@@ -139,7 +146,8 @@ full configuration when the verified binary is unavailable.
 `LITESTREAM_S3_REGION` is optional for R2 (empty → Litestream falls back to
 `us-east-1`, which R2 accepts for SigV4). Prefer `auto` to be explicit.
 
-Deploy env preflight (`deploy/oracle/usage-monitor-sync-env.sh`) requires the
+Deploy env preflight (`deploy/retired/oracle/usage-monitor-sync-env.sh`, run on the
+Hetzner box — see `deploy/README.md` for the canonical install path) requires the
 B2 bucket name `jays-usage-monitor-eu` (or historic R2 `usage-monitor-prod-v3`
 during cutover only). **Account-wide free-tier analytics** still count every
 **R2** bucket on the Cloudflare account for the historic free-tier card; that
@@ -311,10 +319,10 @@ Restore is exercised continuously, not just at drills:
 - Every production deploy hard-gates LTX freshness (≤ 10800s / 3h) plus an
   authenticated restore dry-run, and acceptance performs a full authenticated
   replica restore with a complete SQLite integrity scan
-  (`deploy/oracle/deploy-production.sh`).
+  (`deploy/retired/oracle/deploy-production.sh`).
 - The fleet-sentry-monitor singleton runs an authenticated dry-run every 15
   minutes and a weekly full-integrity restore to a fixed Oracle scratch path
-  (`deploy/oracle/README.md` "Backup monitoring").
+  (`deploy/retired/oracle/README.md` "Backup monitoring").
 
 Still run a **manual** drill quarterly and after any Litestream version bump —
 a wrong `-config` path, a stale/incompatible LTX generation, or a

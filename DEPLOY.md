@@ -8,14 +8,16 @@ Fleet ops sheet: `/Users/jay/apps/COOLIFY.md` and Socratic
 `docs/rollouts/2026-08-07-hetzner-fleet-cutover.md`.
 
 **Legacy Oracle** runbook (auto-deploy timer, preflight, litestream host
-scripts) remains under **[`deploy/oracle/README.md`](deploy/oracle/README.md)**
+scripts) remains under **[`deploy/retired/oracle/`](deploy/retired/oracle/)**
 for history / emergency reference — **Oracle is not the live writer** after the
-Hetzner cutover.
+Hetzner cutover.  See `deploy/README.md` for the canonical deploy index and
+the entry-point banner at `deploy/retired/oracle/RETIRED.md` for the explicit
+"Do not enable the Oracle auto-deploy timer on any host" warning.
 
 The former Render deployment is **retired and suspended as a rollback host
 only**; its historical runbook lives in
-[`deploy/render/RETIRED-rollback.md`](deploy/render/RETIRED-rollback.md) and
-`render.yaml` is kept functional solely so that host can be revived in a
+[`deploy/retired/render/RETIRED-rollback.md`](deploy/retired/render/RETIRED-rollback.md)
+and `render.yaml` is kept functional solely so that host can be revived in a
 deliberate rollback.
 
 ## Operational invariants
@@ -55,7 +57,7 @@ deliberate rollback.
    Actions, healthy current database / sole scheduler / backup replica /
    `/data` headroom / public readiness, Render retirement proof) was the
    **retired Oracle host's** mechanism — see
-   [`deploy/oracle/README.md`](deploy/oracle/README.md) — and is **not** what
+   [`deploy/retired/oracle/`](deploy/retired/oracle/) — and is **not** what
    runs on the live Coolify host. Coolify's own GitHub auto-deploy fires on
    every push to `main` via a per-app webhook (`/Users/jay/apps/COOLIFY.md`
    "GitHub auto-deploy" row), independent of GitHub Actions outcome.
@@ -68,7 +70,11 @@ deliberate rollback.
    host-side eligibility check on this host today; restoring one (or gating
    the Coolify trigger itself on a `workflow_run`-dispatched deploy call)
    needs Coolify dashboard/API access to implement and verify — tracked on
-   the board rather than assumed fixed by this note.
+   the board rather than assumed fixed by this note. The historical
+   `usage-monitor-auto-deploy.timer` from the Oracle era is preserved under
+   [`deploy/retired/oracle/`](deploy/retired/oracle/) for forensic reference
+   only and must not be `enable --now`'d on any host — see
+   `deploy/retired/oracle/RETIRED.md`.
 5. **Rollback never restores an old database over new writes.** Automatic
    rollback changes code/image only. A full host rollback requires quiescing
    the writer and restoring the latest verified **B2** lineage (or the weekly
@@ -97,8 +103,12 @@ All production runtime config — secrets **and** non-secrets — lives in the
 Infisical `usage-monitor` project, environment `prod`, path `/`. The host
 never edits a runtime `.env` file; it materializes one:
 
-- `/usr/local/sbin/usage-monitor-env-sync` (source:
-  `deploy/oracle/infisical-env-sync.sh`) logs in with the `automation`
+- `/usr/local/sbin/usage-monitor-env-sync` is installed on the Hetzner box.
+  The reference implementation lives at
+  [`deploy/retired/oracle/infisical-env-sync.sh`](deploy/retired/oracle/infisical-env-sync.sh)
+  (Oracle-era, byte-identical to the Hetzner install); the historical
+  filename is preserved so anyone diffing against the retired Oracle stack
+  can see the script is unchanged.  The script logs in with the `automation`
   universal-auth machine identity, exports the project as JSON, validates the
   required keys, and atomically writes
   `/run/usage-monitor/usage-monitor.env` (tmpfs, root-owned, mode 0600, raw
@@ -273,8 +283,11 @@ sync-interval — not continuous second-scale PITR; see `litestream.yml`).
 **Cloudflare R2 remains historic** until the owner deletes it after B2 is
 proven. The external singleton at
 `/Users/jay/apps/fleet-sentry-monitor/monitor.py` verifies replica freshness
-and restorability (see "Backup monitoring" in `deploy/oracle/README.md`). Full
-setup and disaster-recovery restore steps live in `docs/litestream.md`.
+and restorability (see "Backup monitoring" in `deploy/README.md`'s
+"Live production" table — the script is machine-level, not per-app; the
+retired Oracle-era runbook lives under `deploy/retired/oracle/README.md`
+and is not the source of operational truth anymore). Full setup and
+disaster-recovery restore steps live in `docs/litestream.md`.
 Relevant files: `scripts/fetch-litestream.sh` (build-time binary download),
 `scripts/start-with-litestream.sh` (startup wrapper),
 `scripts/litestream-restore.sh` (manual restore).

@@ -1,7 +1,16 @@
-# Oracle A1 deployment (LEGACY — not live production)
+# Oracle A1 deployment (RETIRED — see RETIRED.md at the top of this directory)
 
 > **2026-08-07:** Production Usage Monitor runs on the Coolify fleet host (see private `jaywedgeworth22/fleet-ops:ATTACK-MAP.md`). SSH:
 > `ssh coolify`. See `/Users/jay/apps/COOLIFY.md`.
+>
+> **Do not install the `usage-monitor-auto-deploy.timer` from the install
+> block below on any host.**  The timer polls GitHub once per minute and
+> starts a writer — that was the live deploy path before 2026-08-07 and is
+> not the live path on Hetzner/Coolify.  See `deploy/README.md` for the
+> canonical deploy index and `DEPLOY.md` invariant #4 for the Coolify +
+> GitHub Actions auto-deploy description.  The install block at the bottom
+> of this file is preserved verbatim because it is the historical record,
+> not because anyone should run it.
 >
 > This Oracle runbook is retained for historical preflight/deploy script
 > reference only. Do not treat Oracle as the sole writer.
@@ -156,7 +165,10 @@ sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-replica-status.
 sudo install -o root -g root -m 0644 deploy/oracle/usage-monitor-replica-status.timer /etc/systemd/system/usage-monitor-replica-status.timer
 sudo systemctl daemon-reload
 sudo systemctl enable --now usage-monitor-env-sync.timer
-sudo systemctl enable --now usage-monitor-auto-deploy.timer
+# 2026-09-18: do NOT `enable --now usage-monitor-auto-deploy.timer` on
+# any host.  The timer polls GitHub once per minute and starts a writer;
+# production runs on Hetzner/Coolify and uses GitHub Actions for deploys,
+# not this timer.  See `deploy/README.md` and `DEPLOY.md` invariant #4.
 sudo systemctl enable --now usage-monitor-replica-status.timer
 ```
 

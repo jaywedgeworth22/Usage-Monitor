@@ -246,7 +246,7 @@ describe("runtime health state", () => {
       vi.stubEnv("LITESTREAM_ACTIVE", "true");
       vi.stubEnv("LITESTREAM_REPLICA_STATUS_PATH", statusPath);
 
-      // Shape written by deploy/oracle/replica-status-probe.sh. It omits
+      // Shape written by deploy/retired/oracle/replica-status-probe.sh. It omits
       // `ageSeconds` ON PURPOSE: the parser prefers ageSeconds over
       // checkedAt, and a frozen ageSeconds in a file left behind by a dead
       // probe would pass forever. checkedAt must drive staleness.

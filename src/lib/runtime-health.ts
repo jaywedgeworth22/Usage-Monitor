@@ -563,7 +563,8 @@ export function getStartupRuntimeStatus(): {
 }
 
 // Aligned with the deploy preflight's MIN_DATA_FREE_BYTES in
-// deploy/oracle/deploy-production.sh so the steady-state signal trips at the
+// deploy/retired/oracle/deploy-production.sh (the retired Oracle host's
+// canonical transaction) so the steady-state signal trips at the
 // same headroom the next deploy would demand.
 const DEFAULT_DISK_WARN_FREE_BYTES = 5 * 1024 * 1024 * 1024;
 
