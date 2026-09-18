@@ -79,10 +79,13 @@ export function windowLabelFromSeconds(seconds) {
 /**
  * Build the ExternalUsageEvent for one window reading.
  *
- * `eventId` is keyed on the reset instant so repeated 15-minute ticks inside
- * one window collapse to a single row rather than one row per tick, matching
- * `agy-quota:<bucket>:<reset_time>`.  When the provider reports no reset time
- * we fall back to the current hour so the series still advances.
+ * `eventId` includes the reset instant (or the current hour when the provider
+ * reports none) AND the observation time.  Ingest hashes (producerId, eventId)
+ * and 409s on a replay whose credits, occurredAt, or metadata differ — it does
+ * not upsert.  Keying only on resetAt froze the dashboard at the first
+ * 15-minute sample until the window rolled.  `projectQuotaWindows` already
+ * keeps the latest row per bucket.  Dedicated antigravity-usage-collector.mjs
+ * already salts eventId with occurredAt for the same reason.
  */
 export function buildQuotaEvent({
   provider,
@@ -100,7 +103,7 @@ export function buildQuotaEvent({
         : Math.round((100 - remaining) * 100) / 100;
   const seriesKey = reading.resetAt ?? `${occurredAtIso.slice(0, 13)}:00`;
   return {
-    eventId: `subq:${provider}:${reading.bucketId}:${seriesKey}`,
+    eventId: `subq:${provider}:${reading.bucketId}:${seriesKey}:${occurredAtIso}`,
     provider,
     service,
     label: reading.label,

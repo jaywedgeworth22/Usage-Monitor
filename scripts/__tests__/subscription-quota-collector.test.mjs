@@ -89,9 +89,45 @@ describe("quota-event helpers", () => {
     expect(event.metadata.quotaWindow).toBe("5h");
     expect(event.metadata.resetAt).toBe("2026-09-12T18:00:00.000Z");
     expect(event.metadata.source).toBe("api.anthropic.com");
-    // eventId is keyed on the reset instant so a 15-minute tick inside one
-    // window collapses to a single row instead of one row per tick.
-    expect(event.eventId).toBe("subq:anthropic:anthropic:five_hour:2026-09-12T18:00:00.000Z");
+    // eventId must include the observation time.  Ingest 409s when credits
+    // change under the same (producerId, eventId); a reset-only key would
+    // freeze remaining % after the first LaunchAgent tick.
+    expect(event.eventId).toBe(
+      "subq:anthropic:anthropic:five_hour:2026-09-12T18:00:00.000Z:2026-09-12T12:00:00.000Z",
+    );
+  });
+
+  it("gives each 15-minute tick its own eventId so remaining % can advance", () => {
+    const reading = {
+      bucketId: "anthropic:five_hour",
+      label: "5h window",
+      quotaWindow: "5h",
+      remainingPercent: 80,
+      usedPercent: 20,
+      resetAt: "2026-09-12T18:00:00.000Z",
+      planType: "max_20x",
+      modelId: null,
+      remainingUnknown: false,
+      isExhausted: false,
+    };
+    const first = buildQuotaEvent({
+      provider: "anthropic",
+      service: "claude-code",
+      source: "api.anthropic.com",
+      occurredAtIso: "2026-09-12T12:00:00.000Z",
+      reading,
+    });
+    const later = buildQuotaEvent({
+      provider: "anthropic",
+      service: "claude-code",
+      source: "api.anthropic.com",
+      occurredAtIso: "2026-09-12T12:15:00.000Z",
+      reading: { ...reading, remainingPercent: 65, usedPercent: 35 },
+    });
+    expect(first.eventId).not.toBe(later.eventId);
+    expect(first.credits).toBe(80);
+    expect(later.credits).toBe(65);
+    expect(later.metadata.resetAt).toBe(first.metadata.resetAt);
   });
 });
 
