@@ -19,6 +19,7 @@ import {
 } from "../lib/subscription-quota-parsers.mjs";
 import {
   eventsForProvider,
+  grokAuthRecord,
   parseArgs,
   resolveCredentialField,
 } from "../subscription-quota-collector.mjs";
@@ -273,6 +274,36 @@ describe("parseGrokBilling", () => {
     expect(row.remainingPercent).toBe(12);
     expect(row.quotaWindow).toBe("daily");
   });
+
+  it("reads live CLI config.creditUsagePercent as percent used", () => {
+    const [row] = parseGrokBilling(fixture("grok-billing-config.json"));
+    expect(row.remainingPercent).toBe(49);
+    expect(row.usedPercent).toBe(51);
+    expect(row.quotaWindow).toBe("weekly");
+    expect(row.resetAt).toBe("2026-09-17T00:00:00.000Z");
+    expect(row.remainingUnknown).toBe(false);
+  });
+});
+
+describe("grokAuthRecord", () => {
+  it("unwraps a single nested Grok CLI profile and prefers the key field", () => {
+    const profile = grokAuthRecord({
+      "https://auth.x.ai::fixture-id": { key: "nested-secret", expires_at: "2099-01-01T00:00:00Z" },
+    });
+    expect(resolveCredentialField(profile, ["key", "access_token"])).toEqual({
+      key: "key",
+      value: "nested-secret",
+    });
+  });
+
+  it("leaves a flat auth.json unchanged", () => {
+    const flat = { access_token: "flat-secret" };
+    expect(grokAuthRecord(flat)).toBe(flat);
+    expect(resolveCredentialField(flat, ["key", "access_token"])).toEqual({
+      key: "access_token",
+      value: "flat-secret",
+    });
+  });
 });
 
 describe("parseMinimaxRemains", () => {
@@ -327,6 +358,7 @@ describe("collector wiring", () => {
       ["claude", "claude-oauth-usage.json", "anthropic", 3],
       ["codex", "codex-wham-usage.json", "openai", 2],
       ["grok", "grok-billing-credits.json", "xai", 1],
+      ["grok", "grok-billing-config.json", "xai", 1],
       ["minimax", "minimax-coding-plan-remains.json", "minimax", 3],
     ];
     for (const [providerKey, file, provider, count] of cases) {

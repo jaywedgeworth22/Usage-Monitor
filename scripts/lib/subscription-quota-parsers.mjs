@@ -235,6 +235,34 @@ export function parseCodexUsage(payload, { planType = null, now = Date.now() } =
  */
 export function parseGrokBilling(payload) {
   const root = asRecord(payload);
+  // Live CLI billing (2026-09-18): `{ config: { creditUsagePercent, currentPeriod } }`.
+  // Same shape the macOS LocalQuotaReader already parses.  creditUsagePercent is
+  // percent USED; remaining is 100 minus that.
+  const config = asRecord(root.config);
+  const usedFromConfig = firstNumber(config, ["creditUsagePercent"]);
+  if (usedFromConfig != null) {
+    const period = asRecord(config.currentPeriod);
+    const resetAt =
+      firstTimestamp(period, ["end"]) ?? firstTimestamp(config, ["billingPeriodEnd"]);
+    const start =
+      firstTimestamp(period, ["start"]) ?? firstTimestamp(config, ["billingPeriodStart"]);
+    const seconds =
+      start && resetAt ? (Date.parse(resetAt) - Date.parse(start)) / 1000 : null;
+    const token = windowLabelFromSeconds(seconds);
+    const used = clampPercent(usedFromConfig);
+    return [
+      reading({
+        bucketId: "xai:subscription",
+        label: token ? `${token} window` : "Subscription window",
+        quotaWindow: token,
+        remainingPercent: used == null ? null : 100 - used,
+        usedPercent: used,
+        resetAt,
+        remainingUnknown: used == null,
+      }),
+    ];
+  }
+
   const nested = asRecord(root.credits ?? root.usage ?? root.billing ?? root.data);
   const merged = { ...nested, ...root };
 

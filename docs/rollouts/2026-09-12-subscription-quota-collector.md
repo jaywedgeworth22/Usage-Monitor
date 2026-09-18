@@ -44,7 +44,7 @@ impersonated and no GPL code is vendored.
 |---|---|---|
 | Claude | `~/.claude/.credentials.json` → `claudeAiOauth` | `GET https://api.anthropic.com/api/oauth/usage` |
 | Codex | `~/.codex/auth.json` → `tokens` | `GET https://chatgpt.com/backend-api/wham/usage` |
-| Grok | `~/.grok/auth.json` | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
+| Grok | `~/.grok/auth.json` (nested `https://auth.x.ai::<id>.key`, not a flat `access_token`) | `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` (`config.creditUsagePercent` is percent USED) |
 | MiniMax | `~/.mmx/config.json` | `GET https://api.minimax.io/v1/api/openplatform/coding_plan/remains` (falls back to `api.minimaxi.com`) |
 
 Claude and Codex report percent USED; the collector converts to remaining.
@@ -91,9 +91,11 @@ the existing collectors.  It reads `USAGE_INGEST_TOKEN` through the shared
 
 Uninstall: `launchctl bootout gui/$(id -u)/com.jays.subscription-quota-collector`
 
-This is an **always-on** background job.  Add its row to
-`/Users/jay/apps/MAC-LOCAL-PROCESSES.md` and refresh the
-`⭐️ Background Jobs Master List` note when it is actually loaded.
+This is a **scheduled** job (`StartInterval 900`), same class as the Codex /
+Grok / Copilot session collectors, not a KeepAlive daemon.  Use
+`/opt/homebrew/bin/node` (Node 26): Node 24 `fetch` ETIMEDOUTs against the
+Grok and MiniMax hosts.  Add its row to `/Users/jay/apps/MAC-LOCAL-PROCESSES.md`
+and refresh the `⭐️ Background Jobs Master List` note when it is actually loaded.
 
 ## How to verify
 
