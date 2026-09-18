@@ -51,22 +51,30 @@ deliberate rollback.
    external verification. R2 free-tier monitoring still watches the weekly
    bucket; the 70% kill switch only stops litestream when the endpoint is R2, not B2.
    See `docs/litestream.md`.
-4. **Deploys are automatic and gated by GitHub Actions + Coolify.** The
-   GitHub App on this repo is wired to the Hetzner/Coolify host and triggers
-   a fresh container build on every merge to `main`.  The build refuses to
-   start unless GitHub Actions reports: exact `main` SHA with valid
-   signature, merged-PR provenance, green `verify` (lint + typecheck +
-   vitest + migration/backup/startup + Next.js build), green `gitleaks`, and
-   green `Analyze JavaScript and TypeScript` (CodeQL).  The historical
-   `usage-monitor-auto-deploy.timer` that polled GitHub once per minute on
-   Oracle is **not** the live path — that timer lives under
-   [`deploy/retired/oracle/`](deploy/retired/oracle/) and is preserved only
-   for forensic reference.  The preflight gates that USED to live on the
-   Oracle host (database / sole scheduler / backup replica / `/data`
-   headroom / public readiness / Render retirement proof) are now exposed
-   through `/api/ready` and verified by the Coolify deploy hook before a new
-   container is accepted.  `LITESTREAM_REQUIRED=true` keeps the sole-writer
-   gate strict in production.
+4. **Deploys are automatic; the live Coolify path is not CI-gated (known
+   gap, board `d0f5f1db`).** The preflight-gated `usage-monitor-auto-deploy.timer`
+   (exact `main` SHA with valid signature, merged-PR provenance, green GitHub
+   Actions, healthy current database / sole scheduler / backup replica /
+   `/data` headroom / public readiness, Render retirement proof) was the
+   **retired Oracle host's** mechanism — see
+   [`deploy/retired/oracle/`](deploy/retired/oracle/) — and is **not** what
+   runs on the live Coolify host. Coolify's own GitHub auto-deploy fires on
+   every push to `main` via a per-app webhook (`/Users/jay/apps/COOLIFY.md`
+   "GitHub auto-deploy" row), independent of GitHub Actions outcome.
+   `production-deploy-verify.yml` only **observes** after the fact — it
+   confirms production reaches a SHA once CI on that SHA is green, but it
+   cannot block or delay the webhook-triggered deploy that already started.
+   A commit that lands on `main` with CI still red (or not yet dispatched)
+   can therefore reach production before anyone is paged. There is no
+   `/etc/usage-monitor/auto-deploy.paused`-equivalent freeze switch or
+   host-side eligibility check on this host today; restoring one (or gating
+   the Coolify trigger itself on a `workflow_run`-dispatched deploy call)
+   needs Coolify dashboard/API access to implement and verify — tracked on
+   the board rather than assumed fixed by this note. The historical
+   `usage-monitor-auto-deploy.timer` from the Oracle era is preserved under
+   [`deploy/retired/oracle/`](deploy/retired/oracle/) for forensic reference
+   only and must not be `enable --now`'d on any host — see
+   `deploy/retired/oracle/RETIRED.md`.
 5. **Rollback never restores an old database over new writes.** Automatic
    rollback changes code/image only. A full host rollback requires quiescing
    the writer and restoring the latest verified **B2** lineage (or the weekly
