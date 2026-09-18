@@ -134,12 +134,6 @@ public actor APIClient {
     /// `?window=` produced `/api/agents-overview%3Fwindow=30d`, a Next.js 404
     /// that the Agents tab surfaces as "Request failed".
     public func agentsOverview(window: String = "30d") async throws -> AgentsOverviewResponse {
-<<<<<<< HEAD
-=======
-        // Query must go through `queryItems`. Baking `?window=` into `path`
-        // makes `appendingPathComponent` percent-encode `?` → `/api/agents-overview%3Fwindow=…`
-        // which the Next server answers with 404 (seen on Coding Agents).
->>>>>>> be476a6 (fix(ios): Coding Agents Agent Bar parity + agents-overview 404)
         try await get(
             "/api/agents-overview",
             queryItems: [URLQueryItem(name: "window", value: window)],
