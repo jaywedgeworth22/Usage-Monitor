@@ -1,4 +1,14 @@
-## Current (2026-09-13 FX — read token cannot mutate alerts)
+## Current (2026-09-18 CURSOR — Effort Issues Sync Crons margin)
+
+Sentry **FLEET-INFRA-CF** is a missed check-in, not a failed board mirror.
+GitHub starts daily `effort-issues-sync.yml` 4.3-6.4h late; the sync then
+succeeds in ~15s.  Reporter override is now
+`CHECKIN_MARGIN_OVERRIDES["Effort Issues Sync"] = 600`.  Cron and sync
+unchanged.  Do not `Fixes FLEET-INFRA-CF` on merge — wait for the next
+scheduled upsert.  Extra-ship no.  No Coolify.  Rollout:
+`docs/rollouts/2026-09-18-effort-issues-sync-monitor-margin.md`.
+
+## Prior (2026-09-13 FX — read token cannot mutate alerts)
 
 `PUT /api/settings` is dashboard-session only.  `USAGE_READ_TOKEN` still reads GET.  APNs list omits full device tokens.  Auto-merge workflows are `pull_request` + same-repo.  Boards `154b622e` `e93a83fe`.  Branch `fx/read-token-writes`.
 
