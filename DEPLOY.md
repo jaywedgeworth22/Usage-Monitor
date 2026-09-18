@@ -49,15 +49,26 @@ deliberate rollback.
    external verification. R2 free-tier monitoring still watches the weekly
    bucket; the 70% kill switch only stops litestream when the endpoint is R2, not B2.
    See `docs/litestream.md`.
-4. **Deploys are automatic and gated.** The
-   `usage-monitor-auto-deploy.timer` polls GitHub once per minute and deploys
-   only when all preflight gates pass: exact `main` SHA with valid signature,
-   merged-PR provenance, green GitHub Actions (`verify`, `gitleaks`,
-   `Analyze JavaScript and TypeScript`), healthy current database / sole
-   scheduler / backup replica / `/data` headroom / public readiness, and the
-   Render retirement proof (service user-suspended, auto-deploy disabled,
-   `USAGE_SCHEDULER_ENABLED=false`, verified live through Render's API).
-   `/etc/usage-monitor/auto-deploy.paused` freezes deployments while present.
+4. **Deploys are automatic; the live Coolify path is not CI-gated (known
+   gap, board `d0f5f1db`).** The preflight-gated `usage-monitor-auto-deploy.timer`
+   (exact `main` SHA with valid signature, merged-PR provenance, green GitHub
+   Actions, healthy current database / sole scheduler / backup replica /
+   `/data` headroom / public readiness, Render retirement proof) was the
+   **retired Oracle host's** mechanism — see
+   [`deploy/oracle/README.md`](deploy/oracle/README.md) — and is **not** what
+   runs on the live Coolify host. Coolify's own GitHub auto-deploy fires on
+   every push to `main` via a per-app webhook (`/Users/jay/apps/COOLIFY.md`
+   "GitHub auto-deploy" row), independent of GitHub Actions outcome.
+   `production-deploy-verify.yml` only **observes** after the fact — it
+   confirms production reaches a SHA once CI on that SHA is green, but it
+   cannot block or delay the webhook-triggered deploy that already started.
+   A commit that lands on `main` with CI still red (or not yet dispatched)
+   can therefore reach production before anyone is paged. There is no
+   `/etc/usage-monitor/auto-deploy.paused`-equivalent freeze switch or
+   host-side eligibility check on this host today; restoring one (or gating
+   the Coolify trigger itself on a `workflow_run`-dispatched deploy call)
+   needs Coolify dashboard/API access to implement and verify — tracked on
+   the board rather than assumed fixed by this note.
 5. **Rollback never restores an old database over new writes.** Automatic
    rollback changes code/image only. A full host rollback requires quiescing
    the writer and restoring the latest verified **B2** lineage (or the weekly
