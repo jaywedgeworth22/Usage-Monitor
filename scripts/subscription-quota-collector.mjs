@@ -115,12 +115,41 @@ export function resolveCredentialField(record, candidates) {
   return null;
 }
 
+/**
+ * Grok CLI writes `~/.grok/auth.json` as `{ "https://auth.x.ai::<id>": { key, expires_at } }`
+ * rather than a flat access_token.  Match the macOS LocalQuotaReader: if the file
+ * has exactly one nested object profile, unwrap it.  Never returns token values
+ * in a loggable form — callers still go through resolveCredentialField.
+ */
+export function grokAuthRecord(auth) {
+  const root = asRecord(auth);
+  const profiles = Object.values(root).filter(
+    (value) => value && typeof value === "object" && !Array.isArray(value),
+  );
+  if (Object.keys(root).length === 1 && profiles.length === 1) return profiles[0];
+  return root;
+}
+
 async function fetchJson(url, headers) {
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { accept: "application/json", ...headers },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers: { accept: "application/json", ...headers },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const cause = error && typeof error === "object" ? error.cause : null;
+    const code =
+      cause && typeof cause === "object"
+        ? cause.code || cause.errno || cause.syscall
+        : null;
+    const host = hostOf(url);
+    if (error && error.name === "TimeoutError") {
+      throw new Error(`timeout from ${host}`);
+    }
+    throw new Error(`fetch failed from ${host}${code ? ` (${code})` : ""}`);
+  }
   const text = await response.text();
   let parsed = null;
   try {
@@ -217,8 +246,9 @@ const PROVIDERS = {
     parse: (payload) => parseGrokBilling(payload),
     async fetch({ debug }) {
       const path = join(expandHome(process.env.GROK_HOME || "~/.grok"), "auth.json");
-      const auth = await readJson(path);
+      const auth = grokAuthRecord(await readJson(path));
       const token = resolveCredentialField(auth, [
+        "key",
         "access_token",
         "accessToken",
         "token",
@@ -229,6 +259,10 @@ const PROVIDERS = {
         "auth.access_token",
       ]);
       if (!token) return { skipped: "no Grok CLI credential found" };
+      const expiresAt = Date.parse(String(auth.expires_at ?? auth.expiresAt ?? ""));
+      if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= Date.now()) {
+        return { skipped: "Grok CLI access token is expired; skipping this tick" };
+      }
       // Log the key NAME only, never the value — the key layout is undocumented
       // and knowing which name matched is what makes a bad tick diagnosable.
       if (debug) log(`grok credential matched key name "${token.key}"`);
