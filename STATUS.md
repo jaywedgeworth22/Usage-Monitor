@@ -1,4 +1,15 @@
-## Current (2026-09-18 CLAUDE — Slack wrong-token-type diagnostic + Coolify deploy-gate doc)
+## Current (2026-09-18 CLAUDE — USAGE_READ_TOKEN cannot enroll an APNs device)
+
+`POST /api/apns/device-tokens` accepted `USAGE_READ_TOKEN` the same as GET, so a
+read-only credential could register a device to receive push alerts. PR #1458
+(2026-09-13) already fixed `PUT /api/settings` and the full-device-token GET leak
+(boards `154b622e` `e93a83fe`); this closes the remaining gap noted under
+`48334ff1` finding B3. POST is now dashboard-session only, matching the only
+real caller (`APIClient.registerApnsDeviceToken` already sends `.session`). GET
+is unchanged. Boards `68013aab` `48334ff1` `154b622e` `e93a83fe`. Branch
+`claude/security-read-token-scope`.
+
+## Prior (2026-09-18 CLAUDE — Slack wrong-token-type diagnostic + Coolify deploy-gate doc)
 
 Board `1f414cf3`: the Slack platform-status probe now distinguishes "wrong
 token type" (a User OAuth `xoxp-`/legacy token pasted into `SLACK_BOT_TOKEN`)
