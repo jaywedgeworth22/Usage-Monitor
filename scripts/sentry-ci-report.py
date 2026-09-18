@@ -175,6 +175,16 @@ CHECKIN_MARGIN_OVERRIDES = {
     # 2026-09-08 dispatch-delay figures (1.2-29.5min) once GitHub's cadence
     # for this workflow recovers to roughly its nominal 30-minute interval.
     "iOS TestFlight ship (Mac runner)": 480,  # was 40, was 90, was 15; see comment above
+    # FLEET-INFRA-CF (2026-09-18): daily Effort Issues Sync (`12 6 * * *`)
+    # misses every day at 06:27Z because GitHub starts the ubuntu-latest
+    # schedule 4.3-6.4h late in September (worst retained Sept: 6h 25m on
+    # 2026-09-14 12:36Z).  The sync then succeeds in ~15s and the late OK
+    # auto-resolves CF until the next day.  #1460 in_progress cannot cover
+    # this -- the run does not exist yet at 06:27Z.  600 matches the daily
+    # ubuntu cron siblings (ST #3194 / FLEET-INFRA-C1, #3387 / C3, #3389 /
+    # BY, Autorotate #219 / CD).  Do not copy 600 onto the 30-min macos
+    # iOS-ship cron above (already 480 for a different drop-tick class).
+    "Effort Issues Sync": 600,
 }
 _CHECKIN_MARGINS_FOLDED = {name.casefold(): margin for name, margin in CHECKIN_MARGIN_OVERRIDES.items()}
 

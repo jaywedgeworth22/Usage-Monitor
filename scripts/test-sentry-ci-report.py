@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import ast
 import os
 import re
 import sys
@@ -60,4 +61,38 @@ if actual_override != expected_override:
     print(f"Error: MAX_RUNTIME_OVERRIDES['{key}'] is {actual_override}, expected {expected_override} (based on timeout-minutes: {timeout_minutes} in ios-ship.yml * 2 + 20)")
     sys.exit(1)
 
+
+def _assign_value(tree: ast.AST, name: str):
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if name in targets:
+                return ast.literal_eval(node.value)
+    raise AssertionError(f"{name} not found in {script_path.name}")
+
+
+tree = ast.parse(text)
+default_margin = _assign_value(tree, "DEFAULT_CHECKIN_MARGIN")
+margin_overrides = _assign_value(tree, "CHECKIN_MARGIN_OVERRIDES")
+schedules = _assign_value(tree, "CRON_SCHEDULES")
+
+if default_margin != 15:
+    print(f"Error: DEFAULT_CHECKIN_MARGIN is {default_margin}, expected 15")
+    sys.exit(1)
+
+expected_margins = {
+    "CI": 480,
+    "iOS TestFlight ship (Mac runner)": 480,
+    "Effort Issues Sync": 600,
+}
+if margin_overrides != expected_margins:
+    print(f"Error: CHECKIN_MARGIN_OVERRIDES is {margin_overrides}, expected {expected_margins}")
+    sys.exit(1)
+
+if schedules.get("Effort Issues Sync") != "12 6 * * *":
+    print(f"Error: CRON_SCHEDULES['Effort Issues Sync'] is {schedules.get('Effort Issues Sync')}, expected '12 6 * * *'")
+    sys.exit(1)
+
+print("MARGIN_PARSE_OK", margin_overrides)
+print("EFFORT_SYNC_CRON_OK", schedules["Effort Issues Sync"])
 print("test-sentry-ci-report.py: PASSED")
