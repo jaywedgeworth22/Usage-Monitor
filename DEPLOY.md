@@ -8,14 +8,16 @@ Fleet ops sheet: `/Users/jay/apps/COOLIFY.md` and Socratic
 `docs/rollouts/2026-08-07-hetzner-fleet-cutover.md`.
 
 **Legacy Oracle** runbook (auto-deploy timer, preflight, litestream host
-scripts) remains under **[`deploy/oracle/README.md`](deploy/oracle/README.md)**
+scripts) remains under **[`deploy/retired/oracle/`](deploy/retired/oracle/)**
 for history / emergency reference — **Oracle is not the live writer** after the
-Hetzner cutover.
+Hetzner cutover.  See `deploy/README.md` for the canonical deploy index and
+the entry-point banner at `deploy/retired/oracle/RETIRED.md` for the explicit
+"Do not enable the Oracle auto-deploy timer on any host" warning.
 
 The former Render deployment is **retired and suspended as a rollback host
 only**; its historical runbook lives in
-[`deploy/render/RETIRED-rollback.md`](deploy/render/RETIRED-rollback.md) and
-`render.yaml` is kept functional solely so that host can be revived in a
+[`deploy/retired/render/RETIRED-rollback.md`](deploy/retired/render/RETIRED-rollback.md)
+and `render.yaml` is kept functional solely so that host can be revived in a
 deliberate rollback.
 
 ## Operational invariants
@@ -49,15 +51,22 @@ deliberate rollback.
    external verification. R2 free-tier monitoring still watches the weekly
    bucket; the 70% kill switch only stops litestream when the endpoint is R2, not B2.
    See `docs/litestream.md`.
-4. **Deploys are automatic and gated.** The
-   `usage-monitor-auto-deploy.timer` polls GitHub once per minute and deploys
-   only when all preflight gates pass: exact `main` SHA with valid signature,
-   merged-PR provenance, green GitHub Actions (`verify`, `gitleaks`,
-   `Analyze JavaScript and TypeScript`), healthy current database / sole
-   scheduler / backup replica / `/data` headroom / public readiness, and the
-   Render retirement proof (service user-suspended, auto-deploy disabled,
-   `USAGE_SCHEDULER_ENABLED=false`, verified live through Render's API).
-   `/etc/usage-monitor/auto-deploy.paused` freezes deployments while present.
+4. **Deploys are automatic and gated by GitHub Actions + Coolify.** The
+   GitHub App on this repo is wired to the Hetzner/Coolify host and triggers
+   a fresh container build on every merge to `main`.  The build refuses to
+   start unless GitHub Actions reports: exact `main` SHA with valid
+   signature, merged-PR provenance, green `verify` (lint + typecheck +
+   vitest + migration/backup/startup + Next.js build), green `gitleaks`, and
+   green `Analyze JavaScript and TypeScript` (CodeQL).  The historical
+   `usage-monitor-auto-deploy.timer` that polled GitHub once per minute on
+   Oracle is **not** the live path — that timer lives under
+   [`deploy/retired/oracle/`](deploy/retired/oracle/) and is preserved only
+   for forensic reference.  The preflight gates that USED to live on the
+   Oracle host (database / sole scheduler / backup replica / `/data`
+   headroom / public readiness / Render retirement proof) are now exposed
+   through `/api/ready` and verified by the Coolify deploy hook before a new
+   container is accepted.  `LITESTREAM_REQUIRED=true` keeps the sole-writer
+   gate strict in production.
 5. **Rollback never restores an old database over new writes.** Automatic
    rollback changes code/image only. A full host rollback requires quiescing
    the writer and restoring the latest verified **B2** lineage (or the weekly
@@ -86,8 +95,12 @@ All production runtime config — secrets **and** non-secrets — lives in the
 Infisical `usage-monitor` project, environment `prod`, path `/`. The host
 never edits a runtime `.env` file; it materializes one:
 
-- `/usr/local/sbin/usage-monitor-env-sync` (source:
-  `deploy/oracle/infisical-env-sync.sh`) logs in with the `automation`
+- `/usr/local/sbin/usage-monitor-env-sync` is installed on the Hetzner box.
+  The reference implementation lives at
+  [`deploy/retired/oracle/infisical-env-sync.sh`](deploy/retired/oracle/infisical-env-sync.sh)
+  (Oracle-era, byte-identical to the Hetzner install); the historical
+  filename is preserved so anyone diffing against the retired Oracle stack
+  can see the script is unchanged.  The script logs in with the `automation`
   universal-auth machine identity, exports the project as JSON, validates the
   required keys, and atomically writes
   `/run/usage-monitor/usage-monitor.env` (tmpfs, root-owned, mode 0600, raw
@@ -262,8 +275,11 @@ sync-interval — not continuous second-scale PITR; see `litestream.yml`).
 **Cloudflare R2 remains historic** until the owner deletes it after B2 is
 proven. The external singleton at
 `/Users/jay/apps/fleet-sentry-monitor/monitor.py` verifies replica freshness
-and restorability (see "Backup monitoring" in `deploy/oracle/README.md`). Full
-setup and disaster-recovery restore steps live in `docs/litestream.md`.
+and restorability (see "Backup monitoring" in `deploy/README.md`'s
+"Live production" table — the script is machine-level, not per-app; the
+retired Oracle-era runbook lives under `deploy/retired/oracle/README.md`
+and is not the source of operational truth anymore). Full setup and
+disaster-recovery restore steps live in `docs/litestream.md`.
 Relevant files: `scripts/fetch-litestream.sh` (build-time binary download),
 `scripts/start-with-litestream.sh` (startup wrapper),
 `scripts/litestream-restore.sh` (manual restore).
