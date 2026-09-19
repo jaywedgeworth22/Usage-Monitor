@@ -8,6 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import type { SchedulerRunFailedProvider } from "@/lib/runtime-health";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -147,7 +148,7 @@ describe("runtime health state", () => {
       providerFetchDegraded: true,
       // 9 entries, plus a poisoned entry with non-string fields that
       // must be filtered out, and an unsafe entry that must be dropped.
-      failedProviders: [
+      failedProviders: ([
         { id: "p1", name: "p1", errorCode: "TIMEOUT" },
         { id: "p2", name: "p2", errorCode: "AUTH_FAILED" },
         { id: "p3", name: "p3", errorCode: "RATE_LIMITED" },
@@ -159,7 +160,7 @@ describe("runtime health state", () => {
         { id: "p9", name: "p9" }, // missing errorCode — must be dropped
         { id: "p10", errorCode: "x" }, // missing name — must be dropped
         "not-an-object", // not an object — must be dropped
-      ],
+      ] as unknown[]) as SchedulerRunFailedProvider[],
       cloudflareLegacyHandoff: "disabled" as const,
     };
     markSchedulerTickCompleted(true, summary, tickAt);
