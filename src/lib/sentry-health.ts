@@ -144,6 +144,31 @@ async function fetchProjectHealth(
     );
 
     if (!res.ok) {
+      if (res.status === 429) {
+        // Paced retry on burst rate limit
+        await new Promise((r) => setTimeout(r, 200));
+        const retryRes = await fetch(
+          `https://sentry.io/api/0/projects/${org}/${project.slug}/issues/?query=is%3Aunresolved&statsPeriod=14d&limit=100`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(8_000),
+          }
+        );
+        if (retryRes.ok) {
+          const retryData = (await retryRes.json()) as unknown;
+          const retryCount = Array.isArray(retryData) ? retryData.length : 0;
+          return {
+            projectSlug: project.slug,
+            displayName: project.displayName,
+            unresolvedCount: retryCount,
+            hasMore: linkHeaderHasNext(retryRes.headers.get("link")),
+            issuesUrl,
+            dashboardUrl,
+            datadogUrl,
+          };
+        }
+      }
+
       return {
         projectSlug: project.slug,
         displayName: project.displayName,
@@ -192,9 +217,11 @@ export async function fetchSentryHealth(): Promise<SentryHealthSummary | SentryH
   const config = sentryConfig();
   if (!config) return { configured: false };
 
-  const projects = await Promise.all(
-    trackedProjects().map((project) => fetchProjectHealth(config.org, config.token, project))
-  );
+  const projects: SentryProjectHealth[] = [];
+  for (const project of trackedProjects()) {
+    projects.push(await fetchProjectHealth(config.org, config.token, project));
+    await new Promise((r) => setTimeout(r, 60));
+  }
 
   return {
     configured: true,
