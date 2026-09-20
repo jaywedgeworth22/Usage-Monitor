@@ -48,18 +48,16 @@ describe("sentryBeforeSend", () => {
     const result = sentryBeforeSend(
       {
         type: "test" as never,
+        // Cast around the @sentry/nextjs ErrorEvent type strictness —
+        // the scrubber only reads object keys, so the value shape is
+        // irrelevant for the test.
         sdkProcessingMetadata: {
           dynamicSamplingContext: {
             public_key: "abc123-public-dsn-key",
             trace_id: "kept-trace-id",
           },
-          requestSession: { status: "ok" } as unknown as Record<string, unknown>,
-          // `sessionKey` would be redacted by the key-name scrubber
-          // because it contains "key"; verify it is preserved by the
-          // safe-key allow-list when nested under a different parent key
-          // that explicitly allow-lists it. We test it via a separate
-          // event below.
-        },
+          requestSession: { status: "ok" },
+        } as unknown as Record<string, unknown>,
       },
       NO_HINT
     );
