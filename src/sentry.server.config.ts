@@ -8,6 +8,7 @@
 import * as Sentry from "@sentry/nextjs";
 
 import { nonEmptyEnv, parseTracesSampleRate } from "@/lib/sentry-options";
+import { sentryBeforeSend, sentryBeforeSendTransaction } from "@/lib/sentry-scrubber";
 
 const dsn = nonEmptyEnv(process.env.SENTRY_DSN);
 
@@ -21,6 +22,17 @@ if (dsn) {
       process.env.SENTRY_PROFILE_SESSION_SAMPLE_RATE ?? "1"
     ),
     profileLifecycle: "trace",
+    // Audit 2026-09-20: any object key whose name contains a sensitive
+    // substring (token/secret/key/password/passwd/auth) is replaced with
+    // "[REDACTED]" before the event is sent. Defensive guard against
+    // future regressions where a thrown Error carries a payload with
+    // secret-shaped metadata. See src/lib/sentry-scrubber.ts.
+    // The cast is necessary because @sentry/nextjs re-bundles its own copy of
+    // @sentry/core whose `TransactionEvent` is structurally identical but
+    // nominally distinct from the one imported inside the scrubber.
+    beforeSend: sentryBeforeSend as unknown as Parameters<typeof Sentry.init>[0]["beforeSend"],
+    beforeSendTransaction:
+      sentryBeforeSendTransaction as unknown as Parameters<typeof Sentry.init>[0]["beforeSendTransaction"],
     integrations: [Sentry.nodeRuntimeMetricsIntegration()],
   });
 }
