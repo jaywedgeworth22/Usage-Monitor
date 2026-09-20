@@ -50,8 +50,14 @@ const URL_QUERY_REDACTION_REGEX =
 // recursing into them. These are Sentry SDK-owned cyclic metadata fields
 // that would otherwise throw our recursion. Each entry is the dotted
 // path from the event root to the field. Match is case-sensitive.
+//
+// Sentry 10.74 ships BOTH `capturedSpanScope` AND `capturedSpanIsolationScope`
+// on sampled server transactions; both point to cyclic `Scope` objects and
+// must be skipped together (Codex re-review P1, observed 2026-09-20 on
+// commit 5c17318).
 const SDK_INTERNAL_CYCLIC_PATHS = new Set([
   "sdkProcessingMetadata.capturedSpanScope",
+  "sdkProcessingMetadata.capturedSpanIsolationScope",
   "sdkProcessingMetadata.capturedSpanScopeAsString",
 ]);
 

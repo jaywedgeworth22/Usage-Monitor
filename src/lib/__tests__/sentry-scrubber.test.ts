@@ -146,17 +146,21 @@ describe("sentryBeforeSend", () => {
 
   it("scrubs Sentry SDK-internal cyclic metadata without recursing (Codex re-review P1)", () => {
     // Codex re-review P1: real transaction events carry a cyclic
-    // `sdkProcessingMetadata.capturedSpanScope` that points to a Sentry
-    // Scope object. Walking it would loop forever (or throw, bypassing
-    // redaction). The scrubber must replace it with `[SDK_INTERNAL]`
+    // `sdkProcessingMetadata.capturedSpanScope` AND
+    // `capturedSpanIsolationScope` that both point to Sentry Scope
+    // objects. Walking either would loop forever (or throw, bypassing
+    // redaction). The scrubber must replace both with `[SDK_INTERNAL]`
     // without recursing.
     const cyclicScope: Record<string, unknown> = { type: "Scope" };
     cyclicScope.self = cyclicScope; // cycle
+    const cyclicIsolationScope: Record<string, unknown> = { type: "IsolationScope" };
+    cyclicIsolationScope.self = cyclicIsolationScope; // cycle
     const result = sentryBeforeSend(
       {
         type: "test" as never,
         sdkProcessingMetadata: {
           capturedSpanScope: cyclicScope,
+          capturedSpanIsolationScope: cyclicIsolationScope,
           requestSession: { status: "ok" },
         } as unknown as Record<string, unknown>,
       },
@@ -166,10 +170,12 @@ describe("sentryBeforeSend", () => {
     const typed = result as unknown as {
       sdkProcessingMetadata: {
         capturedSpanScope: string;
+        capturedSpanIsolationScope: string;
         requestSession: { status: string };
       };
     };
     expect(typed.sdkProcessingMetadata.capturedSpanScope).toBe("[SDK_INTERNAL]");
+    expect(typed.sdkProcessingMetadata.capturedSpanIsolationScope).toBe("[SDK_INTERNAL]");
     expect(typed.sdkProcessingMetadata.requestSession.status).toBe("ok");
   });
 
