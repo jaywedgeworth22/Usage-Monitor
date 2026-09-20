@@ -314,6 +314,25 @@ describe("parseGrokBilling", () => {
     expect(row.resetAt).toBeNull();
     expect(row.remainingUnknown).toBe(false);
   });
+  it("labels a config period with no dates as Subscription window", () => {
+    const [row] = parseGrokBilling({ config: { creditUsagePercent: 10 } });
+    expect(row.remainingPercent).toBe(90);
+    expect(row.label).toBe("Subscription window");
+    expect(row.quotaWindow).toBeNull();
+    expect(row.resetAt).toBeNull();
+  });
+
+  it("treats creditUsagePercent 0 as remaining 100 and derives monthly from dates", () => {
+    const [row] = parseGrokBilling({
+      config: {
+        creditUsagePercent: 0,
+        currentPeriod: { start: "2026-09-01T00:00:00Z", end: "2026-10-01T00:00:00Z" },
+      },
+    });
+    expect(row.remainingPercent).toBe(100);
+    expect(row.usedPercent).toBe(0);
+    expect(row.quotaWindow).toBe("monthly");
+  });
 });
 
 describe("grokAuthRecord", () => {
@@ -435,6 +454,16 @@ describe("Grok fetch credential skips", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+  it("does not unwrap when more than one nested profile exists", () => {
+    const auth = { a: { key: "one" }, b: { key: "two" } };
+    expect(grokAuthRecord(auth)).toBe(auth);
+    expect(resolveCredentialField(grokAuthRecord(auth), ["key"])).toBeNull();
+  });
+
+  it("returns an empty record for missing auth.json", () => {
+    expect(grokAuthRecord(null)).toEqual({});
+    expect(resolveCredentialField(grokAuthRecord(null), ["key"])).toBeNull();
   });
 });
 

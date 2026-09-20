@@ -1,4 +1,30 @@
-## Current (2026-09-18 CURSOR — Effort Issues Sync Crons margin)
+## Current (2026-09-18 CLAUDE — USAGE_READ_TOKEN cannot enroll an APNs device)
+
+`POST /api/apns/device-tokens` accepted `USAGE_READ_TOKEN` the same as GET, so a
+read-only credential could register a device to receive push alerts. PR #1458
+(2026-09-13) already fixed `PUT /api/settings` and the full-device-token GET leak
+(boards `154b622e` `e93a83fe`); this closes the remaining gap noted under
+`48334ff1` finding B3. POST is now dashboard-session only, matching the only
+real caller (`APIClient.registerApnsDeviceToken` already sends `.session`). GET
+is unchanged. Boards `68013aab` `48334ff1` `154b622e` `e93a83fe`. Branch
+`claude/security-read-token-scope`.
+
+## Prior (2026-09-18 CLAUDE — Slack wrong-token-type diagnostic + Coolify deploy-gate doc)
+
+Board `1f414cf3`: the Slack platform-status probe now distinguishes "wrong
+token type" (a User OAuth `xoxp-`/legacy token pasted into `SLACK_BOT_TOKEN`)
+from a genuinely revoked `xoxb-` bot token, surfacing an actionable headline
+and a `Configured Token Type` metric instead of a bare `invalid_auth`.
+Verifying the actually-deployed token's prefix still needs Coolify/Infisical
+prod env access (DSH's 2026-09-15 finding stands). Board `d0f5f1db`:
+`DEPLOY.md` now documents, instead of assuming, that the retired Oracle
+host's CI-gated deploy pipeline is not what the live Coolify host runs —
+Coolify's webhook auto-deploys on every push to `main` independent of GitHub
+Actions outcome. No host-side gate exists today; adding one needs Coolify
+dashboard/API access this Mac session does not have, so the gap stays
+open and tracked rather than half-fixed.
+
+## Prior (2026-09-18 CURSOR — Effort Issues Sync Crons margin)
 
 Sentry **FLEET-INFRA-CF** is a missed check-in, not a failed board mirror.
 GitHub starts daily `effort-issues-sync.yml` 4.3-6.4h late; the sync then
