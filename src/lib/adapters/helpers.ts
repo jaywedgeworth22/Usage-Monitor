@@ -213,7 +213,7 @@ export function isoDateTimeDaysAgo(days: number): string {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-const MAX_RETRY_AFTER_WAIT_MS = 15_000; // never block longer than this - the next 15-min scheduler tick is the real retry
+export const MAX_RETRY_AFTER_WAIT_MS = 15_000; // never block longer than this - the next 15-min scheduler tick is the real retry
 const MAX_RETRIES = 2;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
@@ -238,7 +238,7 @@ export function redactUrlForError(url: string): string {
 // Parses a Retry-After header value, which per RFC 9110 is either an
 // integer number of seconds or an HTTP-date. Returns milliseconds to wait,
 // or null if the header is absent/unparseable.
-function parseRetryAfterMs(value: string | null): number | null {
+export function parseRetryAfterMs(value: string | null): number | null {
   if (!value) return null;
   const trimmed = value.trim();
   if (trimmed === "") return null;
@@ -253,7 +253,7 @@ function parseRetryAfterMs(value: string | null): number | null {
   return dateMs - Date.now();
 }
 
-function sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
