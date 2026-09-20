@@ -18,6 +18,12 @@
 // server-side (API route handler), and the route response contains only the
 // derived counts/links, never the token itself.
 
+import {
+  MAX_RETRY_AFTER_WAIT_MS,
+  parseRetryAfterMs,
+  sleep,
+} from "./adapters/helpers";
+
 export interface SentryProjectHealth {
   projectSlug: string;
   displayName: string;
@@ -42,6 +48,10 @@ export interface SentryHealthUnconfigured {
 }
 
 const DEFAULT_ORG = "jays-services";
+
+// Fallback wait before the single 429 retry when Sentry sends no
+// Retry-After header. Mirrors the adapter helper first-attempt backoff.
+const SENTRY_HEALTH_RETRY_BACKOFF_MS = 1_000;
 
 const SENTRY_DASHBOARDS: Record<string, string> = {
   "fleet-overview": "https://jays-services.sentry.io/dashboard/9920702/",
@@ -144,28 +154,45 @@ async function fetchProjectHealth(
     );
 
     if (!res.ok) {
+      // Status reported when every attempt fails. Updated by the retry below
+      // so a retry that fails with a different status reports the retry
+      // status instead of masking it behind the original 429 (sentry[bot]
+      // review on #1507).
+      let finalStatus = res.status;
       if (res.status === 429) {
-        // Paced retry on burst rate limit
-        await new Promise((r) => setTimeout(r, 200));
-        const retryRes = await fetch(
-          `https://sentry.io/api/0/projects/${org}/${project.slug}/issues/?query=is%3Aunresolved&statsPeriod=14d&limit=100`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            signal: AbortSignal.timeout(8_000),
-          }
-        );
-        if (retryRes.ok) {
-          const retryData = (await retryRes.json()) as unknown;
-          const retryCount = Array.isArray(retryData) ? retryData.length : 0;
-          return {
-            projectSlug: project.slug,
-            displayName: project.displayName,
-            unresolvedCount: retryCount,
-            hasMore: linkHeaderHasNext(retryRes.headers.get("link")),
-            issuesUrl,
-            dashboardUrl,
-            datadogUrl,
-          };
+        // Paced retry on burst rate limit: honor the Retry-After header
+        // when present (capped like the adapter retry helper), otherwise fall
+        // back to a short fixed backoff (sentry[bot] review on #1507).
+        const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
+        const withinCap =
+          retryAfterMs == null || retryAfterMs <= MAX_RETRY_AFTER_WAIT_MS;
+        if (withinCap) {
+          await sleep(
+            retryAfterMs != null && retryAfterMs > 0
+              ? retryAfterMs
+              : SENTRY_HEALTH_RETRY_BACKOFF_MS
+          );
+          const retryRes = await fetch(
+            `https://sentry.io/api/0/projects/${org}/${project.slug}/issues/?query=is%3Aunresolved&statsPeriod=14d&limit=100`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: AbortSignal.timeout(8_000),
+            }
+          );
+          finalStatus = retryRes.status;
+          if (retryRes.ok) {
+            const retryData = (await retryRes.json()) as unknown;
+            const retryCount = Array.isArray(retryData) ? retryData.length : 0;
+            return {
+              projectSlug: project.slug,
+              displayName: project.displayName,
+              unresolvedCount: retryCount,
+              hasMore: linkHeaderHasNext(retryRes.headers.get("link")),
+              issuesUrl,
+              dashboardUrl,
+              datadogUrl,
+            };
+            }
         }
       }
 
@@ -177,7 +204,7 @@ async function fetchProjectHealth(
         issuesUrl,
         dashboardUrl,
         datadogUrl,
-        error: `HTTP ${res.status}`,
+        error: `HTTP ${finalStatus}`,
       };
     }
 
