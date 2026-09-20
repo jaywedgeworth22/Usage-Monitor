@@ -10,14 +10,21 @@
  * `{ metadata: { token: 'real-secret' } }`, say) would leak to Sentry without
  * a guard rail.
  *
- * Two-phase scrub:
+ * Three-phase scrub:
  *   1. Key-name redaction — any object key whose name contains a sensitive
  *      substring is replaced with `"[REDACTED]"`. Names that look sensitive
  *      but are actually SDK internals (Sentry's `public_key` in
  *      `dynamicSamplingContext`, for example) are allow-listed.
  *   2. Value-pattern redaction — string values are scanned for URL query
- *      strings like `?token=...&secret=...` and replaced. The redaction
- *      applies to the parameter value, not the whole string.
+ *      strings like `?token=...` and `&token=...` and replaced. The
+ *      redaction applies to the parameter value, not the whole string.
+ *      Bare `key=value` (no leading `?`) is also matched because Sentry's
+ *      request normalizer stores `request.query_string` without the `?`.
+ *   3. SDK-internal field skip — certain cyclic metadata fields
+ *      (`capturedSpanScope`, etc.) are scrubbed by identity (`===`) on the
+ *      key path, not by recursion, so we never walk into Sentry's cyclic
+ *      Scope objects and throw out of the catch handler (which would
+ *      bypass all redaction).
  *
  * Contract: return `null` to drop the event, or the (possibly mutated) event
  * to keep it. We never throw from here.
@@ -31,11 +38,22 @@ const SENSITIVE_KEY_SUBSTRINGS = ["token", "secret", "key", "password", "passwd"
 // must be preserved. Each entry is matched against the lowercase key name.
 const SENSITIVE_BUT_SAFE_KEY_SUBSTRINGS = ["public_key", "publickey", "sessionkey"];
 
-// Regex for URL query-string redaction. Matches `?name=value&name=value`
-// patterns; we replace the value, not the whole URL. Patterns are case-
-// insensitive on the parameter name only.
+// Regex for URL query-string redaction. Matches three cases:
+//   - `?name=value` (URL with query string)
+//   - `&name=value` (subsequent params)
+//   - `^name=value` (bare query string with no `?`, as Sentry stores
+//     `request.query_string` after slicing the leading `?`)
 const URL_QUERY_REDACTION_REGEX =
-  /([?&])(token|secret|password|passwd|auth|api_key|apikey|access_token|refresh_token)(=)([^&\s"']*)/gi;
+  /([?&]|^)(token|secret|password|passwd|auth|api_key|apikey|access_token|refresh_token)(=)([^&\s"']*)/gi;
+
+// Key paths to scrub by identity (replace with `[REDACTED]`) instead of
+// recursing into them. These are Sentry SDK-owned cyclic metadata fields
+// that would otherwise throw our recursion. Each entry is the dotted
+// path from the event root to the field. Match is case-sensitive.
+const SDK_INTERNAL_CYCLIC_PATHS = new Set([
+  "sdkProcessingMetadata.capturedSpanScope",
+  "sdkProcessingMetadata.capturedSpanScopeAsString",
+]);
 
 function isSafeKey(key: string): boolean {
   const lower = key.toLowerCase();
@@ -49,34 +67,36 @@ function isSensitiveKey(key: string): boolean {
 }
 
 function redactUrlQueryStrings(value: string): string {
-  return value.replace(URL_QUERY_REDACTION_REGEX, (_match, prefix, _name, eq, _value) => {
+  return value.replace(URL_QUERY_REDACTION_REGEX, (_match, prefix, _name, eq) => {
     return `${prefix}${_name}${eq}[REDACTED]`;
   });
 }
 
 function scrubString(value: string): string {
-  // Pattern 1: redact `name=value` URL query strings. This is the high-
-  // confidence path — parameter names are explicitly listed and the match
-  // is anchored to the parameter name, not the value.
   return redactUrlQueryStrings(value);
 }
 
-function scrubObject<T>(input: T): T {
+function scrubObject<T>(input: T, keyPath: string = ""): T {
   if (input === null || typeof input !== "object") return input;
   if (Array.isArray(input)) {
-    return input.map((entry) => scrubObject(entry)) as unknown as T;
+    return input.map((entry, idx) => scrubObject(entry, `${keyPath}[${idx}]`)) as unknown as T;
   }
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    const childPath = keyPath ? `${keyPath}.${k}` : k;
+    if (SDK_INTERNAL_CYCLIC_PATHS.has(childPath)) {
+      // Skip recursion into Sentry SDK-internal cyclic metadata. Replace
+      // with a placeholder so the field survives but doesn't carry a
+      // sensitive payload up to the root.
+      out[k] = "[SDK_INTERNAL]";
+      continue;
+    }
     if (isSensitiveKey(k)) {
       out[k] = "[REDACTED]";
     } else if (typeof v === "string") {
-      // Pattern 2: redact URL query-string parameters in string values,
-      // even when the host key (e.g. `url`, `query_string`) is not itself
-      // sensitive. Catches `request.url` carrying `/api/bills.ics?token=...`.
       out[k] = scrubString(v);
     } else {
-      out[k] = scrubObject(v);
+      out[k] = scrubObject(v, childPath);
     }
   }
   return out as T;
