@@ -355,7 +355,7 @@ export async function POST(request: NextRequest) {
       const { logIngestFailed } = await import("@/lib/sentry-ops");
       void logIngestFailed({
         reason: error instanceof Error ? error.name : "unknown",
-        route: "otlp/metrics",
+        route: "otlp/v1/metrics",
       });
     } catch {
       // Sentry is best-effort; never let observability break the response.

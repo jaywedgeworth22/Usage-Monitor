@@ -136,6 +136,22 @@ async function main() {
 // the CLI body is skipped, nothing is collected, and the process exits 0, so a
 // LaunchAgent reports success forever while telemetry quietly stops arriving.
 // This is the idiom the other collectors in scripts/ already use.
+//
+// Disabled-mode guard (Codex re-review P1, observed 2026-09-21 on commit
+// ac7a3768): the `.disabled.mjs` suffix has no special meaning to Node, so
+// `node scripts/claude-usage-collector.disabled.mjs` would still reach this
+// entrypoint and execute main() with credentials present. Refuse direct
+// execution with a clear error and a non-zero exit so any operator (or
+// copy-pasted LaunchAgent) that points at this filename fails loud, not
+// silent.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+  console.error(
+    "[claude-usage-collector] DISABLED: this collector is intentionally kept as dead code " +
+      "because native Claude OTLP is the active ingest path. Running it would double-count " +
+      "Claude Code usage. To resurrect, rename back to scripts/claude-usage-collector.mjs " +
+      "AND flip the claude-code (local fallback) row in " +
+      "docs/observability/producer-coverage-matrix.md to active before installing any " +
+      "LaunchAgent. Audit: board item dd85b8d570e2416b81e322509a17335f, GitHub #1509."
+  );
+  process.exit(2);
 }
