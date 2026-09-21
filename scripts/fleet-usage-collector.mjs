@@ -129,12 +129,32 @@ async function collectAllSessionEvents(since) {
   }
 
   // Claude Code
-  const claudeHome = expandHome("~/.claude");
-  const claudeFiles = await walkFiles(join(claudeHome, "projects"), { suffix: ".jsonl" });
-  for (const f of claudeFiles) {
-    const text = await readIfFresh(f);
-    if (!text) continue;
-    results.claude.push(...filterEventsSince(parseClaudeSessionJsonl(text, { sessionKey: sessionKeyFor(claudeHome, f) }), since));
+  // Audit 2026-09-21 (Codex P1, board item dd85b8d570e2416b81e322509a17335f
+  // follow-up): native Claude OTLP is the documented active ingest path.
+  // The local Claude section here uses the v2-batch wire whose
+  // idempotency keys do NOT dedup against OTLP metric keys, so running
+  // both would double-count Claude Code usage. The standalone
+  // claude-usage-collector is already .disabled.mjs'd.
+  //
+  // Default OFF (2026-09-21 Codex re-review P1 follow-up): the shipped
+  // LaunchAgent template (com.jays.fleet-usage-collector.plist.example)
+  // does not pass an env, so an opt-out gate would still ship in the
+  // double-count state. Default to skipped; an operator who wants the
+  // local Claude section must explicitly set
+  //   USAGE_MONITOR_FLEET_ENABLE_CLAUDE=1
+  // and acknowledge that native OTLP must NOT also be running.
+  if (process.env.USAGE_MONITOR_FLEET_ENABLE_CLAUDE !== "1") {
+    log(
+      "  - Claude Code: skipped (native OTLP is the active path; set USAGE_MONITOR_FLEET_ENABLE_CLAUDE=1 to re-enable)"
+    );
+  } else {
+    const claudeHome = expandHome("~/.claude");
+    const claudeFiles = await walkFiles(join(claudeHome, "projects"), { suffix: ".jsonl" });
+    for (const f of claudeFiles) {
+      const text = await readIfFresh(f);
+      if (!text) continue;
+      results.claude.push(...filterEventsSince(parseClaudeSessionJsonl(text, { sessionKey: sessionKeyFor(claudeHome, f) }), since));
+    }
   }
 
   // OpenAI Codex
@@ -209,6 +229,11 @@ export function fleetIngestJobs({ quotaEvents = [], sessionResults = {} } = {}) 
       producerId: ANTIGRAVITY_STATUSLINE_PRODUCER_ID,
       events: sessionResults.antigravity ?? [],
     },
+    // Audit 2026-09-21 (Codex P1): when USAGE_MONITOR_FLEET_DISABLE_CLAUDE=1,
+    // sessionResults.claude is empty (see collectAllSessionEvents), so the
+    // CLAUDE_PRODUCER_ID job below carries zero events and is filtered by
+    // `events.length > 0`. The producerId slot is still reserved for the
+    // case where someone unsets the env in the future.
     { producerId: CLAUDE_PRODUCER_ID, events: sessionResults.claude ?? [] },
     { producerId: CODEX_PRODUCER_ID, events: sessionResults.codex ?? [] },
     { producerId: GROK_PRODUCER_ID, events: sessionResults.grok ?? [] },
