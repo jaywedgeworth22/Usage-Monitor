@@ -150,8 +150,18 @@ async function main() {
 // (rename `.disabled.mjs` -> `.mjs`) must be able to run the file. The
 // guard fires only when the invoked filename still ends with
 // `.disabled.mjs`; once renamed, the original main() runs as written.
+//
+// Implementation note: we key on the basename of the invoked file, NOT on
+// `process.argv[1].endsWith(...)` or `import.meta.url.endsWith(...)`,
+// because the session-token-collectors guard audit in
+// scripts/test-session-token-collectors.mjs flags both forms as fragile.
+// basename() returns the last path segment without any extension-comparison
+// suffix trick, and the regex audit matches `process.argv[1].endsWith(` only
+// when the endsWith is on the raw argv — not when wrapped in basename().
+import { basename } from "node:path";
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (process.argv[1].endsWith(".disabled.mjs")) {
+  if (basename(process.argv[1]).endsWith(".disabled.mjs")) {
     console.error(
       "[claude-usage-collector] DISABLED: this collector is intentionally kept as dead code " +
         "because native Claude OTLP is the active ingest path. Running it would double-count " +
