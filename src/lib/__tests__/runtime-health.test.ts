@@ -8,7 +8,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import type { SchedulerRunFailedProvider } from "@/lib/runtime-health";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,14 +105,10 @@ describe("runtime health state", () => {
     expect(JSON.stringify(runtime)).not.toContain("must-not-leak");
   });
 
-  it("includes a bounded, whitelisted failedProviders list in lastRun when a tick has failures (#1478)", () => {
+  it("preserves scheduler summary fields in lastRun without attaching provider details (AGENTS.md L226-228)", () => {
     markSchedulerStarted();
     const tickAt = new Date("2026-09-12T12:00:00.000Z");
     markSchedulerTickStarted(tickAt);
-    // Symptom from issue #1478: 0 successes, 2 failures, 25 skipped,
-    // providerFetchDegraded. The fix surfaces WHICH providers failed
-    // and WHICH adapter error code, so the operator can diagnose
-    // without grepping Sentry logs.
     const summary = {
       total: 27,
       successes: 0,
@@ -121,76 +116,22 @@ describe("runtime health state", () => {
       skipped: 25,
       maintenanceHealthy: true,
       providerFetchDegraded: true,
-      failedProviders: [
-        { id: "p_openai", name: "openai", errorCode: "TIMEOUT" },
-        { id: "p_anthropic", name: "anthropic", errorCode: "AUTH_FAILED" },
-      ],
       cloudflareLegacyHandoff: "disabled" as const,
     };
     markSchedulerTickCompleted(true, summary, tickAt);
     const runtime = getSchedulerRuntimeStatus();
-    expect(runtime.lastRun?.failedProviders).toEqual([
-      { id: "p_openai", name: "openai", errorCode: "TIMEOUT" },
-      { id: "p_anthropic", name: "anthropic", errorCode: "AUTH_FAILED" },
-    ]);
-  });
-
-  it("caps failedProviders at 5 entries and strips non-string fields (#1478)", () => {
-    markSchedulerStarted();
-    const tickAt = new Date("2026-09-12T12:30:00.000Z");
-    markSchedulerTickStarted(tickAt);
-    const summary = {
-      total: 30,
+    expect(runtime.lastRun).toEqual({
+      total: 27,
       successes: 0,
-      failures: 9,
-      skipped: 21,
+      failures: 2,
+      skipped: 25,
       maintenanceHealthy: true,
       providerFetchDegraded: true,
-      // 9 entries, plus a poisoned entry with non-string fields that
-      // must be filtered out, and an unsafe entry that must be dropped.
-      failedProviders: ([
-        { id: "p1", name: "p1", errorCode: "TIMEOUT" },
-        { id: "p2", name: "p2", errorCode: "AUTH_FAILED" },
-        { id: "p3", name: "p3", errorCode: "RATE_LIMITED" },
-        { id: "p4", name: "p4", errorCode: "UNKNOWN" },
-        { id: "p5", name: "p5", errorCode: "NETWORK" },
-        { id: "p6", name: "p6", errorCode: "TIMEOUT" },
-        { id: "p7", name: "p7", errorCode: "TIMEOUT" },
-        { id: 7, name: "p8", errorCode: "TIMEOUT" }, // id is a number — must be dropped
-        { id: "p9", name: "p9" }, // missing errorCode — must be dropped
-        { id: "p10", errorCode: "x" }, // missing name — must be dropped
-        "not-an-object", // not an object — must be dropped
-      ] as unknown[]) as SchedulerRunFailedProvider[],
-      cloudflareLegacyHandoff: "disabled" as const,
-    };
-    markSchedulerTickCompleted(true, summary, tickAt);
-    const runtime = getSchedulerRuntimeStatus();
-    expect(runtime.lastRun?.failedProviders).toHaveLength(5);
-    expect(runtime.lastRun?.failedProviders).toEqual([
-      { id: "p1", name: "p1", errorCode: "TIMEOUT" },
-      { id: "p2", name: "p2", errorCode: "AUTH_FAILED" },
-      { id: "p3", name: "p3", errorCode: "RATE_LIMITED" },
-      { id: "p4", name: "p4", errorCode: "UNKNOWN" },
-      { id: "p5", name: "p5", errorCode: "NETWORK" },
-    ]);
-  });
-
-  it("omits failedProviders when a tick has zero failures (#1478)", () => {
-    markSchedulerStarted();
-    const tickAt = new Date("2026-09-12T12:45:00.000Z");
-    markSchedulerTickStarted(tickAt);
-    const summary = {
-      total: 27,
-      successes: 5,
-      failures: 0,
-      skipped: 22,
-      maintenanceHealthy: true,
-      providerFetchDegraded: false,
-      cloudflareLegacyHandoff: "disabled" as const,
-    };
-    markSchedulerTickCompleted(true, summary, tickAt);
-    const runtime = getSchedulerRuntimeStatus();
-    expect(runtime.lastRun?.failedProviders).toBeUndefined();
+      cloudflareLegacyHandoff: "disabled",
+    });
+    // AGENTS.md lines 226-228: /api/ready exposes the scheduler summary without
+    // attaching target/provider IDs, env values, billing payloads, or provider errors.
+    expect("failedProviders" in (runtime.lastRun ?? {})).toBe(false);
   });
 
   it("reports release identity and backup enforcement from non-secret env", () => {

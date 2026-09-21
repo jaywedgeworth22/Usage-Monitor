@@ -716,16 +716,6 @@ export async function runUsagePollingSchedulerTick(
     // surfaced as a distinct scheduler.providerFetchDegraded signal instead.
     const providerFetchDegraded =
       isProviderFetchTickDegraded(result) || result.tickBudgetExceeded === true;
-    // Surface the failing provider identities on the run summary so the
-    // scheduler.provider_fetch_degraded alert includes actionable detail
-    // (which providers, which error code) without forcing the operator to
-    // dig into Sentry. Normalized + capped inside markTickCompleted via
-    // normalizeSchedulerRunSummary, so this list is best-effort and bounded.
-    const failedProviders = result.errors.map((entry) => ({
-      id: entry.providerId,
-      name: entry.name,
-      errorCode: entry.code,
-    }));
     markTickCompleted(maintenanceHealthy, {
       total: result.total,
       successes: result.successes,
@@ -733,7 +723,6 @@ export async function runUsagePollingSchedulerTick(
       skipped: result.skipped,
       maintenanceHealthy,
       providerFetchDegraded,
-      ...(failedProviders.length > 0 ? { failedProviders } : {}),
       cloudflareLegacyHandoff:
         maintenance.subscriptionAdoption.cloudflareLegacyHandoff,
     });
@@ -753,9 +742,10 @@ export async function runUsagePollingSchedulerTick(
     if (providerFetchDegraded) {
       // Top-5 failing provider names keep the sparse Sentry log bounded
       // while still answering "who is this outage" for the common case.
-      const failingNames = failedProviders
+      // Sentry log only — never exposed on unauthenticated /api/ready.
+      const failingNames = result.errors
         .slice(0, 5)
-        .map((entry) => `${entry.name}:${entry.errorCode}`)
+        .map((entry) => `${entry.name}:${entry.code}`)
         .join(",");
       void logSchedulerDegraded({
         total: result.total,
