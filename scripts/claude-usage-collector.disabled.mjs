@@ -144,14 +144,23 @@ async function main() {
 // execution with a clear error and a non-zero exit so any operator (or
 // copy-pasted LaunchAgent) that points at this filename fails loud, not
 // silent.
+//
+// Filename-gated (Codex re-review P2, observed 2026-09-21 on commit
+// 844012d6): an operator following the documented resurrection procedure
+// (rename `.disabled.mjs` -> `.mjs`) must be able to run the file. The
+// guard fires only when the invoked filename still ends with
+// `.disabled.mjs`; once renamed, the original main() runs as written.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  console.error(
-    "[claude-usage-collector] DISABLED: this collector is intentionally kept as dead code " +
-      "because native Claude OTLP is the active ingest path. Running it would double-count " +
-      "Claude Code usage. To resurrect, rename back to scripts/claude-usage-collector.mjs " +
-      "AND flip the claude-code (local fallback) row in " +
-      "docs/observability/producer-coverage-matrix.md to active before installing any " +
-      "LaunchAgent. Audit: board item dd85b8d570e2416b81e322509a17335f, GitHub #1509."
-  );
-  process.exit(2);
+  if (process.argv[1].endsWith(".disabled.mjs")) {
+    console.error(
+      "[claude-usage-collector] DISABLED: this collector is intentionally kept as dead code " +
+        "because native Claude OTLP is the active ingest path. Running it would double-count " +
+        "Claude Code usage. To resurrect, rename back to scripts/claude-usage-collector.mjs " +
+        "AND flip the claude-code (local fallback) row in " +
+        "docs/observability/producer-coverage-matrix.md to active before installing any " +
+        "LaunchAgent. Audit: board item dd85b8d570e2416b81e322509a17335f, GitHub #1509."
+    );
+    process.exit(2);
+  }
+  main().catch((error) => fail(error instanceof Error ? error.message : String(error)));
 }
