@@ -1,4 +1,28 @@
 #!/usr/bin/env node
+// **DISABLED — DO NOT RUN OR INSTALL.**
+//
+// This file is the local-fallback collector for Anthropic Claude Code session
+// JSONL.  It is intentionally kept here as a dead-code reference for the day
+// the native Claude OTLP path goes away (see the matrix entry below), but it
+// must NOT be scheduled or invoked today: the native Claude OTLP exporter
+// already covers the same Claude Code usage, and running both would
+// double-count.
+//
+// The .disabled.mjs extension is not recognized by the collector manifest or
+// the LaunchAgent installer; attempting to run this file directly is a
+// no-op because no consumer ever invokes a .disabled.mjs path.  If you need
+// to resurrect this collector, rename it back to scripts/claude-usage-collector.mjs
+// AND update docs/observability/producer-coverage-matrix.md to flip the
+// claude-code (local fallback) row from "parser exists but is not scheduled"
+// to "active" before installing any LaunchAgent for it.
+//
+// Matrix reference:
+//   docs/observability/producer-coverage-matrix.md > claude-code (local fallback)
+// Audit finding: board item dd85b8d570e2416b81e322509a17335f, GitHub #1509.
+//
+// --- Original docstring follows (kept verbatim for the day the file is
+// re-enabled; no behavioral changes have been made).
+//
 // Local collector for Anthropic Claude Code session JSONL.
 //
 // Reads ${CLAUDE_HOME:-~/.claude}/projects/*/*.jsonl.
