@@ -1,8 +1,10 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildQuotaEvent,
@@ -18,8 +20,11 @@ import {
   parseMinimaxRemains,
 } from "../lib/subscription-quota-parsers.mjs";
 import {
+  PROVIDERS,
   eventsForProvider,
+  fetchJson,
   grokAuthRecord,
+  hostOf,
   parseArgs,
   resolveCredentialField,
 } from "../subscription-quota-collector.mjs";
@@ -284,6 +289,31 @@ describe("parseGrokBilling", () => {
     expect(row.remainingUnknown).toBe(false);
   });
 
+  it("falls back to config billingPeriodStart/End when currentPeriod has no dates", () => {
+    const [row] = parseGrokBilling({
+      config: {
+        creditUsagePercent: 25,
+        billingPeriodStart: "2026-09-01T00:00:00Z",
+        billingPeriodEnd: "2026-10-01T00:00:00Z",
+      },
+    });
+    expect(row.remainingPercent).toBe(75);
+    expect(row.usedPercent).toBe(25);
+    expect(row.quotaWindow).toBe("monthly");
+    expect(row.resetAt).toBe("2026-10-01T00:00:00.000Z");
+    expect(row.label).toBe("monthly window");
+  });
+
+  it("labels a config window without dates as Subscription window", () => {
+    const [row] = parseGrokBilling({
+      config: { creditUsagePercent: 10 },
+    });
+    expect(row.label).toBe("Subscription window");
+    expect(row.quotaWindow).toBeNull();
+    expect(row.remainingPercent).toBe(90);
+    expect(row.resetAt).toBeNull();
+    expect(row.remainingUnknown).toBe(false);
+  });
   it("labels a config period with no dates as Subscription window", () => {
     const [row] = parseGrokBilling({ config: { creditUsagePercent: 10 } });
     expect(row.remainingPercent).toBe(90);
@@ -325,6 +355,106 @@ describe("grokAuthRecord", () => {
     });
   });
 
+  it("does not unwrap when two object profiles are present", () => {
+    const auth = {
+      "https://auth.x.ai::a": { key: "a-secret" },
+      "https://auth.x.ai::b": { key: "b-secret" },
+    };
+    expect(grokAuthRecord(auth)).toEqual(auth);
+    expect(resolveCredentialField(grokAuthRecord(auth), ["key"])).toBeNull();
+  });
+
+  it("ignores a lone array value instead of treating it as a profile", () => {
+    const auth = { items: [{ key: "nope" }] };
+    expect(grokAuthRecord(auth)).toEqual(auth);
+  });
+
+  it("returns an empty record for a non-object auth file", () => {
+    expect(grokAuthRecord(null)).toEqual({});
+    expect(grokAuthRecord("not-json-object")).toEqual({});
+  });
+});
+
+describe("fetchJson error wrapping", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("maps TimeoutError to timeout from host", async () => {
+    const err = new Error("aborted");
+    err.name = "TimeoutError";
+    vi.stubGlobal("fetch", async () => {
+      throw err;
+    });
+    await expect(fetchJson("https://cli-chat-proxy.grok.com/v1/billing")).rejects.toThrow(
+      "timeout from cli-chat-proxy.grok.com",
+    );
+  });
+
+  it("surfaces ETIMEDOUT cause codes on a generic fetch failure", async () => {
+    const err = new Error("fetch failed");
+    err.cause = { code: "ETIMEDOUT" };
+    vi.stubGlobal("fetch", async () => {
+      throw err;
+    });
+    await expect(fetchJson("https://api.minimax.io/v1/x")).rejects.toThrow(
+      "fetch failed from api.minimax.io (ETIMEDOUT)",
+    );
+  });
+
+  it("omits a cause code when the thrown value has none", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("network down");
+    });
+    await expect(fetchJson("https://api.anthropic.com/api/oauth/usage")).rejects.toThrow(
+      "fetch failed from api.anthropic.com",
+    );
+  });
+
+  it("keeps an unparseable URL as the host label", () => {
+    expect(hostOf("not a url")).toBe("not a url");
+    expect(hostOf("https://cli-chat-proxy.grok.com/v1/billing")).toBe("cli-chat-proxy.grok.com");
+  });
+});
+
+describe("Grok fetch credential skips", () => {
+  afterEach(() => {
+    delete process.env.GROK_HOME;
+  });
+
+  async function writeGrokHome(auth) {
+    const dir = await mkdtemp(join(tmpdir(), "grok-auth-"));
+    await writeFile(join(dir, "auth.json"), JSON.stringify(auth));
+    process.env.GROK_HOME = dir;
+    return dir;
+  }
+
+  it("skips when the nested Grok CLI token is expired", async () => {
+    const dir = await writeGrokHome({
+      "https://auth.x.ai::fixture-id": {
+        key: "nested-secret",
+        expires_at: "2020-01-01T00:00:00Z",
+      },
+    });
+    try {
+      await expect(PROVIDERS.grok.fetch({ debug: false })).resolves.toEqual({
+        skipped: "Grok CLI access token is expired; skipping this tick",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when no Grok CLI credential is present", async () => {
+    const dir = await writeGrokHome({ empty: true });
+    try {
+      await expect(PROVIDERS.grok.fetch({ debug: false })).resolves.toEqual({
+        skipped: "no Grok CLI credential found",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
   it("does not unwrap when more than one nested profile exists", () => {
     const auth = { a: { key: "one" }, b: { key: "two" } };
     expect(grokAuthRecord(auth)).toBe(auth);
@@ -455,6 +585,7 @@ describe("shared-contract compliance", () => {
       ["claude", "claude-oauth-usage.json"],
       ["codex", "codex-wham-usage.json"],
       ["grok", "grok-billing-credits.json"],
+      ["grok", "grok-billing-config.json"],
       ["minimax", "minimax-coding-plan-remains.json"],
     ];
     for (const [providerKey, file] of cases) {

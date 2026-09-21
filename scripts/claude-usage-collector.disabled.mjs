@@ -1,4 +1,28 @@
 #!/usr/bin/env node
+// **DISABLED — DO NOT RUN OR INSTALL.**
+//
+// This file is the local-fallback collector for Anthropic Claude Code session
+// JSONL.  It is intentionally kept here as a dead-code reference for the day
+// the native Claude OTLP path goes away (see the matrix entry below), but it
+// must NOT be scheduled or invoked today: the native Claude OTLP exporter
+// already covers the same Claude Code usage, and running both would
+// double-count.
+//
+// The .disabled.mjs extension is not recognized by the collector manifest or
+// the LaunchAgent installer; attempting to run this file directly is a
+// no-op because no consumer ever invokes a .disabled.mjs path.  If you need
+// to resurrect this collector, rename it back to scripts/claude-usage-collector.mjs
+// AND update docs/observability/producer-coverage-matrix.md to flip the
+// claude-code (local fallback) row from "parser exists but is not scheduled"
+// to "active" before installing any LaunchAgent for it.
+//
+// Matrix reference:
+//   docs/observability/producer-coverage-matrix.md > claude-code (local fallback)
+// Audit finding: board item dd85b8d570e2416b81e322509a17335f, GitHub #1509.
+//
+// --- Original docstring follows (kept verbatim for the day the file is
+// re-enabled; no behavioral changes have been made).
+//
 // Local collector for Anthropic Claude Code session JSONL.
 //
 // Reads ${CLAUDE_HOME:-~/.claude}/projects/*/*.jsonl.
@@ -112,6 +136,41 @@ async function main() {
 // the CLI body is skipped, nothing is collected, and the process exits 0, so a
 // LaunchAgent reports success forever while telemetry quietly stops arriving.
 // This is the idiom the other collectors in scripts/ already use.
+//
+// Disabled-mode guard (Codex re-review P1, observed 2026-09-21 on commit
+// ac7a3768): the `.disabled.mjs` suffix has no special meaning to Node, so
+// `node scripts/claude-usage-collector.disabled.mjs` would still reach this
+// entrypoint and execute main() with credentials present. Refuse direct
+// execution with a clear error and a non-zero exit so any operator (or
+// copy-pasted LaunchAgent) that points at this filename fails loud, not
+// silent.
+//
+// Filename-gated (Codex re-review P2, observed 2026-09-21 on commit
+// 844012d6): an operator following the documented resurrection procedure
+// (rename `.disabled.mjs` -> `.mjs`) must be able to run the file. The
+// guard fires only when the invoked filename still ends with
+// `.disabled.mjs`; once renamed, the original main() runs as written.
+//
+// Implementation note: we key on the basename of the invoked file, NOT on
+// `process.argv[1].endsWith(...)` or `import.meta.url.endsWith(...)`,
+// because the session-token-collectors guard audit in
+// scripts/test-session-token-collectors.mjs flags both forms as fragile.
+// basename() returns the last path segment without any extension-comparison
+// suffix trick, and the regex audit matches `process.argv[1].endsWith(` only
+// when the endsWith is on the raw argv — not when wrapped in basename().
+import { basename } from "node:path";
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  if (basename(process.argv[1]).endsWith(".disabled.mjs")) {
+    console.error(
+      "[claude-usage-collector] DISABLED: this collector is intentionally kept as dead code " +
+        "because native Claude OTLP is the active ingest path. Running it would double-count " +
+        "Claude Code usage. To resurrect, rename back to scripts/claude-usage-collector.mjs " +
+        "AND flip the claude-code (local fallback) row in " +
+        "docs/observability/producer-coverage-matrix.md to active before installing any " +
+        "LaunchAgent. Audit: board item dd85b8d570e2416b81e322509a17335f, GitHub #1509."
+    );
+    process.exit(2);
+  }
   main().catch((error) => fail(error instanceof Error ? error.message : String(error)));
 }
