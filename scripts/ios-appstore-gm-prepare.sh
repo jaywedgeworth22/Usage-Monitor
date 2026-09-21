@@ -29,26 +29,25 @@ SECRETS_DIR="${HOME}/.secrets"
 mkdir -p "$SECRETS_DIR"
 chmod 700 "$SECRETS_DIR"
 
+# Write the p8 body without echoing.  Keep ~/.secrets/AuthKey.p8 as the
+# real file, then always force-link the Xcode 26.6 / altool standard name.
+# CI 34039065969 passed Infisical load then failed xcodebuild bearer-auth
+# when -authenticationKeyPath was the AuthKey.p8 alias.
 KEY_PATH="${SECRETS_DIR}/AuthKey.p8"
-# The p8 body is a GitHub secret.  Write it without echoing.
 printf '%s\n' "$ASC_KEY_P8" > "$KEY_PATH"
 chmod 600 "$KEY_PATH"
 
-# Xcode 26.6 archive looks for AuthKey_<id>.p8 here.  altool already does.
-# UM 1.0.15 failed when only ~/.secrets/AuthKey.p8 existed.
 ASC_KEY_STD_DIR="${HOME}/.appstoreconnect/private_keys"
 mkdir -p "$ASC_KEY_STD_DIR"
 chmod 700 "$ASC_KEY_STD_DIR"
 ASC_KEY_STD="${ASC_KEY_STD_DIR}/AuthKey_${ASC_KEY_ID}.p8"
-if [[ ! -e "$ASC_KEY_STD" ]]; then
-  ln -sf "$KEY_PATH" "$ASC_KEY_STD"
-fi
+ln -sfn "$KEY_PATH" "$ASC_KEY_STD"
 
 ENV_PATH="${SECRETS_DIR}/appstore-connect.env"
 {
   printf 'ASC_KEY_ID=%s\n' "$ASC_KEY_ID"
   printf 'ASC_ISSUER_ID=%s\n' "$ASC_ISSUER_ID"
-  printf 'ASC_KEY_PATH=%s\n' "$KEY_PATH"
+  printf 'ASC_KEY_PATH=%s\n' "$ASC_KEY_STD"
 } > "$ENV_PATH"
 chmod 600 "$ENV_PATH"
 

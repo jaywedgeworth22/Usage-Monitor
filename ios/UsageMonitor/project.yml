@@ -71,6 +71,12 @@ targets:
         ENABLE_PREVIEWS: YES
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
+      configs:
+        # Archive/TestFlight must use Distribution.  XcodeGen defaults this
+        # to iPhone Developer, which makes CI ask for IOS_APP_DEVELOPMENT
+        # profiles (see run 34039065969).  Debug stays the default.
+        Release:
+          CODE_SIGN_IDENTITY: "Apple Distribution"
     dependencies:
       - target: UsageMonitorWidgetExtension
         embed: true
@@ -171,6 +177,9 @@ targets:
         CODE_SIGN_ENTITLEMENTS: UsageMonitorWidget/UsageMonitorWidget.entitlements
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         TARGETED_DEVICE_FAMILY: "1,2"
+      configs:
+        Release:
+          CODE_SIGN_IDENTITY: "Apple Distribution"
     dependencies:
       - package: UsageMonitorKit
         product: WidgetShared
