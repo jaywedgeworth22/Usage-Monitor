@@ -129,12 +129,26 @@ async function collectAllSessionEvents(since) {
   }
 
   // Claude Code
-  const claudeHome = expandHome("~/.claude");
-  const claudeFiles = await walkFiles(join(claudeHome, "projects"), { suffix: ".jsonl" });
-  for (const f of claudeFiles) {
-    const text = await readIfFresh(f);
-    if (!text) continue;
-    results.claude.push(...filterEventsSince(parseClaudeSessionJsonl(text, { sessionKey: sessionKeyFor(claudeHome, f) }), since));
+  // Audit 2026-09-21 (Codex P1, board item dd85b8d570e2416b81e322509a17335f
+  // follow-up): when native Claude OTLP is the active ingest path, the
+  // Claude section here double-counts Claude Code usage against the OTLP
+  // stream (different producerId / idempotency-key space; v2 batch keys
+  // and OTLP metric keys do NOT dedup across each other). The standalone
+  // claude-usage-collector is already .disabled.mjs'd; gate this section
+  // behind the same opt-out env so a fleet collector that shares the Mac
+  // with native OTLP stops reading ~/.claude/projects entirely.
+  if (process.env.USAGE_MONITOR_FLEET_DISABLE_CLAUDE === "1") {
+    log(
+      "  - Claude Code: skipped (USAGE_MONITOR_FLEET_DISABLE_CLAUDE=1; native OTLP is the active path)"
+    );
+  } else {
+    const claudeHome = expandHome("~/.claude");
+    const claudeFiles = await walkFiles(join(claudeHome, "projects"), { suffix: ".jsonl" });
+    for (const f of claudeFiles) {
+      const text = await readIfFresh(f);
+      if (!text) continue;
+      results.claude.push(...filterEventsSince(parseClaudeSessionJsonl(text, { sessionKey: sessionKeyFor(claudeHome, f) }), since));
+    }
   }
 
   // OpenAI Codex
@@ -209,6 +223,11 @@ export function fleetIngestJobs({ quotaEvents = [], sessionResults = {} } = {}) 
       producerId: ANTIGRAVITY_STATUSLINE_PRODUCER_ID,
       events: sessionResults.antigravity ?? [],
     },
+    // Audit 2026-09-21 (Codex P1): when USAGE_MONITOR_FLEET_DISABLE_CLAUDE=1,
+    // sessionResults.claude is empty (see collectAllSessionEvents), so the
+    // CLAUDE_PRODUCER_ID job below carries zero events and is filtered by
+    // `events.length > 0`. The producerId slot is still reserved for the
+    // case where someone unsets the env in the future.
     { producerId: CLAUDE_PRODUCER_ID, events: sessionResults.claude ?? [] },
     { producerId: CODEX_PRODUCER_ID, events: sessionResults.codex ?? [] },
     { producerId: GROK_PRODUCER_ID, events: sessionResults.grok ?? [] },
