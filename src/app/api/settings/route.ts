@@ -52,7 +52,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  const hasDashboardSession = verifySessionToken(
+    request.cookies.get(SESSION_COOKIE_NAME)?.value
+  );
+  if (!hasDashboardSession) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

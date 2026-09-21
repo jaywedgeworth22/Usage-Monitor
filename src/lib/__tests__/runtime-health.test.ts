@@ -1047,14 +1047,14 @@ describe("runtime health state", () => {
     };
     markSchedulerTickCompleted(true, degradedRun);
     expect(getSchedulerReadiness()).toMatchObject({
-      ok: true,
-      reason: null,
+      ok: false,
+      reason: "provider_fetch_zero_success",
       providerFetchDegradedTickThreshold: 2,
     });
     markSchedulerTickCompleted(true, degradedRun);
     expect(getSchedulerReadiness()).toMatchObject({
-      ok: true,
-      reason: "provider_fetch_degraded",
+      ok: false,
+      reason: "provider_fetch_zero_success",
       providerFetchDegradedTickThreshold: 2,
     });
   });

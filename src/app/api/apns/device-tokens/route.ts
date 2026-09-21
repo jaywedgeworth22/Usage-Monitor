@@ -37,10 +37,15 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     count: tokens.length,
     tokens: tokens.map((t) => ({
-      ...t,
+      id: t.id,
+      deviceModel: t.deviceModel,
+      osVersion: t.osVersion,
+      environment: t.environment,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
       deviceTokenPreview: t.deviceToken.length > 12
         ? `${t.deviceToken.slice(0, 6)}...${t.deviceToken.slice(-6)}`
-        : t.deviceToken,
+        : "••••",
     })),
   });
 }

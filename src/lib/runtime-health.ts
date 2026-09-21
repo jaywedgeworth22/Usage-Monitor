@@ -51,6 +51,7 @@ export interface SchedulerReadiness {
     | "tick_stalled"
     | "tick_stale"
     | "provider_fetch_degraded"
+    | "provider_fetch_zero_success"
     | null;
   staleAfterMs: number;
   failureThreshold: number;
@@ -249,11 +250,22 @@ export function getSchedulerReadiness(now = new Date()): SchedulerReadiness {
       providerFetchDegradedTickThreshold: degradedTickThreshold,
     };
   }
-  // Provider-fetch degradation never takes the service unready on its own -
-  // this app is still serving correctly, the outage is upstream. It only
-  // gets its own readinessReason once sustained (see
-  // providerFetchDegradedTickThreshold) so a monitor reading this endpoint
-  // can alert on it without the deploy being marked not-ready.
+  const lastRun = scheduler.lastRun;
+  if (lastRun && lastRun.successes === 0 && lastRun.failures > 0) {
+    return {
+      ok: false,
+      reason: "provider_fetch_zero_success",
+      staleAfterMs,
+      failureThreshold,
+      providerFetchDegraded: true,
+      providerFetchDegradedTickThreshold: degradedTickThreshold,
+    };
+  }
+  // Partial provider-fetch degradation never takes the service unready on its
+  // own — this app is still serving correctly, the outage is upstream.  It
+  // only gets its own readinessReason once sustained so a monitor can alert
+  // without marking the deploy not-ready.  A tick with zero successes is
+  // different and fails closed above.
   if (providerFetchDegraded) {
     return {
       ok: true,
