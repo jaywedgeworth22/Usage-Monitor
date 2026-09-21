@@ -130,16 +130,22 @@ async function collectAllSessionEvents(since) {
 
   // Claude Code
   // Audit 2026-09-21 (Codex P1, board item dd85b8d570e2416b81e322509a17335f
-  // follow-up): when native Claude OTLP is the active ingest path, the
-  // Claude section here double-counts Claude Code usage against the OTLP
-  // stream (different producerId / idempotency-key space; v2 batch keys
-  // and OTLP metric keys do NOT dedup across each other). The standalone
-  // claude-usage-collector is already .disabled.mjs'd; gate this section
-  // behind the same opt-out env so a fleet collector that shares the Mac
-  // with native OTLP stops reading ~/.claude/projects entirely.
-  if (process.env.USAGE_MONITOR_FLEET_DISABLE_CLAUDE === "1") {
+  // follow-up): native Claude OTLP is the documented active ingest path.
+  // The local Claude section here uses the v2-batch wire whose
+  // idempotency keys do NOT dedup against OTLP metric keys, so running
+  // both would double-count Claude Code usage. The standalone
+  // claude-usage-collector is already .disabled.mjs'd.
+  //
+  // Default OFF (2026-09-21 Codex re-review P1 follow-up): the shipped
+  // LaunchAgent template (com.jays.fleet-usage-collector.plist.example)
+  // does not pass an env, so an opt-out gate would still ship in the
+  // double-count state. Default to skipped; an operator who wants the
+  // local Claude section must explicitly set
+  //   USAGE_MONITOR_FLEET_ENABLE_CLAUDE=1
+  // and acknowledge that native OTLP must NOT also be running.
+  if (process.env.USAGE_MONITOR_FLEET_ENABLE_CLAUDE !== "1") {
     log(
-      "  - Claude Code: skipped (USAGE_MONITOR_FLEET_DISABLE_CLAUDE=1; native OTLP is the active path)"
+      "  - Claude Code: skipped (native OTLP is the active path; set USAGE_MONITOR_FLEET_ENABLE_CLAUDE=1 to re-enable)"
     );
   } else {
     const claudeHome = expandHome("~/.claude");
