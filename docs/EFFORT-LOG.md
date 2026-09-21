@@ -1514,6 +1514,7 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
 - 2026-08-31 — CLAUDE — COMPLETED — account username scrubbed from public tree: namecheap.py now resolves NAMECHEAP_API_USER from env or ~/.secrets/global-api-keys exactly like the API key (no hardcoded name; clear error if absent); account details documented in private fleet-ops ATTACK-MAP.md instead.  Board 1887f041.
 - 2026-08-31 — CLAUDE — COMPLETED — /api/health r2Weekly + replica-status probe cost trim (branch `claude/backup-health-probe`, PR #1378, merged 2614d4b6).  (1) Added `checks.storage.r2Weekly` to `/api/health` (`getPublicR2WeeklyHealth` wrapping the existing `getR2WeeklyArchiveStatus`) so this app matches Socratic.Trade/Congress.Trade's public backup-freshness shape -- work found already complete from a prior killed session, reviewed and verified correct.  (2) Trimmed the host `usage-monitor-replica-status` systemd timer/probe: dropped the always-failing in-container `docker exec --once` heartbeat attempt, replaced the unconditional `{0,1,2,3,9}` LTX-level scan with an adaptive level-0-first escalation (1 call/tick steady state, escalates to 1-3 then 9 only when level 0 is briefly empty), widened cadence 10min -> 30min (~720/day -> roughly 48-96/day).  A first-pass fixed `{0,9}`-only design was caught as wrong by `chatgpt-codex-connector`'s PR review before merge (litestream's brief L0 retention can leave a real tip at L1-3) and fixed with the adaptive design plus a new functional self-test that execs the real escalation source against a mocked subprocess.  Full verify gate green (lint/tsc/2338 tests/build + all repo `test:*` scripts incl. a clean `test:apple-projects` native iOS build).  Rollout: `docs/rollouts/2026-08-31-health-r2weekly-probe-efficiency.md`.
 
+## 2026-09-20 — MM (P1) — Comprehensive top-to-bottom review (1 of N): untracked test file + Sentry beforeSend scrubber
 ## 2026-09-20 — MM (P1) — Comprehensive top-to-bottom review (1 of N)
 
 **PR #1513 (`minimax/comprehensive-review`)** — filed 4 findings; implemented 2; closed via auto-merge.
@@ -1529,3 +1530,16 @@ _Source: `docs/audits/2026-07-20-grok3-full-app-expert-review.md` (14 specialist
 - Added `src/lib/sentry-scrubber.ts` — a recursive `beforeSend` / `beforeSendTransaction` hook that replaces any object key whose name contains a sensitive substring (`token` / `secret` / `key` / `password` / `passwd` / `auth`) with `"[REDACTED]"`. Wired into both `src/sentry.{server,edge}.config.ts`. 4 unit tests cover substring list, recursion, primitive inputs, and cyclic-input safety.
 
 **Verification:** `npm run typecheck` clean, lint clean on new files (12 pre-existing warnings in unrelated files), `vitest` 80 pass / 11 todo / 0 fail.
+
+## 2026-09-20 — MM (P2/P3) — Comprehensive top-to-bottom review (2 of N): dead-code sweep + Sentry symmetry
+
+**PR #1514 (`minimax/dead-code-cleanup`)** — closed board item dd85b8d5 (`#1509`), board item c0fe8d9c (`#1515`), and addressed a Codex re-review P1 follow-up.
+
+**What landed:**
+- `scripts/claude-usage-collector.mjs` renamed to `scripts/claude-usage-collector.disabled.mjs`.  Top-of-file docstring flags the file as disabled and explains how to resurrect safely.  Runtime guard refuses direct execution (`process.exit(2)` with a clear message) when the filename still ends in `.disabled.mjs`; the original `main()` invocation is restored once the operator renames back to `.mjs`.
+- `scripts/fleet-usage-collector.mjs` Claude section gated behind `USAGE_MONITOR_FLEET_ENABLE_CLAUDE=1` (default OFF).  Default to skipped: an operator who wants the local Claude section must explicitly opt in and acknowledge that native OTLP must NOT also be running.
+- `package.json`: removed the stale `claude:collect` npm script.
+- `src/app/api/otlp/v1/metrics/route.ts`: the catch-all now lazy-imports `logIngestFailed()` from `src/lib/sentry-ops.ts` and calls it with `route: "otlp/v1/metrics"`.
+- `docs/observability/producer-coverage-matrix.md`: updated the `claude-code (local fallback)` row and added a new `claude-code (fleet collector Claude section)` row.
+
+Refs board items dd85b8d5, c0fe8d9c; closes #1509 and #1515.
