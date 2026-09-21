@@ -12,17 +12,6 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import packageJson from "../../package.json";
 import type { CloudflareLegacyHandoffStatus } from "@/lib/external-billing-subscription-adoption";
 
-export interface SchedulerRunFailedProvider {
-  // Provider id - opaque database identifier, safe to surface.
-  id: string;
-  // Provider display name - safe to surface.
-  name: string;
-  // Adapter error code (TIMEOUT, RATE_LIMITED, AUTH_FAILED, UNKNOWN, ...).
-  // Safe: an enum-style string, never the upstream response body or
-  // credential material. See ProviderFetchError.code in usage-recorder.ts.
-  errorCode: string;
-}
-
 export interface SchedulerRunSummary {
   total: number;
   successes: number;
@@ -34,20 +23,8 @@ export interface SchedulerRunSummary {
   // usage-recorder.ts. Distinct from maintenanceHealthy: a tick can succeed
   // (maintenance healthy) while most provider polls still failed.
   providerFetchDegraded: boolean;
-  // Bounded, safe-to-surface list of providers that failed THIS tick so an
-  // operator looking at /api/ready.lastRun can see which providers the
-  // "0 successes, 2 failures, providerFetchDegraded" alert came from
-  // without grepping Sentry logs. Capped at FAILED_PROVIDERS_SUMMARY_CAP
-  // (currently 5) to keep the readiness body bounded; the count field
-  // above remains the authoritative failures total.
-  failedProviders?: SchedulerRunFailedProvider[];
   cloudflareLegacyHandoff: CloudflareLegacyHandoffStatus;
 }
-
-// Keep this small enough that a tick with many failures still produces a
-// bounded readiness body, but large enough that an operator can usually
-// see every failing provider at the 15-minute cadence.
-const FAILED_PROVIDERS_SUMMARY_CAP = 5;
 
 export interface SchedulerRuntimeStatus {
   startedAt: string | null;
@@ -157,22 +134,6 @@ const state =
 function normalizeSchedulerRunSummary(
   summary: SchedulerRunSummary
 ): SchedulerRunSummary {
-  // Filter + cap failedProviders so the readiness body is bounded and a
-  // caller cannot push arbitrarily large lists through this path. Whitelist
-  // of fields is intentional - any future addition to SchedulerRunSummary
-  // has to be added here explicitly so a leak through a stale summary
-  // cannot surface arbitrary caller-supplied data on /api/ready.
-  const failedProviders = Array.isArray(summary.failedProviders)
-    ? summary.failedProviders
-        .filter(
-          (entry): entry is SchedulerRunFailedProvider =>
-            !!entry &&
-            typeof entry.id === "string" &&
-            typeof entry.name === "string" &&
-            typeof entry.errorCode === "string"
-        )
-        .slice(0, FAILED_PROVIDERS_SUMMARY_CAP)
-    : undefined;
   return {
     total: summary.total,
     successes: summary.successes,
@@ -180,7 +141,6 @@ function normalizeSchedulerRunSummary(
     skipped: summary.skipped,
     maintenanceHealthy: summary.maintenanceHealthy,
     providerFetchDegraded: summary.providerFetchDegraded,
-    ...(failedProviders ? { failedProviders } : {}),
     cloudflareLegacyHandoff: summary.cloudflareLegacyHandoff,
   };
 }
