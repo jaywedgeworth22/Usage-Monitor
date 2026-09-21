@@ -1,7 +1,12 @@
 import type { EventHint } from "@sentry/core";
 import { describe, expect, it } from "vitest";
 
-import { sentryBeforeSend } from "../sentry-scrubber";
+import {
+  sentryBeforeSend,
+  sentryBeforeSendLog,
+  sentryBeforeSendMetric,
+  sentryBeforeSendTransaction,
+} from "../sentry-scrubber";
 
 const NO_HINT: EventHint = {};
 
@@ -41,10 +46,12 @@ describe("sentryBeforeSend", () => {
     expect(typed.request.headers.authorization).toBe("[REDACTED]");
   });
 
-  it("preserves Sentry SDK-internal key names that look sensitive (public_key, etc.)", () => {
-    // Codex review P2: Sentry's `dynamicSamplingContext.public_key` must
-    // NOT be redacted or dynamic sampling breaks. Public keys are
-    // non-secret identifiers required for trace correlation.
+  it("preserves Sentry's dynamicSamplingContext.public_key but redacts application sessionKey", () => {
+    // Codex review P2: `public_key` MUST be preserved (dynamic sampling
+    // breaks otherwise). Codex re-review P2: `sessionKey` is just a
+    // naming coincidence, NOT an SDK-owned field, and treating it as
+    // safe globally would let callers stash credentials under that key
+    // and bypass scrubbing. So sessionKey must now be redacted.
     const result = sentryBeforeSend(
       {
         type: "test" as never,
@@ -55,6 +62,7 @@ describe("sentryBeforeSend", () => {
           },
           requestSession: { status: "ok" },
         } as unknown as Record<string, unknown>,
+        extra: { sessionKey: "stashed-credential-under-this-name" },
       },
       NO_HINT
     );
@@ -64,19 +72,17 @@ describe("sentryBeforeSend", () => {
         dynamicSamplingContext: { public_key: string; trace_id: string };
         requestSession: { status: string };
       };
+      extra: { sessionKey: string };
     };
     expect(typed.sdkProcessingMetadata.dynamicSamplingContext.public_key).toBe(
       "abc123-public-dsn-key"
     );
     expect(typed.sdkProcessingMetadata.dynamicSamplingContext.trace_id).toBe("kept-trace-id");
     expect(typed.sdkProcessingMetadata.requestSession.status).toBe("ok");
+    expect(typed.extra.sessionKey).toBe("[REDACTED]");
   });
 
   it("redacts secrets embedded in URL query strings (Codex P1)", () => {
-    // Codex review P1: `/api/bills.ics?token=...` puts the calendar token
-    // in the request URL string, which lives under a non-sensitive key
-    // (e.g. `request.url` or `transaction`). The key-name scrubber misses
-    // it; the value-pattern scrubber must catch it.
     const result = sentryBeforeSend(
       {
         type: "test" as never,
@@ -99,7 +105,6 @@ describe("sentryBeforeSend", () => {
     );
     expect(typed.transaction).toBe("/api/bills.ics?token=[REDACTED]");
     expect(typed.extra.urlWithMultipleParams).toBe("/api/x?safe=true&token=[REDACTED]&page=1");
-    // Make sure the real secret value did not survive in any field.
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain("real-calendar-token-here");
     expect(serialized).not.toContain("another-real-token");
@@ -107,10 +112,6 @@ describe("sentryBeforeSend", () => {
   });
 
   it("redacts bare query-string credentials without a leading ? (Codex re-review P1)", () => {
-    // Codex re-review P1: Sentry's request normalizer stores
-    // `request.query_string` as the substring after the leading `?`,
-    // so `?token=abc` becomes `token=abc` (bare). The first regex
-    // missed this; the new regex also matches start-of-string.
     const result = sentryBeforeSend(
       {
         type: "test" as never,
@@ -145,12 +146,6 @@ describe("sentryBeforeSend", () => {
   });
 
   it("scrubs Sentry SDK-internal cyclic metadata without recursing (Codex re-review P1)", () => {
-    // Codex re-review P1: real transaction events carry a cyclic
-    // `sdkProcessingMetadata.capturedSpanScope` AND
-    // `capturedSpanIsolationScope` that both point to Sentry Scope
-    // objects. Walking either would loop forever (or throw, bypassing
-    // redaction). The scrubber must replace both with `[SDK_INTERNAL]`
-    // without recursing.
     const cyclicScope: Record<string, unknown> = { type: "Scope" };
     cyclicScope.self = cyclicScope; // cycle
     const cyclicIsolationScope: Record<string, unknown> = { type: "IsolationScope" };
@@ -218,7 +213,6 @@ describe("sentryBeforeSend", () => {
   });
 
   it("does not throw when the input is malformed", () => {
-    // Cyclic input is the realistic failure mode.
     const input: Record<string, unknown> = { extra: {} };
     input.extra = input; // cycle
     expect(() =>
@@ -227,5 +221,78 @@ describe("sentryBeforeSend", () => {
         NO_HINT
       )
     ).not.toThrow();
+  });
+});
+
+describe("sentryBeforeSendTransaction", () => {
+  it("scrubs transaction events using the same key-name + URL regex", () => {
+    // Mirror the error-path test for the transaction path so we never
+    // regress the scrubber contract there.
+    const result = sentryBeforeSendTransaction(
+      {
+        type: "transaction" as never,
+        transaction: "/api/bills.ics?token=tx-token",
+        sdkProcessingMetadata: {
+          dynamicSamplingContext: { public_key: "abc" },
+          capturedSpanScope: (() => {
+            const c: Record<string, unknown> = {};
+            c.self = c;
+            return c;
+          })(),
+        } as unknown as Record<string, unknown>,
+      } as unknown as Parameters<typeof sentryBeforeSendTransaction>[0],
+      NO_HINT
+    );
+    expect(result).not.toBeNull();
+    const typed = result as unknown as {
+      transaction: string;
+      sdkProcessingMetadata: {
+        dynamicSamplingContext: { public_key: string };
+        capturedSpanScope: string;
+      };
+    };
+    expect(typed.transaction).toBe("/api/bills.ics?token=[REDACTED]");
+    expect(typed.sdkProcessingMetadata.dynamicSamplingContext.public_key).toBe("abc");
+    expect(typed.sdkProcessingMetadata.capturedSpanScope).toBe("[SDK_INTERNAL]");
+  });
+});
+
+describe("sentryBeforeSendLog", () => {
+  it("scrubs log payloads from Sentry.logger.* calls (Codex re-review P2)", () => {
+    // This is the explicit motivation for the scrubber: logIngestFailed
+    // in src/lib/sentry-ops.ts routes through Sentry.logger, and the
+    // attributes it passes (route, reason, etc.) could carry user data
+    // in future regressions.
+    const result = sentryBeforeSendLog({
+      message: { formatted: "ingest failed" },
+      attributes: {
+        route: "ingest/usage",
+        reason: "Error",
+        apiToken: "stashed",
+      },
+    } as unknown as Parameters<typeof sentryBeforeSendLog>[0]);
+    expect(result).not.toBeNull();
+    const typed = result as unknown as {
+      attributes: Record<string, unknown>;
+    };
+    expect(typed.attributes.route).toBe("ingest/usage");
+    expect(typed.attributes.reason).toBe("Error");
+    expect(typed.attributes.apiToken).toBe("[REDACTED]");
+  });
+});
+
+describe("sentryBeforeSendMetric", () => {
+  it("scrubs metric payloads from Sentry.metrics.* calls (Codex re-review P2)", () => {
+    const result = sentryBeforeSendMetric({
+      name: "ingest.failed",
+      attributes: {
+        route: "ingest/usage",
+        apiKey: "stashed",
+      },
+    } as unknown as Parameters<typeof sentryBeforeSendMetric>[0]);
+    expect(result).not.toBeNull();
+    const typed = result as unknown as { attributes: Record<string, unknown> };
+    expect(typed.attributes.route).toBe("ingest/usage");
+    expect(typed.attributes.apiKey).toBe("[REDACTED]");
   });
 });

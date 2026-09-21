@@ -19,7 +19,8 @@
  *      strings like `?token=...` and `&token=...` and replaced. The
  *      redaction applies to the parameter value, not the whole string.
  *      Bare `key=value` (no leading `?`) is also matched because Sentry's
- *      request normalizer stores `request.query_string` without the `?`.
+ *      request normalizer stores `request.query_string` after slicing the
+ *      leading `?`.
  *   3. SDK-internal field skip — certain cyclic metadata fields
  *      (`capturedSpanScope`, etc.) are scrubbed by identity (`===`) on the
  *      key path, not by recursion, so we never walk into Sentry's cyclic
@@ -29,14 +30,30 @@
  * Contract: return `null` to drop the event, or the (possibly mutated) event
  * to keep it. We never throw from here.
  */
-import type { ErrorEvent, EventHint, TransactionEvent } from "@sentry/core";
+import type {
+  ErrorEvent,
+  EventHint,
+  Log,
+  Metric,
+  TransactionEvent,
+} from "@sentry/core";
 
 // Key-name substrings that always trigger redaction. Lowercased.
 const SENSITIVE_KEY_SUBSTRINGS = ["token", "secret", "key", "password", "passwd", "auth"];
 
 // Key-name substrings that LOOK sensitive but are SDK/protocol internals and
 // must be preserved. Each entry is matched against the lowercase key name.
-const SENSITIVE_BUT_SAFE_KEY_SUBSTRINGS = ["public_key", "publickey", "sessionkey"];
+//
+// Only true SDK-owned non-secret identifiers belong here. `public_key` is
+// the DSN public key used by Sentry's dynamic-sampling context — it is a
+// NON-secret identifier required for trace correlation.
+//
+// Note: `sessionKey` was previously in this list but was removed (Codex
+// re-review P2, observed 2026-09-20): sessionKey is just a naming
+// coincidence, not an SDK-owned field, and treating it as safe globally
+// would let any caller stash a credential under that key and bypass
+// scrubbing.
+const SENSITIVE_BUT_SAFE_KEY_SUBSTRINGS = ["public_key", "publickey"];
 
 // Regex for URL query-string redaction. Matches three cases:
 //   - `?name=value` (URL with query string)
@@ -137,5 +154,36 @@ export function sentryBeforeSendTransaction(
     return scrubObject(event);
   } catch {
     return event;
+  }
+}
+
+/**
+ * `beforeSendLog` hook for Sentry 10.74's logger payload family. Same
+ * scrubber contract; the SDK uses this hook to sanitize logs produced by
+ * `Sentry.logger.*` calls (the explicit motivation for this scrubber,
+ * since `logIngestFailed` in `src/lib/sentry-ops.ts` routes through
+ * `Sentry.logger`). Never throws.
+ */
+export function sentryBeforeSendLog(log: Log): Log | null {
+  try {
+    if (!log || typeof log !== "object") return log;
+    return scrubObject(log);
+  } catch {
+    return log;
+  }
+}
+
+/**
+ * `beforeSendMetric` hook for Sentry 10.74's metrics payload family.
+ * Mirrors the log hook — counters and gauges that callers might label
+ * with sensitive substrings pass through the same key-name / value-pattern
+ * redaction. Never throws.
+ */
+export function sentryBeforeSendMetric(metric: Metric): Metric | null {
+  try {
+    if (!metric || typeof metric !== "object") return metric;
+    return scrubObject(metric);
+  } catch {
+    return metric;
   }
 }
