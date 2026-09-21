@@ -346,6 +346,20 @@ export async function POST(request: NextRequest) {
       "[otlp/metrics] unhandled failure:",
       error instanceof Error ? error.message : error
     );
+    // Audit 2026-09-20 (board item c0fe8d9c): the ingest/usage sibling route
+    // emits ingest.failed via Sentry.logger + Sentry.metrics + the fleet-infra
+    // mirror. Mirror the same observability here so the OTLP path is not a
+    // silent failure sink (Codex re-review found the same gap on the
+    // beforeSend hooks; this is the same shape, different layer).
+    try {
+      const { logIngestFailed } = await import("@/lib/sentry-ops");
+      void logIngestFailed({
+        reason: error instanceof Error ? error.name : "unknown",
+        route: "otlp/metrics",
+      });
+    } catch {
+      // Sentry is best-effort; never let observability break the response.
+    }
     return NextResponse.json(
       {
         ok: false,
