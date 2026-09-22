@@ -16,7 +16,7 @@ import SafariServices
 typealias PlatformViewController = NSViewController
 #endif
 
-let extensionBundleIdentifier = "services.jays.usage.monitor.safari.Extension"
+let extensionBundleIdentifier = "com.simplewithus.usagemonitor.macos.safari.Extension"
 
 class ViewController: PlatformViewController, WKNavigationDelegate, WKScriptMessageHandler {
 

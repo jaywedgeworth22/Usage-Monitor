@@ -6,6 +6,8 @@
 
 Both apps already exist in ASC with version **1.0** in `PREPARE_FOR_SUBMISSION` and VALID TestFlight builds. This pack is the copy, privacy answers, review notes, and screenshot plan agents/humans paste into ASC (or push via `scripts/asc-push-listing.rb`).
 
+> **2026-09-22 [MM] bundle-ID migration note:**  Bundle IDs and App Groups below match the post-rename state (`com.simplewithus.usagemonitor.ios` / `com.simplewithus.usagemonitor.local.ios`, App Group `group.com.simplewithus.usagemonitor`).  The pre-rename `services.jays.usage.*` references shown in this older pack's history are historical; do not double-paste them into the renamed ASC records — the next build will ship under the new IDs.  See `docs/rollouts/2026-09-22-bundle-id-migration.md`.
+
 Public legal URLs (must stay unauthenticated):
 
 | Purpose | URL |
@@ -27,8 +29,8 @@ Contact (review): Jay Wedgeworth · mail@jays.services · +1 956-420-0244
 | Price | Free |
 | Invalid Binary note | See `docs/rollouts/2026-08-11-local-invalid-binary.md` — TF VALID ≠ App Store review; beta macOS host is likely remaining blocker |
 | Content rights | Does not contain, show, or access third-party content that requires special licensing beyond user-configured APIs |
-| App Groups (Local) | `group.services.jays.usage.local.monitor` — must appear on **App Store** provisioning profile (not empty `[]`) |
-| App Groups (Client) | `group.services.jays.usage.client.monitor` on app + widget App Store profiles |
+| App Groups (Local) | `group.com.simplewithus.usagemonitor` — must appear on **App Store** provisioning profile (not empty `[]`) |
+| App Groups (Client) | `group.com.simplewithus.usagemonitor` on app + widget App Store profiles (single App Group shared across Client + Local + widget + iOS Safari extension) |
 | PrivacyInfo | Bundle `PrivacyInfo.xcprivacy` in app (+ widget). Required-reason: file timestamp `C617.1`, disk space `E174.1` |
 | Export compliance | Uses only exempt encryption (HTTPS / Keychain / CryptoKit standard). `ITSAppUsesNonExemptEncryption = false` |
 | Age rating | 4+ — all questionnaire items None / No (no UGC, no unrestricted web browser, no gambling, etc.) |
@@ -41,7 +43,7 @@ Contact (review): Jay Wedgeworth · mail@jays.services · +1 956-420-0244
 | | |
 |--|--|
 | **ASC name** | Usage Client Monitor |
-| **Bundle ID** | `services.jays.usage.client.monitor` |
+| **Bundle ID** | `com.simplewithus.usagemonitor.ios` |
 | **SKU** | `usage-client-monitor` |
 | **ASC app id** | `6799230435` |
 | **Version id (1.0)** | `4dd15570-c956-4895-93f3-d3e7adc21080` |
@@ -125,7 +127,7 @@ Declare data types only if the app *by design* sends them off-device: budget JSO
 | | |
 |--|--|
 | **ASC name** | Usage Local Monitor |
-| **Bundle ID** | `services.jays.usage.local.monitor` |
+| **Bundle ID** | `com.simplewithus.usagemonitor.local.ios` |
 | **SKU** | `usage-local-monitor` |
 | **ASC app id** | `6799230729` |
 | **Version id (1.0)** | `7ddabffc-9fbd-413d-addd-34476fa5cefd` |

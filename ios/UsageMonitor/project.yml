@@ -1,5 +1,17 @@
 name: UsageMonitor
 
+# 2026-09-22 bundle-ID migration: every PRODUCT_BUNDLE_IDENTIFIER below was
+# `services.jays.usage.*` and is now `com.simplewithus.usagemonitor.*`.  The
+# companion entitlements files (`App/Resources/UsageMonitor.entitlements`,
+# `LocalApp/Resources/LocalUsageMonitor.entitlements`,
+# `UsageMonitorWidget/UsageMonitorWidget.entitlements`,
+# `iOS (Extension)/Usage Monitor Safari iOS Extension.entitlements`) gained
+# `com.apple.security.application-groups: [group.com.simplewithus.usagemonitor]`
+# and the Safari extension also gained
+# `com.apple.developer.associated-domains: [applinks:usage-monitor.com,
+# webcredentials:usage-monitor.com]`.  See
+# `docs/rollouts/2026-09-22-bundle-id-migration.md`.
+
 # ---------------------------------------------------------------------------
 # XcodeGen spec for the Usage Monitor iOS app.
 #
@@ -14,7 +26,7 @@ name: UsageMonitor
 # ---------------------------------------------------------------------------
 
 options:
-  bundleIdPrefix: services.jays.usage
+  bundleIdPrefix: com.simplewithus.usagemonitor
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
@@ -60,7 +72,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: UsageMonitor
-        PRODUCT_BUNDLE_IDENTIFIER: services.jays.usage.client.monitor
+        PRODUCT_BUNDLE_IDENTIFIER: com.simplewithus.usagemonitor.ios
         DEVELOPMENT_TEAM: CC8UTF7ATG
         INFOPLIST_FILE: App/Resources/Info.plist
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
@@ -123,7 +135,7 @@ targets:
       base:
         # Distinct product name + bundle ID so Xcode never overwrites the remote client.
         PRODUCT_NAME: LocalUsageMonitor
-        PRODUCT_BUNDLE_IDENTIFIER: services.jays.usage.local.monitor
+        PRODUCT_BUNDLE_IDENTIFIER: com.simplewithus.usagemonitor.local.ios
         DEVELOPMENT_TEAM: CC8UTF7ATG
         INFOPLIST_FILE: LocalApp/Resources/Info.plist
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
@@ -165,7 +177,7 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: services.jays.usage.client.monitor.widget
+        PRODUCT_BUNDLE_IDENTIFIER: com.simplewithus.usagemonitor.ios.widget
         DEVELOPMENT_TEAM: CC8UTF7ATG
         INFOPLIST_FILE: UsageMonitorWidget/Info.plist
         CODE_SIGN_ENTITLEMENTS: UsageMonitorWidget/UsageMonitorWidget.entitlements
@@ -189,7 +201,7 @@ targets:
       - path: UsageMonitorTests
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: services.jays.usage.client.monitor.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.simplewithus.usagemonitor.ios.tests
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: UsageMonitor
@@ -208,7 +220,7 @@ targets:
       - path: UsageMonitorWidget/WidgetPresentation.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: services.jays.usage.client.monitor.widgettests
+        PRODUCT_BUNDLE_IDENTIFIER: com.simplewithus.usagemonitor.ios.widgettests
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - package: UsageMonitorKit

@@ -4,8 +4,8 @@ Two App Store products that share kit code but **not** money-truth or identity.
 
 | App (user-visible name) | Scheme | Bundle ID | Purpose |
 |---|---|---|---|
-| **Usage Client Monitor** | `UsageMonitor` | `services.jays.usage.client.monitor` | Live-sync **client** of a Usage Monitor **server** you host (or the owner fleet). Widget: `services.jays.usage.client.monitor.widget`. |
-| **Usage Local Monitor** | `LocalUsageMonitor` | `services.jays.usage.local.monitor` | **Free App Store candidate** — on-device only. Keys in Keychain; budgets in local SQLite. **No server required.** |
+| **Usage Client Monitor** | `UsageMonitor` | `com.simplewithus.usagemonitor.ios` | Live-sync **client** of a Usage Monitor **server** you host (or the owner fleet). Widget: `com.simplewithus.usagemonitor.ios.widget`. |
+| **Usage Local Monitor** | `LocalUsageMonitor` | `com.simplewithus.usagemonitor.local.ios` | **Free App Store candidate** — on-device only. Keys in Keychain; budgets in local SQLite. **No server required.** |
 
 User-facing copy uses the **plain app name** only. Show `name` + `bundle ID` together only on identity/debug surfaces.
 
@@ -16,8 +16,8 @@ Binding contract: [`UsageMonitor/ARCHITECTURE-CONTRACT.md`](UsageMonitor/ARCHITE
 
 | | Usage Client Monitor | Usage Local Monitor |
 |---|---|---|
-| Bundle ID | `services.jays.usage.client.monitor` | `services.jays.usage.local.monitor` |
-| App group | `group.services.jays.usage.client.monitor` | `group.services.jays.usage.local.monitor` |
+| Bundle ID | `com.simplewithus.usagemonitor.ios` | `com.simplewithus.usagemonitor.local.ios` |
+| App group | `group.com.simplewithus.usagemonitor` | `group.com.simplewithus.usagemonitor` |
 | Deep link | `usageclientmonitor://` | `usagelocalmonitor://` |
 | ASC name | Usage Client Monitor | Usage Local Monitor |
 | ASC SKU | `usage-client-monitor` | `usage-local-monitor` |
@@ -45,8 +45,8 @@ xcodebuild -scheme LocalUsageMonitor -destination 'generic/platform=iOS Simulato
 
 | Scheme | Bundle ID | Home-screen name |
 |---|---|---|
-| `UsageMonitor` | `services.jays.usage.client.monitor` | Usage Client Monitor |
-| `LocalUsageMonitor` | `services.jays.usage.local.monitor` | Usage Local Monitor |
+| `UsageMonitor` | `com.simplewithus.usagemonitor.ios` | Usage Client Monitor |
+| `LocalUsageMonitor` | `com.simplewithus.usagemonitor.local.ios` | Usage Local Monitor |
 
 1. Scheme menu → **UsageMonitor** → Run.  
 2. Stop or leave running.  
@@ -58,6 +58,13 @@ Delete any old install under legacy IDs if you tested earlier:
 - `services.jays.usage.monitor`
 - `services.jays.usage.monitor.local`
 - `services.jays.local.usage.monitor`
+- `services.jays.usage.client.monitor` (pre-2026-09-22 bundle ID)
+- `services.jays.usage.local.monitor` (pre-2026-09-22 bundle ID)
+- `services.jays.usage.client.monitor.widget` (pre-2026-09-22 widget)
+- `services.jays.usage.client.monitor.widgettests` (pre-2026-09-22 widget tests)
+- `services.jays.usage.client.monitor.tests` (pre-2026-09-22 tests)
+- `services.jays.usage.monitor.safari.Extension` (pre-2026-09-22 Safari extension)
+- `services.jays.usage.monitor.safari` (pre-2026-09-22 Safari host app)
 
 Canonical IDs are only the **client** / **local** rows in the table above.
 

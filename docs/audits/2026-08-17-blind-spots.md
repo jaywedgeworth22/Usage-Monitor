@@ -3,6 +3,8 @@
 **Date:** 2026-08-17
 **Panel:** product strategy, test architecture / code quality, billing-finance nuance, receipt / email workflows, privacy (data lifecycle), accessibility, i18n / currencies, vendor lock-in, monitor cost efficiency, documentation, observability, plus leftover domains not owned by sibling reviews.
 **Method:** Read-only static review at `8db78b58`.  Findings cite paths and line numbers from this checkout.  No production mutations.  No secret values.
+
+> **[ARCHAEOLOGY / pre-2026-09-22]**  Bundle IDs `services.jays.usage.*` referenced below are the pre-2026-09-22 fleet-wide bundle-ID state and have not been retconned.  Canonical IDs after the fleet-wide rename: `com.simplewithus.usagemonitor.ios` (Client), `com.simplewithus.usagemonitor.local.ios` (Local), App Group `group.com.simplewithus.usagemonitor`.  See `docs/rollouts/2026-09-22-bundle-id-migration.md`.
 **Keepout:** Provider-adapter accuracy, backend / SQLite / Litestream durability, auth / token / crypto security, web / iOS UX polish, and burn-rate / EOM / anomaly projection math are owned by concurrent 2026-08-17 audits.  Those topics appear here only when a second-order assumption in *this* panel's domains would otherwise be missed.
 
 **Sibling cloud agents (same day, same repo):** providers accuracy, outcomes / projections, security / privacy (exploit/auth), backend durability, web / iOS parity.

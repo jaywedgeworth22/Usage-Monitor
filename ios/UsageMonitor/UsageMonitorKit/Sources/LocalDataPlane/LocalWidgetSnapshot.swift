@@ -3,9 +3,17 @@ import LocalBudget
 import WidgetShared
 
 /// Writes BudgetEngine summary into the **Local** app-group widget file.
-/// Uses a dedicated group id so Local never overwrites the remote client widget.
+/// Shares the unified `group.com.simplewithus.usagemonitor` container with the
+/// remote client; the legacy separate-group separation is gone after the
+/// 2026-09-22 bundle-ID migration.  Local writes its own
+/// `local-widget-snapshot.json` filename (not `widget-snapshot.json` — that
+/// is the client's legacy filename and is actively deleted by
+/// `WidgetShared.SharedStore.cleanupLegacyData()` / `clear()` on every
+/// client write), and the client writes `widget-snapshot-v2.json`, so the
+/// two snapshots coexist inside the shared container without the client
+/// cleanup path wiping Local's payload.
 public enum LocalAppGroup {
-    public static let identifier = "group.services.jays.usage.local.monitor"
+    public static let identifier = "group.com.simplewithus.usagemonitor"
 
     public static var containerURL: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
@@ -20,7 +28,7 @@ public enum LocalAppGroup {
 }
 
 public enum LocalWidgetSnapshotWriter {
-    private static let fileName = "widget-snapshot.json"
+    private static let fileName = "local-widget-snapshot.json"
 
     public static func write(from summary: BudgetEngine.Summary, now: Date = Date()) {
         guard let dir = LocalAppGroup.containerURL else { return }
