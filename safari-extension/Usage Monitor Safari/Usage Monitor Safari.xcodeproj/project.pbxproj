@@ -598,7 +598,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.safari.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.ios.safari.Extension;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -632,7 +632,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.safari.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.ios.safari.Extension;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -750,7 +750,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.safari.macos;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.macos.safari.Extension;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -785,7 +785,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.safari.macos;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.macos.safari.Extension;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;

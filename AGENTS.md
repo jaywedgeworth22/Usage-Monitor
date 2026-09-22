@@ -10,9 +10,9 @@
 > - iOS Widget: `com.simplewithus.usagemonitor.ios.widget`
 > - iOS unit tests: `com.simplewithus.usagemonitor.ios.tests`
 > - iOS widget unit tests: `com.simplewithus.usagemonitor.ios.widgettests`
-> - iOS Safari extension: `com.simplewithus.usagemonitor.safari.ios`
+> - iOS Safari extension: `com.simplewithus.usagemonitor.ios.safari.Extension`
 > - iOS Safari host app: `com.simplewithus.usagemonitor.ios.safari`
-> - macOS Safari extension: `com.simplewithus.usagemonitor.safari.macos`
+> - macOS Safari extension: `com.simplewithus.usagemonitor.macos.safari.Extension`
 > - macOS Safari host app: `com.simplewithus.usagemonitor.macos.safari`
 > - Single App Group (shared across all Usage-Monitor iOS surfaces): `group.com.simplewithus.usagemonitor`
 > - Associated Domain on iOS Safari extension: `applinks:usage-monitor.com` + `webcredentials:usage-monitor.com`
