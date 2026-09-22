@@ -6,7 +6,10 @@
 	<array>
 		<string>group.com.simplewithus.usagemonitor</string>
 	</array>
-	<key>aps-environment</key>
-	<string>development</string>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:usage-monitor.com</string>
+		<string>webcredentials:usage-monitor.com</string>
+	</array>
 </dict>
 </plist>

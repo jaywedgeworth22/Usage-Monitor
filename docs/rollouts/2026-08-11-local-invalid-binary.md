@@ -1,5 +1,7 @@
 # 2026-08-11 — Usage Local / Client Invalid Binary (ASC)
 
+> **[ARCHAEOLOGY / pre-2026-09-22]**  Bundle IDs and App Group `services.jays.usage.client.monitor` / `services.jays.usage.local.monitor` / `group.services.jays.usage.local.monitor` referenced below are the pre-2026-09-22 fleet-wide bundle-ID state and have not been retconned.  Canonical IDs after the fleet-wide rename: `com.simplewithus.usagemonitor.ios`, `com.simplewithus.usagemonitor.local.ios`, App Group `group.com.simplewithus.usagemonitor`.  See `docs/rollouts/2026-09-22-bundle-id-migration.md`.
+
 ## Symptom
 App Store Connect History: `Waiting for Review` → `Invalid Binary` within
 minutes. TestFlight builds remain `VALID`. After rejection, the version returns

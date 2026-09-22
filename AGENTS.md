@@ -3,6 +3,22 @@
 
 > **Note:** The macOS Agent Quotas menu bar app has been extracted into its own repository and is now called **[AgentBar](https://github.com/jaywedgeworth22/agent-bar)**. The `macos/` folder in this repo is kept for historical reference only.
 
+
+> **[!IMPORTANT] 2026-09-22 bundle-ID migration — see [`docs/rollouts/2026-09-22-bundle-id-migration.md`](docs/rollouts/2026-09-22-bundle-id-migration.md).**  All iOS bundle IDs were renamed from `services.jays.usage.*` to `com.simplewithus.usagemonitor.*`.  Active canonical IDs:
+> - iOS Usage Client Monitor: `com.simplewithus.usagemonitor.ios`
+> - iOS Usage Local Monitor: `com.simplewithus.usagemonitor.local.ios`
+> - iOS Widget: `com.simplewithus.usagemonitor.ios.widget`
+> - iOS unit tests: `com.simplewithus.usagemonitor.ios.tests`
+> - iOS widget unit tests: `com.simplewithus.usagemonitor.ios.widgettests`
+> - iOS Safari extension: `com.simplewithus.usagemonitor.safari.ios`
+> - iOS Safari host app: `com.simplewithus.usagemonitor.ios.safari`
+> - macOS Safari extension: `com.simplewithus.usagemonitor.safari.macos`
+> - macOS Safari host app: `com.simplewithus.usagemonitor.macos.safari`
+> - Single App Group (shared across all Usage-Monitor iOS surfaces): `group.com.simplewithus.usagemonitor`
+> - Associated Domain on iOS Safari extension: `applinks:usage-monitor.com` + `webcredentials:usage-monitor.com`
+>
+> Archaeology: pre-2026-09-22 `services.jays.usage.*` references in pre-rename `docs/rollouts/*`, `docs/audits/*`, and pre-2026-09-22 rows of `docs/EFFORT-LOG.md` + `STATUS.md` are historical record — each carries a dated archaeology note at the top of the file.  Do not rename them.
+
 ## Codex Cloud protocol bootstrap
 
 Run `bash .codex/setup.sh` during cloud provisioning and `bash .codex/maintenance.sh` on
@@ -594,8 +610,8 @@ Dispatch:
 gh workflow run ios-ship.yml
 ```
 
-Bundle IDs `services.jays.usage.client.monitor` (Usage Client Monitor) and
-`services.jays.usage.local.monitor` (Usage Local Monitor), team `CC8UTF7ATG`.
+Bundle IDs `com.simplewithus.usagemonitor.ios` (Usage Client Monitor) and
+`com.simplewithus.usagemonitor.local.ios` (Usage Local Monitor), team `CC8UTF7ATG`.
 Do not mint a new App Store Connect key. Do not exec
 `/Users/jay/apps/ios-fleet/ship-testflight.sh` from a cloud seat -- that path
 does not exist on hosted runners.

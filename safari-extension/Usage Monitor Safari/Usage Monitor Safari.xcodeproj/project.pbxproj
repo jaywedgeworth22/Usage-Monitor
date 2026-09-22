@@ -580,6 +580,7 @@
 		6909BA913010734700C7D51A /* Debug configuration for PBXNativeTarget "Usage Monitor Safari Extension (iOS)" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "iOS (Extension)/Usage Monitor Safari iOS Extension.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -597,7 +598,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.safari.Extension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.safari.ios;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -613,6 +614,7 @@
 		6909BA923010734700C7D51A /* Release configuration for PBXNativeTarget "Usage Monitor Safari Extension (iOS)" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "iOS (Extension)/Usage Monitor Safari iOS Extension.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -630,7 +632,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.safari.Extension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.safari.ios;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -671,7 +673,7 @@
 					"-framework",
 					WebKit,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.safari;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.ios.safari;
 				PRODUCT_NAME = "Usage Monitor Safari";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -711,7 +713,7 @@
 					"-framework",
 					WebKit,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.safari;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.ios.safari;
 				PRODUCT_NAME = "Usage Monitor Safari";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -748,7 +750,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.safari.Extension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.safari.macos;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -783,7 +785,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.safari.Extension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.safari.macos;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -823,7 +825,7 @@
 					"-framework",
 					WebKit,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.safari;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.macos.safari;
 				PRODUCT_NAME = "Usage Monitor Safari";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
@@ -864,7 +866,7 @@
 					"-framework",
 					WebKit,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = services.jays.usage.monitor.safari;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.macos.safari;
 				PRODUCT_NAME = "Usage Monitor Safari";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
