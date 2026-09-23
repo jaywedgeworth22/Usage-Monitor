@@ -34,6 +34,12 @@ The Safari IDs are not named in the owner's message; they follow the same base w
 3. **Local data migration that could not work.**  `LocalDataMigration.swift` looked for `local.sqlite` in an old App Group container.  The old Local app kept it in its own sandbox (`applicationSupportDirectory/LocalUsageMonitor/local.sqlite`), which a renamed app cannot read, and its Keychain provider keys do not carry over either.  Both apps are TestFlight-only, so the helper and its call in `LocalAppModel.bootstrap()` are removed.  A renamed install starts with an empty Local store; testers re-add providers.
 4. **Wrong App IDs and capability mapping in the provisioning steps.**  #1524's owner steps listed Safari extension App IDs no target uses and put the App Group and Associated Domains on the wrong iOS ID.  The correct list is below.  The iOS Safari extension's App Group entitlement is also removed: no extension code reads the group, so it only added a portal capability for nothing.
 
+## Follow-up: macOS settings migration (post-merge review of #1525)
+
+The macOS bundle ID change also moves `UserDefaults.standard` to the new domain.  `TokenStore` keeps the legacy Keychain service, so the token survives, but `MonitorModel` reads `displayMode`, `quotaViewLayout`, `localEnabled`, `serverEnabled`, `endpoint` and `hasSavedToken` from the new, empty domain.  An in-place `build_and_run.sh --install` would lose the server connection and saved layout.
+
+`LegacyDefaultsMigration` in `AppDelegate.swift` runs in `UsageMonitorMain.main()` before `MonitorModel` is created.  If `migratedFromLegacyBundleID` is not set, it copies those six keys from the `com.jays.usage-monitor.mac` domain for any key missing under the new ID, then sets the marker.  It never overwrites a value already in the new domain and leaves the legacy domain in place.  This relies on the macOS app not being sandboxed: it is ad-hoc signed by the script with no entitlements.  No test added: the `UsageMonitorMenu` executable target has no test target.
+
 ## Owner steps (not done by this PR)
 
 1. **Apple Developer Portal — register explicit App IDs:**
