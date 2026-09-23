@@ -55,16 +55,36 @@ echo "== apps.json Apple IDs =="
 eval "$(python3 - "$APPS" <<'PY'
 import json, sys
 apps = json.load(open(sys.argv[1]))["apps"]
-print(f"usage_appleId={apps.get('usage', {}).get('appleId', '')}")
-print(f"usage_local_appleId={apps.get('usage-local', {}).get('appleId', '')}")
+def s(v):
+    return "" if v is None else str(v)
+print(f"usage_appleId={s(apps.get('usage', {}).get('appleId'))}")
+print(f"usage_local_appleId={s(apps.get('usage-local', {}).get('appleId'))}")
+print(f"usage_pending={s(apps.get('usage', {}).get('ascRecordPending'))}")
+print(f"usage_local_pending={s(apps.get('usage-local', {}).get('ascRecordPending'))}")
 print(f"socratic_appleId={apps.get('socratic', {}).get('appleId', '')}")
 print(f"congress_appleId={apps.get('congress', {}).get('appleId', '')}")
 print(f"dealdex_appleId={apps.get('dealdex', {}).get('appleId', '')}")
 print(f"dealdex_bundleId={apps.get('dealdex', {}).get('bundleId', '')}")
 PY
 )"
-check "usage appleId" "6799230435" "${usage_appleId}"
-check "usage-local appleId" "6799230729" "${usage_local_appleId}"
+# Usage + Local moved to com.simplewithus.usage.{client,local} on 2026-09-23.
+# Their old Apple IDs (6799230435 / 6799230729) belong to the retired
+# services.jays.usage.* records and must not come back; the new App Store
+# Connect records are pending, so appleId stays empty and the ship is refused.
+check "usage appleId pending (empty)" "" "${usage_appleId}"
+check "usage-local appleId pending (empty)" "" "${usage_local_appleId}"
+check "usage ascRecordPending" "True" "${usage_pending}"
+check "usage-local ascRecordPending" "True" "${usage_local_pending}"
+if grep -Eq '6799230435|6799230729' "$APPS"; then
+  check "old Usage Apple IDs gone from apps.json" "absent" "present"
+else
+  check "old Usage Apple IDs gone from apps.json" "absent" "absent"
+fi
+if grep -q 'ascRecordPending' "${SCRIPT_DIR}/ios-fleet/ship-testflight.sh"; then
+  check "ship-testflight refuses pending ASC records" "present" "present"
+else
+  check "ship-testflight refuses pending ASC records" "present" "absent"
+fi
 check "socratic appleId" "6799238379" "${socratic_appleId}"
 check "congress appleId" "6798076688" "${congress_appleId}"
 check "live DealDex bundle" "net.dealdex" "${dealdex_bundleId}"

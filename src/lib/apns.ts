@@ -33,7 +33,7 @@ export const APNS_ENDPOINTS = {
 
 export const APNS_TOKEN_REFRESH_MS = 50 * 60_000;
 export const APNS_COLLAPSE_ID_MAX = 64;
-export const DEFAULT_APNS_BUNDLE_ID = "com.simplewithus.usagemonitor.ios";
+export const DEFAULT_APNS_BUNDLE_ID = "com.simplewithus.usage.client";
 
 export type ApnsEnvSource = Record<string, string | undefined>;
 
@@ -119,10 +119,10 @@ export function decodeApnsPrivateKeyPem(raw: string): string | null {
 }
 
 export function loadApnsConfig(env: ApnsEnvSource = process.env): ApnsConfig | null {
-  // Production uses the renamed bundle ID (set in prod Infisical after the
-  // 2026-09-22 fleet bundle-ID migration); the new App ID is
-  // `com.simplewithus.usagemonitor.ios`. The DEFAULT_APNS_BUNDLE_ID fallback
-  // mirrors the iOS target so an un-overridden load picks up the new topic.
+  // The apns-topic is the iOS Client app's bundle ID,
+  // `com.simplewithus.usage.client` (2026-09-23 identifier scheme). Prod sets
+  // APNS_BUNDLE_ID in Infisical; the DEFAULT_APNS_BUNDLE_ID fallback mirrors
+  // the iOS target so an un-overridden load picks up the same topic.
   const keyId = (env.APNS_KEY_ID ?? "").trim();
   const teamId = (env.APNS_TEAM_ID ?? "").trim();
   const bundleId = (env.APNS_BUNDLE_ID ?? DEFAULT_APNS_BUNDLE_ID).trim();

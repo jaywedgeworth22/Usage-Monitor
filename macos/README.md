@@ -34,6 +34,6 @@ swift test --package-path macos
 ./script/build_and_run.sh --install
 ```
 
-`--build-only` stages and ad hoc signs `macos/dist/Usage Monitor.app` without terminating or launching an app.  The default command terminates only the staged app executable, then builds and opens the bundle.  `--install` copies only over an existing bundle with identifier `com.jays.usage-monitor.mac`; it refuses any other bundle.
+`--build-only` stages and ad hoc signs `macos/dist/Usage Monitor.app` without terminating or launching an app.  The default command terminates only the staged app executable, then builds and opens the bundle.  `--install` copies only over an existing bundle with identifier `com.simplewithus.usage.macos` (or the pre-2026-09-23 `com.jays.usage-monitor.mac`, so an older install upgrades in place); it refuses any other bundle.  The app shows as **Usage Monitor for Mac** (`CFBundleDisplayName`); the bundle folder stays `Usage Monitor.app`.  The Keychain service string `com.jays.usage-monitor.mac.read-token` in `TokenStore.swift` is an internal namespace, not a bundle ID, and is unchanged.
 
 Local builds use ad hoc signing for development.  This repository does not claim notarized distribution.

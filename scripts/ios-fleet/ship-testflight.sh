@@ -630,6 +630,13 @@ _EARLY_BUNDLE="$(json_get "$APP_KEY" bundleId)"
 _EARLY_SCHEME="$(json_get "$APP_KEY" scheme)"
 _EARLY_PROJECT="$(json_get "$APP_KEY" projectRel)"
 [[ -n "$_EARLY_BUNDLE" && -n "$_EARLY_SCHEME" && -n "$_EARLY_PROJECT" ]] || die "unknown app key or incomplete registry: $APP_KEY"
+# An app whose bundle ID has no App Store Connect record yet must not ship:
+# an upload would either fail or, worse, pair the new bundle with an old
+# record's Apple ID.  apps.json marks such apps with "ascRecordPending": true
+# and a null appleId until the owner creates the record.
+if [[ "$(json_get "$APP_KEY" ascRecordPending)" == "True" ]]; then
+  die "refusing to ship ${APP_KEY}: no App Store Connect record yet for ${_EARLY_BUNDLE} (apps.json ascRecordPending=true). Create the record, set its appleId in apps.json, drop ascRecordPending, then refresh the pin."
+fi
 
 # Prefer stable Xcode.app over Xcode-beta for TestFlight / ASC compatibility.
 # Beta toolchains + beta macOS stamp BuildMachineOSBuild that App Store review

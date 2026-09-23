@@ -26,11 +26,15 @@ end
 
 APPS = {
   "client" => {
-    app_id: "6799230435",
-    version_id: "4dd15570-c956-4895-93f3-d3e7adc21080",
-    loc_id: "806f8051-efc5-4edf-8527-3ccbdcdb79a3",
-    app_info_id: "37175442-4af6-4a83-aa41-3480401dc6bf",
-    app_info_loc_id: "d9a5a612-f7e9-459b-9fe9-3a89afb19a98",
+    # 2026-09-23: nil until the App Store Connect record for
+    # com.simplewithus.usage.client exists. The old IDs (app 6799230435 and
+    # its version/localization IDs) belong to the retired
+    # services.jays.usage.client.monitor record.
+    app_id: nil,
+    version_id: nil,
+    loc_id: nil,
+    app_info_id: nil,
+    app_info_loc_id: nil,
     name: "Usage Client Monitor",
     subtitle: "Live budgets for API spend",
     promotional_text: "Connect your self-hosted Usage Monitor server. See month-to-date spend, provider budgets, project allocation, and alerts — with Face ID lock and offline widgets.",
@@ -75,11 +79,15 @@ APPS = {
     TXT
   },
   "local" => {
-    app_id: "6799230729",
-    version_id: "7ddabffc-9fbd-413d-addd-34476fa5cefd",
-    loc_id: "09c8eb6b-8f6d-4629-b14b-6e30a5d73da6",
-    app_info_id: "7ae98cc7-dbae-4a35-87f1-008f297c369c",
-    app_info_loc_id: "2d225776-d637-483e-aa1a-690f4b40e3fb",
+    # 2026-09-23: nil until the App Store Connect record for
+    # com.simplewithus.usage.local exists. The old IDs (app 6799230729 and
+    # its version/localization IDs) belong to the retired
+    # services.jays.usage.local.monitor record.
+    app_id: nil,
+    version_id: nil,
+    loc_id: nil,
+    app_info_id: nil,
+    app_info_loc_id: nil,
     name: "Usage Local Monitor",
     subtitle: "On-device API budget tracker",
     promotional_text: "Track OpenRouter, OpenAI, Anthropic, and more on your phone — keys in Keychain, budgets in on-device SQLite. No Usage Monitor server required.",
@@ -319,6 +327,9 @@ options[:apps] = APPS.keys if options[:apps].empty?
 
 options[:apps].each do |key|
   cfg = APPS[key] or abort "unknown app #{key}"
+  if %i[app_id version_id loc_id app_info_id app_info_loc_id].any? { |k| cfg[k].nil? }
+    abort "refusing to push #{key}: its App Store Connect record for the com.simplewithus.usage.* bundle does not exist yet (IDs are nil in APPS)"
+  end
   puts "=== #{key} ==="
   patch_localization(cfg)
   patch_app_info_localization(cfg)

@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.com.simplewithus.usagemonitor</string>
+		<string>group.com.simplewithus.usage</string>
 	</array>
 </dict>
 </plist>

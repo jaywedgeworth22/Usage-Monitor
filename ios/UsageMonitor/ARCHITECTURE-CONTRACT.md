@@ -20,8 +20,8 @@ total spend).
 
 | App target | Bundle ID | Role |
 |---|---|---|
-| **UsageMonitor** (Usage Client Monitor) | `com.simplewithus.usagemonitor.ios` | Remote live-sync client (owner + server self-hosters). §§1–9. |
-| **LocalUsageMonitor** (Usage Local Monitor) | `com.simplewithus.usagemonitor.local.ios` | On-device self-host product. §10 + design doc. |
+| **UsageMonitor** (Usage Client Monitor) | `com.simplewithus.usage.client` | Remote live-sync client (owner + server self-hosters). §§1–9. |
+| **LocalUsageMonitor** (Usage Local Monitor) | `com.simplewithus.usage.local` | On-device self-host product. §10 + design doc. |
 
 See `ios/README.md` and
 `docs/designs/2026-08-04-mobile-parity-and-phone-self-host.md`.
@@ -311,7 +311,7 @@ files under `UsageMonitorKitTests` for their own logic.
 |---|---|---|---|---|---|
 | **AppLock** | `Sources/AppLock/AppLockGate.swift` | `AppLockGate<Content> { … }` (wraps `RootView` in the app target) | `AppCore`, `DesignSystem` | Signature stays `AppLockGate { <content> }`. Read `env.settings.appLockEnabled`; gate with `LAContext.evaluatePolicy`, re-lock on `scenePhase == .background`; pass-through when disabled. `NSFaceIDUsageDescription` already in Info.plist. | Pass-through starter |
 | **OfflineCache** | `Sources/OfflineCache/` (`BudgetDiskCache`, `WidgetSnapshotBuilder`, `WidgetSnapshotStore`) | `BudgetDiskCache` (`save`/`load`/`clear`), `WidgetSnapshotBuilder` budget/LLM/server/Mac/alerts projections, `WidgetSnapshotStore` merge-writes | `Models`, `Networking`, `WidgetShared` | Model-free of AppCore. Budget writes merge into the existing snapshot so LLM, server, and Mac tiles are not wiped. | Working |
-| **WidgetShared** | `Sources/WidgetShared/` (`WidgetSnapshot`, `AppGroup`, `SharedStore`) | `WidgetSnapshot` (+ optional `llm` / `servers` / `mac` / `alerts`, `.placeholder`), `AppGroup`, `SharedStore.shared` (`read`/`write`/`update`) | `DesignSystem` | App group id `group.com.simplewithus.usagemonitor` must match both `.entitlements`. Older snapshots without `llm`/`servers`/`mac`/`alerts` decode as missing sections, not zeros. | Working |
+| **WidgetShared** | `Sources/WidgetShared/` (`WidgetSnapshot`, `AppGroup`, `SharedStore`) | `WidgetSnapshot` (+ optional `llm` / `servers` / `mac` / `alerts`, `.placeholder`), `AppGroup`, `SharedStore.shared` (`read`/`write`/`update`) | `DesignSystem` | App group id `group.com.simplewithus.usage` must match both `.entitlements`. Older snapshots without `llm`/`servers`/`mac`/`alerts` decode as missing sections, not zeros. | Working |
 | **Widget UI** | `UsageMonitorWidget/` (app extension, **not** a Kit target) | `UsageMonitorWidgetBundle` (`@main`), `BudgetSummaryWidget` + dedicated `MacGlanceWidget` / `AlertsGlanceWidget`, `SelectBudgetIntent` topic + focus | `WidgetShared`, `DesignSystem` | Gallery: **Usage Monitor**, **Mac**, **Alerts** (same `.widget` bundle, small/medium/large). **Edit Widget** picks **Budget**, **LLM Quotas**, **Servers**, **Mac**, **Alerts**, or **Providers**. Honest empty/stale when a section is missing. Deep links: dashboard / projects / serverStatus / computers / alerts / providers. Bundle id unchanged. | Working |
 | **PushScaffold** | `Sources/PushScaffold/PushScaffold.swift` | `PushScaffold` enum (`requestAuthorization()`, `configureNotificationCategories()`, `scheduleAlertNotifications(for:)`) | `AppCore`, `Models`, `Networking` | Called from launch. **Local notifications only — remote push (APNs) is NOT implemented.** There is no server device-enrollment endpoint and no APNs sender, so the app must not claim `aps-environment` or `UIBackgroundModes: remote-notification`; `PushScaffoldTests` enforces both. Delivery is `BGTaskScheduler` (`UIBackgroundModes: fetch` + `BGTaskSchedulerPermittedIdentifiers`) → `AlertNotifier.deliver` → `scheduleAlertNotifications`. Adding remote push means adding the server side first, then the client against that real contract. | Working (local only) |
 
@@ -355,8 +355,8 @@ This section binds the **LocalUsageMonitor** app target only. §§1–9 bind
 
 | App | Xcode scheme | Money-truth | App group |
 |---|---|---|---|
-| **UsageMonitor** (Usage Client Monitor) | `UsageMonitor` | Remote server SQLite via HTTPS | `group.com.simplewithus.usagemonitor` |
-| **LocalUsageMonitor** (Usage Local Monitor) | `LocalUsageMonitor` | On-device GRDB (PR-2+) | `group.com.simplewithus.usagemonitor` |
+| **UsageMonitor** (Usage Client Monitor) | `UsageMonitor` | Remote server SQLite via HTTPS | `group.com.simplewithus.usage` |
+| **LocalUsageMonitor** (Usage Local Monitor) | `LocalUsageMonitor` | On-device GRDB (PR-2+) | `group.com.simplewithus.usage` |
 
 - **Do not** merge these into one binary with a runtime switch.
 - Local app must **not** link remote money write paths (`APIClient` mutations,

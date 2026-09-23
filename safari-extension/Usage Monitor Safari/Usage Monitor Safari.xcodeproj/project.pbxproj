@@ -598,7 +598,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.ios.safari.Extension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usage.safari.ios.Extension;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -632,7 +632,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.ios.safari.Extension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usage.safari.ios.Extension;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -673,7 +673,7 @@
 					"-framework",
 					WebKit,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.ios.safari;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usage.safari.ios;
 				PRODUCT_NAME = "Usage Monitor Safari";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -713,7 +713,7 @@
 					"-framework",
 					WebKit,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.ios.safari;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usage.safari.ios;
 				PRODUCT_NAME = "Usage Monitor Safari";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -750,7 +750,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.macos.safari.Extension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usage.safari.macos.Extension;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -785,7 +785,7 @@
 					"-framework",
 					SafariServices,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.macos.safari.Extension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usage.safari.macos.Extension;
 				PRODUCT_NAME = "Usage Monitor Safari Extension";
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
@@ -825,7 +825,7 @@
 					"-framework",
 					WebKit,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.macos.safari;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usage.safari.macos;
 				PRODUCT_NAME = "Usage Monitor Safari";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
@@ -866,7 +866,7 @@
 					"-framework",
 					WebKit,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usagemonitor.macos.safari;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simplewithus.usage.safari.macos;
 				PRODUCT_NAME = "Usage Monitor Safari";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
