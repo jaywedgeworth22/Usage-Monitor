@@ -3,7 +3,7 @@ import LocalBudget
 import WidgetShared
 
 /// Writes BudgetEngine summary into the **Local** app-group widget file.
-/// Shares the unified `group.com.simplewithus.usagemonitor` container with the
+/// Shares the unified `group.com.simplewithus.usage` container with the
 /// remote client; the legacy separate-group separation is gone after the
 /// 2026-09-22 bundle-ID migration.  Local writes its own
 /// `local-widget-snapshot.json` filename (not `widget-snapshot.json` — that
@@ -13,7 +13,7 @@ import WidgetShared
 /// two snapshots coexist inside the shared container without the client
 /// cleanup path wiping Local's payload.
 public enum LocalAppGroup {
-    public static let identifier = "group.com.simplewithus.usagemonitor"
+    public static let identifier = "group.com.simplewithus.usage"
 
     public static var containerURL: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: identifier)
