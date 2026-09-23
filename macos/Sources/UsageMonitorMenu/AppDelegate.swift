@@ -6,7 +6,11 @@ import SwiftUI
 enum UsageMonitorMain {
     @MainActor
     static func main() {
-        if let existing = NSRunningApplication.runningApplications(withBundleIdentifier: "com.jays.usage-monitor.mac")
+        // Current ID first; the pre-2026-09-23 ID still matches an older build
+        // that is already running.
+        let bundleIdentifiers = ["com.simplewithus.usage.macos", "com.jays.usage-monitor.mac"]
+        if let existing = bundleIdentifiers
+            .flatMap({ NSRunningApplication.runningApplications(withBundleIdentifier: $0) })
             .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && !$0.isTerminated }) {
             existing.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
             return
