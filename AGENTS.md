@@ -4,18 +4,20 @@
 > **Note:** The macOS Agent Quotas menu bar app has been extracted into its own repository and is now called **[AgentBar](https://github.com/jaywedgeworth22/agent-bar)**. The `macos/` folder in this repo is kept for historical reference only.
 
 
-> **[!IMPORTANT] 2026-09-22 bundle-ID migration — see [`docs/rollouts/2026-09-22-bundle-id-migration.md`](docs/rollouts/2026-09-22-bundle-id-migration.md).**  All iOS bundle IDs were renamed from `services.jays.usage.*` to `com.simplewithus.usagemonitor.*`.  Active canonical IDs:
-> - iOS Usage Client Monitor: `com.simplewithus.usagemonitor.ios`
-> - iOS Usage Local Monitor: `com.simplewithus.usagemonitor.local.ios`
-> - iOS Widget: `com.simplewithus.usagemonitor.ios.widget`
-> - iOS unit tests: `com.simplewithus.usagemonitor.ios.tests`
-> - iOS widget unit tests: `com.simplewithus.usagemonitor.ios.widgettests`
-> - iOS Safari extension: `com.simplewithus.usagemonitor.ios.safari.Extension`
-> - iOS Safari host app: `com.simplewithus.usagemonitor.ios.safari`
-> - macOS Safari extension: `com.simplewithus.usagemonitor.macos.safari.Extension`
-> - macOS Safari host app: `com.simplewithus.usagemonitor.macos.safari`
-> - Single App Group (shared across all Usage-Monitor iOS surfaces): `group.com.simplewithus.usagemonitor`
-> - Associated Domain on iOS Safari extension: `applinks:usage-monitor.com` + `webcredentials:usage-monitor.com`
+> **[!IMPORTANT] Bundle identifiers (2026-09-23 owner scheme) — see [`docs/rollouts/2026-09-23-usage-identifier-fixes.md`](docs/rollouts/2026-09-23-usage-identifier-fixes.md).**  Base is `com.simplewithus.usage.*`; the word "Monitor" is not part of any bundle ID.  History: `services.jays.usage.*` until 2026-09-22, then `com.simplewithus.usagemonitor.*` for one day (#1524, [`docs/rollouts/2026-09-22-bundle-id-migration.md`](docs/rollouts/2026-09-22-bundle-id-migration.md)).  Active canonical IDs:
+> - iOS **Usage Monitor** (Client, main app): `com.simplewithus.usage.client`
+> - iOS **Local Monitor** (on-device app): `com.simplewithus.usage.local`
+> - iOS Widget: `com.simplewithus.usage.client.widget`
+> - iOS unit tests: `com.simplewithus.usage.client.tests`
+> - iOS widget unit tests: `com.simplewithus.usage.client.widgettests`
+> - iOS Safari host app / extension: `com.simplewithus.usage.safari.ios` / `com.simplewithus.usage.safari.ios.Extension`
+> - macOS Safari host app / extension: `com.simplewithus.usage.safari.macos` / `com.simplewithus.usage.safari.macos.Extension`
+> - macOS app **Usage Monitor for Mac** (`macos/`, `script/build_and_run.sh`): `com.simplewithus.usage.macos`
+> - Reserved, no bundle in this repo today: `com.simplewithus.usage.server` (the Hetzner server, "Usage Server"); `com.simplewithus.usage.web` if the website ever needs its own
+> - App Group (Client + Local + Widget): `group.com.simplewithus.usage`
+> - No Associated Domains on any target.  If universal links or shared web credentials are wanted later, declare them on the host app, against a domain that actually serves an `apple-app-site-association` file.
+> - Domains: `usage.jays.services` is Jay's hosted instance (production); Usage.SimpleWithUs.com is the planned public website.  There is no other Usage-Monitor domain.
+> - App Store Connect: the old Apple IDs belong to the retired `services.jays.usage.*` records.  New records for `com.simplewithus.usage.client` / `.local` are pending (owner step); `scripts/ios-fleet/apps.json` keeps `appleId: null` + `ascRecordPending: true` until then, and the ship / listing scripts refuse to run.
 >
 > Archaeology: pre-2026-09-22 `services.jays.usage.*` references in pre-rename `docs/rollouts/*`, `docs/audits/*`, and pre-2026-09-22 rows of `docs/EFFORT-LOG.md` + `STATUS.md` are historical record — each carries a dated archaeology note at the top of the file.  Do not rename them.
 
@@ -610,8 +612,8 @@ Dispatch:
 gh workflow run ios-ship.yml
 ```
 
-Bundle IDs `com.simplewithus.usagemonitor.ios` (Usage Client Monitor) and
-`com.simplewithus.usagemonitor.local.ios` (Usage Local Monitor), team `CC8UTF7ATG`.
+Bundle IDs `com.simplewithus.usage.client` (Usage Monitor) and
+`com.simplewithus.usage.local` (Local Monitor), team `CC8UTF7ATG`.
 Do not mint a new App Store Connect key. Do not exec
 `/Users/jay/apps/ios-fleet/ship-testflight.sh` from a cloud seat -- that path
 does not exist on hosted runners.
