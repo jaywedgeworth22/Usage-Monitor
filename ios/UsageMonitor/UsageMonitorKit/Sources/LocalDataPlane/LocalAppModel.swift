@@ -33,14 +33,11 @@ public final class LocalAppModel {
 
     public func bootstrap() async {
         do {
-            // 2026-09-22 rename migration: copy the legacy `local.sqlite`
-            // from the previous App Group container into the new bundle
-            // sandbox IF the legacy container is still reachable (requires
-            // the OLD App Group capability to remain on the new bundle ID
-            // in the Apple Developer Portal during the transition window —
-            // see `docs/rollouts/2026-09-22-bundle-id-migration.md`
-            // §Owner action items §1).  Silent no-op otherwise.
-            LocalDataMigration.migrateIfNeeded()
+            // No carry-over from earlier bundle IDs: the pre-rename Local app
+            // kept `local.sqlite` in its own sandbox, which a renamed app
+            // cannot read, and its Keychain provider keys do not follow either.
+            // A renamed install starts fresh (testers re-add providers).  See
+            // `docs/rollouts/2026-09-23-usage-identifier-fixes.md`.
             try await store.open()
             schemaVersion = await store.schemaVersion
             // Heal seed-invented catalog-guess fees before materialize.
