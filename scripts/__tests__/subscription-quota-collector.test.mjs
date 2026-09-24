@@ -25,6 +25,7 @@ import {
   fetchJson,
   grokAuthRecord,
   hostOf,
+  ingestTokenEnvNames,
   parseArgs,
   resolveCredentialField,
 } from "../subscription-quota-collector.mjs";
@@ -597,5 +598,24 @@ describe("shared-contract compliance", () => {
         ).toBe(true);
       }
     }
+  });
+});
+
+describe("per-producer ingest tokens", () => {
+  it("looks up each provider's scoped token before the collector-wide fallbacks", () => {
+    expect(ingestTokenEnvNames(PROVIDERS.claude)).toEqual([
+      "CLAUDE_CODE_INGEST_TOKEN",
+      "SUBSCRIPTION_QUOTA_INGEST_TOKEN",
+      "USAGE_INGEST_TOKEN",
+    ]);
+    expect(ingestTokenEnvNames(PROVIDERS.codex)[0]).toBe("CODEX_INGEST_TOKEN");
+    expect(ingestTokenEnvNames(PROVIDERS.grok)[0]).toBe("GROK_INGEST_TOKEN");
+    expect(ingestTokenEnvNames(PROVIDERS.minimax)[0]).toBe("MINIMAX_INGEST_TOKEN");
+  });
+
+  it("gives every provider a distinct token name", () => {
+    const names = Object.values(PROVIDERS).map((definition) => definition.tokenEnv);
+    expect(names.every(Boolean)).toBe(true);
+    expect(new Set(names).size).toBe(names.length);
   });
 });

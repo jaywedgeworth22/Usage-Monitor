@@ -185,6 +185,24 @@ describe("POST /api/otlp/v1/metrics", () => {
     expect(rows[0].costUsd).toBeCloseTo(0.0231);
   });
 
+  it("accepts a claude-code scoped token when scoped tokens are required", async () => {
+    vi.stubEnv("USAGE_INGEST_PRODUCER_TOKENS", "claude-code:scoped-claude-token,codecaps:scoped-caps-token");
+    vi.stubEnv("USAGE_INGEST_REQUIRE_SCOPED_TOKENS", "true");
+
+    const unscoped = await POST(jsonRequest(samplePayload, { authorization: "Bearer test-token-123" }));
+    expect(unscoped.status).toBe(401);
+
+    const otherProducer = await POST(
+      jsonRequest(samplePayload, { authorization: "Bearer scoped-caps-token" })
+    );
+    expect(otherProducer.status).toBe(403);
+
+    const res = await POST(jsonRequest(samplePayload, { authorization: "Bearer scoped-claude-token" }));
+    expect(res.status).toBe(202);
+    const rows = await prisma.externalUsageEvent.findMany({ where: { sourceApp: "claude-code" } });
+    expect(rows).toHaveLength(1);
+  });
+
   it("lazily seeds an anthropic Provider row with no budget on first ingest", async () => {
     const before = await prisma.provider.findMany({ where: { name: "anthropic" } });
     expect(before).toHaveLength(0);
