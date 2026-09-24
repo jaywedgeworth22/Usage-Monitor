@@ -14,6 +14,7 @@ import {
   defaultCredentialsFilePath,
   extractFields,
   isEntrypoint,
+  isTrustedSentryEndpoint,
   main,
   noopReplyFor,
   parsePayload,
@@ -123,6 +124,21 @@ describe("resolveCredentials", () => {
 
   it("defaultCredentialsFilePath points under ~/.config/usage-monitor", () => {
     expect(defaultCredentialsFilePath()).toMatch(/\.config\/usage-monitor\/agent-hook-otlp-sentry\.json$/);
+  });
+});
+
+describe("isTrustedSentryEndpoint", () => {
+  it("accepts https sentry.io and its subdomains", () => {
+    expect(isTrustedSentryEndpoint("https://sentry.io/api/1/envelope/")).toBe(true);
+    expect(isTrustedSentryEndpoint("https://o123.ingest.us.sentry.io/api/456/integration/otlp/v1/logs")).toBe(true);
+  });
+
+  it("rejects non-https, non-sentry.io, and malformed endpoints", () => {
+    expect(isTrustedSentryEndpoint("http://o123.ingest.us.sentry.io/api/456/v1/logs")).toBe(false);
+    expect(isTrustedSentryEndpoint("https://evil.example.com/v1/logs")).toBe(false);
+    expect(isTrustedSentryEndpoint("https://sentry.io.evil.example.com/v1/logs")).toBe(false);
+    expect(isTrustedSentryEndpoint("not a url")).toBe(false);
+    expect(isTrustedSentryEndpoint("")).toBe(false);
   });
 });
 
@@ -433,7 +449,7 @@ describe("postOtlp", () => {
       throw new Error("ECONNREFUSED");
     });
     await expect(
-      postOtlp({ endpoint: "https://x", headerName: "h", headerValue: "v" }, {}, fetchImpl)
+      postOtlp({ endpoint: "https://x.sentry.io", headerName: "h", headerValue: "v" }, {}, fetchImpl)
     ).resolves.toBeUndefined();
   });
 
@@ -446,12 +462,18 @@ describe("postOtlp", () => {
             init.signal.addEventListener("abort", () => reject(new Error("aborted")));
           })
       );
-      const promise = postOtlp({ endpoint: "https://x", headerName: "h", headerValue: "v" }, {}, fetchImpl);
+      const promise = postOtlp({ endpoint: "https://x.sentry.io", headerName: "h", headerValue: "v" }, {}, fetchImpl);
       await vi.advanceTimersByTimeAsync(2100);
       await expect(promise).resolves.toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("never calls fetch for an untrusted endpoint, even with valid-looking credentials", async () => {
+    const fetchImpl = vi.fn();
+    await postOtlp({ endpoint: "https://evil.example.com/v1/logs", headerName: "h", headerValue: "v" }, {}, fetchImpl);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 
@@ -601,15 +623,13 @@ describe("agent-hook-otlp.mjs as a real subprocess", () => {
     });
   }
 
-  it("posts allowlisted fields only and prints the fixed antigravity Stop reply", async () => {
+  it("prints the fixed antigravity Stop reply and exits 0 regardless of the network outcome", async () => {
     await startServer();
     const payload = {
       conversationId: "conv-secret-session",
       modelName: "gemini-3-pro",
       error: "",
       fullyIdle: true,
-      // Adversarial: if the shim ever widened its extraction, these must
-      // never reach the wire.
       transcriptPath: "/Users/jay/very/private/transcript.json",
       workspacePaths: ["/Users/jay/private-repo"],
     };
@@ -624,17 +644,30 @@ describe("agent-hook-otlp.mjs as a real subprocess", () => {
     expect(code).toBe(0);
     expect(stdout).toBe(JSON.stringify({ decision: "continue" }));
 
-    // Give the fire-and-forget POST a moment to land after process exit.
+    // This local test server is not *.sentry.io, so isTrustedSentryEndpoint
+    // correctly refuses to send it anything -- the fixed stdout reply above
+    // is unconditional and lands regardless.  The full allowlisted wire
+    // body against a *.sentry.io-shaped endpoint is proven at the unit
+    // level (buildLogRecord's tests, and "main" -> "posts a log record end
+    // to end when credentials are present").
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(receivedRequests).toHaveLength(1);
-    const [request] = receivedRequests;
-    expect(request.headers["x-sentry-auth"]).toBe("sentry sentry_key=test");
-    expect(request.headers["content-type"]).toBe("application/json");
-    expect(request.body).not.toMatch(/transcriptPath|workspacePaths|private-repo|private\/transcript/);
-    const parsed = JSON.parse(request.body);
-    for (const key of attributeKeys(parsed)) {
-      expect(ALLOWLIST_KEYS.has(key)).toBe(true);
-    }
+    expect(receivedRequests).toHaveLength(0);
+  });
+
+  it("never sends to a non-sentry.io endpoint even when credentials otherwise resolve cleanly", async () => {
+    await startServer();
+    const { code, stdout } = await run(["cursor", "afterFileEdit"], {
+      input: JSON.stringify({ conversation_id: "conv-secret-session", model: "claude-sonnet-5" }),
+      env: {
+        AGENT_HOOK_OTLP_ENDPOINT: serverUrl,
+        AGENT_HOOK_OTLP_HEADER_NAME: "x-sentry-auth",
+        AGENT_HOOK_OTLP_HEADER_VALUE: "sentry sentry_key=test",
+      },
+    });
+    expect(code).toBe(0);
+    expect(stdout).toBe("");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(receivedRequests).toHaveLength(0);
   });
 
   it("exits 0 and prints nothing extra for a fire-and-forget cursor event, even with no server listening", async () => {
@@ -662,7 +695,7 @@ describe("agent-hook-otlp.mjs as a real subprocess", () => {
     expect(stdout).toBe("");
   });
 
-  it("reads credentials from a chmod-600 file when env vars are absent", async () => {
+  it("reads credentials from a chmod-600 file when env vars are absent (proven at the resolveCredentials unit level; the wire attempt here is correctly refused as non-sentry.io)", async () => {
     await startServer();
     tempDir = await mkdtemp(join(tmpdir(), "agent-hook-otlp-"));
     const credsPath = join(tempDir, "creds.json");
@@ -678,12 +711,10 @@ describe("agent-hook-otlp.mjs as a real subprocess", () => {
     expect(code).toBe(0);
     expect(stdout).toBe("");
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(receivedRequests).toHaveLength(1);
-    expect(receivedRequests[0].headers["x-sentry-auth"]).toBe("sentry sentry_key=fromfile");
+    expect(receivedRequests).toHaveLength(0);
   });
 
   it("still runs main() when invoked through a symlink (P2 finding: import.meta.url resolves the real path)", async () => {
-    await startServer();
     tempDir = await mkdtemp(join(tmpdir(), "agent-hook-otlp-symlink-"));
     const linkPath = join(tempDir, "agent-hook-otlp-link.mjs");
     await symlink(SCRIPT_PATH, linkPath);
@@ -692,21 +723,23 @@ describe("agent-hook-otlp.mjs as a real subprocess", () => {
       const child = spawn(process.execPath, [linkPath, "antigravity", "PostToolUse"], {
         env: {
           ...process.env,
-          AGENT_HOOK_OTLP_ENDPOINT: serverUrl,
+          AGENT_HOOK_OTLP_ENDPOINT: "https://o1.ingest.us.sentry.io/api/1/integration/otlp/v1/logs",
           AGENT_HOOK_OTLP_HEADER_NAME: "x-sentry-auth",
           AGENT_HOOK_OTLP_HEADER_VALUE: "sentry sentry_key=test",
         },
       });
-      let stdout = "";
+      let out = "";
       child.on("error", reject);
-      child.stdout.on("data", (c) => (stdout += c));
-      child.on("close", (code) => resolve({ code, stdout }));
+      child.stdout.on("data", (c) => (out += c));
+      child.on("close", (closeCode) => resolve({ code: closeCode, stdout: out }));
       child.stdin.end(JSON.stringify({ toolCall: { name: "Bash" }, conversationId: "via-symlink" }));
     });
 
+    // Proves main() actually ran (the antigravity PostToolUse "{}" reply is
+    // written by main() itself, after the symlink-safe entrypoint check
+    // passes) -- not that a real POST reached sentry.io, which this sandbox
+    // cannot reach and does not need to for this specific regression.
     expect(code).toBe(0);
     expect(stdout).toBe(JSON.stringify({}));
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(receivedRequests).toHaveLength(1);
   });
 });

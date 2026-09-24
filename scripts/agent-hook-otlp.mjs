@@ -327,10 +327,29 @@ export function noopReplyFor(platform, event) {
 // ---------------------------------------------------------------------------
 
 /**
+ * True only for an https:// URL whose host is exactly `sentry.io` or a
+ * subdomain of it.  The credentials file's `endpoint` is local, trusted,
+ * chmod-600 data (see resolveCredentials), but postOtlp still checks this
+ * before sending: it is the one place file content decides an outbound
+ * request's destination (CodeQL js/file-access-to-http, alerts #52/#53), so
+ * it is worth constraining independently of trusting the file's contents.
+ */
+export function isTrustedSentryEndpoint(endpoint) {
+  let url;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && (url.hostname === "sentry.io" || url.hostname.endsWith(".sentry.io"));
+}
+
+/**
  * POST the log record to Sentry, bounded to HTTP_TIMEOUT_MS.  Never throws;
  * the caller does not need a try/catch.  `fetchImpl` is injectable for tests.
  */
 export async function postOtlp(credentials, body, fetchImpl = fetch) {
+  if (!isTrustedSentryEndpoint(credentials.endpoint)) return;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
   try {
