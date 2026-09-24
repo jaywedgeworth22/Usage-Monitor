@@ -22,16 +22,25 @@ export interface OtlpPointDescriptor {
 }
 
 // Persist only dimensions that are useful for attribution/debugging and are
-// known not to contain arbitrary payloads. In particular, user.email,
-// session.id, prompt fragments, and future exporter attributes are excluded.
-// All attributes still participate in the one-way series/idempotency hashes,
-// which preserves counter correctness without retaining sensitive values.
+// known not to contain arbitrary payloads. In particular, user.email, prompt
+// fragments, and future exporter attributes are excluded. All attributes
+// still participate in the one-way series/idempotency hashes, which
+// preserves counter correctness without retaining sensitive values.
+//
+// session.id is an exception, added 2026-09-24 for the Sentry agent-telemetry
+// plan's "cost per board item" view (GET /api/cost-by-session): THE BOARD
+// records a Claude Code session id on a finding, and this app sums cost
+// across those ids by matching this metadata key. It is an opaque per-process
+// UUID Claude Code mints for itself, not PII, and carries no prompt/response
+// content -- unlike user.email (still excluded), it is safe and useful to
+// retain. See src/lib/cost-by-session.ts.
 const METADATA_ALLOWLIST = new Set([
   "service.name",
   "service.version",
   "deployment.environment",
   "project",
   "project.name",
+  "session.id",
   "host.name",
   "model",
   "type",
