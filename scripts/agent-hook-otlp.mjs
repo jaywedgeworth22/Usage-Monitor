@@ -43,7 +43,12 @@
 //     const fs=require("node:fs"), os=require("node:os"), path=require("node:path");
 //     const s=JSON.parse(fs.readFileSync(path.join(os.homedir(),".claude","settings.json"),"utf8"));
 //     const env=s.env||{}; const endpoint=env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT;
-//     const [headerName,headerValue]=String(env.OTEL_EXPORTER_OTLP_LOGS_HEADERS).split("=");
+//     // Split on the FIRST "=" only -- the header value itself contains one
+//     // (Sentry's x-sentry-auth is "sentry sentry_key=<hex>, sentry_version=7").
+//     // String.prototype.split(sep, limit) truncates rather than joining the
+//     // remainder, so indexOf/slice is used instead of split("=", 2).
+//     const raw=String(env.OTEL_EXPORTER_OTLP_LOGS_HEADERS); const i=raw.indexOf("=");
+//     const headerName=raw.slice(0,i), headerValue=raw.slice(i+1);
 //     const dir=path.join(os.homedir(),".config","usage-monitor"); fs.mkdirSync(dir,{recursive:true});
 //     const out=path.join(dir,"agent-hook-otlp-sentry.json");
 //     fs.writeFileSync(out, JSON.stringify({endpoint, headerName: headerName.trim(), headerValue: headerValue.trim()}), {mode:0o600});
@@ -208,7 +213,10 @@ export function extractFields(platform, event, payload) {
   // future payload version is honoured without a code change, but never
   // fabricate one.
   const durationRaw = pick(payload, "duration_ms", "durationMs", "duration");
-  const durationMs = Number.isFinite(Number(durationRaw)) ? Number(durationRaw) : undefined;
+  // Number("") is 0, which Number.isFinite treats as finite -- guard it
+  // explicitly so an empty string is "absent", not a false duration_ms:0.
+  const durationMs =
+    durationRaw !== "" && Number.isFinite(Number(durationRaw)) ? Number(durationRaw) : undefined;
   return { ...fields, durationMs };
 }
 

@@ -255,6 +255,10 @@ describe("extractFields: duration_ms passthrough", () => {
     expect(extractFields("copilot", "postToolUse", { duration_ms: "not a number" }).durationMs).toBeUndefined();
   });
 
+  it("treats an empty-string duration as absent, not a false 0 (Number('') is 0)", () => {
+    expect(extractFields("copilot", "postToolUse", { duration_ms: "" }).durationMs).toBeUndefined();
+  });
+
   it("an unknown platform yields an otherwise-empty field set", () => {
     expect(extractFields("unknown-platform", "whatever", { conversationId: "x" })).toEqual({
       durationMs: undefined,
