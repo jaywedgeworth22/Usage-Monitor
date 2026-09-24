@@ -180,8 +180,12 @@ function extractCopilot(event, payload) {
     case "postToolUse": {
       const toolName = coarseToolName(pick(payload, "toolName", "tool_name"));
       const toolResult = pick(payload, "toolResult", "tool_result") || {};
+      // Documented values are "success" / "failure" (docs.github.com/copilot/
+      // reference/hooks-reference) -- require the exact success value rather
+      // than merely excluding "error", so a documented "failure" result (or
+      // any future/unknown value) is correctly recorded as not successful.
       const resultType = pick(toolResult, "resultType", "result_type");
-      return { toolName, success: resultType !== "error", sessionId };
+      return { toolName, success: resultType === "success", sessionId };
     }
     case "sessionEnd": {
       const reason = pick(payload, "reason");

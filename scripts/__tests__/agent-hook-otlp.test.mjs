@@ -229,6 +229,15 @@ describe("extractFields: copilot", () => {
     expect(fields.sessionId).toBe("s-2");
   });
 
+  it("postToolUse treats the documented 'failure' resultType as unsuccessful, not just 'error'", () => {
+    // docs.github.com/copilot/reference/hooks-reference documents
+    // resultType as "success" | "failure" -- "error" is not the only
+    // non-success value, so the check must require "success" explicitly.
+    expect(extractFields("copilot", "postToolUse", { toolResult: { resultType: "failure" } }).success).toBe(false);
+    expect(extractFields("copilot", "postToolUse", { toolResult: {} }).success).toBe(false);
+    expect(extractFields("copilot", "postToolUse", {}).success).toBe(false);
+  });
+
   it("sessionEnd maps reason:complete to success", () => {
     expect(extractFields("copilot", "sessionEnd", { reason: "complete" }).success).toBe(true);
     expect(extractFields("copilot", "sessionEnd", { reason: "error" }).success).toBe(false);
