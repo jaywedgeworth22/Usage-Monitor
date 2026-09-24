@@ -46,8 +46,10 @@ using the generic `OTEL_EXPORTER_OTLP_*` vars for both signals:
 This is a **Mac config change only** — this repo (Usage Monitor) is
 unmodified except for this doc and the `AGENTS.md` note below.  Every Claude
 Code seat on this Mac shares `~/.claude/settings.json`, so all seats' logs
-now flow to `agent-sessions`; metrics for all seats keep flowing to Usage
-Monitor exactly as before.
+now flow to `agent-sessions`; metrics for all seats still *target* Usage
+Monitor exactly as before, but see Verification below — that target is
+currently rejecting the configured credential with `401`, so metrics are
+not actually landing right now.
 
 ## Verification performed
 
