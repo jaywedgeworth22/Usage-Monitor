@@ -105,8 +105,13 @@ export async function loadAgentModelMixRows(
         costUsd: Number(row.costUsd ?? 0),
         eventCount: Number(row.eventCount ?? 0),
       }));
-  } catch {
-    return [];
+  } catch (err) {
+    // TEMP DIAGNOSTIC (remove before merge): rethrow instead of swallowing
+    // so the route can surface the real cause -- production is returning
+    // an empty result set despite confirmed real data via /api/budget-status
+    // (pushedUnpricedEventCount: 3718 for the anthropic provider this
+    // month), so this catch is very likely masking a real query error.
+    throw err;
   }
 }
 

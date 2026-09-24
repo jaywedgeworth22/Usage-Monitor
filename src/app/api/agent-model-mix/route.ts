@@ -83,7 +83,17 @@ export async function GET(request: NextRequest) {
     windowStart = new Date(windowEnd.getTime() - days * DAY_MS);
   }
 
-  const rows = await loadAgentModelMixRows(windowStart, windowEnd);
+  let rows;
+  try {
+    rows = await loadAgentModelMixRows(windowStart, windowEnd);
+  } catch (err) {
+    // TEMP DIAGNOSTIC (remove before merge): surface the real query error
+    // to figure out why production returns an empty result set.
+    return NextResponse.json(
+      { error: "debug_query_failed", message: String(err), stack: err instanceof Error ? err.stack : null },
+      { status: 500 }
+    );
+  }
   const report = buildAgentModelMixReport(rows, windowStart, windowEnd, days, now);
 
   return NextResponse.json(report, {
