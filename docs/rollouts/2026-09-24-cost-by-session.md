@@ -27,9 +27,11 @@ finished task" metric is answerable instead of only aspirational.
 - **`GET /api/cost-by-session?ids=a,b,c[&since=ISO][&until=ISO]`** (new) —
   dashboard-session gated like `GET /api/llm-burn` (no middleware exclusion,
   no bearer-token path).  `ids` accepts comma-separated and/or repeated
-  params, capped at 100 distinct ids.  Window defaults to the trailing 180
-  days, capped at 400 days, matching `/api/export/daily-rollups`'s
-  reject-rather-than-clamp philosophy for an out-of-range request.
+  params, capped at 100 distinct ids.  Window defaults to the trailing 90
+  days, capped at 180 days (a too-wide request 400s), and the effective
+  `since` used for the query is additionally clamped up to the live raw-event
+  retention cutoff (`data-retention.ts`'s `getExternalEventRawCutoff`) — see
+  "Fixes from review" below.
 - **`src/components/CostBySessionPanel.tsx` + `src/app/cost-by-session/page.tsx`**
   (new) — a small card/table view.  Reads `?ids=` on mount so a link lands
   pre-filled; otherwise a seat pastes ids from `board show <id>`.  Linked from
@@ -38,6 +40,39 @@ finished task" metric is answerable instead of only aspirational.
   not this repo)** — a finding with recorded `session_ids` now shows a
   "Cost →" link to `https://usage.jays.services/cost-by-session?ids=<ids>`
   next to the existing session-count line.
+
+## Fixes from review (chatgpt-codex-connector, PR #1534)
+
+Two real findings landed on top of the initial version, both fixed and
+covered by new tests before merge:
+
+- **P1 — aggregate timestamps could 500 a successful lookup.**  Prisma's
+  SQLite `$queryRaw` deserializes a direct `SELECT "occurredAt"` into a JS
+  `Date`, but `MIN("occurredAt")` / `MAX("occurredAt")` loses that
+  column-type mapping and the driver hands back its raw representation
+  instead — observed as a `bigint` (epoch milliseconds).  `new Date(bigint)`
+  throws `TypeError: Cannot convert a BigInt value to a number`, so every
+  non-empty match would have 500'd.  Fixed with `coerceOccurredAt` (handles
+  `Date`, `bigint`, `number`, epoch-ms string, and ISO string), and proved
+  against a REAL SQLite database — not a mock — in the new
+  `src/lib/__tests__/cost-by-session.db.test.ts`, which is the only test in
+  this feature that round-trips `loadCostBySessionRows` through actual
+  Prisma/SQLite instead of stubbing it.
+- **P2 — the advertised window could exceed raw-event retention.**  Raw
+  `ExternalUsageEvent` rows (and their `metadata`, including `session.id`)
+  are rolled up and pruned after `EXTERNAL_USAGE_EVENT_RAW_RETENTION_DAYS`
+  (default 90) — the rollup table does not retain per-session attribution.
+  The original 180-day default / 400-day max could silently report an old,
+  real session as "unmatched" instead of "too old to still carry a session
+  id."  Fixed two ways: `DEFAULT_WINDOW_DAYS` dropped to 90 and
+  `MAX_WINDOW_DAYS` to 180 (aligned with the default retention), AND the
+  route now clamps the effective query `since` up to
+  `getExternalEventRawCutoff(now)` regardless of what's requested, so a
+  deployment that overrides the retention env var is still handled
+  correctly even though the two constants above can't see that override.
+  The response's `window.clampedToRawRetention` (plus `requestedSince`)
+  surfaces this transparently instead of silently under-reporting; the UI
+  shows it inline on the "no usage found" notice.
 
 ## Cost semantics (unchanged contract)
 
@@ -54,11 +89,12 @@ token.usage`) are exact, not estimated.
   pre-existing, unrelated `tsc` errors traced to a stray `/Users/jay/
   node_modules` directory shadowing this worktree's own — a local-machine
   artifact, not caused by this change; flagged separately, not fixed here).
-- 116 tests green across every OTLP/cost-adjacent suite (`cost-by-session`,
-  `claude-code-mapper`, `metrics-route` — including the updated allowlist
-  test — `llm-burn`, `claude-cost-check`, `external-usage-*`,
-  `otlp/system-mapper`, `otlp/bounded-log-once`, `logs-route`), plus the new
-  route test's own dedicated ids/window validation cases.
+- 121 tests green across every OTLP/cost-adjacent suite (`cost-by-session`,
+  `cost-by-session.db` — the real-SQLite integration test — `claude-code-mapper`,
+  `metrics-route` — including the updated allowlist test — `llm-burn`,
+  `claude-cost-check`, `external-usage-*`, `otlp/system-mapper`,
+  `otlp/bounded-log-once`, `logs-route`), plus the route test's own dedicated
+  ids/window/retention-clamp validation cases.
 - `buildCostBySessionReport` needs no wall-clock freeze — it has no `new
   Date()` inside it — so its unit tests use plain literal `Date` fixtures
   (see `wall-clock-test-rot` in the local Usage-Monitor memory notes for why

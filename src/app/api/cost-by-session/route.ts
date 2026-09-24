@@ -6,6 +6,7 @@ import {
   loadCostBySessionRows,
   parseSessionIdsParam,
 } from "@/lib/cost-by-session";
+import { getExternalEventRawCutoff } from "@/lib/data-retention";
 
 export const dynamic = "force-dynamic";
 
@@ -24,8 +25,17 @@ export const dynamic = "force-dynamic";
  *
  * `since`/`until` default to the trailing DEFAULT_WINDOW_DAYS and are capped
  * at MAX_WINDOW_DAYS apart so a stale or typo'd session id can't force a
- * full-table scan; out-of-range or malformed dates 400 rather than silently
- * clamp, matching /api/export/daily-rollups.
+ * full-table scan; a request wider than that 400s rather than silently
+ * clamping, matching /api/export/daily-rollups.
+ *
+ * The *effective* `since` used for the query is additionally clamped up to
+ * the live raw-event retention cutoff (data-retention.ts's
+ * getExternalEventRawCutoff): a session older than that horizon has already
+ * had its raw rows (and their session.id metadata) rolled up and pruned, so
+ * querying past it can only ever find nothing -- reporting it as
+ * "unmatched" would misleadingly suggest that session had no claude-code
+ * usage at all, rather than "usage too old to still carry a session id".
+ * The response's `window.clampedToRawRetention` flags when this happened.
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -59,11 +69,19 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const rows = await loadCostBySessionRows(parsedIds.ids, since, until);
+  const retentionCutoff = getExternalEventRawCutoff(now);
+  const effectiveSince = since < retentionCutoff ? retentionCutoff : since;
+
+  const rows = await loadCostBySessionRows(parsedIds.ids, effectiveSince, until);
   const report = buildCostBySessionReport(parsedIds.ids, rows);
 
   return NextResponse.json({
     ...report,
-    window: { since: since.toISOString(), until: until.toISOString() },
+    window: {
+      since: effectiveSince.toISOString(),
+      until: until.toISOString(),
+      requestedSince: since.toISOString(),
+      clampedToRawRetention: effectiveSince.getTime() !== since.getTime(),
+    },
   });
 }

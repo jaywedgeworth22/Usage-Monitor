@@ -28,7 +28,7 @@ interface Report {
   unmatchedSessionIds: string[];
   sessions: SessionCostSummary[];
   totals: { eventCount: number; tokens: SessionTokenBreakdown; costUsd: number };
-  window: { since: string; until: string };
+  window: { since: string; until: string; requestedSince: string; clampedToRawRetention: boolean };
 }
 
 const inputClass =
@@ -142,7 +142,11 @@ export default function CostBySessionPanel() {
               <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
                 No claude-code usage found in this window for: {report.unmatchedSessionIds.join(", ")}. That session may not have exported OTLP
                 metrics yet (the exporter only runs while the seat has restarted since it was configured), or it falls outside {report.window.since}
-                {" "}to {report.window.until}.
+                {" "}to {report.window.until}
+                {report.window.clampedToRawRetention
+                  ? ` (the requested window started ${report.window.requestedSince}, but raw event data only survives back to ${report.window.since} -- older sessions can no longer be matched even though they existed)`
+                  : ""}
+                .
               </p>
             ) : null}
           </section>

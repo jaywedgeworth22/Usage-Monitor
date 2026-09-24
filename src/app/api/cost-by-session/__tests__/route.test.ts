@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type { CostBySessionRow } from "@/lib/cost-by-session";
 
@@ -88,7 +88,12 @@ describe("GET /api/cost-by-session", () => {
     expect(body.matchedSessionIds).toEqual(["session-a"]);
     expect(body.unmatchedSessionIds).toEqual(["session-b"]);
     expect(body.totals.costUsd).toBeCloseTo(1.5);
-    expect(body.window).toEqual({ since: "2026-09-20T00:00:00.000Z", until: "2026-09-24T00:00:00.000Z" });
+    expect(body.window).toEqual({
+      since: "2026-09-20T00:00:00.000Z",
+      until: "2026-09-24T00:00:00.000Z",
+      requestedSince: "2026-09-20T00:00:00.000Z",
+      clampedToRawRetention: false,
+    });
     expect(body.billingMode).toBe("estimated");
   });
 
@@ -98,5 +103,54 @@ describe("GET /api/cost-by-session", () => {
     const [, since, until] = mocks.loadCostBySessionRows.mock.calls[0];
     const spanDays = (until.getTime() - since.getTime()) / 86_400_000;
     expect(spanDays).toBeCloseTo(DEFAULT_WINDOW_DAYS, 5);
+  });
+
+  describe("raw-event retention clamp", () => {
+    // Frozen clock: unlike the pure lib functions (no `new Date()` inside
+    // them), the route itself calls `new Date()` for `now`, and
+    // getExternalEventRawCutoff derives the retention cutoff from that same
+    // `now` -- so this specific behavior needs a fixed wall clock to assert
+    // on precisely (see the wall-clock-test-rot memory note: freeze the
+    // clock for the tests that actually depend on it, not the ones that don't).
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-09-24T12:00:00Z"));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("clamps an explicit `since` older than raw-event retention up to the retention cutoff, and flags it", async () => {
+      // 150 days back from the frozen `now`: inside MAX_WINDOW_DAYS (180, so
+      // the requested-span check passes) but well past the 90-day default
+      // raw retention window, so the retention clamp -- not the window-size
+      // rejection -- is what this test exercises.
+      const response = await GET(
+        request("?ids=session-a&since=2026-04-27T12:00:00Z&until=2026-09-24T12:00:00Z")
+      );
+      expect(response.status).toBe(200);
+      const [, since] = mocks.loadCostBySessionRows.mock.calls[0];
+      // 90 days back from the frozen `now`.
+      expect(since.toISOString()).toBe("2026-06-26T12:00:00.000Z");
+
+      const body = await response.json();
+      expect(body.window.requestedSince).toBe("2026-04-27T12:00:00.000Z");
+      expect(body.window.since).toBe("2026-06-26T12:00:00.000Z");
+      expect(body.window.clampedToRawRetention).toBe(true);
+    });
+
+    it("does not clamp when the requested window is already within raw-event retention", async () => {
+      const response = await GET(
+        request("?ids=session-a&since=2026-09-01T00:00:00Z&until=2026-09-24T12:00:00Z")
+      );
+      expect(response.status).toBe(200);
+      const [, since] = mocks.loadCostBySessionRows.mock.calls[0];
+      expect(since.toISOString()).toBe("2026-09-01T00:00:00.000Z");
+
+      const body = await response.json();
+      expect(body.window.clampedToRawRetention).toBe(false);
+      expect(body.window.since).toBe(body.window.requestedSince);
+    });
   });
 });

@@ -26,8 +26,16 @@ import { prisma } from "@/lib/prisma";
 // metric shapes, never by raw event count.
 
 export const MAX_SESSION_IDS = 100;
-export const DEFAULT_WINDOW_DAYS = 180;
-export const MAX_WINDOW_DAYS = 400;
+// Aligned with data-retention.ts's DEFAULT_EXTERNAL_EVENT_RETENTION_DAYS (90):
+// past that, raw ExternalUsageEvent rows (and their metadata -- including
+// session.id) are pruned into ExternalUsageEventDailyRollup, which does not
+// retain per-session attribution. The route additionally clamps the actual
+// query `since` to the *live* retention cutoff (via
+// data-retention.ts's getExternalEventRawCutoff), so a deployment that
+// overrides EXTERNAL_USAGE_EVENT_RAW_RETENTION_DAYS is still handled
+// correctly even though these two constants can't see that env var change.
+export const DEFAULT_WINDOW_DAYS = 90;
+export const MAX_WINDOW_DAYS = 180;
 
 export interface CostBySessionRow {
   sessionId: string;
@@ -95,6 +103,24 @@ function addTokens(into: SessionTokenBreakdown, type: keyof SessionTokenBreakdow
 }
 
 /**
+ * Prisma's SQLite $queryRaw loses the DateTime-column type mapping on an
+ * aggregated value: a direct SELECT of `occurredAt` deserializes to a JS
+ * Date, but `MIN("occurredAt")` / `MAX("occurredAt")` comes back as the raw
+ * driver value for that column's underlying storage -- observed as a bigint
+ * (milliseconds since epoch) here, but this coerces defensively across
+ * bigint, number, epoch-ms string, and ISO string so it doesn't silently
+ * break again if the driver's raw-aggregate representation changes.
+ * `new Date(bigint)` throws TypeError, which is exactly the bug this fixes.
+ */
+function coerceOccurredAt(value: Date | string | number | bigint): Date {
+  if (value instanceof Date) return value;
+  if (typeof value === "bigint" || typeof value === "number") return new Date(Number(value));
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return new Date(Number(trimmed));
+  return new Date(trimmed);
+}
+
+/**
  * Parse and validate the `ids` query parameter: comma-separated and/or
  * repeated (`ids=a&ids=b`), trimmed, order-preserving de-dup. Returns an
  * error string instead of throwing so the route can 400 with a clear reason.
@@ -144,8 +170,8 @@ export async function loadCostBySessionRows(
       quantity: unknown;
       costUsd: unknown;
       eventCount: unknown;
-      firstOccurredAt: Date | string;
-      lastOccurredAt: Date | string;
+      firstOccurredAt: Date | string | number | bigint;
+      lastOccurredAt: Date | string | number | bigint;
     }>
   >(Prisma.sql`
     SELECT
@@ -177,8 +203,8 @@ export async function loadCostBySessionRows(
       quantity: Number(row.quantity ?? 0),
       costUsd: Number(row.costUsd ?? 0),
       eventCount: Number(row.eventCount ?? 0),
-      firstOccurredAt: new Date(row.firstOccurredAt),
-      lastOccurredAt: new Date(row.lastOccurredAt),
+      firstOccurredAt: coerceOccurredAt(row.firstOccurredAt),
+      lastOccurredAt: coerceOccurredAt(row.lastOccurredAt),
     }));
 }
 
