@@ -36,6 +36,11 @@ export const dynamic = "force-dynamic";
  * "unmatched" would misleadingly suggest that session had no claude-code
  * usage at all, rather than "usage too old to still carry a session id".
  * The response's `window.clampedToRawRetention` flags when this happened.
+ *
+ * When even `until` is at or before that cutoff, the whole window has aged
+ * out: clamping would yield a reversed range, so the route skips the query
+ * and answers with every id unmatched and `window.expiredBeforeRawRetention`
+ * set.  `window.rawRetentionCutoff` is always included.
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -70,6 +75,19 @@ export async function GET(request: NextRequest) {
   }
 
   const retentionCutoff = getExternalEventRawCutoff(now);
+  if (until <= retentionCutoff) {
+    return NextResponse.json({
+      ...buildCostBySessionReport(parsedIds.ids, []),
+      window: {
+        since: since.toISOString(),
+        until: until.toISOString(),
+        requestedSince: since.toISOString(),
+        clampedToRawRetention: false,
+        expiredBeforeRawRetention: true,
+        rawRetentionCutoff: retentionCutoff.toISOString(),
+      },
+    });
+  }
   const effectiveSince = since < retentionCutoff ? retentionCutoff : since;
 
   const rows = await loadCostBySessionRows(parsedIds.ids, effectiveSince, until);
@@ -82,6 +100,8 @@ export async function GET(request: NextRequest) {
       until: until.toISOString(),
       requestedSince: since.toISOString(),
       clampedToRawRetention: effectiveSince.getTime() !== since.getTime(),
+      expiredBeforeRawRetention: false,
+      rawRetentionCutoff: retentionCutoff.toISOString(),
     },
   });
 }
