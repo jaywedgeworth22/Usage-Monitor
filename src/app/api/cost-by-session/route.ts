@@ -37,8 +37,10 @@ export const dynamic = "force-dynamic";
  * usage at all, rather than "usage too old to still carry a session id".
  * The response's `window.clampedToRawRetention` flags when this happened.
  *
- * When even `until` is at or before that cutoff, the whole window has aged
- * out: clamping would yield a reversed range, so the route skips the query
+ * When even `until` is before that cutoff, the whole window has aged out
+ * (retention deletes rows with occurredAt < cutoff, so a row exactly at the
+ * cutoff survives and `until == cutoff` still queries that one instant):
+ * clamping would yield a reversed range, so the route skips the query
  * and answers with every id unmatched and `window.expiredBeforeRawRetention`
  * set.  `window.rawRetentionCutoff` is always included.
  */
@@ -75,7 +77,7 @@ export async function GET(request: NextRequest) {
   }
 
   const retentionCutoff = getExternalEventRawCutoff(now);
-  if (until <= retentionCutoff) {
+  if (until < retentionCutoff) {
     return NextResponse.json({
       ...buildCostBySessionReport(parsedIds.ids, []),
       window: {
