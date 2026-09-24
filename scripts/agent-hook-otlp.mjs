@@ -63,7 +63,7 @@
 // Listed as an on-demand hook script in /Users/jay/apps/MAC-LOCAL-PROCESSES.md.
 
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -388,7 +388,27 @@ export async function main(argv = process.argv, env = process.env, deps = {}) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/**
+ * True when this module is the process entrypoint (run directly), not
+ * merely `import`ed (as the test suite does).  Resolves `process.argv[1]`
+ * through `realpathSync` before comparing: Node canonicalizes
+ * `import.meta.url` to the real (symlink-resolved) path of the executed
+ * file, so a bare string comparison against the argv path is false, and
+ * `main()` silently never runs, whenever a hooks.json entry invokes this
+ * script through a symlink.
+ */
+export function isEntrypoint(argv = process.argv, metaUrl = import.meta.url, realpath = realpathSync) {
+  if (!argv[1]) return false;
+  try {
+    return metaUrl === pathToFileURL(realpath(argv[1])).href;
+  } catch {
+    // argv[1] does not resolve (e.g. deleted mid-run) -- fall back to a
+    // literal comparison rather than silently skipping main().
+    return metaUrl === pathToFileURL(argv[1]).href;
+  }
+}
+
+if (isEntrypoint()) {
   main().finally(() => {
     process.exitCode = 0;
   });

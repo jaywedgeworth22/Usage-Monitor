@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import {
   coarseToolName,
   defaultCredentialsFilePath,
   extractFields,
+  isEntrypoint,
   main,
   noopReplyFor,
   parsePayload,
@@ -429,6 +430,36 @@ describe("postOtlp", () => {
   });
 });
 
+describe("isEntrypoint", () => {
+  it("is true when argv[1]'s realpath matches import.meta.url", () => {
+    const realpath = (p) => {
+      expect(p).toBe("/some/symlink/agent-hook-otlp.mjs");
+      return "/real/target/agent-hook-otlp.mjs";
+    };
+    const metaUrl = pathToFileURL("/real/target/agent-hook-otlp.mjs").href;
+    expect(isEntrypoint(["node", "/some/symlink/agent-hook-otlp.mjs"], metaUrl, realpath)).toBe(true);
+  });
+
+  it("is false when running as an imported module (different file)", () => {
+    const realpath = (p) => p;
+    const metaUrl = pathToFileURL("/real/target/agent-hook-otlp.mjs").href;
+    expect(isEntrypoint(["node", "/some/other/script.mjs"], metaUrl, realpath)).toBe(false);
+  });
+
+  it("is false when argv has no script path", () => {
+    expect(isEntrypoint(["node"], "file:///x", () => "/x")).toBe(false);
+  });
+
+  it("falls back to a literal comparison when realpath throws (e.g. deleted mid-run)", () => {
+    const realpath = () => {
+      throw new Error("ENOENT");
+    };
+    const metaUrl = pathToFileURL("/real/target/agent-hook-otlp.mjs").href;
+    expect(isEntrypoint(["node", "/real/target/agent-hook-otlp.mjs"], metaUrl, realpath)).toBe(true);
+    expect(isEntrypoint(["node", "/other/path.mjs"], metaUrl, realpath)).toBe(false);
+  });
+});
+
 describe("main", () => {
   it("no-ops silently (no network call) when credentials are not configured", async () => {
     const postOtlpImpl = vi.fn();
@@ -624,5 +655,33 @@ describe("agent-hook-otlp.mjs as a real subprocess", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(receivedRequests).toHaveLength(1);
     expect(receivedRequests[0].headers["x-sentry-auth"]).toBe("sentry sentry_key=fromfile");
+  });
+
+  it("still runs main() when invoked through a symlink (P2 finding: import.meta.url resolves the real path)", async () => {
+    await startServer();
+    tempDir = await mkdtemp(join(tmpdir(), "agent-hook-otlp-symlink-"));
+    const linkPath = join(tempDir, "agent-hook-otlp-link.mjs");
+    await symlink(SCRIPT_PATH, linkPath);
+
+    const { code, stdout } = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [linkPath, "antigravity", "PostToolUse"], {
+        env: {
+          ...process.env,
+          AGENT_HOOK_OTLP_ENDPOINT: serverUrl,
+          AGENT_HOOK_OTLP_HEADER_NAME: "x-sentry-auth",
+          AGENT_HOOK_OTLP_HEADER_VALUE: "sentry sentry_key=test",
+        },
+      });
+      let stdout = "";
+      child.on("error", reject);
+      child.stdout.on("data", (c) => (stdout += c));
+      child.on("close", (code) => resolve({ code, stdout }));
+      child.stdin.end(JSON.stringify({ toolCall: { name: "Bash" }, conversationId: "via-symlink" }));
+    });
+
+    expect(code).toBe(0);
+    expect(stdout).toBe(JSON.stringify({}));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(receivedRequests).toHaveLength(1);
   });
 });
