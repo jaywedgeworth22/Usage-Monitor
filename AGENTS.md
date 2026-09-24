@@ -187,6 +187,15 @@ SQLite datasource — match provider names case-insensitively in JS (`.toLowerCa
   because a timed-out exporter may retry while the original query is still live.
   Keep the token around every database call in each route and release it only in
   `finally`; never add a timeout that releases ownership while a query is running.
+- As of 2026-09-23, Claude Code's own per-turn OTel **logs** (`api_request`,
+  `user_prompt`, `tool_result`, `tool_decision`, `api_error`, etc.) no longer
+  target this app at all — they go straight to a dedicated Sentry project
+  (`agent-sessions` in the `jays-services` org) via per-signal
+  `OTEL_EXPORTER_OTLP_LOGS_*` env vars in `~/.claude/settings.json` on the
+  Mac.  Claude Code **metrics** are unaffected and still land here via
+  `OTEL_EXPORTER_OTLP_METRICS_*`.  The `POST /api/otlp/v1/logs` route above
+  remains the accept-and-drop stub it always was — see
+  `docs/rollouts/2026-09-23-claude-code-logs-sentry.md`.
 
 ## Per-project cost attribution
 
