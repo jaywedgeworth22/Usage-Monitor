@@ -238,6 +238,22 @@ describe("extractFields: copilot", () => {
     expect(extractFields("copilot", "postToolUse", {}).success).toBe(false);
   });
 
+  it("postToolUseFailure records the tool as unsuccessful (camelCase and VS Code shapes)", () => {
+    const camel = extractFields("copilot", "postToolUseFailure", {
+      sessionId: "s-3",
+      toolName: "mcp_github_search",
+      error: "boom -- never read",
+    });
+    expect(camel).toMatchObject({ toolName: "mcp_tool", success: false, sessionId: "s-3" });
+    const snake = extractFields("copilot", "PostToolUseFailure", {
+      hook_event_name: "PostToolUseFailure",
+      session_id: "s-4",
+      tool_name: "read_file",
+      error: "ENOENT",
+    });
+    expect(snake).toMatchObject({ toolName: "read_file", success: false, sessionId: "s-4" });
+  });
+
   it("sessionEnd maps reason:complete to success", () => {
     expect(extractFields("copilot", "sessionEnd", { reason: "complete" }).success).toBe(true);
     expect(extractFields("copilot", "sessionEnd", { reason: "error" }).success).toBe(false);
