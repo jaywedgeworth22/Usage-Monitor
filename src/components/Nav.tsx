@@ -29,7 +29,10 @@ const PRIMARY_LINKS: NavLink[] = [
   { href: "/settings", label: "Settings" },
 ];
 
-const SECONDARY_LINKS: NavLink[] = [{ href: "/attribution", label: "Keys & apps" }];
+const SECONDARY_LINKS: NavLink[] = [
+  { href: "/attribution", label: "Keys & apps" },
+  { href: "/cost-by-session", label: "Cost by session" },
+];
 
 function isLinkActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";

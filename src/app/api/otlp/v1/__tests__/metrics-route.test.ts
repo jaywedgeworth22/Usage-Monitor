@@ -486,7 +486,11 @@ describe("POST /api/otlp/v1/metrics", () => {
     expect(await prisma.otlpMetricState.count()).toBe(0);
   });
 
-  it("uses an explicit metadata allowlist", async () => {
+  it("uses an explicit metadata allowlist, with session.id as the one deliberate exception", async () => {
+    // session.id is retained (2026-09-24) for GET /api/cost-by-session -- see
+    // mapping-utils.ts's METADATA_ALLOWLIST comment and
+    // src/lib/cost-by-session.ts. It is an opaque per-process UUID, not PII,
+    // unlike user.email which stays excluded below.
     const payload = structuredClone(samplePayload);
     payload.resourceMetrics[0].resource.attributes.push(
       { key: "user.email", value: { stringValue: "private@example.com" } },
@@ -494,15 +498,18 @@ describe("POST /api/otlp/v1/metrics", () => {
     );
     payload.resourceMetrics[0].scopeMetrics[0].metrics[0].sum.dataPoints[0].attributes.push({
       key: "session.id",
-      value: { stringValue: "secret-session" },
+      value: { stringValue: "kept-session" },
     });
     await POST(jsonRequest(payload, { authorization: "Bearer test-token-123" }));
     const row = await prisma.externalUsageEvent.findFirstOrThrow({
       where: { sourceApp: "claude-code" },
     });
-    expect(row.metadata).toMatchObject({ model: "claude-sonnet-5", project: "socratic-trade" });
+    expect(row.metadata).toMatchObject({
+      model: "claude-sonnet-5",
+      project: "socratic-trade",
+      "session.id": "kept-session",
+    });
     expect(row.metadata).not.toMatchObject({ "user.email": expect.anything() });
-    expect(row.metadata).not.toMatchObject({ "session.id": expect.anything() });
   });
 
   it("mirrors dotted project.name resource attribute into metadata.project", async () => {

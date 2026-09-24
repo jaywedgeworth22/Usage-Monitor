@@ -22,11 +22,14 @@ import {
 // Metrics and Logs Export"), current as of 2026-07-04. Claude Code's OTel
 // meter name is `com.anthropic.claude_code`; every metric below is a Sum
 // (monotonic counter). Attributes listed are the ones this mapper actually
-// reads. Claude Code emits several more (session.id, user.email,
-// organization.id, terminal.type, query_source, speed, effort, agent.name,
-// skill.name, plugin.name, mcp_server.name, mcp_tool.name, ...). Those values
+// reads. Claude Code emits several more (user.email, organization.id,
+// terminal.type, query_source, speed, effort, agent.name, skill.name,
+// plugin.name, mcp_server.name, mcp_tool.name, ...). Those values
 // participate in one-way series/idempotency hashes but are not persisted;
-// metadata storage uses the explicit allowlist in mapping-utils.ts.
+// metadata storage uses the explicit allowlist in mapping-utils.ts. session.id
+// is the one exception -- it IS persisted (added 2026-09-24) so
+// GET /api/cost-by-session can sum cost across the session(s) THE BOARD
+// records on a finding. See mapping-utils.ts's METADATA_ALLOWLIST comment.
 //
 //   OTLP metric name                      | unit   | -> ExternalUsageEvent fields
 //   ---------------------------------------+--------+---------------------------------
