@@ -192,10 +192,15 @@ SQLite datasource — match provider names case-insensitively in JS (`.toLowerCa
   target this app at all — they go straight to a dedicated Sentry project
   (`agent-sessions` in the `jays-services` org) via per-signal
   `OTEL_EXPORTER_OTLP_LOGS_*` env vars in `~/.claude/settings.json` on the
-  Mac.  Claude Code **metrics** are unaffected and still land here via
-  `OTEL_EXPORTER_OTLP_METRICS_*`.  The `POST /api/otlp/v1/logs` route above
-  remains the accept-and-drop stub it always was — see
-  `docs/rollouts/2026-09-23-claude-code-logs-sentry.md`.
+  Mac.  Claude Code **metrics** keep targeting this app, unchanged, via
+  `OTEL_EXPORTER_OTLP_METRICS_*` — but a production smoke test taken during
+  this same rollout found the configured metrics credential getting `401`
+  from `/api/otlp/v1/metrics` (reproduced against both the new and the
+  byte-identical pre-existing credential, so it predates this split and is
+  not caused by it).  Until that's resolved, Claude Code metrics from these
+  seats are not actually landing here despite being configured to.  The
+  `POST /api/otlp/v1/logs` route above remains the accept-and-drop stub it
+  always was — see `docs/rollouts/2026-09-23-claude-code-logs-sentry.md`.
 
 ## Per-project cost attribution
 

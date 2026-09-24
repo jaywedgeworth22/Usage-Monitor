@@ -16,11 +16,15 @@ Claude Code's shared `~/.claude/settings.json` `env` block (this Mac only,
 not a Usage Monitor app change) now splits OTLP config per signal instead of
 using the generic `OTEL_EXPORTER_OTLP_*` vars for both signals:
 
-- **Metrics** — unchanged destination (Usage Monitor), now on dedicated
-  per-signal vars: `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`,
+- **Metrics** — unchanged intended destination (Usage Monitor), now on
+  dedicated per-signal vars: `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`,
   `OTEL_EXPORTER_OTLP_METRICS_HEADERS`, `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL`.
   `OTEL_METRICS_EXPORTER=otlp` is unchanged.  The credential value is
   byte-identical to what was already configured — only the var names moved.
+  **However**, see Verification below: that credential currently gets `401`
+  from Usage Monitor in production, so metrics are configured to land here
+  but are not actually succeeding right now — a pre-existing condition this
+  rollout surfaced rather than caused.
 - **Logs** — new destination, a dedicated Sentry project named
   `agent-sessions` in the `jays-services` org (US region), on
   `OTEL_LOGS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`,
