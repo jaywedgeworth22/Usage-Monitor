@@ -46,7 +46,9 @@ Live producers are the `sourceApp` values the production database received in th
 
 Not producers: `agent-bar` (the pre-rename CodeCaps app, silent since 2026-09-21), `owner-recorded-expense` (its own `OWNER_EXPENSE_TOKEN` route), `manual-billing-adjustment` and `subscription` (on-demand import and the internal materializer).  No GitHub Actions secret in any fleet repo carries an ingest token.  Codex Cloud setup only receives `SLACK_BOT_TOKEN` and `GH_TOKEN`.
 
-On-demand scripts that post as some other producer (`import-manual-subscription-events.mjs`, `fleet-usage-collector.mjs`) need a scoped token for that producer once the flag is on; pass it as `USAGE_INGEST_TOKEN` in the environment for that run.
+- `scripts/fleet-usage-collector.mjs` (on-demand) also posts several producers per pass; it now resolves each batch's own `<PRODUCER>_INGEST_TOKEN` before `USAGE_INGEST_TOKEN`.
+
+The on-demand `import-manual-subscription-events.mjs` posts only `manual-billing-adjustment`; once the flag is on, run it with a token scoped to that producer passed as `USAGE_INGEST_TOKEN` in the environment for that run.
 
 ## Rotation runbook
 
