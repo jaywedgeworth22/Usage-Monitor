@@ -8,15 +8,21 @@ set -euo pipefail
 INGEST_URL="${INGEST_URL:-https://usage.jays.services/api/ingest/mac-heartbeat}"
 SECRETS_FILE="/Users/jay/.secrets/global-api-keys"
 
-if [[ -f "$SECRETS_FILE" ]]; then
-  # Extract USAGE_INGEST_TOKEN if available
-  TOKEN=$(grep "^USAGE_INGEST_TOKEN=" "$SECRETS_FILE" | cut -d'=' -f2 | tr -d '"' || true)
-fi
+# Prefer the scoped heartbeat token (a `mac-host:<token>` entry in the
+# monitor's USAGE_INGEST_PRODUCER_TOKENS); the unscoped USAGE_INGEST_TOKEN is
+# refused once USAGE_INGEST_REQUIRE_SCOPED_TOKENS=true.
+read_secret() {
+  [[ -f "$SECRETS_FILE" ]] || return 0
+  grep -m1 "^$1=" "$SECRETS_FILE" | cut -d'=' -f2- | tr -d '"' || true
+}
 
-TOKEN="${USAGE_INGEST_TOKEN:-${TOKEN:-}}"
+TOKEN="${MAC_HEARTBEAT_INGEST_TOKEN:-}"
+[[ -n "$TOKEN" ]] || TOKEN="$(read_secret MAC_HEARTBEAT_INGEST_TOKEN)"
+[[ -n "$TOKEN" ]] || TOKEN="${USAGE_INGEST_TOKEN:-}"
+[[ -n "$TOKEN" ]] || TOKEN="$(read_secret USAGE_INGEST_TOKEN)"
 
 if [[ -z "$TOKEN" ]]; then
-  echo "Error: USAGE_INGEST_TOKEN not found in environment or $SECRETS_FILE" >&2
+  echo "Error: MAC_HEARTBEAT_INGEST_TOKEN / USAGE_INGEST_TOKEN not found in environment or $SECRETS_FILE" >&2
   exit 1
 fi
 

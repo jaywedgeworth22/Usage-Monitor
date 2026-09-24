@@ -30,8 +30,13 @@
 //   launchctl bootout gui/$(id -u)/com.jays.subscription-quota-collector
 //
 // Env:
-//   USAGE_INGEST_TOKEN (or SUBSCRIPTION_QUOTA_INGEST_TOKEN), falling back to
-//     ~/.secrets/global-api-keys via resolveCollectorToken
+//   Per-producer scoped ingest tokens, one per provider batch:
+//     CLAUDE_CODE_INGEST_TOKEN (claude-code), CODEX_INGEST_TOKEN (openai-codex),
+//     GROK_INGEST_TOKEN (grok-build), MINIMAX_INGEST_TOKEN (minimax-code).
+//   Each falls back to SUBSCRIPTION_QUOTA_INGEST_TOKEN, then USAGE_INGEST_TOKEN
+//     (unscoped; refused once USAGE_INGEST_REQUIRE_SCOPED_TOKENS=true).  Every
+//     name is read from the environment first, then ~/.secrets/global-api-keys
+//     via resolveCollectorToken.
 //   USAGE_MONITOR_INGEST_URL (default https://usage.jays.services/api/ingest/usage)
 //   CLAUDE_HOME / CODEX_HOME / GROK_HOME / MINIMAX_CONFIG_PATH to override
 //     credential locations
@@ -190,6 +195,8 @@ const PROVIDERS = {
     provider: "anthropic",
     service: "claude-code",
     producerId: CLAUDE_PRODUCER_ID,
+    // Per-producer scoped ingest token (USAGE_INGEST_PRODUCER_TOKENS).
+    tokenEnv: "CLAUDE_CODE_INGEST_TOKEN",
     defaultSource: hostOf(CLAUDE_USAGE_URL),
     parse: (payload, context) => parseClaudeUsage(payload, context),
     async fetch() {
@@ -218,6 +225,8 @@ const PROVIDERS = {
     provider: "openai",
     service: "codex-cli",
     producerId: CODEX_PRODUCER_ID,
+    // Per-producer scoped ingest token (USAGE_INGEST_PRODUCER_TOKENS).
+    tokenEnv: "CODEX_INGEST_TOKEN",
     defaultSource: hostOf(CODEX_USAGE_URL),
     parse: (payload, context) => parseCodexUsage(payload, context),
     async fetch() {
@@ -242,6 +251,8 @@ const PROVIDERS = {
     provider: "xai",
     service: "grok-cli",
     producerId: GROK_PRODUCER_ID,
+    // Per-producer scoped ingest token (USAGE_INGEST_PRODUCER_TOKENS).
+    tokenEnv: "GROK_INGEST_TOKEN",
     defaultSource: hostOf(GROK_BILLING_URL),
     parse: (payload) => parseGrokBilling(payload),
     async fetch({ debug }) {
@@ -277,6 +288,8 @@ const PROVIDERS = {
     provider: "minimax",
     service: "minimax-code",
     producerId: MINIMAX_PRODUCER_ID,
+    // Per-producer scoped ingest token (USAGE_INGEST_PRODUCER_TOKENS).
+    tokenEnv: "MINIMAX_INGEST_TOKEN",
     defaultSource: hostOf(MINIMAX_URLS[0]),
     parse: (payload) => parseMinimaxRemains(payload),
     async fetch({ debug }) {
@@ -428,6 +441,20 @@ async function collectProvider(providerKey, args) {
   }
 }
 
+/**
+ * Token lookup order for one provider's batch: that producer's scoped token
+ * first, then the legacy collector-wide names.  With
+ * USAGE_INGEST_REQUIRE_SCOPED_TOKENS=true only the first can succeed, because
+ * a scoped token authorizes exactly one producerId.
+ */
+export function ingestTokenEnvNames(definition) {
+  return [
+    ...(definition.tokenEnv ? [definition.tokenEnv] : []),
+    "SUBSCRIPTION_QUOTA_INGEST_TOKEN",
+    "USAGE_INGEST_TOKEN",
+  ];
+}
+
 async function main() {
   let args;
   try {
@@ -446,12 +473,11 @@ async function main() {
 
   const withEvents = results.filter((r) => r.events.length > 0);
   if (withEvents.length > 0 && !args.dryRun) {
-    const token = resolveCollectorToken([
-      "SUBSCRIPTION_QUOTA_INGEST_TOKEN",
-      "USAGE_INGEST_TOKEN",
-    ]);
     for (const result of withEvents) {
       const definition = PROVIDERS[result.providerKey];
+      // Each provider posts as its own producerId, and a scoped ingest token
+      // only authorizes its own producer, so resolve one token per producer.
+      const token = resolveCollectorToken(ingestTokenEnvNames(definition));
       try {
         const ack = await postUsageBatches({
           events: result.events,

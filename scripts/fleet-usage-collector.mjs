@@ -41,6 +41,7 @@ import {
   isBotFleetManagedCodexSession,
   isBotFleetSessionPath,
   parseCollectorArgs,
+  resolveCollectorToken,
   readIfFresh,
   sessionKeyFor,
   walkFiles,
@@ -219,6 +220,26 @@ async function collectAllSessionEvents(since) {
  * Keep one batch per seat producer id so eventIds already hashed with those
  * ids stay idempotent with the individual collectors.
  */
+/**
+ * Scoped ingest token names per producer.  A scoped token authorizes exactly
+ * one producerId, so every batch resolves its own token (environment first,
+ * then ~/.secrets/global-api-keys) before the unscoped USAGE_INGEST_TOKEN,
+ * which is refused once USAGE_INGEST_REQUIRE_SCOPED_TOKENS=true.
+ */
+export const FLEET_TOKEN_ENV_BY_PRODUCER = {
+  [ANTIGRAVITY_PRODUCER_ID]: ["ANTIGRAVITY_INGEST_TOKEN"],
+  [ANTIGRAVITY_STATUSLINE_PRODUCER_ID]: ["ANTIGRAVITY_STATUSLINE_INGEST_TOKEN"],
+  [CLAUDE_PRODUCER_ID]: ["CLAUDE_CODE_INGEST_TOKEN", "CLAUDE_INGEST_TOKEN"],
+  [CODEX_PRODUCER_ID]: ["CODEX_INGEST_TOKEN"],
+  [GROK_PRODUCER_ID]: ["GROK_INGEST_TOKEN"],
+  [COPILOT_PRODUCER_ID]: ["COPILOT_INGEST_TOKEN"],
+  [DEEPSEEK_PRODUCER_ID]: ["DEEPSEEK_INGEST_TOKEN"],
+};
+
+export function fleetTokenEnvNames(producerId) {
+  return [...(FLEET_TOKEN_ENV_BY_PRODUCER[producerId] ?? []), "USAGE_INGEST_TOKEN"];
+}
+
 export function fleetIngestJobs({ quotaEvents = [], sessionResults = {} } = {}) {
   return [
     {
@@ -281,11 +302,6 @@ async function main() {
     return;
   }
 
-  const token =
-    process.env.USAGE_INGEST_TOKEN?.trim() ||
-    process.env.ANTIGRAVITY_INGEST_TOKEN?.trim() ||
-    process.env.CLAUDE_INGEST_TOKEN?.trim();
-
   try {
     let received = 0;
     let persisted = 0;
@@ -295,7 +311,7 @@ async function main() {
       const ack = await postUsageBatches({
         events: job.events,
         ingestUrl: INGEST_URL,
-        ingestToken: token,
+        ingestToken: resolveCollectorToken(fleetTokenEnvNames(job.producerId)),
         producerId: job.producerId,
         dryRun: DRY || args.dryRun,
         log,

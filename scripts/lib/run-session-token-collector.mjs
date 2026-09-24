@@ -6,23 +6,30 @@ import { homedir } from "node:os";
 /**
  * Resolves an ingest token from environment variables or falls back to
  * ~/.secrets/global-api-keys (same pattern as mac-server-watchdog.sh and local-keys-bundle.mjs).
+ *
+ * Names are tried strictly in order, each in the environment and then in the
+ * secrets file, so a producer-scoped name kept in the file still beats an
+ * unscoped USAGE_INGEST_TOKEN exported in the environment.
  */
-export function resolveCollectorToken(tokenEnvVarNames = ["USAGE_INGEST_TOKEN"]) {
-  for (const name of tokenEnvVarNames) {
-    const val = process.env[name]?.trim();
-    if (val) return val;
-  }
+export function resolveCollectorToken(
+  tokenEnvVarNames = ["USAGE_INGEST_TOKEN"],
+  { env = process.env, secretsPath = join(homedir(), ".secrets", "global-api-keys") } = {},
+) {
+  let content = null;
   try {
-    const secretsPath = join(homedir(), ".secrets", "global-api-keys");
-    const content = readFileSync(secretsPath, "utf8");
-    for (const name of tokenEnvVarNames) {
+    content = readFileSync(secretsPath, "utf8");
+  } catch {
+    // No secrets file: environment only.
+  }
+  for (const name of tokenEnvVarNames) {
+    const val = env[name]?.trim();
+    if (val) return val;
+    if (content) {
       const match = new RegExp(`^(?:export\\s+)?${name}=["\']?([^"\'\\r\\n]+)["\']?`, "m").exec(content);
       if (match && match[1]?.trim()) {
         return match[1].trim();
       }
     }
-  } catch {
-    // ignore
   }
   return null;
 }
