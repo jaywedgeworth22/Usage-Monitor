@@ -74,6 +74,10 @@ export const isPublicPath = (pathname: string) => {
   // tokens 401 at the session gate before the route's own auth runs.
   if (pathname === "/api/export/daily-rollups" || pathname === "/api/export/daily-rollups/") return true;
   if (pathname === "/api/workspace/export" || pathname === "/api/workspace/export/") return true;
+  // Self-authenticates via isUsageReadAuthorized (same pattern as the
+  // daily-rollups exclusion above) — without this, bearer read tokens 401 at
+  // the session gate before the route's own auth runs.
+  if (pathname === "/api/agent-model-mix" || pathname === "/api/agent-model-mix/") return true;
   return false;
 };
 
