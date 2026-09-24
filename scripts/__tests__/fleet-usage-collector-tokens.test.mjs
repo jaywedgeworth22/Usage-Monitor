@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { STATUSLINE_TOKEN_ENV_NAMES } from "../antigravity-session-collector.mjs";
 import { fleetIngestJobs, fleetTokenEnvNames } from "../fleet-usage-collector.mjs";
 
 describe("fleet collector scoped tokens", () => {
@@ -38,5 +39,10 @@ describe("fleet collector scoped tokens", () => {
     ];
     const first = producers.map((p) => fleetTokenEnvNames(p)[0]);
     expect(new Set(first).size).toBe(producers.length);
+  });
+
+  it("never offers the antigravity-cli token to the status-line collector", () => {
+    expect(STATUSLINE_TOKEN_ENV_NAMES).toEqual(["ANTIGRAVITY_STATUSLINE_INGEST_TOKEN", "USAGE_INGEST_TOKEN"]);
+    expect(fleetTokenEnvNames("antigravity-statusline")).not.toContain("ANTIGRAVITY_INGEST_TOKEN");
   });
 });

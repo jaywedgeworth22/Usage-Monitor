@@ -21,6 +21,9 @@ With `USAGE_INGEST_REQUIRE_SCOPED_TOKENS=true` the unscoped `USAGE_INGEST_TOKEN`
 - `scripts/subscription-quota-collector.mjs` posted four producers (`claude-code`, `openai-codex`, `grok-build`, `minimax-code`) with one token, which no single scoped token can authorize.  It now resolves one token per provider batch: `CLAUDE_CODE_INGEST_TOKEN`, `CODEX_INGEST_TOKEN`, `GROK_INGEST_TOKEN`, `MINIMAX_INGEST_TOKEN`, each falling back to `SUBSCRIPTION_QUOTA_INGEST_TOKEN`, then `USAGE_INGEST_TOKEN`.
 - `scripts/ops/mac-server-watchdog.sh` reads `MAC_HEARTBEAT_INGEST_TOKEN` (environment, then `~/.secrets/global-api-keys`) before `USAGE_INGEST_TOKEN`.
 - `POST /api/ingest/mac-heartbeat` rejects a token scoped to a producer other than `mac-host`.
+- `scripts/fleet-usage-collector.mjs` (on-demand) also posts several producers per pass; it now resolves each batch's own `<PRODUCER>_INGEST_TOKEN` before `USAGE_INGEST_TOKEN`.
+- `resolveCollectorToken` tries each name in the environment and then in the secrets file before the next name, so a scoped file entry beats an exported unscoped token.
+- `scripts/antigravity-session-collector.mjs` reads `ANTIGRAVITY_STATUSLINE_INGEST_TOKEN`, never the `antigravity-cli` producer's `ANTIGRAVITY_INGEST_TOKEN`.
 - Tests: scoped `claude-code` OTLP acceptance (and unscoped/other-producer refusal under the flag), heartbeat route scoping, collector token precedence.
 
 ## Producer inventory (names only, no values)
@@ -37,7 +40,7 @@ Live producers are the `sourceApp` values the production database received in th
 | `minimax-code` | Quota collector's MiniMax batch (and on-demand `minimax-usage-collector.mjs`) | `MINIMAX_INGEST_TOKEN` in `~/.secrets/global-api-keys` | Shared |
 | `deepseek-dsh` | On-demand `deepseek-usage-collector.mjs` | `DEEPSEEK_INGEST_TOKEN` in `~/.secrets/global-api-keys` | Shared |
 | `antigravity-cli` | `com.jays.antigravity-usage-collector` | `ANTIGRAVITY_INGEST_TOKEN` in `~/.secrets/global-api-keys` | Already scoped |
-| `antigravity-statusline` | `com.jays.antigravity-session-collector` | plist `EnvironmentVariables` | Scoped by board row `078333b0` |
+| `antigravity-statusline` | `com.jays.antigravity-session-collector` | `ANTIGRAVITY_STATUSLINE_INGEST_TOKEN` in `~/.secrets/global-api-keys` (the plist also pins it under the older `ANTIGRAVITY_INGEST_TOKEN` name, which pre-change code reads) | Scoped by board row `078333b0` |
 | `mac-host` | `com.jays.mac-server-watchdog` heartbeat | `MAC_HEARTBEAT_INGEST_TOKEN` in `~/.secrets/global-api-keys` | Shared |
 | `codecaps` | CodeCaps menu bar app (Mac) | macOS Keychain, entered in the app's settings | Shared (owner must paste) |
 | `botfleet` | BotFleet harness on the Mac | `~/.botfleet/config.json` `usage.ingestToken` and BotFleet Infisical `USAGE_MONITOR_INGEST_TOKEN` | Shared |
@@ -45,8 +48,6 @@ Live producers are the `sourceApp` values the production database received in th
 | `socratic-trade` | Socratic.Trade on Coolify | Socratic.Trade Infisical `USAGE_INGEST_TOKEN` | Shared |
 
 Not producers: `agent-bar` (the pre-rename CodeCaps app, silent since 2026-09-21), `owner-recorded-expense` (its own `OWNER_EXPENSE_TOKEN` route), `manual-billing-adjustment` and `subscription` (on-demand import and the internal materializer).  No GitHub Actions secret in any fleet repo carries an ingest token.  Codex Cloud setup only receives `SLACK_BOT_TOKEN` and `GH_TOKEN`.
-
-- `scripts/fleet-usage-collector.mjs` (on-demand) also posts several producers per pass; it now resolves each batch's own `<PRODUCER>_INGEST_TOKEN` before `USAGE_INGEST_TOKEN`.
 
 The on-demand `import-manual-subscription-events.mjs` posts only `manual-billing-adjustment`; once the flag is on, run it with a token scoped to that producer passed as `USAGE_INGEST_TOKEN` in the environment for that run.
 

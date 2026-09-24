@@ -26,6 +26,7 @@ const DRY = process.argv.includes("--dry-run");
 const PRODUCER_ID =
   process.env.ANTIGRAVITY_STATUSLINE_PRODUCER_ID ||
   ANTIGRAVITY_STATUSLINE_PRODUCER_ID;
+export const STATUSLINE_TOKEN_ENV_NAMES = ["ANTIGRAVITY_STATUSLINE_INGEST_TOKEN", "USAGE_INGEST_TOKEN"];
 const INGEST_URL = process.env.USAGE_MONITOR_INGEST_URL || "https://usage.jays.services/api/ingest/usage";
 
 function log(message) {
@@ -75,7 +76,9 @@ async function main() {
     }
     return;
   }
-  const token = resolveCollectorToken(["ANTIGRAVITY_INGEST_TOKEN", "USAGE_INGEST_TOKEN"]);
+  // ANTIGRAVITY_INGEST_TOKEN is scoped to the antigravity-cli producer, not
+  // this one, so it is deliberately not a candidate here.
+  const token = resolveCollectorToken(STATUSLINE_TOKEN_ENV_NAMES);
   try {
     const ack = await postUsageBatches({
       events,
