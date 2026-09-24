@@ -52,6 +52,9 @@
 //     const dir=path.join(os.homedir(),".config","usage-monitor"); fs.mkdirSync(dir,{recursive:true});
 //     const out=path.join(dir,"agent-hook-otlp-sentry.json");
 //     fs.writeFileSync(out, JSON.stringify({endpoint, headerName: headerName.trim(), headerValue: headerValue.trim()}), {mode:0o600});
+//     // `mode` only applies when the file is created -- re-tighten an
+//     // existing (e.g. 0644) file so the ingest credential is not world-readable.
+//     fs.chmodSync(out, 0o600);
 //     console.log("wrote", out, "(", fs.statSync(out).size, "bytes )");
 //   '
 // If neither source resolves, the shim is a silent no-op (still exits 0).
@@ -135,7 +138,7 @@ function pick(payload, ...keys) {
   return undefined;
 }
 
-/** platform "antigravity" (agy). Payload shapes per antigravity.google/docs/hooks. */
+/** platform "antigravity" (agy).  Payload shapes per antigravity.google/docs/hooks. */
 function extractAntigravity(event, payload) {
   const sessionId = nonEmptyString(payload?.conversationId);
   const model = nonEmptyString(payload?.modelName);
@@ -157,7 +160,7 @@ function extractAntigravity(event, payload) {
   }
 }
 
-/** platform "cursor". Payload shapes per cursor.com/docs/agent/hooks. */
+/** platform "cursor".  Payload shapes per cursor.com/docs/agent/hooks. */
 function extractCursor(event, payload) {
   const sessionId = nonEmptyString(payload?.conversation_id);
   const model = nonEmptyString(payload?.model);
@@ -173,7 +176,7 @@ function extractCursor(event, payload) {
   }
 }
 
-/** platform "copilot". Payload shapes per docs.github.com/copilot/reference/hooks-reference (camelCase and VS Code-compatible snake_case both handled). */
+/** platform "copilot".  Payload shapes per docs.github.com/copilot/reference/hooks-reference (camelCase and VS Code-compatible snake_case both handled). */
 function extractCopilot(event, payload) {
   const sessionId = nonEmptyString(pick(payload, "sessionId", "session_id"));
   switch (event) {
@@ -247,7 +250,7 @@ function attr(key, value) {
  * surfaces it in the Logs product or free-text log search -- confirmed by
  * probing the identical endpoint with and without these fields and checking
  * `GET .../explore/traces/trace/<id>` (which reports a log count per trace
- * regardless of full-text search indexing lag). There is no real parent
+ * regardless of full-text search indexing lag).  There is no real parent
  * span here -- each hook invocation gets its own synthetic, disposable
  * trace -- but the fields must be present for Sentry to index the log.
  */
