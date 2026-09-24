@@ -187,6 +187,11 @@ function extractCopilot(event, payload) {
       const resultType = pick(toolResult, "resultType", "result_type");
       return { toolName, success: resultType === "success", sessionId };
     }
+    case "postToolUseFailure":
+    case "PostToolUseFailure":
+      // Fires after a tool completes with a failure; the payload carries
+      // toolName/tool_name and an `error` string, no toolResult.
+      return { toolName: coarseToolName(pick(payload, "toolName", "tool_name")), success: false, sessionId };
     case "sessionEnd": {
       const reason = pick(payload, "reason");
       return { success: reason === "complete", sessionId };
