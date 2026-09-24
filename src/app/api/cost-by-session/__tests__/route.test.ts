@@ -93,6 +93,8 @@ describe("GET /api/cost-by-session", () => {
       until: "2026-09-24T00:00:00.000Z",
       requestedSince: "2026-09-20T00:00:00.000Z",
       clampedToRawRetention: false,
+      expiredBeforeRawRetention: false,
+      rawRetentionCutoff: expect.any(String),
     });
     expect(body.billingMode).toBe("estimated");
   });
@@ -138,6 +140,28 @@ describe("GET /api/cost-by-session", () => {
       expect(body.window.requestedSince).toBe("2026-04-27T12:00:00.000Z");
       expect(body.window.since).toBe("2026-06-26T12:00:00.000Z");
       expect(body.window.clampedToRawRetention).toBe(true);
+    });
+
+    it("returns an expired-window result without querying when `until` is older than raw-event retention", async () => {
+      const response = await GET(
+        request("?ids=session-a,session-b&since=2026-04-27T12:00:00Z&until=2026-05-27T12:00:00Z")
+      );
+      expect(response.status).toBe(200);
+      expect(mocks.loadCostBySessionRows).not.toHaveBeenCalled();
+
+      const body = await response.json();
+      expect(body.matchedSessionIds).toEqual([]);
+      expect(body.unmatchedSessionIds).toEqual(["session-a", "session-b"]);
+      expect(body.sessions).toEqual([]);
+      expect(body.totals.costUsd).toBe(0);
+      expect(body.window).toEqual({
+        since: "2026-04-27T12:00:00.000Z",
+        until: "2026-05-27T12:00:00.000Z",
+        requestedSince: "2026-04-27T12:00:00.000Z",
+        clampedToRawRetention: false,
+        expiredBeforeRawRetention: true,
+        rawRetentionCutoff: "2026-06-26T12:00:00.000Z",
+      });
     });
 
     it("does not clamp when the requested window is already within raw-event retention", async () => {
