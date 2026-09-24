@@ -28,7 +28,14 @@ interface Report {
   unmatchedSessionIds: string[];
   sessions: SessionCostSummary[];
   totals: { eventCount: number; tokens: SessionTokenBreakdown; costUsd: number };
-  window: { since: string; until: string; requestedSince: string; clampedToRawRetention: boolean };
+  window: {
+    since: string;
+    until: string;
+    requestedSince: string;
+    clampedToRawRetention: boolean;
+    expiredBeforeRawRetention?: boolean;
+    rawRetentionCutoff?: string;
+  };
 }
 
 const inputClass =
@@ -138,7 +145,12 @@ export default function CostBySessionPanel() {
               <Metric label="Total tokens" value={tokens(report.totals.tokens.total)} />
               <Metric label="Events" value={tokens(report.totals.eventCount)} />
             </div>
-            {report.unmatchedSessionIds.length > 0 ? (
+            {report.window.expiredBeforeRawRetention ? (
+              <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                The requested window ({report.window.since} to {report.window.until}) ended before raw event data starts
+                ({report.window.rawRetentionCutoff}), so no session in it can be matched any more, even if it had usage.
+              </p>
+            ) : report.unmatchedSessionIds.length > 0 ? (
               <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
                 No claude-code usage found in this window for: {report.unmatchedSessionIds.join(", ")}. That session may not have exported OTLP
                 metrics yet (the exporter only runs while the seat has restarted since it was configured), or it falls outside {report.window.since}
@@ -168,12 +180,12 @@ export default function CostBySessionPanel() {
                 <tbody>
                   {report.sessions.map((session) => (
                     <tr key={session.sessionId} className="border-b border-gray-100 dark:border-gray-700">
-                      <td className="px-4 py-3 font-mono text-xs text-gray-900 dark:text-gray-100">{session.sessionId}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{session.models.join(", ") || "—"}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{tokens(session.tokens.total)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{money(session.costUsd)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{tokens(session.eventCount)}</td>
-                      <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
+                      <td data-label="Session" className="px-4 py-3 font-mono text-xs text-gray-900 dark:text-gray-100">{session.sessionId}</td>
+                      <td data-label="Models" className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{session.models.join(", ") || "—"}</td>
+                      <td data-label="Tokens" className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{tokens(session.tokens.total)}</td>
+                      <td data-label="Est. cost" className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{money(session.costUsd)}</td>
+                      <td data-label="Events" className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{tokens(session.eventCount)}</td>
+                      <td data-label="Span" className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
                         {fmtTime(session.firstSeenAt)} to {fmtTime(session.lastSeenAt)}
                       </td>
                     </tr>
