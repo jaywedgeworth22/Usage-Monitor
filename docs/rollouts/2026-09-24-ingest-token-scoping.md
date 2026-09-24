@@ -59,3 +59,24 @@ The on-demand `import-manual-subscription-events.mjs` posts only `manual-billing
 4. Set `USAGE_INGEST_REQUIRE_SCOPED_TOKENS=true`, reload, and prove every producer still succeeds and an unscoped request is refused.
 
 Values are handled only inside short-lived local scripts that print key names, lengths, SHA-256 prefixes, and HTTP status codes.
+
+## Result (Thu, Sep 24, 2026 at 4:45 PM CT)
+
+Done:
+
+- Eleven new scoped tokens (`claude-code`, `openai-codex`, `grok-build`, `github-copilot`, `minimax-code`, `deepseek-dsh`, `mac-host`, `codecaps`, `botfleet`, `congress-trade`, `socratic-trade`) are in `USAGE_INGEST_PRODUCER_TOKENS` next to the two Antigravity entries.  Each is also stored in Usage Monitor Infisical under its own `<PRODUCER>_INGEST_TOKEN` name.
+- Every scoped token was probed against production without writing: an all-invalid v2 batch returns `202` (authenticated), and a batch for a different producer returns `403` (scope enforced).  The `claude-code` token also returns `202` on OTLP metrics.
+- Installed: the `~/.claude/settings.json` metrics header, the Mac collector names in the handoff file, `~/.botfleet/config.json` plus BotFleet Infisical, Congress.Trade Infisical (resolved at runtime), and Socratic.Trade Infisical (container restarted; process environment fingerprint confirmed).
+- `USAGE_INGEST_TOKEN` rotated in Usage Monitor Infisical.  The inert Coolify copies (production and preview) were deleted, so Infisical is the only source.  The handoff file's `USAGE_INGEST_TOKEN` and `USAGE_MONITOR_INGEST_TOKEN` lines hold the new value.  Old value: `401`.  New value: `202`.  No fleet Infisical project still holds the old value.
+- After the rotation, production kept receiving `congress-trade`, `socratic-trade`, `openai-codex`, `grok-build`, `minimax-code`, `claude-code`, and `mac-host` events.  The new quota collector was run once from a `main` checkout with only scoped names available: the Codex, Grok, and MiniMax batches acknowledged with `rejected=0`.
+
+Not done, so `USAGE_INGEST_REQUIRE_SCOPED_TOKENS` stays unset (off):
+
+- **CodeCaps** keeps its ingest token in the macOS Keychain, entered in the app.  The owner must paste `CODECAPS_INGEST_TOKEN` from the handoff file into CodeCaps settings.  Until then CodeCaps pushes get `401`.
+- **BotFleet** has the scoped token in both of its stores, but its telemetry was already failing with dispatch timeouts before the rotation, and its local API was not answering during verification.  Confirm `botfleet` events resume once BotFleet is healthy again.
+- The Mac LaunchAgents run scripts from `~/Code/Usage-Monitor`, which still has pre-#1533 code.  The quota collector and heartbeat watchdog only pick up their scoped names once that checkout reaches `main`.
+- Running Claude Code sessions keep the old metrics header until they restart; their OTLP exports get `401` until then.
+
+To finish: after the items above, set `USAGE_INGEST_REQUIRE_SCOPED_TOKENS=true` in Usage Monitor Infisical, restart the container, and prove that an unscoped token gets `401` while each producer keeps landing.
+
+Side effects of verification: two synthetic production rows were written by probes and left in place for the owner to decide on.  One is a heartbeat row `342d8fbe-c18a-4730-ae93-5127d8f3c73e` (superseded by the next real heartbeat).  The other is a `scope-probe-other` / `scope-probe` usage row `6785e638-c611-4586-9881-a36418413d1c` (quantity 1, no cost).
