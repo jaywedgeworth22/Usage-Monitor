@@ -392,7 +392,7 @@ describe("noopReplyFor / NOOP_REPLIES", () => {
   it("antigravity's three wired events each have a fixed safe reply", () => {
     expect(noopReplyFor("antigravity", "PostToolUse")).toEqual({});
     expect(noopReplyFor("antigravity", "PostInvocation")).toEqual({});
-    expect(noopReplyFor("antigravity", "Stop")).toEqual({ decision: "continue" });
+    expect(noopReplyFor("antigravity", "Stop")).toEqual({});
   });
 
   it("cursor and copilot events have no special reply (fire-and-forget, print nothing)", () => {
@@ -642,7 +642,7 @@ describe("agent-hook-otlp.mjs as a real subprocess", () => {
       },
     });
     expect(code).toBe(0);
-    expect(stdout).toBe(JSON.stringify({ decision: "continue" }));
+    expect(stdout).toBe(JSON.stringify({}));
 
     // This local test server is not *.sentry.io, so isTrustedSentryEndpoint
     // correctly refuses to send it anything -- the fixed stdout reply above
