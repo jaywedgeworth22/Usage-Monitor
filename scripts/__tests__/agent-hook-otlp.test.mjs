@@ -360,19 +360,22 @@ describe("buildLogRecord", () => {
     // caller (or a future extractor bug) ever passed them through: it must
     // read exactly toolName/success/durationMs/sessionId/model and nothing
     // else, no matter what else rides along on the object.
+    // Deliberately NOT shaped like a real credential (no "Bearer ", no
+    // "api_key=", no "authorization:") -- this is a content-leak test, not a
+    // secret-scanner test, and a credential-shaped fixture string trips
+    // CI's own gitleaks gate on this file even though it is fake.
+    const FORBIDDEN = "FORBIDDEN-fixture-2f6a19";
     const record = buildLogRecord("cursor", "afterFileEdit", {
       toolName: "Edit",
       success: true,
       sessionId: "sess-1",
-      prompt: "the user's password is hunter2; api_key=sk-abcdef1234567890",
-      transcriptPath: "/Users/jay/very/private/transcript.json",
-      workspacePaths: ["/Users/jay/private-repo"],
-      command: "curl -H 'authorization: Bearer secret-token' https://internal",
+      prompt: `the user's private message: ${FORBIDDEN}`,
+      transcriptPath: `/Users/jay/very/private/${FORBIDDEN}.json`,
+      workspacePaths: [`/Users/jay/${FORBIDDEN}-repo`],
+      command: `some-tool --flag ${FORBIDDEN}`,
     });
     const serialized = JSON.stringify(record);
-    expect(serialized).not.toMatch(
-      /password|hunter2|secret|api[_-]?key|transcriptPath|workspacePaths|private-repo|authorization|Bearer/i
-    );
+    expect(serialized).not.toMatch(new RegExp(`${FORBIDDEN}|transcriptPath|workspacePaths`, "i"));
     const logRecord = record.resourceLogs[0].scopeLogs[0].logRecords[0];
     expect(logRecord.attributes.map((a) => a.key).sort()).toEqual(["event", "session.id", "tool.name", "success"].sort());
   });
