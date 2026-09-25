@@ -314,7 +314,7 @@ export const NOOP_REPLIES = {
   antigravity: {
     PostToolUse: {},
     PostInvocation: {},
-    Stop: { decision: "continue" },
+    Stop: {},
   },
 };
 
