@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -20,6 +21,7 @@ import {
   parsePayload,
   postOtlp,
   resolveCredentials,
+  scheduleBackgroundSend,
 } from "../agent-hook-otlp.mjs";
 
 const SCRIPT_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "agent-hook-otlp.mjs");
@@ -352,15 +354,27 @@ describe("buildLogRecord", () => {
     expect(keys).not.toContain("model");
   });
 
-  it("never leaks forbidden content even when field values are adversarially stuffed with it", () => {
-    // extractFields would never produce these in real use, but buildLogRecord
-    // itself must not special-case or widen anything if it did.
+  it("ignores any field beyond the known five, even when it carries forbidden-looking content", () => {
+    // extractFields would never produce these extra keys in real use, but
+    // buildLogRecord itself must not widen what it reads off `fields` if a
+    // caller (or a future extractor bug) ever passed them through: it must
+    // read exactly toolName/success/durationMs/sessionId/model and nothing
+    // else, no matter what else rides along on the object.
     const record = buildLogRecord("cursor", "afterFileEdit", {
       toolName: "Edit",
+      success: true,
       sessionId: "sess-1",
+      prompt: "the user's password is hunter2; api_key=sk-abcdef1234567890",
+      transcriptPath: "/Users/jay/very/private/transcript.json",
+      workspacePaths: ["/Users/jay/private-repo"],
+      command: "curl -H 'authorization: Bearer secret-token' https://internal",
     });
     const serialized = JSON.stringify(record);
-    expect(serialized).not.toMatch(/password|secret|api[_-]?key/i);
+    expect(serialized).not.toMatch(
+      /password|hunter2|secret|api[_-]?key|transcriptPath|workspacePaths|private-repo|authorization|Bearer/i
+    );
+    const logRecord = record.resourceLogs[0].scopeLogs[0].logRecords[0];
+    expect(logRecord.attributes.map((a) => a.key).sort()).toEqual(["event", "session.id", "tool.name", "success"].sort());
   });
 
   it("stamps a plausible current timeUnixNano", () => {
@@ -421,6 +435,43 @@ describe("parsePayload", () => {
     expect(parsePayload("42")).toEqual({});
     expect(parsePayload("[1,2,3]")).toEqual({});
     expect(parsePayload("null")).toEqual({});
+  });
+});
+
+describe("scheduleBackgroundSend", () => {
+  it("spawns a detached `node <scriptPath> --send`, writes {credentials, body} to its stdin, and unrefs it", () => {
+    const stdinChunks = [];
+    const fakeChild = {
+      stdin: { end: (data) => stdinChunks.push(data), on: () => {} },
+      on: () => {},
+      unref: vi.fn(),
+    };
+    const spawnImpl = vi.fn(() => fakeChild);
+    const credentials = { endpoint: "https://example.sentry.io/v1/logs", headerName: "x-sentry-auth", headerValue: "v" };
+    const body = { resourceLogs: [] };
+
+    scheduleBackgroundSend("/path/to/agent-hook-otlp.mjs", credentials, body, spawnImpl);
+
+    expect(spawnImpl).toHaveBeenCalledTimes(1);
+    const [execPath, args, options] = spawnImpl.mock.calls[0];
+    expect(execPath).toBe(process.execPath);
+    expect(args).toEqual(["/path/to/agent-hook-otlp.mjs", "--send"]);
+    expect(options.detached).toBe(true);
+    expect(options.stdio).toEqual(["pipe", "ignore", "ignore"]);
+    expect(JSON.parse(stdinChunks[0])).toEqual({ credentials, body });
+    expect(fakeChild.unref).toHaveBeenCalledTimes(1);
+  });
+
+  it("never throws when spawnImpl itself throws", () => {
+    const spawnImpl = vi.fn(() => {
+      throw new Error("EMFILE");
+    });
+    expect(() => scheduleBackgroundSend("/path", { endpoint: "e" }, {}, spawnImpl)).not.toThrow();
+  });
+
+  it("never throws when the returned child has no stdin (e.g. a stub missing it)", () => {
+    const spawnImpl = vi.fn(() => ({ on: () => {}, unref: () => {} }));
+    expect(() => scheduleBackgroundSend("/path", { endpoint: "e" }, {}, spawnImpl)).not.toThrow();
   });
 });
 
@@ -536,28 +587,63 @@ describe("main", () => {
     expect(postOtlpImpl).not.toHaveBeenCalled();
   });
 
-  it("posts a log record end to end when credentials are present", async () => {
+  it("schedules a background send (never calls postOtlp directly) when credentials are present", async () => {
     const postOtlpImpl = vi.fn(async () => {});
+    const scheduleBackgroundSendImpl = vi.fn();
     const env = {
       AGENT_HOOK_OTLP_ENDPOINT: "https://example.sentry.io/v1/logs",
       AGENT_HOOK_OTLP_HEADER_NAME: "x-sentry-auth",
       AGENT_HOOK_OTLP_HEADER_VALUE: "sentry sentry_key=abc",
     };
     await main(
-      ["node", "agent-hook-otlp.mjs", "copilot", "postToolUse"],
+      ["node", "/path/to/agent-hook-otlp.mjs", "copilot", "postToolUse"],
       env,
       {
         readStdin: async () => JSON.stringify({ sessionId: "s-9", toolName: "read_file", toolResult: { resultType: "success" } }),
         postOtlp: postOtlpImpl,
+        scheduleBackgroundSend: scheduleBackgroundSendImpl,
       }
     );
-    expect(postOtlpImpl).toHaveBeenCalledTimes(1);
-    const [credentials, body] = postOtlpImpl.mock.calls[0];
+    // The P2 fix: main() must hand the built body to the background
+    // scheduler and return, never await postOtlp (the network call) itself.
+    expect(postOtlpImpl).not.toHaveBeenCalled();
+    expect(scheduleBackgroundSendImpl).toHaveBeenCalledTimes(1);
+    const [scriptPath, credentials, body] = scheduleBackgroundSendImpl.mock.calls[0];
+    expect(scriptPath).toBe("/path/to/agent-hook-otlp.mjs");
     expect(credentials.endpoint).toBe("https://example.sentry.io/v1/logs");
     const logRecord = body.resourceLogs[0].scopeLogs[0].logRecords[0];
     expect(logRecord.attributes).toEqual(
       expect.arrayContaining([{ key: "session.id", value: { stringValue: "s-9" } }])
     );
+  });
+
+  it('in "--send" mode, reads {credentials, body} from stdin and posts them -- this is the detached background sender\'s own entrypoint', async () => {
+    const postOtlpImpl = vi.fn(async () => {});
+    const credentials = { endpoint: "https://example.sentry.io/v1/logs", headerName: "x-sentry-auth", headerValue: "v" };
+    const body = { resourceLogs: [] };
+    await main(["node", "/path/to/agent-hook-otlp.mjs", "--send"], {}, {
+      readStdin: async () => JSON.stringify({ credentials, body }),
+      postOtlp: postOtlpImpl,
+    });
+    expect(postOtlpImpl).toHaveBeenCalledTimes(1);
+    expect(postOtlpImpl).toHaveBeenCalledWith(credentials, body);
+  });
+
+  it('"--send" mode never throws on malformed or empty stdin, and never posts without both credentials and body', async () => {
+    const postOtlpImpl = vi.fn(async () => {});
+    await expect(
+      main(["node", "/path/to/agent-hook-otlp.mjs", "--send"], {}, {
+        readStdin: async () => "not json {{{",
+        postOtlp: postOtlpImpl,
+      })
+    ).resolves.toBeUndefined();
+    await expect(
+      main(["node", "/path/to/agent-hook-otlp.mjs", "--send"], {}, {
+        readStdin: async () => JSON.stringify({ credentials: null, body: { a: 1 } }),
+        postOtlp: postOtlpImpl,
+      })
+    ).resolves.toBeUndefined();
+    expect(postOtlpImpl).not.toHaveBeenCalled();
   });
 
   it("never throws even when readStdin itself rejects", async () => {
@@ -569,6 +655,111 @@ describe("main", () => {
       })
     ).resolves.toBeUndefined();
   });
+
+  it("never throws even when the background scheduler itself throws synchronously", async () => {
+    const env = {
+      AGENT_HOOK_OTLP_ENDPOINT: "https://example.sentry.io/v1/logs",
+      AGENT_HOOK_OTLP_HEADER_NAME: "x-sentry-auth",
+      AGENT_HOOK_OTLP_HEADER_VALUE: "v",
+    };
+    await expect(
+      main(["node", "/path/to/agent-hook-otlp.mjs", "cursor", "stop"], env, {
+        readStdin: async () => JSON.stringify({ status: "completed" }),
+        scheduleBackgroundSend: () => {
+          throw new Error("spawn EMFILE");
+        },
+      })
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("main -- privacy regression: no forbidden content or non-allowlisted key for any wired (platform, event)", () => {
+  // One entry per (platform, event) actually wired in ~/.gemini/config/hooks.json,
+  // ~/.cursor/hooks.json, and ~/.copilot/hooks/agent-hook-otlp.json today.  Each
+  // payload is adversarially stuffed with sentinel strings in every field real
+  // hook payloads are documented to carry, standing in for prompt text, tool
+  // args/commands, file paths, transcripts, and error stacks.
+  const SENTINEL = "SENTINEL-forbidden-98f13c02";
+  const cases = [
+    {
+      platform: "antigravity",
+      event: "PostToolUse",
+      payload: {
+        conversationId: "conv-1",
+        modelName: "gemini-3-pro",
+        toolCall: { name: "Bash", args: { command: `rm -rf ${SENTINEL}` } },
+        error: "",
+        transcriptPath: `/Users/jay/${SENTINEL}/transcript.json`,
+        workspacePaths: [`/Users/jay/${SENTINEL}`],
+      },
+    },
+    {
+      platform: "antigravity",
+      event: "PostInvocation",
+      payload: { conversationId: "conv-2", modelName: "gemini-3-pro", response: SENTINEL, error: "" },
+    },
+    {
+      platform: "antigravity",
+      event: "Stop",
+      payload: { conversationId: "conv-3", modelName: "gemini-3-pro", error: `${SENTINEL} traceback`, fullyIdle: true },
+    },
+    {
+      platform: "cursor",
+      event: "afterFileEdit",
+      payload: { conversation_id: "c-1", model: "claude-sonnet-5", file_path: `/repo/${SENTINEL}.ts`, diff: SENTINEL },
+    },
+    {
+      platform: "cursor",
+      event: "afterAgentResponse",
+      payload: { conversation_id: "c-2", model: "claude-sonnet-5", text: SENTINEL },
+    },
+    {
+      platform: "cursor",
+      event: "stop",
+      payload: { conversation_id: "c-3", model: "claude-sonnet-5", status: "completed", summary: SENTINEL },
+    },
+    {
+      platform: "copilot",
+      event: "postToolUse",
+      payload: {
+        sessionId: "cp-1",
+        toolName: "shell",
+        toolArgs: { command: SENTINEL },
+        toolResult: { resultType: "success", output: SENTINEL },
+      },
+    },
+    {
+      platform: "copilot",
+      event: "sessionEnd",
+      payload: { sessionId: "cp-2", reason: "complete", transcript: SENTINEL },
+    },
+    {
+      platform: "copilot",
+      event: "errorOccurred",
+      payload: { sessionId: "cp-3", error: `${SENTINEL} stack trace` },
+    },
+  ];
+
+  for (const { platform, event, payload } of cases) {
+    it(`${platform}.${event}: body carries no sentinel and only allowlisted keys`, async () => {
+      const scheduleBackgroundSendImpl = vi.fn();
+      const env = {
+        AGENT_HOOK_OTLP_ENDPOINT: "https://example.sentry.io/v1/logs",
+        AGENT_HOOK_OTLP_HEADER_NAME: "x-sentry-auth",
+        AGENT_HOOK_OTLP_HEADER_VALUE: "v",
+      };
+      await main(["node", "/path/to/agent-hook-otlp.mjs", platform, event], env, {
+        readStdin: async () => JSON.stringify(payload),
+        scheduleBackgroundSend: scheduleBackgroundSendImpl,
+      });
+      expect(scheduleBackgroundSendImpl).toHaveBeenCalledTimes(1);
+      const [, credentials, body] = scheduleBackgroundSendImpl.mock.calls[0];
+      expect(credentials.headerValue).toBe("v");
+      const serialized = JSON.stringify(body);
+      expect(serialized).not.toContain(SENTINEL);
+      expect(attributeKeys(body)).toEqual(new Set([...attributeKeys(body)].filter((k) => ALLOWLIST_KEYS.has(k))));
+    });
+  }
 });
 
 describe("agent-hook-otlp.mjs as a real subprocess", () => {
@@ -723,7 +914,14 @@ describe("agent-hook-otlp.mjs as a real subprocess", () => {
       const child = spawn(process.execPath, [linkPath, "antigravity", "PostToolUse"], {
         env: {
           ...process.env,
-          AGENT_HOOK_OTLP_ENDPOINT: "https://o1.ingest.us.sentry.io/api/1/integration/otlp/v1/logs",
+          // A fake, never-sentry.io host: isTrustedSentryEndpoint rejects it
+          // synchronously (proven separately by isTrustedSentryEndpoint's and
+          // postOtlp's own unit tests), so the detached background sender
+          // this spawns never dials out -- this regression test only needs
+          // to prove main() actually ran through the symlink, not that a
+          // real request reached a real host, and CI must not make real
+          // outbound calls.
+          AGENT_HOOK_OTLP_ENDPOINT: "https://fake.invalid.example/v1/logs",
           AGENT_HOOK_OTLP_HEADER_NAME: "x-sentry-auth",
           AGENT_HOOK_OTLP_HEADER_VALUE: "sentry sentry_key=test",
         },
@@ -742,4 +940,53 @@ describe("agent-hook-otlp.mjs as a real subprocess", () => {
     expect(code).toBe(0);
     expect(stdout).toBe(JSON.stringify({}));
   });
+
+  it("scheduleBackgroundSend returns immediately even when the spawned child is slow -- real detached child, real timing (P2 fix regression guard)", async () => {
+    // This is the direct proof for the P2 finding: the caller (main(), and
+    // therefore the hook host waiting on this process) must never block on
+    // however long the actual "network" work inside the detached child
+    // takes.  A real child process is spawned here -- via the real
+    // scheduleBackgroundSend, not a mock -- that deliberately sleeps for
+    // 1.2s (standing in for a slow cold start + fetch) before writing a
+    // marker file, well past the 500ms this test allows the CALLER to take.
+    tempDir = await mkdtemp(join(tmpdir(), "agent-hook-otlp-slow-"));
+    const markerPath = join(tempDir, "marker.txt");
+    const slowScriptPath = join(tempDir, "slow-child.mjs");
+    await writeFile(
+      slowScriptPath,
+      [
+        "import { writeFileSync } from 'node:fs';",
+        "const chunks = [];",
+        "process.stdin.on('data', (c) => chunks.push(c));",
+        "process.stdin.on('end', () => {",
+        "  setTimeout(() => {",
+        `    writeFileSync(${JSON.stringify(markerPath)}, 'ran');`,
+        "  }, 1200);",
+        "});",
+      ].join("\n")
+    );
+
+    const start = Date.now();
+    scheduleBackgroundSend(slowScriptPath, { endpoint: "https://example.sentry.io/v1/logs" }, { fake: "body" });
+    const elapsed = Date.now() - start;
+
+    // scheduleBackgroundSend's own work is a synchronous spawn() call (the
+    // fork/exec happens inside it) plus writing to a pipe -- it does not
+    // wait for the child's Node runtime to finish starting, so this must be
+    // fast regardless of machine load, unlike the child's own cold start.
+    expect(elapsed).toBeLessThan(500);
+    // Not written yet -- the child is still "working" at this point, proving
+    // this test would fail if scheduleBackgroundSend ever awaited it.
+    expect(existsSync(markerPath)).toBe(false);
+
+    // Poll rather than a single fixed sleep: this Mac's load average can
+    // push a cold Node start well past a second on its own (see the P2
+    // finding this test guards against), so a generous, self-terminating
+    // ceiling is used instead of a brittle fixed wait.
+    const deadline = Date.now() + 15_000;
+    while (!existsSync(markerPath) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    expect(existsSync(markerPath)).toBe(true);
+  }, 20_000);
 });
