@@ -24,12 +24,27 @@
 //     event:    the hook name exactly as that platform's own hooks.json uses
 //               it (e.g. PostToolUse, afterFileEdit, postToolUse)
 //
-// Contract: reads stdin, does at most one outbound HTTP POST bounded to a 2s
-// timeout, ALWAYS exits 0, and prints nothing on stdout unless the specific
+// Contract: reads stdin, builds at most one OTLP log record, and hands it to
+// a DETACHED background process for the actual network POST (bounded there
+// to a 2s timeout) -- the invoked (foreground) process itself never awaits
+// the network and returns as soon as the send is scheduled.  This process
+// ALWAYS exits 0, and prints nothing on stdout unless the specific
 // platform+event needs a fixed no-op reply to guarantee it never blocks the
 // host tool (see NOOP_REPLIES below) -- never anything derived from the
 // payload.  A misconfigured or unreachable Sentry endpoint must never surface
 // as hook failure, a blocked tool call, or a terminated agent turn.
+//
+// Why detached rather than a plain unawaited fetch: every host here applies
+// a hook timeout of 3s, and a cold `node` start alone has been observed
+// taking 2-3.85s on this Mac under heavy concurrent-agent load (see
+// docs/observability/agent-hook-otlp.md) -- close enough to the old
+// foreground 2s HTTP_TIMEOUT_MS that a real share of invocations were
+// getting killed by the host before the POST could even complete, dropping
+// the telemetry record and stalling the host's hook wait for the full
+// timeout.  A `node ... --send` grandchild is spawned detached and unref'd
+// (see scheduleBackgroundSend), so this process exits the instant the child
+// exists as its own OS process, regardless of how long that child's own
+// cold start + fetch takes.
 //
 // Credentials (never hardcoded here, never printed): resolved in order from
 //   1. env vars AGENT_HOOK_OTLP_ENDPOINT / AGENT_HOOK_OTLP_HEADER_NAME /
@@ -59,12 +74,28 @@
 //   '
 // If neither source resolves, the shim is a silent no-op (still exits 0).
 //
-// Wiring:
-//   agy      ~/.gemini/config/hooks.json     -- see docs/observability/ note
+// Wiring: every hooks.json below invokes the PINNED copy at
+// ~/.local/share/agent-hook-otlp/agent-hook-otlp.mjs, never a path inside a
+// git worktree -- ~/Code/<App> is reset by a daemon and can be checked out
+// on any branch at any time, and a stale/missing pinned copy would silently
+// break every wired hook (see docs/observability/agent-hook-otlp.md).
+// Refresh the pinned copy from origin/main with:
+//   node scripts/install-agent-hook-otlp.mjs
+//   agy      ~/.gemini/config/hooks.json     -- PostInvocation, Stop only
+//                                                (PostToolUse is not a
+//                                                recognized agy hook event
+//                                                in the installed CLI build
+//                                                -- confirmed via
+//                                                `agy -p "/hooks"
+//                                                --output-format json`,
+//                                                with and without an added
+//                                                "matcher" key; never wire
+//                                                it)
 //   Cursor   ~/.cursor/hooks.json            -- fire-and-forget events only
 //   Copilot  ~/.copilot/hooks/*.json         -- fire-and-forget events only
-// Listed as an on-demand hook script in /Users/jay/apps/MAC-LOCAL-PROCESSES.md.
+// Listed as an on-demand helper in /Users/jay/apps/MAC-LOCAL-PROCESSES.md.
 
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -370,6 +401,37 @@ export async function postOtlp(credentials, body, fetchImpl = fetch) {
   }
 }
 
+/**
+ * Hand {credentials, body} to a DETACHED `node <scriptPath> --send` child
+ * over its stdin and return without waiting for it.  The child performs the
+ * actual postOtlp() network call (see the `--send` branch in main()) fully
+ * independently of this process's lifetime: `detached: true` + `unref()` is
+ * the standard Node idiom for a fire-and-forget background process --
+ * spawn() creates the real OS process synchronously (the fork/exec happens
+ * inside this call), so the child already exists before this function
+ * returns and keeps running after this process exits.  Never throws;
+ * `spawnImpl` is injectable for tests.
+ */
+export function scheduleBackgroundSend(scriptPath, credentials, body, spawnImpl = spawn) {
+  try {
+    const child = spawnImpl(process.execPath, [scriptPath, "--send"], {
+      detached: true,
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+    child.on("error", () => {
+      // Spawn failed (e.g. missing/unreadable scriptPath) -- best-effort
+      // telemetry only, never surfaced to the caller.
+    });
+    child.stdin?.on("error", () => {
+      // e.g. EPIPE if the child died before the write landed.
+    });
+    child.stdin?.end(JSON.stringify({ credentials, body }));
+    child.unref();
+  } catch {
+    // Never let a scheduling failure reach the caller.
+  }
+}
+
 // ---------------------------------------------------------------------------
 // stdin
 // ---------------------------------------------------------------------------
@@ -398,7 +460,26 @@ export function parsePayload(raw) {
 export async function main(argv = process.argv, env = process.env, deps = {}) {
   const readStdinImpl = deps.readStdin ?? readStdin;
   const postOtlpImpl = deps.postOtlp ?? postOtlp;
+  const scheduleBackgroundSendImpl = deps.scheduleBackgroundSend ?? scheduleBackgroundSend;
   const platform = argv[2];
+
+  // Background-sender mode: a detached child spawned by scheduleBackgroundSend
+  // invokes this same script with a single "--send" argv[2].  It reads
+  // {credentials, body} (already-built, already-allowlisted) from its own
+  // stdin and performs the one real network POST -- fully off the critical
+  // path of the actual hook invocation below, which never reaches this
+  // branch.
+  if (platform === "--send") {
+    try {
+      const raw = await readStdinImpl();
+      const { credentials, body } = JSON.parse(raw || "{}");
+      if (credentials && body) await postOtlpImpl(credentials, body);
+    } catch {
+      // Best-effort background sender; never throw.
+    }
+    return;
+  }
+
   const event = argv[3];
   const reply = noopReplyFor(platform, event);
   if (reply !== undefined) {
@@ -413,7 +494,10 @@ export async function main(argv = process.argv, env = process.env, deps = {}) {
     const credentials = resolveCredentials(env);
     if (!credentials) return;
     const body = buildLogRecord(platform, event, fields);
-    await postOtlpImpl(credentials, body);
+    // Schedule-and-return: the actual fetch happens in a detached child
+    // (see scheduleBackgroundSend's docstring for why), so this call never
+    // awaits the network and this function returns immediately after.
+    scheduleBackgroundSendImpl(argv[1], credentials, body);
   } catch {
     // A telemetry shim must never fail the hook it is attached to.
   }

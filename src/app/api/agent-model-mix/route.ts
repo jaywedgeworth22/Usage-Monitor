@@ -15,11 +15,11 @@ export const dynamic = "force-dynamic";
 // Auth: dashboard session cookie OR the dedicated USAGE_READ_TOKEN bearer
 // (isUsageReadAuthorized, with the documented non-production/break-glass
 // ingest-token fallback) — the exact dual-auth pattern GET /api/budget-status
-// uses. See src/middleware.ts's isPublicPath for the matching exclusion this
+// uses.  See src/middleware.ts's isPublicPath for the matching exclusion this
 // route needs so a bearer request reaches this check instead of 401ing at
 // the session gate first.
 //
-// Window: `days` (default 7, 1-90 inclusive) is the primary interface. An
+// Window: `days` (default 7, 1-90 inclusive) is the primary interface.  An
 // optional `since`/`until` ISO pair overrides it for ad hoc ranges.
 const DEFAULT_WINDOW_DAYS = 7;
 const MAX_WINDOW_DAYS = 90;
@@ -83,17 +83,14 @@ export async function GET(request: NextRequest) {
     windowStart = new Date(windowEnd.getTime() - days * DAY_MS);
   }
 
-  let rows;
-  try {
-    rows = await loadAgentModelMixRows(windowStart, windowEnd);
-  } catch (err) {
-    // TEMP DIAGNOSTIC (remove before merge): surface the real query error
-    // to figure out why production returns an empty result set.
-    return NextResponse.json(
-      { error: "debug_query_failed", message: String(err), stack: err instanceof Error ? err.stack : null },
-      { status: 500 }
-    );
-  }
+  // loadAgentModelMixRows fails closed to [] on a query error (see its
+  // docblock) rather than throwing, so no try/catch is needed here -- the
+  // same fail-closed convention loadAnalyticsTokenRows uses in
+  // external-usage-events.ts.  (Unlike this route, GET /api/cost-by-session
+  // has no such contract: loadCostBySessionRows has no try/catch of its own
+  // and a query error there propagates as a 500 -- see the TOTAL() fix note
+  // in cost-by-session.ts for a bug that used to make that likelier.)
+  const rows = await loadAgentModelMixRows(windowStart, windowEnd);
   const report = buildAgentModelMixReport(rows, windowStart, windowEnd, days, now);
 
   return NextResponse.json(report, {
