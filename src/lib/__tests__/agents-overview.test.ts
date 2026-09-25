@@ -21,6 +21,7 @@ describe("agents-overview", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(prisma.subscription as any, "findMany").mockResolvedValue([]);
+    vi.spyOn(prisma.externalUsageEvent as any, "findMany").mockResolvedValue([]);
     vi.spyOn(prisma.externalUsageEvent as any, "findFirst").mockResolvedValue(null);
     mockedMacHealth.mockResolvedValue({
       ok: false,
@@ -268,7 +269,7 @@ describe("agents-overview", () => {
     expect(cursor?.totalTokens).toBe(0);
   });
 
-  it("marks unpriced model cost unknown instead of presenting zero as complete", async () => {
+  it("prices DeepSeek flash output from the event UTC hour", async () => {
     vi.spyOn(prisma.externalUsageEvent as any, "groupBy").mockImplementation(async (args: any) => {
       if (args.where?.metricType === "usage") {
         return [
@@ -277,23 +278,35 @@ describe("agents-overview", () => {
             provider: "deepseek",
             keyRef: "deepseek-v4-flash",
             label: "token:output",
-            _sum: { quantity: 10_000 },
+            _sum: { quantity: 1_000_000 },
           },
         ] as any;
       }
       return [] as any;
     });
+    vi.spyOn(prisma.externalUsageEvent as any, "findMany").mockResolvedValue([
+      {
+        sourceApp: "deepseek-dsh",
+        keyRef: "deepseek-v4-flash",
+        label: "token:output",
+        quantity: 1_000_000,
+        // Monday 02:30 UTC is inside the first peak window.  Flash output peak is $1.20 / 1M.
+        occurredAt: new Date("2026-09-21T02:30:00.000Z"),
+      },
+    ] as any);
     vi.spyOn(prisma.externalUsageEventDailyRollup as any, "groupBy").mockResolvedValue([] as any);
 
     const result = await computeAgentsOverview(30);
     const deepseek = result.platforms.find((p) => p.id === "deepseek-dsh");
-    expect(deepseek?.totalTokens).toBe(10_000);
-    expect(deepseek?.apiEquivalentCostUsd).toBe(0);
-    expect(deepseek?.apiEquivalentCostComplete).toBe(false);
-    expect(deepseek?.modelsUsed[0]?.apiEquivalentCostKnown).toBe(false);
+    expect(deepseek?.totalTokens).toBe(1_000_000);
+    expect(deepseek?.apiEquivalentCostUsd).toBeCloseTo(1.2, 2);
+    expect(deepseek?.apiEquivalentCostComplete).toBe(true);
+    expect(deepseek?.modelsUsed[0]?.apiEquivalentCostUsd).toBeCloseTo(1.2, 4);
+    expect(deepseek?.modelsUsed[0]?.apiEquivalentCostKnown).toBe(true);
+    expect(result.summary.unpricedModelCount).toBe(0);
+    expect(result.modelDistribution[0]?.apiEquivalentCostKnown).toBe(true);
+    // Other seats still have no telemetry, so the hero total stays incomplete.
     expect(result.summary.apiEquivalentCostComplete).toBe(false);
-    expect(result.summary.unpricedModelCount).toBe(1);
-    expect(result.modelDistribution[0]?.apiEquivalentCostKnown).toBe(false);
   });
 
   it("does not include cache-unsplit input in the known API-equivalent subtotal", async () => {
