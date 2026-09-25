@@ -1,11 +1,48 @@
+import { pathToFileURL } from "node:url";
+
 import { describe, expect, it, vi } from "vitest";
 
-import { defaultDestPath, installFromOriginMain } from "../install-agent-hook-otlp.mjs";
+import { defaultDestPath, installFromOriginMain, isEntrypoint } from "../install-agent-hook-otlp.mjs";
 
 describe("defaultDestPath", () => {
   it("points at a stable path under ~/.local/share, outside any git worktree", () => {
     const dest = defaultDestPath();
     expect(dest).toMatch(/\.local\/share\/agent-hook-otlp\/agent-hook-otlp\.mjs$/);
+  });
+});
+
+describe("isEntrypoint", () => {
+  // Same symlink-safety contract as agent-hook-otlp.mjs's own isEntrypoint()
+  // (found by a Sentry bot review on this PR): a bare
+  // `import.meta.url === file://${argv[1]}` comparison is false when this
+  // script is invoked through a symlink, silently skipping main() with no
+  // error -- realpath-resolving argv[1] first fixes that.
+  it("is true when argv[1]'s realpath matches import.meta.url", () => {
+    const realpath = (p) => {
+      expect(p).toBe("/some/symlink/install-agent-hook-otlp.mjs");
+      return "/real/target/install-agent-hook-otlp.mjs";
+    };
+    const metaUrl = pathToFileURL("/real/target/install-agent-hook-otlp.mjs").href;
+    expect(isEntrypoint(["node", "/some/symlink/install-agent-hook-otlp.mjs"], metaUrl, realpath)).toBe(true);
+  });
+
+  it("is false when running as an imported module (different file)", () => {
+    const realpath = (p) => p;
+    const metaUrl = pathToFileURL("/real/target/install-agent-hook-otlp.mjs").href;
+    expect(isEntrypoint(["node", "/some/other/script.mjs"], metaUrl, realpath)).toBe(false);
+  });
+
+  it("is false when argv has no script path", () => {
+    expect(isEntrypoint(["node"], "file:///x", () => "/x")).toBe(false);
+  });
+
+  it("falls back to a literal comparison when realpath throws (e.g. deleted mid-run)", () => {
+    const realpath = () => {
+      throw new Error("ENOENT");
+    };
+    const metaUrl = pathToFileURL("/real/target/install-agent-hook-otlp.mjs").href;
+    expect(isEntrypoint(["node", "/real/target/install-agent-hook-otlp.mjs"], metaUrl, realpath)).toBe(true);
+    expect(isEntrypoint(["node", "/other/path.mjs"], metaUrl, realpath)).toBe(false);
   });
 });
 

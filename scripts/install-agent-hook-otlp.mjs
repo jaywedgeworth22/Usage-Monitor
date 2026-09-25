@@ -26,9 +26,10 @@
 // Prints only paths and byte counts -- there is nothing secret in this file.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const SOURCE_PATH = "scripts/agent-hook-otlp.mjs";
 
@@ -72,6 +73,24 @@ function main() {
   console.log(`installed ${dest} (${size} bytes) from origin/main:${SOURCE_PATH} in ${args.repo}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * True when this module is the process entrypoint, not merely `import`ed.
+ * Same symlink-safe pattern as agent-hook-otlp.mjs's own `isEntrypoint()`:
+ * a bare `import.meta.url === \`file://${process.argv[1]}\`` comparison is
+ * false whenever this script is invoked through a symlink (Node resolves
+ * `import.meta.url` to the real path but leaves `process.argv[1]` as
+ * given), which would silently skip `main()` -- this script would exit 0
+ * having installed nothing, with no error.
+ */
+export function isEntrypoint(argv = process.argv, metaUrl = import.meta.url, realpath = realpathSync) {
+  if (!argv[1]) return false;
+  try {
+    return metaUrl === pathToFileURL(realpath(argv[1])).href;
+  } catch {
+    return metaUrl === pathToFileURL(argv[1]).href;
+  }
+}
+
+if (isEntrypoint()) {
   main();
 }
