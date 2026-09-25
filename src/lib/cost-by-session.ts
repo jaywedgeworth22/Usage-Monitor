@@ -150,9 +150,23 @@ export function parseSessionIdsParam(searchParams: URLSearchParams): { ids: stri
 /**
  * Bounded SQLite aggregate: sum quantity/costUsd/eventCount and track the
  * occurredAt span, grouped by session id + the dimensions needed to recover
- * a token-type breakdown per session. `sourceApp = 'claude-code'` narrows to
+ * a token-type breakdown per session.  `sourceApp = 'claude-code'` narrows to
  * the OTLP-mapped rows that carry a session.id at all (see
  * claude-code-mapper.ts) -- other producers never set this metadata key.
+ *
+ * quantity/costUsd use SQLite's TOTAL(...), not SUM(...), for the same
+ * reason agent-model-mix.ts's sibling aggregate does (see that module's
+ * docblock, "Follow-up NULL-first variant", 2026-09-25 adversarial review of
+ * PR #1546): `COALESCE(SUM(x), 0)` returns SQL NULL, then falls back to the
+ * untyped literal `0`, whenever every row in the FIRST GROUP BY bucket has a
+ * NULL quantity/costUsd (e.g. a usage-only group sorting before a
+ * fractional-cost group) -- Prisma's $queryRaw type inference then locks
+ * that column to BigInt from the first row and throws converting a later
+ * group's real fractional value.  Reproduced against real SQLite (see
+ * cost-by-session.db.test.ts).  TOTAL() always returns a REAL and never
+ * NULL, so there is no COALESCE fallback left for the inference to latch
+ * onto.  This function has no try/catch of its own, so before this fix the
+ * crash surfaced as a bare 500 from GET /api/cost-by-session.
  */
 export async function loadCostBySessionRows(
   ids: string[],
@@ -180,8 +194,8 @@ export async function loadCostBySessionRows(
       "unit" AS "unit",
       "keyRef" AS "model",
       "label" AS "label",
-      COALESCE(SUM("quantity"), 0) AS "quantity",
-      COALESCE(SUM("costUsd"), 0) AS "costUsd",
+      TOTAL("quantity") AS "quantity",
+      TOTAL("costUsd") AS "costUsd",
       COUNT(*) AS "eventCount",
       MIN("occurredAt") AS "firstOccurredAt",
       MAX("occurredAt") AS "lastOccurredAt"

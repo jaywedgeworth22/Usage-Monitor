@@ -25,21 +25,38 @@
 // instead of hiding the gap.
 //
 // Production BigInt crash (2026-09-24, found via PR #1541's temporary
-// rethrow): the "tokens"/"costUsd" SUM(CASE ...) aggregates were bare, not
-// CAST to REAL.  SQLite's $queryRaw type inference samples the FIRST row's
-// runtime storage class per column to decide how Prisma should deserialize
-// every row in that column -- when the first group's sum happened to land on
-// an exact integer (e.g. a group with zero matching 'cost' events, summing
-// to literal 0), Prisma inferred Int64/BigInt for the whole column, then
-// threw `RangeError: The number 0.3... cannot be converted to a BigInt`
-// converting a LATER group's genuinely fractional dollar amount. Reproduced
-// locally against a real SQLite db (see agent-model-mix.db.test.ts) and
-// fixed by wrapping both SUMs in CAST(... AS REAL) so the column is always
-// reported as floating point regardless of which group SQLite returns
-// first. The bug was invisible in the original PR's tests because they
-// mocked $queryRaw entirely (fails-closed contract below), never exercising
-// real SQLite runtime typing -- same class of gap the cost-by-session.db.test.ts
-// precedent (PR #1534) exists to close.
+// rethrow, fixed in PR #1546): the "tokens"/"costUsd" SUM(CASE ...)
+// aggregates were bare, not CAST to REAL.  SQLite's $queryRaw type inference
+// samples the FIRST row's runtime storage class per column to decide how
+// Prisma should deserialize every row in that column -- when the first
+// group's sum happened to land on an exact integer (e.g. a group with zero
+// matching 'cost' events, summing to literal 0), Prisma inferred Int64/BigInt
+// for the whole column, then threw `RangeError: The number 0.3... cannot be
+// converted to a BigInt` converting a LATER group's genuinely fractional
+// dollar amount.  Reproduced locally against a real SQLite db (see
+// agent-model-mix.db.test.ts) and fixed by wrapping both SUMs in
+// CAST(... AS REAL).
+//
+// Follow-up NULL-first variant (2026-09-25, adversarial review of PR #1546):
+// `COALESCE(CAST(SUM(...) AS REAL), 0)` still crashed when the FIRST group's
+// matching rows all had a NULL costUsd/quantity -- SUM() over all-NULL input
+// returns SQL NULL, so COALESCE fell back to the untyped literal `0` and
+// Prisma re-locked the column to BigInt exactly as before.  Reproduced the
+// same RangeError against real SQLite with a NULL-only first group followed
+// by a fractional-valued later group.  Fixed by switching both aggregates to
+// SQLite's TOTAL(...), which always returns a REAL and never NULL (a bare
+// TOTAL() over zero/NULL-only input is the float `0.0`, not SQL NULL), so
+// there is no COALESCE fallback left for Prisma's type inference to latch
+// onto.  See cost-by-session.ts for the same TOTAL() fix applied to its
+// sibling aggregate, and the module docblock note there.
+//
+// The original bug was invisible in the first PR's tests because they mocked
+// $queryRaw entirely (fails-closed contract below), never exercising real
+// SQLite runtime typing -- same class of gap the cost-by-session.db.test.ts
+// precedent (PR #1534) exists to close.  loadAgentModelMixRows's catch below
+// now also logs via console.warn on a query failure, so a future regression
+// shows up in server logs instead of silently degrading to an empty "no
+// usage this window" result the way this one did.
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -60,7 +77,7 @@ export interface AgentModelMixRow {
 
 /**
  * Fleet-wide aggregate over ExternalUsageEvent for the trailing window —
- * every sourceApp, not filtered to claude-code. One bounded query; grouped
+ * every sourceApp, not filtered to claude-code.  One bounded query; grouped
  * in SQL so the row count is bounded by the distinct
  * sourceApp/provider/model/seat/project combinations, not raw event count.
  * Fails closed (empty array) when the Prisma client in tests has no
@@ -90,14 +107,8 @@ export async function loadAgentModelMixRows(
         "keyRef" AS "model",
         json_extract("metadata", '$.seat') AS "seat",
         json_extract("metadata", '$.project') AS "project",
-        COALESCE(
-          CAST(SUM(CASE WHEN "metricType" = 'usage' AND "unit" = 'token' THEN "quantity" ELSE 0 END) AS REAL),
-          0
-        ) AS "tokens",
-        COALESCE(
-          CAST(SUM(CASE WHEN "metricType" = 'cost' THEN "costUsd" ELSE 0 END) AS REAL),
-          0
-        ) AS "costUsd",
+        TOTAL(CASE WHEN "metricType" = 'usage' AND "unit" = 'token' THEN "quantity" ELSE 0 END) AS "tokens",
+        TOTAL(CASE WHEN "metricType" = 'cost' THEN "costUsd" ELSE 0 END) AS "costUsd",
         COUNT(*) AS "eventCount"
       FROM "ExternalUsageEvent"
       WHERE "occurredAt" >= ${windowStart}
@@ -122,12 +133,17 @@ export async function loadAgentModelMixRows(
         costUsd: Number(row.costUsd ?? 0),
         eventCount: Number(row.eventCount ?? 0),
       }));
-  } catch {
+  } catch (err) {
     // Fails closed to [] like loadAnalyticsTokenRows -- a query hiccup
     // degrades the digest to "no data this window" rather than 500ing the
-    // route. See the module docblock's "production BigInt crash" note: this
-    // catch is why the underlying bug (below) went undiagnosed until PR
-    // #1541's temporary rethrow surfaced the real error.
+    // route.  See the module docblock's "production BigInt crash" notes:
+    // this catch swallowing the error silently is why both underlying bugs
+    // went undiagnosed until PR #1541's temporary rethrow surfaced the
+    // first one.  Logging here (added in the 2026-09-25 follow-up) is a
+    // cheap guard against a repeat: a future query failure now shows up in
+    // server logs as a warning instead of masquerading as "no usage this
+    // window" with zero trace of why.
+    console.warn("[agent-model-mix] aggregate query failed; returning empty", err);
     return [];
   }
 }
@@ -151,7 +167,7 @@ export interface AgentModelMixReport {
 
 /**
  * Pure reducer: shapes loaded rows into the response the digest script
- * consumes. Deliberately takes windowStart/windowEnd/days/generatedAt as
+ * consumes.  Deliberately takes windowStart/windowEnd/days/generatedAt as
  * parameters instead of calling `new Date()` — see the module docblock.
  * Rows are sorted by tokens desc (then costUsd desc, then
  * sourceApp/provider/model asc) so the biggest fleet consumers sort first

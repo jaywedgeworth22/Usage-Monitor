@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -13,20 +13,37 @@ import { setupPrismaSqliteTestDb } from "@/lib/__tests__/setup-test-db";
 //
 // This specific regression: production threw `RangeError: The number
 // 0.3498095 cannot be converted to a BigInt because it is not an integer`
-// from every call. Root cause -- confirmed by reproducing it here before the
+// from every call.  Root cause -- confirmed by reproducing it here before the
 // fix and watching it disappear after -- SQLite's $queryRaw type inference
-// samples the FIRST returned row's storage class per column. The original
+// samples the FIRST returned row's storage class per column.  The original
 // query's SUM(CASE ...) aggregates were not CAST to REAL, so when the first
 // GROUP BY bucket's sum happened to land on an exact integer (a group with
 // no matching 'cost' events sums to literal 0), Prisma inferred
 // Int64/BigInt for that whole column and crashed converting a LATER group's
-// genuinely fractional dollar amount. See agent-model-mix.ts's module
-// docblock for the full incident note. The fix wraps both SUMs in
+// genuinely fractional dollar amount.  See agent-model-mix.ts's module
+// docblock for the full incident note.  The fix wraps both SUMs in
 // CAST(... AS REAL).
 //
-// The two groups below are seeded in the same order that triggered it in
-// production: an all-"usage" group (exact-zero cost) with a keyRef that
-// sorts/groups before a "cost"-bearing group with a real fractional amount.
+// The two groups below (first `it`) are seeded in the same order that
+// triggered it in production: an all-"usage" group (exact-zero cost) with a
+// keyRef that sorts/groups before a "cost"-bearing group with a real
+// fractional amount.
+//
+// A second, NULL-first variant of the same bug (found in the 2026-09-25
+// adversarial review of PR #1546, which shipped the CAST fix above) is
+// covered by the "NULL-first" `it` block below: `COALESCE(CAST(SUM(...) AS
+// REAL), 0)` still crashed when the FIRST group's matching rows all had a
+// NULL costUsd/quantity, because SUM() over all-NULL input is SQL NULL, so
+// COALESCE fell back to the untyped literal `0` and Prisma re-locked the
+// column to BigInt.  The fix for that variant switched both aggregates from
+// `COALESCE(CAST(SUM(...) AS REAL), 0)` to plain `TOTAL(...)`, which always
+// returns a REAL and never NULL.  See agent-model-mix.ts's module docblock,
+// "Follow-up NULL-first variant", for the full note.
+//
+// A third `it` block covers the fail-closed catch itself: a $queryRaw that
+// rejects must still resolve to `[]` (not throw), and must log a warning
+// (2026-09-25 follow-up) instead of swallowing the failure silently the way
+// the original incident did.
 let dbPath: string;
 let loadAgentModelMixRows: typeof import("../agent-model-mix").loadAgentModelMixRows;
 let prisma: typeof import("@/lib/prisma").prisma;
@@ -212,5 +229,97 @@ describe("loadAgentModelMixRows (real SQLite)", () => {
   it("returns [] for a window with no matching events", async () => {
     const rows = await loadAgentModelMixRows(WINDOW_START, WINDOW_END);
     expect(rows).toEqual([]);
+  });
+
+  // NULL-first variant of the BigInt crash (2026-09-25 adversarial review of
+  // PR #1546) -- see the file-level docblock above and agent-model-mix.ts's
+  // "Follow-up NULL-first variant" module docblock note.  Unlike the first
+  // test in this file (an exact-integer-zero first group), these seed a
+  // FIRST group whose matching column is NULL on every row, which
+  // `COALESCE(CAST(SUM(...) AS REAL), 0)` also collapsed to the untyped
+  // literal `0`.
+  it("does not throw and returns 0 tokens when an earlier group's quantity is NULL on every row", async () => {
+    // Group A ("model-a"): a 'usage'/'token' row with quantity left NULL --
+    // SUM(quantity) over an all-NULL group is SQL NULL, not 0.
+    await seedEvent({
+      idempotencyKey: "amm-db-nulla",
+      keyRef: "model-a",
+      metricType: "usage",
+      unit: "token",
+      quantity: null,
+      occurredAt: OCCURRED_AT,
+    });
+    // Group B ("model-b"): a real fractional quantity -- the value that
+    // crashed once Prisma had locked the "tokens" column to BigInt from
+    // group A's NULL-collapsed-to-0 sum.
+    await seedEvent({
+      idempotencyKey: "amm-db-nullb",
+      keyRef: "model-b",
+      metricType: "usage",
+      unit: "token",
+      quantity: 12.5,
+      occurredAt: OCCURRED_AT,
+    });
+
+    const rows = await loadAgentModelMixRows(WINDOW_START, WINDOW_END);
+
+    expect(rows).toHaveLength(2);
+    const groupA = rows.find((r) => r.model === "model-a");
+    const groupB = rows.find((r) => r.model === "model-b");
+    expect(groupA).toMatchObject({ tokens: 0, eventCount: 1 });
+    expect(groupB).toMatchObject({ tokens: 12.5, eventCount: 1 });
+    for (const row of rows) {
+      expect(typeof row.tokens).toBe("number");
+      expect(Number.isNaN(row.tokens)).toBe(false);
+    }
+  });
+
+  it("does not throw and returns 0 costUsd when an earlier group's costUsd is NULL on every row", async () => {
+    // Group A ("model-a"): a 'cost' row with costUsd left NULL.
+    await seedEvent({
+      idempotencyKey: "amm-db-nullc",
+      keyRef: "model-a",
+      metricType: "cost",
+      costUsd: null,
+      occurredAt: OCCURRED_AT,
+    });
+    // Group B ("model-b"): a real fractional cost.
+    await seedEvent({
+      idempotencyKey: "amm-db-nulld",
+      keyRef: "model-b",
+      metricType: "cost",
+      costUsd: 0.3498095,
+      occurredAt: OCCURRED_AT,
+    });
+
+    const rows = await loadAgentModelMixRows(WINDOW_START, WINDOW_END);
+
+    expect(rows).toHaveLength(2);
+    const groupA = rows.find((r) => r.model === "model-a");
+    const groupB = rows.find((r) => r.model === "model-b");
+    expect(groupA).toMatchObject({ costUsd: 0, eventCount: 1 });
+    expect(groupB).toMatchObject({ costUsd: 0.3498095, eventCount: 1 });
+    for (const row of rows) {
+      expect(typeof row.costUsd).toBe("number");
+      expect(Number.isNaN(row.costUsd)).toBe(false);
+    }
+  });
+
+  it("fails closed to [] and logs a warning (not silently) when the query rejects", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const queryRawSpy = vi
+      .spyOn(prisma, "$queryRaw")
+      .mockRejectedValueOnce(new Error("simulated query failure"));
+
+    try {
+      const rows = await loadAgentModelMixRows(WINDOW_START, WINDOW_END);
+
+      expect(rows).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain("[agent-model-mix]");
+    } finally {
+      queryRawSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
   });
 });
