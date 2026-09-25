@@ -23,6 +23,23 @@
 // not yet include "seat" (confirmed 2026-09-24), so every row's seat is
 // currently null.  seatDataAvailable in the report reflects that honestly
 // instead of hiding the gap.
+//
+// Production BigInt crash (2026-09-24, found via PR #1541's temporary
+// rethrow): the "tokens"/"costUsd" SUM(CASE ...) aggregates were bare, not
+// CAST to REAL.  SQLite's $queryRaw type inference samples the FIRST row's
+// runtime storage class per column to decide how Prisma should deserialize
+// every row in that column -- when the first group's sum happened to land on
+// an exact integer (e.g. a group with zero matching 'cost' events, summing
+// to literal 0), Prisma inferred Int64/BigInt for the whole column, then
+// threw `RangeError: The number 0.3... cannot be converted to a BigInt`
+// converting a LATER group's genuinely fractional dollar amount. Reproduced
+// locally against a real SQLite db (see agent-model-mix.db.test.ts) and
+// fixed by wrapping both SUMs in CAST(... AS REAL) so the column is always
+// reported as floating point regardless of which group SQLite returns
+// first. The bug was invisible in the original PR's tests because they
+// mocked $queryRaw entirely (fails-closed contract below), never exercising
+// real SQLite runtime typing -- same class of gap the cost-by-session.db.test.ts
+// precedent (PR #1534) exists to close.
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -74,11 +91,11 @@ export async function loadAgentModelMixRows(
         json_extract("metadata", '$.seat') AS "seat",
         json_extract("metadata", '$.project') AS "project",
         COALESCE(
-          SUM(CASE WHEN "metricType" = 'usage' AND "unit" = 'token' THEN "quantity" ELSE 0 END),
+          CAST(SUM(CASE WHEN "metricType" = 'usage' AND "unit" = 'token' THEN "quantity" ELSE 0 END) AS REAL),
           0
         ) AS "tokens",
         COALESCE(
-          SUM(CASE WHEN "metricType" = 'cost' THEN "costUsd" ELSE 0 END),
+          CAST(SUM(CASE WHEN "metricType" = 'cost' THEN "costUsd" ELSE 0 END) AS REAL),
           0
         ) AS "costUsd",
         COUNT(*) AS "eventCount"
@@ -105,13 +122,13 @@ export async function loadAgentModelMixRows(
         costUsd: Number(row.costUsd ?? 0),
         eventCount: Number(row.eventCount ?? 0),
       }));
-  } catch (err) {
-    // TEMP DIAGNOSTIC (remove before merge): rethrow instead of swallowing
-    // so the route can surface the real cause -- production is returning
-    // an empty result set despite confirmed real data via /api/budget-status
-    // (pushedUnpricedEventCount: 3718 for the anthropic provider this
-    // month), so this catch is very likely masking a real query error.
-    throw err;
+  } catch {
+    // Fails closed to [] like loadAnalyticsTokenRows -- a query hiccup
+    // degrades the digest to "no data this window" rather than 500ing the
+    // route. See the module docblock's "production BigInt crash" note: this
+    // catch is why the underlying bug (below) went undiagnosed until PR
+    // #1541's temporary rethrow surfaced the real error.
+    return [];
   }
 }
 
