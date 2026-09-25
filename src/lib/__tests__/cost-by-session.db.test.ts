@@ -7,18 +7,34 @@ import { setupPrismaSqliteTestDb } from "@/lib/__tests__/setup-test-db";
 // Exercises loadCostBySessionRows against a REAL throwaway SQLite database
 // (never the dev `data`/`dev.db`), not a mocked Prisma client -- this is the
 // only test in the cost-by-session suite that actually round-trips through
-// $queryRaw's json_extract + MIN/MAX(occurredAt) aggregate. It exists
+// $queryRaw's json_extract + MIN/MAX(occurredAt) aggregate.  It exists
 // specifically because a mocked-Prisma unit test cannot catch a bug in how
 // the raw driver represents an *aggregated* DateTime column: a direct SELECT
 // of `occurredAt` deserializes to a JS Date via Prisma's normal mapping, but
 // MIN()/MAX() loses that column-type metadata and the driver hands back its
-// raw underlying representation instead (observed as `bigint` here). See
+// raw underlying representation instead (observed as `bigint` here).  See
 // coerceOccurredAt in ../cost-by-session.ts -- P1 review finding on PR #1534
 // (chatgpt-codex-connector): passing that raw value straight to `new
 // Date(...)` throws `TypeError: Cannot convert a BigInt value to a number`,
-// turning every successful non-empty lookup into a 500. This test asserts
+// turning every successful non-empty lookup into a 500.  This test asserts
 // against real firstOccurredAt/lastOccurredAt Date objects to prove the fix,
 // not just that the function doesn't throw.
+//
+// A second regression is covered below ("does not throw and returns 0 for an
+// earlier session's NULL cost/quantity..."): found in the 2026-09-25
+// adversarial review of PR #1546 (the agent-model-mix.ts BigInt fix), the
+// SAME bug class as that PR was fixing existed here too.
+// `COALESCE(SUM(x), 0)` returns the untyped literal `0` whenever a GROUP BY
+// bucket's matching rows are all NULL for that column (SUM over an all-NULL
+// group is SQL NULL, so COALESCE's fallback fires) -- if that bucket is the
+// FIRST row $queryRaw returns, Prisma's SQLite type inference locks the
+// whole column to BigInt from that `0`, then throws converting a LATER
+// session's genuinely fractional cost/quantity.  Fixed by switching both
+// aggregates from `COALESCE(SUM(x), 0)` to `TOTAL(x)`, which always returns
+// a REAL and never NULL.  See agent-model-mix.ts's module docblock,
+// "Follow-up NULL-first variant", for the fuller incident note (this
+// function's own crash was reproduced the same way, against real SQLite,
+// before the fix and confirmed gone after).
 
 let dbPath: string;
 let loadCostBySessionRows: typeof import("../cost-by-session").loadCostBySessionRows;
@@ -151,5 +167,51 @@ describe("loadCostBySessionRows (real SQLite)", () => {
   it("returns an empty array when ids is empty, without querying the database", async () => {
     const rows = await loadCostBySessionRows([], new Date(0), new Date());
     expect(rows).toEqual([]);
+  });
+
+  // NULL-first regression (2026-09-25 adversarial review of PR #1546) -- see
+  // the file-level docblock above.  Session ids are prefixed "a-"/"b-" so the
+  // usage-only session's group sorts/groups first, matching the order that
+  // reproduced the bug.
+  it("does not throw and returns the correct fractional costUsd when an earlier session's group is usage-only (NULL costUsd)", async () => {
+    // Group A ("a-usage-only-session"): a 'usage' row -- costUsd is NULL for
+    // every row in this group, so SUM(costUsd) over it is SQL NULL.
+    await seedEvent({
+      sessionId: "a-usage-only-session",
+      metricType: "usage",
+      unit: "token",
+      label: "token:input",
+      quantity: 100,
+      occurredAt: new Date("2026-09-20T10:00:00.000Z"),
+      idempotencyKey: "cbs-db-nulla",
+    });
+    // Group B ("b-fractional-cost-session"): a real fractional cost -- the
+    // value that crashed once Prisma had locked the "costUsd" column to
+    // BigInt from group A's NULL-collapsed-to-0 sum.
+    await seedEvent({
+      sessionId: "b-fractional-cost-session",
+      metricType: "cost",
+      costUsd: 0.3498095,
+      occurredAt: new Date("2026-09-20T10:00:00.000Z"),
+      idempotencyKey: "cbs-db-nullb",
+    });
+
+    const rows = await loadCostBySessionRows(
+      ["a-usage-only-session", "b-fractional-cost-session"],
+      new Date("2026-09-01T00:00:00.000Z"),
+      new Date("2026-09-30T00:00:00.000Z")
+    );
+
+    expect(rows).toHaveLength(2);
+    const groupA = rows.find((r) => r.sessionId === "a-usage-only-session");
+    const groupB = rows.find((r) => r.sessionId === "b-fractional-cost-session");
+    expect(groupA).toMatchObject({ quantity: 100, costUsd: 0 });
+    expect(groupB).toMatchObject({ quantity: 0, costUsd: 0.3498095 });
+    for (const row of rows) {
+      expect(typeof row.quantity).toBe("number");
+      expect(typeof row.costUsd).toBe("number");
+      expect(Number.isNaN(row.quantity)).toBe(false);
+      expect(Number.isNaN(row.costUsd)).toBe(false);
+    }
   });
 });
