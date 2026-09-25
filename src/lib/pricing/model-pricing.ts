@@ -22,6 +22,7 @@
 // `above200k` explicitly; otherwise base rates are used and long-context
 // usage is under-priced by the premium delta.
 
+import { isDeepSeekPaygModel } from "./deepseek-payg";
 import snapshot from "./model-pricing.snapshot.json";
 
 export interface ModelPricingEntry {
@@ -193,13 +194,11 @@ const RUNTIME_PRICING_OVERRIDES: Record<string, ModelPricingEntry> = {
   "xai/grok-4.5-build": GROK_45,
 };
 
-// Official DeepSeek V4 pricing changes by the request's UTC weekday/hour,
-// while Codex Spark has no published standard API rate.  Grouped analytics
-// cannot truthfully price either case, so they stay explicitly unknown.
+// Codex Spark has no published standard API rate.  DeepSeek Flash / V4 Pro
+// are not in this set: they have published peak and off-peak rates, priced
+// per event in deepseek-payg.ts.  Their LiteLLM snapshot rows are a single
+// stale rate and must not be used as a weekday average.
 const EXPLICITLY_UNPRICED_MODELS = new Set([
-  "deepseek-flash",
-  "deepseek-v4-flash",
-  "deepseek-v4-pro",
   "gpt-5.3-codex-spark",
 ]);
 
@@ -285,6 +284,10 @@ function resolvePricingKeyUncached(model: string): string | null {
   const trimmed = model.trim();
   if (!trimmed) return null;
   if (isExplicitlyUnpricedAlias(trimmed)) return null;
+  // Time-priced DeepSeek ids are in the bundled snapshot at one flat rate.
+  // Returning null here keeps grouped analytics from applying that rate.
+  // Agents overview prices each event from occurredAt instead.
+  if (isDeepSeekPaygModel(trimmed)) return null;
   if (catalogEntry(trimmed)) return trimmed;
 
   const lower = trimmed.toLowerCase();

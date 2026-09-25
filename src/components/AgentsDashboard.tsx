@@ -105,7 +105,7 @@ export function AgentsDashboard() {
             <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-muted-foreground">Active on Mac</span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                   {data.macChip}
                 </span>
@@ -256,9 +256,9 @@ export function AgentsDashboard() {
                         </div>
 
                         {/* Status Badge */}
-                        <div className="text-right">
+                        <div className="shrink-0 text-right">
                           <span
-                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+                            className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium ${
                               platform.isRunningOnMac
                                 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                                 : "bg-muted text-muted-foreground"

@@ -95,12 +95,16 @@ describe("resolvePricingKey", () => {
     expect(pricing?.cache_creation_input_token_cost).toBeUndefined();
   });
 
-  it("leaves time-dependent DeepSeek V4 rates unknown without request time", () => {
+  it("does not apply a flat DeepSeek V4 catalog rate without an event time", () => {
+    // The LiteLLM snapshot still has one stale rate for these ids.  Peak and
+    // off-peak are priced per event in deepseek-payg.ts, not from that row.
     expect(resolvePricingKey("deepseek-v4-flash")).toBeNull();
     expect(resolvePricingKey("deepseek-v4-pro")).toBeNull();
+    expect(resolvePricingKey("deepseek-flash")).toBeNull();
     expect(resolvePricingKey("deepseek/deepseek-v4-pro")).toBeNull();
     expect(resolvePricingKey("openrouter/deepseek/deepseek-v4-flash-20260913")).toBeNull();
     expect(getModelPricing("deepseek/deepseek-v4-pro")).toBeNull();
+    expect(getModelPricing("deepseek-flash")).toBeNull();
   });
 
   it("caches lookups without changing results", () => {

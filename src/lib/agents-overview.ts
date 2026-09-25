@@ -8,6 +8,7 @@ import {
 import { getExternalEventRawCutoff, startOfUtcDay } from "@/lib/data-retention";
 import { getLatestMacHealth } from "@/lib/mac-health";
 import { prisma } from "@/lib/prisma";
+import { isDeepSeekPaygModel, sumDeepSeekPaygEvents, type DeepSeekPaygEvent } from "@/lib/pricing/deepseek-payg";
 import { deriveTokenCostUsd, getModelPricing } from "@/lib/pricing/model-pricing";
 import { SUBSCRIPTION_ANALYTICS_SOURCE_APPS } from "@/lib/subscription-analytics";
 import {
@@ -169,12 +170,17 @@ const TOKEN_TELEMETRY_KIND_BY_APP = new Map(
   AGENT_PLATFORMS.map((meta) => [meta.id, meta.tokenTelemetryKind] as const),
 );
 
+export function platformIdForSourceApp(sourceApp: string): string {
+  const normalized = sourceApp.trim().toLowerCase();
+  return normalized === "antigravity-statusline" ? "antigravity-cli" : normalized;
+}
+
 export function isReliableTokenSourceApp(sourceApp: string): boolean {
   const normalized = sourceApp.trim().toLowerCase();
   // Historical antigravity-cli token rows came from transcript character
   // estimates.  Only the separate status-line producer carries exact counts.
   if (normalized === "antigravity-cli") return false;
-  const appKey = normalized === "antigravity-statusline" ? "antigravity-cli" : normalized;
+  const appKey = platformIdForSourceApp(normalized);
   const kind = TOKEN_TELEMETRY_KIND_BY_APP.get(appKey);
   if (!kind) return true;
   return isReliableTokenTelemetryKind(kind);
@@ -313,6 +319,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     earliestEvent,
     subscriptionRows,
     observedCodexPlan,
+    deepseekTokenRows,
   ] = await Promise.all([
     getLatestMacHealth().catch(() => null),
     prisma.externalUsageEvent.groupBy({
@@ -404,6 +411,32 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       orderBy: { occurredAt: "desc" },
       select: { keyRef: true },
     }),
+    // DeepSeek Flash / V4 Pro rates depend on the event's UTC hour.  Grouped
+    // sums cannot price them.  These rows are the raw events inside the
+    // retention window; daily rollups have no hour and stay unpriced.
+    prisma.externalUsageEvent.findMany({
+      where: {
+        AND: [
+          { OR: eventWhereOr },
+          { metricType: "usage" },
+          { unit: "token" },
+          { occurredAt: { gte: rawSince } },
+          {
+            OR: [
+              { keyRef: { contains: "deepseek-v4" } },
+              { keyRef: { contains: "deepseek-flash" } },
+            ],
+          },
+        ],
+      },
+      select: {
+        sourceApp: true,
+        keyRef: true,
+        label: true,
+        quantity: true,
+        occurredAt: true,
+      },
+    }),
   ]);
 
   const observedByPlatform: Partial<Record<string, { planType: string }>> = {};
@@ -474,8 +507,7 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
 
   for (const group of allTokenRows) {
     if (!isReliableTokenSourceApp(group.sourceApp)) continue;
-    const sourceApp = group.sourceApp.toLowerCase();
-    const app = sourceApp === "antigravity-statusline" ? "antigravity-cli" : sourceApp;
+    const app = platformIdForSourceApp(group.sourceApp);
     const model = group.keyRef || "unknown-model";
     const qty = Math.max(0, group.quantity || 0);
     grandTotalTokens += qty;
@@ -571,20 +603,34 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       platformCacheRead += breakdown.cacheRead;
       platformCacheCreation += breakdown.cacheCreation;
 
-      // Price the model tokens
-      const modelPricing = getModelPricing(modelName);
-      const priced = modelPricing
-        ? deriveTokenCostUsd(modelPricing.pricing, {
-            input: breakdown.input,
-            output: breakdown.output,
-            cacheRead: breakdown.cacheRead,
-            cacheCreation: breakdown.cacheCreation,
-          })
+      // Price the model tokens.  DeepSeek PAYG uses each raw event's UTC
+      // hour.  A grouped sum would hide the peak/off-peak split.
+      const deepseekPriced = isDeepSeekPaygModel(modelName)
+        ? sumDeepSeekPaygEvents(
+            deepseekPaygEventsFor(deepseekTokenRows, { appKey, model: modelName }),
+          )
         : null;
+      const modelPricing = deepseekPriced ? null : getModelPricing(modelName);
+      const priced = deepseekPriced
+        ? null
+        : modelPricing
+          ? deriveTokenCostUsd(modelPricing.pricing, {
+              input: breakdown.input,
+              output: breakdown.output,
+              cacheRead: breakdown.cacheRead,
+              cacheCreation: breakdown.cacheCreation,
+            })
+          : null;
 
-      const modelCost = priced?.costUsd || 0;
-      const modelCostKnown =
-        Boolean(priced?.complete) && !breakdown.incompleteInput && breakdown.unknown === 0;
+      const modelCost = deepseekPriced?.costUsd ?? priced?.costUsd ?? 0;
+      const deepseekCoversGrouped =
+        deepseekPriced != null && deepseekPriced.seenQuantity + 1e-6 >= breakdown.total;
+      const modelCostKnown = deepseekPriced
+        ? deepseekPriced.complete &&
+          deepseekCoversGrouped &&
+          !breakdown.incompleteInput &&
+          breakdown.unknown === 0
+        : Boolean(priced?.complete) && !breakdown.incompleteInput && breakdown.unknown === 0;
       if (!modelCostKnown && breakdown.total > 0) platformApiCostComplete = false;
       platformApiCost += modelCost;
 
@@ -715,15 +761,20 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
   let derivedCost5hUsd = 0;
   let reportedCost5hUsd = 0;
   let derivedCost5hComplete = true;
+  let deepseekTokens5h = 0;
 
   for (const g of token5hGroups) {
     if (!isReliableTokenSourceApp(g.sourceApp)) continue;
     const qty = Math.max(0, g._sum.quantity || 0);
     tokens5h += qty;
     const model = g.keyRef || "";
-    const modelPricing = getModelPricing(model);
     const label = g.label?.toLowerCase() || "";
     if (label.includes("inputunsplit") && qty > 0) derivedCost5hComplete = false;
+    if (isDeepSeekPaygModel(model)) {
+      deepseekTokens5h += qty;
+      continue;
+    }
+    const modelPricing = getModelPricing(model);
     const breakdown = label.includes("output")
       ? { output: qty }
       : label.includes("cacheread") || label.includes("cache_read") || label.includes("cache_hit")
@@ -736,6 +787,16 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
       : null;
     if (!priced?.complete && qty > 0) derivedCost5hComplete = false;
     derivedCost5hUsd += priced?.costUsd || 0;
+  }
+
+  if (deepseekTokens5h > 0) {
+    const deepseek5h = sumDeepSeekPaygEvents(
+      deepseekPaygEventsFor(deepseekTokenRows, { since: window5hStart }),
+    );
+    derivedCost5hUsd += deepseek5h.costUsd;
+    if (!deepseek5h.complete || deepseek5h.seenQuantity + 1e-6 < deepseekTokens5h) {
+      derivedCost5hComplete = false;
+    }
   }
 
   for (const g of cost5hGroups) {
@@ -782,4 +843,33 @@ export async function computeAgentsOverview(windowDays: number = 30): Promise<Ag
     platforms,
     modelDistribution,
   };
+}
+
+type DeepSeekTokenRow = {
+  sourceApp: string;
+  keyRef: string | null;
+  label: string | null;
+  quantity: number | null;
+  occurredAt: Date;
+};
+
+function deepseekPaygEventsFor(
+  rows: readonly DeepSeekTokenRow[],
+  opts: { appKey?: string; model?: string; since?: Date },
+): DeepSeekPaygEvent[] {
+  const events: DeepSeekPaygEvent[] = [];
+  for (const row of rows) {
+    if (!row.keyRef || !isDeepSeekPaygModel(row.keyRef)) continue;
+    if (!isReliableTokenSourceApp(row.sourceApp)) continue;
+    if (opts.appKey && platformIdForSourceApp(row.sourceApp) !== opts.appKey) continue;
+    if (opts.model && row.keyRef !== opts.model) continue;
+    if (opts.since && row.occurredAt.getTime() < opts.since.getTime()) continue;
+    events.push({
+      model: row.keyRef,
+      occurredAt: row.occurredAt,
+      label: row.label,
+      quantity: row.quantity,
+    });
+  }
+  return events;
 }
