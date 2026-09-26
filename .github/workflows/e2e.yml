@@ -12,6 +12,9 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # This throwaway SQLite smoke job has no Datadog agent or production secrets.
+    env:
+      DD_TRACE_ENABLED: 'false'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
