@@ -253,7 +253,11 @@ export async function runGbuJson({ env = process.env, execFileImpl = execFileAsy
     stdout = result.stdout;
   } catch (error) {
     const code = error && typeof error === "object" ? error.code : null;
-    if (code === "ETIMEDOUT") throw new Error("gbu --json timed out");
+    // execFile's timeout kills the child with SIGTERM; its rejection has
+    // code=null, signal=SIGTERM, killed=true (not ETIMEDOUT).
+    if (error && typeof error === "object" && error.killed === true && error.signal === "SIGTERM") {
+      throw new Error("gbu --json timed out");
+    }
     const message = error instanceof Error ? error.message : String(error);
     // Never include stdout/stderr: they can carry account emails.
     throw new Error(`gbu --json failed${code ? ` (${code})` : ""}: ${message.split("\n")[0]}`);

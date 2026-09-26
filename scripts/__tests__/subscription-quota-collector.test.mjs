@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,7 @@ import {
   ingestTokenEnvNames,
   parseArgs,
   resolveCredentialField,
+  runGbuJson,
   GBU_PRODUCER_ID,
 } from "../subscription-quota-collector.mjs";
 
@@ -691,6 +692,33 @@ describe("parseGbuJson", () => {
 });
 
 describe("grok-bot provider wiring", () => {
+  it("classifies an execFile timeout as a timeout, not a generic failure", async () => {
+    const home = await mkdtemp(join(tmpdir(), "gbu-timeout-"));
+    const bin = join(home, "gbu");
+    try {
+      await writeFile(bin, "#!/bin/sh\nexit 0\n");
+      await chmod(bin, 0o755);
+      const error = Object.assign(new Error("Command failed"), { code: null, signal: "SIGTERM", killed: true });
+      await expect(runGbuJson({ env: { HOME: home, GBU_BIN: bin }, execFileImpl: async () => { throw error; } }))
+        .rejects.toThrow("gbu --json timed out");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("does not mistake an ordinary SIGTERM for a timeout", async () => {
+    const home = await mkdtemp(join(tmpdir(), "gbu-signal-"));
+    const bin = join(home, "gbu");
+    try {
+      await writeFile(bin, "#!/bin/sh\nexit 0\n");
+      await chmod(bin, 0o755);
+      const error = Object.assign(new Error("Command failed"), { code: null, signal: "SIGTERM", killed: false });
+      await expect(runGbuJson({ env: { HOME: home, GBU_BIN: bin }, execFileImpl: async () => { throw error; } }))
+        .rejects.toThrow(/^gbu --json failed:/);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
   it("is registered with producer gbu and source gbu", () => {
     expect(PROVIDERS["grok-bot"].provider).toBe("grok-bot");
     expect(PROVIDERS["grok-bot"].service).toBe("gbu");
