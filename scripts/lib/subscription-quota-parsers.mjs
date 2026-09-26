@@ -44,6 +44,10 @@ function firstTimestamp(record, keys) {
 
 function reading(partial) {
   const remainingPercent = partial.remainingUnknown ? null : clampPercent(partial.remainingPercent);
+  const extras =
+    partial.metadataExtras && typeof partial.metadataExtras === "object" && !Array.isArray(partial.metadataExtras)
+      ? partial.metadataExtras
+      : null;
   return {
     bucketId: partial.bucketId,
     label: partial.label,
@@ -55,6 +59,9 @@ function reading(partial) {
     modelId: partial.modelId ?? null,
     remainingUnknown: Boolean(partial.remainingUnknown),
     isExhausted: Boolean(partial.isExhausted) || remainingPercent === 0,
+    // Optional absolute / account fields.  buildQuotaEvent merges these into
+    // metadata without promoting them onto the shared quota-window projection.
+    ...(extras ? { metadataExtras: extras } : {}),
   };
 }
 
@@ -424,9 +431,90 @@ export function parseMinimaxRemains(payload) {
   return readings;
 }
 
+// ---------------------------------------------------------------- gbu (Grok Bot) ----
+
+/**
+ * Parse `gbu --json` output from Kargatharaakash/grok-bot-usage.
+ *
+ * Shape (verified 2026-09-26):
+ *   { active, accounts: [{ account, email, weeklyUsagePercent, available,
+ *     resetsAt, planLabel, includedSpend, includedLimit, includedRemaining,
+ *     onDemandUsed, onDemandLimit, onDemandRemaining, ... }] }
+ *
+ * remainingPercent = 100 - weeklyUsagePercent.  Absolutes stay in metadataExtras
+ * only.  bucketId is "gbu-weekly" for the active (or sole) account so it stays
+ * distinct from CodeCaps' Cursor DashboardService "weekly" series; additional
+ * accounts get "gbu-weekly:<account>".
+ */
+export function parseGbuJson(payload) {
+  const root = asRecord(payload);
+  const accounts = Array.isArray(root.accounts) ? root.accounts : [];
+  const activeName =
+    typeof root.active === "string" && root.active.trim() ? root.active.trim() : null;
+  const readings = [];
+  for (const raw of accounts) {
+    const account = asRecord(raw);
+    if (typeof account.error === "string" && account.error.trim()) continue;
+    const used = firstNumber(account, ["weeklyUsagePercent", "weekly_usage_percent"]);
+    if (used == null || used < 0) {
+      readings.push(
+        reading({
+          bucketId: "gbu-weekly",
+          label: "Grok Bot weekly",
+          quotaWindow: "weekly",
+          remainingUnknown: true,
+          isExhausted: false,
+        }),
+      );
+      continue;
+    }
+    const remaining = 100 - used;
+    const resetAt = firstTimestamp(account, ["resetsAt", "resets_at"]);
+    const planType = firstString(account, ["planLabel", "plan_label"]);
+    const email = firstString(account, ["email", "account"]);
+    const accountName = firstString(account, ["account", "email"]) || "account";
+    const isActive =
+      account.active === true ||
+      (activeName != null && (accountName === activeName || email === activeName));
+    const onlyOne = accounts.length === 1;
+    const bucketId = isActive || onlyOne ? "gbu-weekly" : `gbu-weekly:${accountName}`;
+    const label =
+      isActive || onlyOne ? "Grok Bot weekly" : `Grok Bot weekly (${accountName})`;
+    const available = account.available;
+    const isExhausted =
+      available === false || remaining <= 0;
+    readings.push(
+      reading({
+        bucketId,
+        label,
+        quotaWindow: "weekly",
+        remainingPercent: remaining,
+        usedPercent: used,
+        resetAt,
+        planType,
+        remainingUnknown: false,
+        isExhausted,
+        metadataExtras: {
+          includedSpend: firstNumber(account, ["includedSpend", "included_spend"]),
+          includedLimit: firstNumber(account, ["includedLimit", "included_limit"]),
+          includedRemaining: firstNumber(account, ["includedRemaining", "included_remaining"]),
+          onDemandUsed: firstNumber(account, ["onDemandUsed", "on_demand_used"]),
+          onDemandLimit: firstNumber(account, ["onDemandLimit", "on_demand_limit"]),
+          onDemandRemaining: firstNumber(account, ["onDemandRemaining", "on_demand_remaining"]),
+          account: accountName,
+          email: email,
+        },
+      }),
+    );
+  }
+  return readings;
+}
+
 export const PROVIDER_PARSERS = {
   claude: parseClaudeUsage,
   codex: parseCodexUsage,
   grok: parseGrokBilling,
   minimax: parseMinimaxRemains,
+  "grok-bot": parseGbuJson,
 };
+

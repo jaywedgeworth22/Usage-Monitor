@@ -3,11 +3,15 @@
 <!--
   Template launchd job for scripts/subscription-quota-collector.mjs.
 
-  Reports percent REMAINING per subscription window for Claude, Codex, Grok and
-  MiniMax.  Must run on the Mac that holds those CLIs' own OAuth credentials —
-  the script calls the same endpoints each vendor's CLI calls, with the token
-  that CLI already stored locally.  Antigravity is NOT collected here; it is
+  Reports percent REMAINING per subscription window for Claude, Codex, Grok,
+  MiniMax and Grok Bot (via `gbu --json`).  Must run on the Mac that holds
+  those CLIs' own OAuth credentials — the script calls the same endpoints each
+  vendor's CLI calls, with the token that CLI already stored locally, or shells
+  `gbu` for the Grok Bot weekly pool.  Antigravity is NOT collected here; it is
   already covered by com.jays.antigravity-usage-collector.
+
+  PATH must include $HOME/.gbu/bin and $HOME/.local/bin so `gbu` resolves.
+  Replace /ABSOLUTE/PATH/TO/HOME below with the owner's home directory.
 
   Install:
     cp scripts/com.jays.subscription-quota-collector.plist.example \
@@ -41,7 +45,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>/ABSOLUTE/PATH/TO/HOME/.gbu/bin:/ABSOLUTE/PATH/TO/HOME/.local/bin:/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
   <key>StartInterval</key>
   <integer>900</integer>
