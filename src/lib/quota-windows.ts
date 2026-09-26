@@ -78,6 +78,7 @@ export const EXPECTED_QUOTA_PROVIDERS = [
   "google-antigravity",
   "xai",
   "minimax",
+  "grok-bot",
 ] as const;
 
 /** Event `provider` values that should collapse onto one canonical key. */
@@ -97,6 +98,8 @@ const PROVIDER_ALIASES: Record<string, string> = {
   grok: "xai",
   minimax: "minimax",
   "minimax-code": "minimax",
+  "grok-bot": "grok-bot",
+  gbu: "grok-bot",
 };
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -105,6 +108,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   "google-antigravity": "Antigravity",
   xai: "Grok",
   minimax: "MiniMax",
+  "grok-bot": "Grok Bot",
 };
 
 /** Collapse an event `provider` onto the key its windows are grouped under. */

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,7 @@ import {
   parseCodexUsage,
   parseGrokBilling,
   parseMinimaxRemains,
+  parseGbuJson,
 } from "../lib/subscription-quota-parsers.mjs";
 import {
   PROVIDERS,
@@ -28,6 +29,8 @@ import {
   ingestTokenEnvNames,
   parseArgs,
   resolveCredentialField,
+  runGbuJson,
+  GBU_PRODUCER_ID,
 } from "../subscription-quota-collector.mjs";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -559,6 +562,7 @@ describe("collector wiring", () => {
       "codex",
       "grok",
       "minimax",
+      "grok-bot",
     ]);
     expect(() => parseArgs(["node", "s.mjs", "--provider", "gemini"])).toThrow(/Unknown --provider/);
     expect(() => parseArgs(["node", "s.mjs", "--fixture", "x.json"])).toThrow(/single --provider/);
@@ -617,5 +621,132 @@ describe("per-producer ingest tokens", () => {
     const names = Object.values(PROVIDERS).map((definition) => definition.tokenEnv);
     expect(names.every(Boolean)).toBe(true);
     expect(new Set(names).size).toBe(names.length);
+  });
+});
+
+
+describe("parseGbuJson", () => {
+  it("maps weeklyUsagePercent to remaining and keeps absolutes in metadataExtras", () => {
+    const readings = parseGbuJson(fixture("gbu-json.json"));
+    expect(readings).toHaveLength(1);
+    const [row] = readings;
+    expect(row.bucketId).toBe("gbu-weekly");
+    expect(row.quotaWindow).toBe("weekly");
+    expect(row.label).toBe("Grok Bot weekly");
+    expect(row.remainingPercent).toBe(14.63);
+    expect(row.usedPercent).toBe(85.37);
+    expect(row.resetAt).toBe("2026-09-28T18:35:19.304Z");
+    expect(row.planType).toBe("Grok Bot Plan");
+    expect(row.isExhausted).toBe(false);
+    expect(row.remainingUnknown).toBe(false);
+    expect(row.metadataExtras.includedSpend).toBe(33262);
+    expect(row.metadataExtras.includedLimit).toBe(40000);
+    expect(row.metadataExtras.includedRemaining).toBe(6738);
+    expect(row.metadataExtras.onDemandUsed).toBe(0);
+    expect(row.metadataExtras.email).toBe("mail@example.com");
+  });
+
+  it("marks unavailable accounts exhausted", () => {
+    const readings = parseGbuJson({
+      active: "a@example.com",
+      accounts: [
+        {
+          account: "a@example.com",
+          email: "a@example.com",
+          active: true,
+          weeklyUsagePercent: 100,
+          available: false,
+          resetsAt: "2026-09-28T18:35:19.304Z",
+          planLabel: "Grok Bot Plan",
+        },
+      ],
+    });
+    expect(readings[0].remainingPercent).toBe(0);
+    expect(readings[0].isExhausted).toBe(true);
+  });
+
+  it("gives non-active accounts a distinct bucketId so they do not collapse", () => {
+    const readings = parseGbuJson({
+      active: "a@example.com",
+      accounts: [
+        {
+          account: "a@example.com",
+          email: "a@example.com",
+          active: true,
+          weeklyUsagePercent: 10,
+          available: true,
+          resetsAt: "2026-09-28T18:35:19.304Z",
+        },
+        {
+          account: "b@example.com",
+          email: "b@example.com",
+          active: false,
+          weeklyUsagePercent: 50,
+          available: true,
+          resetsAt: "2026-09-28T18:35:19.304Z",
+        },
+      ],
+    });
+    expect(readings.map((r) => r.bucketId)).toEqual(["gbu-weekly", "gbu-weekly:b@example.com"]);
+  });
+});
+
+describe("grok-bot provider wiring", () => {
+  it("classifies an execFile timeout as a timeout, not a generic failure", async () => {
+    const home = await mkdtemp(join(tmpdir(), "gbu-timeout-"));
+    const bin = join(home, "gbu");
+    try {
+      await writeFile(bin, "#!/bin/sh\nexit 0\n");
+      await chmod(bin, 0o755);
+      const error = Object.assign(new Error("Command failed"), { code: null, signal: "SIGTERM", killed: true });
+      await expect(runGbuJson({ env: { HOME: home, GBU_BIN: bin }, execFileImpl: async () => { throw error; } }))
+        .rejects.toThrow("gbu --json timed out");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("does not mistake an ordinary SIGTERM for a timeout", async () => {
+    const home = await mkdtemp(join(tmpdir(), "gbu-signal-"));
+    const bin = join(home, "gbu");
+    try {
+      await writeFile(bin, "#!/bin/sh\nexit 0\n");
+      await chmod(bin, 0o755);
+      const error = Object.assign(new Error("Command failed"), { code: null, signal: "SIGTERM", killed: false });
+      await expect(runGbuJson({ env: { HOME: home, GBU_BIN: bin }, execFileImpl: async () => { throw error; } }))
+        .rejects.toThrow(/^gbu --json failed:/);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+  it("is registered with producer gbu and source gbu", () => {
+    expect(PROVIDERS["grok-bot"].provider).toBe("grok-bot");
+    expect(PROVIDERS["grok-bot"].service).toBe("gbu");
+    expect(PROVIDERS["grok-bot"].producerId).toBe(GBU_PRODUCER_ID);
+    expect(PROVIDERS["grok-bot"].defaultSource).toBe("gbu");
+    expect(ingestTokenEnvNames(PROVIDERS["grok-bot"])[0]).toBe("GBU_INGEST_TOKEN");
+  });
+
+  it("builds an ingest event with bucketId gbu-weekly and metadata.source gbu", () => {
+    const events = eventsForProvider("grok-bot", fixture("gbu-json.json"), {
+      source: "gbu",
+      occurredAtIso: "2026-09-26T04:00:00.000Z",
+    });
+    expect(events).toHaveLength(1);
+    const event = events[0];
+    expect(event.provider).toBe("grok-bot");
+    expect(event.service).toBe("gbu");
+    expect(event.credits).toBe(14.63);
+    expect(event.metadata.bucketId).toBe("gbu-weekly");
+    expect(event.metadata.quotaWindow).toBe("weekly");
+    expect(event.metadata.source).toBe("gbu");
+    expect(event.metadata.includedSpend).toBe(33262);
+    expect(event.metadata.includedLimit).toBe(40000);
+    expect(event.metadata.includedRemaining).toBe(6738);
+    expect(event.eventId).toContain("subq:grok-bot:gbu-weekly:");
+  });
+
+  it("accepts --provider grok-bot", () => {
+    expect(parseArgs(["--provider", "grok-bot"]).providers).toEqual(["grok-bot"]);
   });
 });

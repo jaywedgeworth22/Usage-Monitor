@@ -121,6 +121,12 @@ export function buildQuotaEvent({
     // lives in metadata.quotaWindow, which is what projectQuotaWindows reads.
     occurredAt: occurredAtIso,
     metadata: {
+      // Extras first so the shared contract fields below always win.
+      ...(reading.metadataExtras &&
+      typeof reading.metadataExtras === "object" &&
+      !Array.isArray(reading.metadataExtras)
+        ? reading.metadataExtras
+        : {}),
       bucketId: reading.bucketId,
       quotaWindow: reading.quotaWindow,
       resetAt: reading.resetAt,
