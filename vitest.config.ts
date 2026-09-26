@@ -18,6 +18,7 @@ export default defineConfig({
       // is worked on by a multi-agent fleet) — their test files are not this
       // checkout's code and must not gate local `npm run verify`.
       "**/.worktrees/**",
+      "**/tests/e2e/**", // Playwright owns these specs, not Vitest.
       "**/*.workers.test.*",
     ],
     coverage: {
