@@ -30,6 +30,10 @@ export interface QuotaWindow {
    */
   via: string | null;
   sourceApp: string | null;
+  /** Stable identity of the machine that produced this window, when supplied. */
+  producerInstanceId?: string;
+  /** Optional human-readable machine name supplied by the producer. */
+  machine?: string;
   modelId: string | null;
   modelType: string | null;
   label: string;
@@ -247,6 +251,8 @@ export function projectQuotaWindows(
     const meta = asRecord(event.metadata);
     const modelId = asString(meta.modelId);
     const bucketId = asString(meta.bucketId);
+    const producerInstanceId = asString(meta._producerInstanceId);
+    const machine = asString(meta.machine);
     // Display label only: stored events keep their original label, so rows
     // ingested before the rename read "Third-Party Models" too.  Normalized
     // before the series key so an old and a new reading of the same bucket
@@ -256,7 +262,14 @@ export function projectQuotaWindows(
         ? antigravityDisplayLabel(event.label)
         : event.label;
     const series = modelId ?? bucketId ?? `${event.provider}:${label ?? ""}`;
-    if (latest.has(series)) continue;
+    // Preserve historical IDs exactly when provenance is absent.  For
+    // attributed windows, encode the identity and series as a JSON tuple so
+    // delimiters inside either value cannot make two machines share a key.
+    const id = producerInstanceId ? JSON.stringify([producerInstanceId, series]) : series;
+    const dedupeKey = producerInstanceId
+      ? JSON.stringify(["producer", producerInstanceId, series])
+      : JSON.stringify(["legacy", series]);
+    if (latest.has(dedupeKey)) continue;
 
     const limit = typeof event.limit === "number" && event.limit > 0 ? event.limit : 100;
     const omitted = asBoolean(meta.remainingUnknown) || event.credits == null;
@@ -267,13 +280,15 @@ export function projectQuotaWindows(
       asBoolean(meta.isExhausted) || omitted || remainingPercent <= 0;
     const remainingUnknown = false;
     const status = quotaStatus({ remainingPercent, remainingUnknown, isExhausted });
-    latest.set(series, {
-      id: series,
+    latest.set(dedupeKey, {
+      id,
       provider: event.provider,
       providerKey: quotaProviderKey(event.provider),
       providerLabel: quotaProviderLabel(event.provider),
       via: quotaProviderVia(event.provider),
       sourceApp: event.service ?? null,
+      ...(producerInstanceId ? { producerInstanceId } : {}),
+      ...(machine ? { machine } : {}),
       modelId,
       modelType: modelId,
       label: label ?? modelId ?? event.provider,
