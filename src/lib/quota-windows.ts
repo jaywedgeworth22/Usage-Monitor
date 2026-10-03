@@ -246,7 +246,7 @@ export function projectQuotaWindows(
   events: QuotaEventLike[],
   now = new Date(),
 ): QuotaWindowsResponse {
-  const latest = new Map<string, QuotaWindow>();
+  const latest = new Map<string, { window: QuotaWindow; series: string }>();
   for (const event of events) {
     const meta = asRecord(event.metadata);
     const modelId = asString(meta.modelId);
@@ -281,34 +281,58 @@ export function projectQuotaWindows(
     const remainingUnknown = false;
     const status = quotaStatus({ remainingPercent, remainingUnknown, isExhausted });
     latest.set(dedupeKey, {
-      id,
-      provider: event.provider,
-      providerKey: quotaProviderKey(event.provider),
-      providerLabel: quotaProviderLabel(event.provider),
-      via: quotaProviderVia(event.provider),
-      sourceApp: event.service ?? null,
-      ...(producerInstanceId ? { producerInstanceId } : {}),
-      ...(machine ? { machine } : {}),
-      modelId,
-      modelType: modelId,
-      label: label ?? modelId ?? event.provider,
-      remainingPercent,
-      remainingUnknown,
-      isExhausted,
-      resetAt: asString(meta.resetAt),
-      window: asString(meta.quotaWindow),
-      status,
-      skip: status === "exhausted",
-      skipReason:
-        status === "exhausted"
-          ? `${label ?? modelId ?? "model"} remaining ${remainingPercent ?? 0}%`
-          : null,
-      occurredAt: iso(event.occurredAt),
-      source: asString(meta.source),
+      series,
+      window: {
+        id,
+        provider: event.provider,
+        providerKey: quotaProviderKey(event.provider),
+        providerLabel: quotaProviderLabel(event.provider),
+        via: quotaProviderVia(event.provider),
+        sourceApp: event.service ?? null,
+        ...(producerInstanceId ? { producerInstanceId } : {}),
+        ...(machine ? { machine } : {}),
+        modelId,
+        modelType: modelId,
+        label: label ?? modelId ?? event.provider,
+        remainingPercent,
+        remainingUnknown,
+        isExhausted,
+        resetAt: asString(meta.resetAt),
+        window: asString(meta.quotaWindow),
+        status,
+        skip: status === "exhausted",
+        skipReason:
+          status === "exhausted"
+            ? `${label ?? modelId ?? "model"} remaining ${remainingPercent ?? 0}%`
+            : null,
+        occurredAt: iso(event.occurredAt),
+        source: asString(meta.source),
+      },
     });
   }
 
-  const windows = [...latest.values()];
+  const projected = [...latest.values()];
+  // Legacy IDs are intentionally unchanged, including arbitrary bucket IDs.
+  // Reserve them before assigning machine IDs so a legacy bucket that happens
+  // to equal a serialized tuple cannot collide with a producer-attributed row.
+  const usedIds = new Set(
+    projected
+      .filter(({ window }) => !window.producerInstanceId)
+      .map(({ window }) => window.id),
+  );
+  const windows = projected.map(({ window, series }) => {
+    if (!window.producerInstanceId) return window;
+
+    let id = JSON.stringify([window.producerInstanceId, series]);
+    let suffix = 0;
+    while (usedIds.has(id)) {
+      id = JSON.stringify(["producer", window.producerInstanceId, series, suffix]);
+      suffix += 1;
+    }
+    usedIds.add(id);
+    window.id = id;
+    return window;
+  });
   const skipModelTypes: SkipModelType[] = [];
   const seenSkip = new Set<string>();
   for (const window of windows) {
