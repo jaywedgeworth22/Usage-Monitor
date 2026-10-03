@@ -30,6 +30,10 @@ export interface QuotaWindow {
    */
   via: string | null;
   sourceApp: string | null;
+  /** Stable identity of the machine that produced this window, when supplied. */
+  producerInstanceId?: string;
+  /** Optional human-readable machine name supplied by the producer. */
+  machine?: string;
   modelId: string | null;
   modelType: string | null;
   label: string;
@@ -242,11 +246,13 @@ export function projectQuotaWindows(
   events: QuotaEventLike[],
   now = new Date(),
 ): QuotaWindowsResponse {
-  const latest = new Map<string, QuotaWindow>();
+  const latest = new Map<string, { window: QuotaWindow; series: string }>();
   for (const event of events) {
     const meta = asRecord(event.metadata);
     const modelId = asString(meta.modelId);
     const bucketId = asString(meta.bucketId);
+    const producerInstanceId = asString(meta._producerInstanceId);
+    const machine = asString(meta.machine);
     // Display label only: stored events keep their original label, so rows
     // ingested before the rename read "Third-Party Models" too.  Normalized
     // before the series key so an old and a new reading of the same bucket
@@ -256,7 +262,14 @@ export function projectQuotaWindows(
         ? antigravityDisplayLabel(event.label)
         : event.label;
     const series = modelId ?? bucketId ?? `${event.provider}:${label ?? ""}`;
-    if (latest.has(series)) continue;
+    // Preserve historical IDs exactly when provenance is absent.  For
+    // attributed windows, encode the identity and series as a JSON tuple so
+    // delimiters inside either value cannot make two machines share a key.
+    const id = producerInstanceId ? JSON.stringify([producerInstanceId, series]) : series;
+    const dedupeKey = producerInstanceId
+      ? JSON.stringify(["producer", producerInstanceId, series])
+      : JSON.stringify(["legacy", series]);
+    if (latest.has(dedupeKey)) continue;
 
     const limit = typeof event.limit === "number" && event.limit > 0 ? event.limit : 100;
     const omitted = asBoolean(meta.remainingUnknown) || event.credits == null;
@@ -267,33 +280,59 @@ export function projectQuotaWindows(
       asBoolean(meta.isExhausted) || omitted || remainingPercent <= 0;
     const remainingUnknown = false;
     const status = quotaStatus({ remainingPercent, remainingUnknown, isExhausted });
-    latest.set(series, {
-      id: series,
-      provider: event.provider,
-      providerKey: quotaProviderKey(event.provider),
-      providerLabel: quotaProviderLabel(event.provider),
-      via: quotaProviderVia(event.provider),
-      sourceApp: event.service ?? null,
-      modelId,
-      modelType: modelId,
-      label: label ?? modelId ?? event.provider,
-      remainingPercent,
-      remainingUnknown,
-      isExhausted,
-      resetAt: asString(meta.resetAt),
-      window: asString(meta.quotaWindow),
-      status,
-      skip: status === "exhausted",
-      skipReason:
-        status === "exhausted"
-          ? `${label ?? modelId ?? "model"} remaining ${remainingPercent ?? 0}%`
-          : null,
-      occurredAt: iso(event.occurredAt),
-      source: asString(meta.source),
+    latest.set(dedupeKey, {
+      series,
+      window: {
+        id,
+        provider: event.provider,
+        providerKey: quotaProviderKey(event.provider),
+        providerLabel: quotaProviderLabel(event.provider),
+        via: quotaProviderVia(event.provider),
+        sourceApp: event.service ?? null,
+        ...(producerInstanceId ? { producerInstanceId } : {}),
+        ...(machine ? { machine } : {}),
+        modelId,
+        modelType: modelId,
+        label: label ?? modelId ?? event.provider,
+        remainingPercent,
+        remainingUnknown,
+        isExhausted,
+        resetAt: asString(meta.resetAt),
+        window: asString(meta.quotaWindow),
+        status,
+        skip: status === "exhausted",
+        skipReason:
+          status === "exhausted"
+            ? `${label ?? modelId ?? "model"} remaining ${remainingPercent ?? 0}%`
+            : null,
+        occurredAt: iso(event.occurredAt),
+        source: asString(meta.source),
+      },
     });
   }
 
-  const windows = [...latest.values()];
+  const projected = [...latest.values()];
+  // Legacy IDs are intentionally unchanged, including arbitrary bucket IDs.
+  // Reserve them before assigning machine IDs so a legacy bucket that happens
+  // to equal a serialized tuple cannot collide with a producer-attributed row.
+  const usedIds = new Set(
+    projected
+      .filter(({ window }) => !window.producerInstanceId)
+      .map(({ window }) => window.id),
+  );
+  const windows = projected.map(({ window, series }) => {
+    if (!window.producerInstanceId) return window;
+
+    let id = JSON.stringify([window.producerInstanceId, series]);
+    let suffix = 0;
+    while (usedIds.has(id)) {
+      id = JSON.stringify(["producer", window.producerInstanceId, series, suffix]);
+      suffix += 1;
+    }
+    usedIds.add(id);
+    window.id = id;
+    return window;
+  });
   const skipModelTypes: SkipModelType[] = [];
   const seenSkip = new Set<string>();
   for (const window of windows) {
